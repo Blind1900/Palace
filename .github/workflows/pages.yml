@@ -12,6 +12,7 @@ permissions:
 jobs:
   deploy:
     permissions:
+      contents: read
       pages: write
       id-token: write
     environment:
