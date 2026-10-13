@@ -32,6 +32,15 @@ const categoryOrder = ["art", "comics", "animations"];
 const allWork = categoryOrder.flatMap((category) =>
   collections[category].items.map((item) => ({ ...item, category })),
 );
+const asciiHorizontal = "-".repeat(220);
+const asciiVertical = "|<br>".repeat(80);
+const asciiFrameParts = `
+  <span class="ascii-edge ascii-top">${asciiHorizontal}</span>
+  <span class="ascii-corner ascii-top-left">/</span>
+  <span class="ascii-side ascii-right">${asciiVertical}</span>
+  <span class="ascii-edge ascii-bottom">${asciiHorizontal}</span>
+  <span class="ascii-corner ascii-bottom-right">/</span>
+  <span class="ascii-side ascii-left">${asciiVertical}</span>`;
 const featureBanner = document.querySelector("#feature-banner");
 const featureLink = document.querySelector("#feature-link");
 const pageContent = document.querySelector("#page-content");
@@ -40,6 +49,31 @@ const artSearch = document.querySelector(".art-search");
 const artSearchInput = document.querySelector("#art-search-input");
 const artSearchResults = document.querySelector("#art-search-results");
 let activeFeature = 0;
+let rangeGameInterval = null;
+let rangeGameScore = 0;
+let rangeGameSeconds = 30;
+let rangeTargetIndex = -1;
+
+const rangeTargetPositions = [
+  { left: "26%", top: "38%", glyph: "申" },
+  { left: "72%", top: "32%", glyph: "雙" },
+  { left: "48%", top: "58%", glyph: "魚" },
+  { left: "34%", top: "72%", glyph: "猴" },
+  { left: "63%", top: "49%", glyph: "希" },
+  { left: "79%", top: "68%", glyph: "克" },
+  { left: "19%", top: "57%", glyph: "蘇" },
+  { left: "54%", top: "28%", glyph: "伯" },
+];
+
+function renderAsciiFrame() {
+  return `<span class="ascii-frame" aria-hidden="true"></span>`;
+}
+
+function fillEmptyAsciiFrames(root = document) {
+  root.querySelectorAll(".ascii-frame:empty").forEach((frame) => {
+    frame.innerHTML = asciiFrameParts;
+  });
+}
 
 function getRoute() {
   const parts = window.location.hash.replace(/^#\/?/, "").split("/").filter(Boolean);
@@ -61,7 +95,7 @@ function getRoute() {
 function makeNavLink(label, href, options = {}) {
   const current = options.current ? ' aria-current="page"' : "";
   const className = options.home ? "nav-button home-button" : "nav-button";
-  return `<a class="${className}" href="${href}"${current}>${label}</a>`;
+  return `<a class="${className}" href="${href}"${current}><span class="nav-bracket nav-bracket-open" aria-hidden="true">[</span><span class="nav-selected-marker" aria-hidden="true">*</span><span class="nav-label">${label}</span><span class="nav-bracket nav-bracket-close" aria-hidden="true">]</span></a>`;
 }
 
 function renderNav(route) {
@@ -79,8 +113,6 @@ function renderNav(route) {
     ));
   }
 
-  links.push(makeNavLink("About / 關於", "#about", { current: route.page === "about" }));
-
   siteNav.innerHTML = links.join("");
 }
 
@@ -90,6 +122,7 @@ function renderCard(item) {
       <a class="work-card-link" href="#${item.category}/${item.id}" aria-label="View ${item.title}">
         <div class="art-placeholder" role="img" aria-label="Artwork placeholder for ${item.title}">
           <span class="placeholder-label"><span>${item.mark}</span>Artwork placeholder</span>
+          ${renderAsciiFrame()}
         </div>
         <div class="card-copy">
           <h3 class="card-title">${item.title}</h3>
@@ -111,7 +144,43 @@ function renderHome() {
         <a class="text-link" href="#art">Explore the collections ↗</a>
       </div>
       <div class="work-grid">${recentWork.map(renderCard).join("")}</div>
-    </section>`;
+    </section>
+    <section class="page-section range-game" aria-labelledby="range-title">
+      <div class="section-heading">
+        <div>
+          <p class="section-overline">// Arcade · 遊戲</p>
+          <h2 id="range-title">Celestial Range / 星界靶場</h2>
+          <p class="page-lede">A first-person target game. Find the celestial glyphs and collect them before time runs out.</p>
+        </div>
+      </div>
+      <div class="range-hud">
+        <span>HITS <strong id="range-score">00</strong></span>
+        <span>TIME <strong id="range-time">00:30</strong></span>
+        <span id="range-status" role="status" aria-live="polite">Start a round when you are ready.</span>
+      </div>
+      <div class="range-scene" aria-label="First-person celestial target range">
+        <span class="range-crosshair" aria-hidden="true">+</span>
+        <button class="range-target" id="range-target" type="button" aria-label="Collect star target" hidden>申</button>
+        ${renderAsciiFrame()}
+      </div>
+      <div class="range-controls">
+        <button class="range-start nav-button" id="range-start" type="button">
+          <span class="nav-bracket nav-bracket-open" aria-hidden="true">[</span>
+          <span class="nav-label" id="range-start-label">Start / 開始</span>
+          <span class="nav-bracket nav-bracket-close" aria-hidden="true">]</span>
+        </button>
+        <span>Click each glyph to collect it / 點擊字符收集</span>
+      </div>
+      <div class="range-tutorial">
+        <h3>How to play / 遊戲方法</h3>
+        <ol>
+          <li>Select <strong>Start / 開始</strong> to begin a 30-second round.</li>
+          <li>Click the Chinese-character target when it appears in the range.</li>
+          <li>Collect as many glyphs as you can before the timer reaches zero.</li>
+        </ol>
+      </div>
+    </section>
+  `;
 }
 
 function renderCollection(category) {
@@ -131,11 +200,14 @@ function renderCollection(category) {
 
 function renderAbout() {
   return `
-    <section class="page-section simple-page">
+    <section class="page-section simple-page about-section">
       <p class="section-overline">A note from the artist</p>
       <h2>Welcome to my little corner of the world.</h2>
       <div class="about-layout">
-        <img class="artist-image" src="./pfpalpha.png" alt="Abstract artwork used as a temporary artist portrait">
+        <div class="artist-image-frame">
+          <img class="artist-image" src="./pfpalpha.png" alt="Abstract artwork used as a temporary artist portrait">
+          ${renderAsciiFrame()}
+        </div>
         <div class="about-copy">
           <p><strong>Your artist name goes here.</strong> I make art, comics, and animations inspired by the strange, the tender, and the things that linger after a story ends.</p>
           <p>This is your space to introduce yourself. Add a few lines about what you make, what inspires you, or what you are working on now. Replace the portrait with your own whenever you are ready.</p>
@@ -175,6 +247,7 @@ function renderDetail(route) {
       </div>
       <div class="art-placeholder detail-art" role="img" aria-label="Large artwork placeholder for ${item.title}">
         <span class="placeholder-label"><span>${item.mark}</span>Replace this box with your artwork</span>
+        ${renderAsciiFrame()}
       </div>
       <p class="detail-note">This is a large placeholder for the full artwork. Add a caption, story notes, or credits here.</p>
     </section>`;
@@ -224,6 +297,8 @@ function renderSearchResults() {
     artSearchResults.append(list);
   }
 
+  artSearchResults.insertAdjacentHTML("beforeend", renderAsciiFrame());
+  fillEmptyAsciiFrames(artSearchResults);
   artSearchResults.hidden = false;
   artSearchInput.setAttribute("aria-expanded", "true");
 }
@@ -239,24 +314,110 @@ function renderFeature() {
 function renderPage() {
   const route = getRoute();
   renderNav(route);
-
-  if (route.page === "home") {
-    pageContent.innerHTML = renderHome();
-  } else if (route.page === "detail") {
-    pageContent.innerHTML = renderDetail(route);
-  } else if (route.page === "about") {
-    pageContent.innerHTML = renderAbout();
-  } else if (route.page === "contact") {
-    pageContent.innerHTML = renderContact();
-  } else {
-    pageContent.innerHTML = renderCollection(route.page);
+  if (route.page !== "home" && rangeGameInterval !== null) {
+    window.clearInterval(rangeGameInterval);
+    rangeGameInterval = null;
   }
+
+  let content;
+  if (route.page === "home") {
+    content = renderHome();
+  } else if (route.page === "detail") {
+    content = renderDetail(route);
+  } else if (route.page === "about") {
+    content = renderAbout();
+  } else if (route.page === "contact") {
+    content = renderContact();
+  } else {
+    content = renderCollection(route.page);
+  }
+
+  if (route.page !== "about") {
+    content += renderAbout();
+  }
+  pageContent.innerHTML = content;
+  fillEmptyAsciiFrames(pageContent);
 }
 
 function changeFeature(direction) {
   activeFeature = (activeFeature + direction + allWork.length) % allWork.length;
   renderFeature();
 }
+
+function placeRangeTarget() {
+  const target = pageContent.querySelector("#range-target");
+  if (!target) {
+    return;
+  }
+
+  rangeTargetIndex = (rangeTargetIndex + 1) % rangeTargetPositions.length;
+  const position = rangeTargetPositions[rangeTargetIndex];
+  target.style.left = position.left;
+  target.style.top = position.top;
+  target.textContent = position.glyph;
+}
+
+function startRangeGame() {
+  const target = pageContent.querySelector("#range-target");
+  const startLabel = pageContent.querySelector("#range-start-label");
+  const status = pageContent.querySelector("#range-status");
+  const scoreDisplay = pageContent.querySelector("#range-score");
+  const timeDisplay = pageContent.querySelector("#range-time");
+
+  if (!target || !startLabel || !status || !scoreDisplay || !timeDisplay) {
+    return;
+  }
+
+  if (rangeGameInterval !== null) {
+    window.clearInterval(rangeGameInterval);
+  }
+
+  rangeGameScore = 0;
+  rangeGameSeconds = 30;
+  rangeTargetIndex = -1;
+  scoreDisplay.textContent = "00";
+  timeDisplay.textContent = "00:30";
+  status.textContent = "Round live · collect the glyphs.";
+  startLabel.textContent = "Restart / 重來";
+  target.hidden = false;
+  placeRangeTarget();
+
+  rangeGameInterval = window.setInterval(() => {
+    rangeGameSeconds -= 1;
+    timeDisplay.textContent = `00:${String(rangeGameSeconds).padStart(2, "0")}`;
+
+    if (rangeGameSeconds <= 0) {
+      window.clearInterval(rangeGameInterval);
+      rangeGameInterval = null;
+      target.hidden = true;
+      status.textContent = `Round complete · ${rangeGameScore} glyphs collected.`;
+      startLabel.textContent = "Play again / 再玩一次";
+    }
+  }, 1000);
+}
+
+pageContent.addEventListener("click", (event) => {
+  if (!(event.target instanceof Element)) {
+    return;
+  }
+
+  if (event.target.closest("#range-start")) {
+    startRangeGame();
+    return;
+  }
+
+  const target = event.target.closest("#range-target");
+  if (!target || rangeGameInterval === null) {
+    return;
+  }
+
+  rangeGameScore += 1;
+  const scoreDisplay = pageContent.querySelector("#range-score");
+  const status = pageContent.querySelector("#range-status");
+  scoreDisplay.textContent = String(rangeGameScore).padStart(2, "0");
+  status.textContent = "Glyph collected · find the next one.";
+  placeRangeTarget();
+});
 
 artSearch.addEventListener("submit", (event) => {
   event.preventDefault();
@@ -296,5 +457,20 @@ document.querySelector("#feature-prev").addEventListener("click", () => changeFe
 document.querySelector("#feature-next").addEventListener("click", () => changeFeature(1));
 window.addEventListener("hashchange", renderPage);
 
+const astroPillar = document.querySelector(".astro-pillar");
+let scrollFrame = 0;
+
+window.addEventListener("scroll", () => {
+  if (scrollFrame) {
+    return;
+  }
+
+  scrollFrame = window.requestAnimationFrame(() => {
+    astroPillar.style.setProperty("--scroll-offset", `${-window.scrollY * 0.5}px`);
+    scrollFrame = 0;
+  });
+}, { passive: true });
+
 renderFeature();
 renderPage();
+fillEmptyAsciiFrames();
