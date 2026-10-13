@@ -1,9 +1,17 @@
+// 1. Portfolio content and reusable labels.
+// Add or edit work here; the gallery, search, and carousel read from this data.
 const collections = {
   art: {
     label: "Art",
     description: "Illustrations, experiments, and small worlds in still frames.",
     items: [
-      { id: "amber-study", title: "A study in amber", date: "New work", mark: "01" },
+      {
+        id: "horizon-ashes",
+        title: "Ashes on the horizon",
+        date: "New work",
+        mark: "01",
+        image: "./ashes-on-the-horizon.jpg",
+      },
       { id: "quiet-garden", title: "The quiet garden", date: "Sketchbook", mark: "02" },
       { id: "night-window", title: "Window after dark", date: "Illustration", mark: "03" },
     ],
@@ -29,12 +37,27 @@ const collections = {
 };
 
 const categoryOrder = ["art", "comics", "animations"];
+const categoryTranslations = {
+  art: "藝術",
+  comics: "漫畫",
+  animations: "動畫",
+};
 const allWork = categoryOrder.flatMap((category) =>
   collections[category].items.map((item) => ({ ...item, category })),
 );
-const asciiHorizontal = "-".repeat(220);
-const asciiVertical = "|<br>".repeat(80);
-const asciiFrameParts = `
+const fallbackFeature = allWork.find((work) => !work.image);
+const featuredWorks = [
+  ...(fallbackFeature ? [fallbackFeature] : []),
+  ...allWork.filter((work) => work.image),
+];
+
+// 2. Shared site state and cached artwork.
+// New banner images are decoded once so manual and timed cycling stay responsive.
+const asciiHorizontal = "-".repeat(400);
+// Keep the frame bars as one text node per side instead of many <br> elements.
+const asciiVertical = "|\n".repeat(80);
+const asciiFrameTemplate = document.createElement("template");
+asciiFrameTemplate.innerHTML = `
   <span class="ascii-edge ascii-top">${asciiHorizontal}</span>
   <span class="ascii-corner ascii-top-left">/</span>
   <span class="ascii-side ascii-right">${asciiVertical}</span>
@@ -42,6 +65,7 @@ const asciiFrameParts = `
   <span class="ascii-corner ascii-bottom-right">/</span>
   <span class="ascii-side ascii-left">${asciiVertical}</span>`;
 const featureBanner = document.querySelector("#feature-banner");
+const featureImage = document.querySelector("#feature-image");
 const featureLink = document.querySelector("#feature-link");
 const pageContent = document.querySelector("#page-content");
 const siteNav = document.querySelector("#site-nav");
@@ -65,20 +89,36 @@ const rangeTargetPositions = [
   { left: "54%", top: "28%", glyph: "伯" },
 ];
 
+const featuredImageCache = new Map([["./pfpalpha.png", featureImage]]);
+for (const src of new Set(allWork.map((work) => work.image).filter(Boolean))) {
+  const image = new Image();
+  image.className = "feature-image";
+  image.fetchPriority = "high";
+  image.decoding = "async";
+  image.src = src;
+  image.hidden = true;
+  featureBanner.append(image);
+  image.decode().catch((error) => {
+    console.error(`Unable to decode featured image "${src}".`, error);
+  });
+  featuredImageCache.set(src, image);
+}
+
 function renderAsciiFrame() {
   return `<span class="ascii-frame" aria-hidden="true"></span>`;
 }
 
 function fillEmptyAsciiFrames(root = document) {
   root.querySelectorAll(".ascii-frame:empty").forEach((frame) => {
-    frame.innerHTML = asciiFrameParts;
+    frame.replaceChildren(asciiFrameTemplate.content.cloneNode(true));
   });
 }
 
+// 3. Route parsing and page rendering.
 function getRoute() {
   const parts = window.location.hash.replace(/^#\/?/, "").split("/").filter(Boolean);
 
-  if (parts.length === 0 || parts[0] === "home") {
+  if (parts.length === 0 || parts[0] === "home" || parts[0] === "featured") {
     return { page: "home" };
   }
   if (parts[0] === "about" || parts[0] === "contact") {
@@ -95,19 +135,27 @@ function getRoute() {
 function makeNavLink(label, href, options = {}) {
   const current = options.current ? ' aria-current="page"' : "";
   const className = options.home ? "nav-button home-button" : "nav-button";
-  return `<a class="${className}" href="${href}"${current}><span class="nav-bracket nav-bracket-open" aria-hidden="true">[</span><span class="nav-selected-marker" aria-hidden="true">*</span><span class="nav-label">${label}</span><span class="nav-bracket nav-bracket-close" aria-hidden="true">]</span></a>`;
+  return `
+    <a class="${className}" href="${href}"${current}>
+      <span class="nav-bracket nav-bracket-open" aria-hidden="true">[</span>
+      <span class="nav-selected-marker" aria-hidden="true">*</span>
+      <span class="nav-label">${label}</span>
+      <span class="nav-bracket nav-bracket-close" aria-hidden="true">]</span>
+    </a>`;
 }
 
 function renderNav(route) {
   const category = route.page === "detail" ? route.category : route.page;
   const links = [
-    makeNavLink("Featured / 精選", "#home", { home: true, current: route.page === "home" }),
+    makeNavLink("Featured / 精選", "#featured", {
+      home: true,
+      current: route.page === "home",
+    }),
   ];
 
   for (const key of categoryOrder) {
-    const translations = { art: "藝術", comics: "漫畫", animations: "動畫" };
     links.push(makeNavLink(
-      `${collections[key].label} / ${translations[key]}`,
+      `${collections[key].label} / ${categoryTranslations[key]}`,
       `#${key}`,
       { current: key === category },
     ));
@@ -117,11 +165,23 @@ function renderNav(route) {
 }
 
 function renderCard(item) {
+  const detailHref = `#${item.category}/${item.id}`;
+  const artwork = item.image
+    ? `
+      <img
+        class="work-art-image"
+        src="${item.image}"
+        alt="${item.title}"
+        loading="lazy"
+        decoding="async"
+      >`
+    : `<span class="placeholder-label"><span>${item.mark}</span>Artwork placeholder</span>`;
+
   return `
     <article class="work-card">
-      <a class="work-card-link" href="#${item.category}/${item.id}" aria-label="View ${item.title}">
-        <div class="art-placeholder" role="img" aria-label="Artwork placeholder for ${item.title}">
-          <span class="placeholder-label"><span>${item.mark}</span>Artwork placeholder</span>
+      <a class="work-card-link" href="${detailHref}" aria-label="View ${item.title}">
+        <div class="art-placeholder"${item.image ? "" : ` role="img" aria-label="Artwork placeholder for ${item.title}"`}>
+          ${artwork}
           ${renderAsciiFrame()}
         </div>
         <div class="card-copy">
@@ -194,7 +254,9 @@ function renderCollection(category) {
           <p class="page-lede">${collection.description}</p>
         </div>
       </div>
-      <div class="work-grid">${collection.items.map((item) => renderCard({ ...item, category })).join("")}</div>
+      <div class="work-grid">${collection.items
+        .map((item) => renderCard({ ...item, category }))
+        .join("")}</div>
     </section>`;
 }
 
@@ -245,14 +307,16 @@ function renderDetail(route) {
         </div>
         <span class="detail-meta">Work ${item.mark} / 09</span>
       </div>
-      <div class="art-placeholder detail-art" role="img" aria-label="Large artwork placeholder for ${item.title}">
-        <span class="placeholder-label"><span>${item.mark}</span>Replace this box with your artwork</span>
-        ${renderAsciiFrame()}
+      <div class="art-placeholder detail-art" role="img" aria-label="${item.image ? "Artwork" : "Large artwork placeholder"} for ${item.title}">
+        ${item.image
+    ? `<img class="work-art-image" src="${item.image}" alt="">`
+    : `<span class="placeholder-label"><span>${item.mark}</span>Replace this box with your artwork</span>`}
       </div>
-      <p class="detail-note">This is a large placeholder for the full artwork. Add a caption, story notes, or credits here.</p>
+      <p class="detail-note">${item.image ? "A featured artwork from the studio." : "This is a large placeholder for the full artwork. Add a caption, story notes, or credits here."}</p>
     </section>`;
 }
 
+// 4. Search results are built as DOM nodes to keep user input out of HTML strings.
 function renderSearchResults() {
   const query = artSearchInput.value.trim().toLocaleLowerCase();
   artSearchResults.replaceChildren();
@@ -303,10 +367,16 @@ function renderSearchResults() {
   artSearchInput.setAttribute("aria-expanded", "true");
 }
 
+// 5. Featured carousel updates only the cached image visibility and destination.
 function renderFeature() {
-  const work = allWork[activeFeature];
+  const work = featuredWorks[activeFeature];
+  const imageSrc = work.image ?? "./pfpalpha.png";
   featureBanner.dataset.category = work.category;
-  featureBanner.style.setProperty("--art-position", `${35 + (activeFeature % 5) * 10}%`);
+  for (const [src, image] of featuredImageCache) {
+    image.hidden = src !== imageSrc;
+  }
+  const image = featuredImageCache.get(imageSrc);
+  image.style.objectPosition = imageSrc === "./pfpalpha.png" ? "50% 17%" : "";
   featureLink.href = `#${work.category}/${work.id}`;
   featureLink.setAttribute("aria-label", `View ${work.title} in ${collections[work.category].label}`);
 }
@@ -340,10 +410,11 @@ function renderPage() {
 }
 
 function changeFeature(direction) {
-  activeFeature = (activeFeature + direction + allWork.length) % allWork.length;
+  activeFeature = (activeFeature + direction + featuredWorks.length) % featuredWorks.length;
   renderFeature();
 }
 
+// 6. The optional range game keeps one timer and updates its existing controls.
 function placeRangeTarget() {
   const target = pageContent.querySelector("#range-target");
   if (!target) {
@@ -419,6 +490,7 @@ pageContent.addEventListener("click", (event) => {
   placeRangeTarget();
 });
 
+// 7. Search, carousel, and page-level event handlers.
 artSearch.addEventListener("submit", (event) => {
   event.preventDefault();
   const firstResult = artSearchResults.querySelector(".search-result");
@@ -453,8 +525,28 @@ document.addEventListener("click", (event) => {
   }
 });
 
-document.querySelector("#feature-prev").addEventListener("click", () => changeFeature(-1));
-document.querySelector("#feature-next").addEventListener("click", () => changeFeature(1));
+for (const [selector, direction] of [["#feature-prev", -1], ["#feature-next", 1]]) {
+  const button = document.querySelector(selector);
+  button.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) {
+      return;
+    }
+
+    changeFeature(direction);
+  });
+  button.addEventListener("click", (event) => {
+    if (event.detail === 0) {
+      changeFeature(direction);
+    }
+  });
+}
+
+window.setInterval(() => {
+  if (!document.hidden && !featureBanner.matches(":hover")) {
+    changeFeature(1);
+  }
+}, 8000);
+
 window.addEventListener("hashchange", renderPage);
 
 const astroPillar = document.querySelector(".astro-pillar");

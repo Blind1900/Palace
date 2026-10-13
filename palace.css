@@ -1,4 +1,4 @@
-/* Main customization controls: tweak these tokens to change the look without editing each component. */
+/* 1. Theme tokens: adjust color, width, spacing, and navigation here. */
 :root {
   color-scheme: dark;
   /* Palette sampled from pfpalpha.png: black, charcoal, grayscale, rust red, and deep blue */
@@ -8,7 +8,6 @@
   --color-muted: #7c7c7c;
   --color-line: #333333;
   --color-accent: #b53201;
-  --color-blue: #02147e;
   /* Site-wide typeface */
   --font-ui: "Times New Roman", Times, serif;
   /* Overall page width and space at the left/right edges */
@@ -23,6 +22,7 @@
   --radius-card: 0;
 }
 
+/* 2. Global defaults and background decoration. */
 * {
   box-sizing: border-box;
 }
@@ -55,7 +55,7 @@ body {
 .astro-pillar {
   position: absolute;
   top: 0;
-  left: 66%;
+  left: calc(66% - 1ch - 2px);
   width: min(28.16vw, 316.8px);
   transform: translate(-50%, var(--scroll-offset, 0px));
 }
@@ -104,11 +104,18 @@ button:focus-visible {
   outline-offset: 4px;
 }
 
+.feature-arrow:focus,
+.feature-arrow:focus-visible {
+  outline: none;
+  outline-offset: 0;
+}
+
 ::selection {
   background: var(--color-accent);
   color: var(--color-bg);
 }
 
+/* 3. Centered site layout and header search. */
 .site-shell {
   position: relative;
   z-index: 1;
@@ -297,6 +304,7 @@ button:focus-visible {
   color: var(--color-accent);
 }
 
+/* 4. Featured banner and its cycling controls. */
 .feature-wrap {
   margin-top: 25px;
 }
@@ -313,28 +321,25 @@ button:focus-visible {
 
 .feature-banner::before {
   position: absolute;
-  z-index: 0;
-  inset: 6px 6px 12px;
-  background-image:
-    linear-gradient(90deg, rgb(2 2 2 / 14%), rgb(2 2 2 / 5%)),
-    url("./pfpalpha.png");
-  background-position: center, var(--art-position, 55%) 12%;
-  background-size: cover;
+  z-index: 1;
+  inset: 6px;
+  background: linear-gradient(90deg, rgb(2 2 2 / 14%), rgb(2 2 2 / 5%));
   content: "";
 }
 
-/* Optional background colors for each featured-work category */
-.feature-banner[data-category="comics"] {
-  background-color: var(--color-bg);
-}
-
-.feature-banner[data-category="animations"] {
-  background-color: var(--color-bg);
+.feature-image {
+  position: absolute;
+  z-index: 0;
+  inset: 6px;
+  width: calc(100% - 12px);
+  height: calc(100% - 12px);
+  object-fit: cover;
+  object-position: center;
 }
 
 .feature-art-link {
   position: absolute;
-  z-index: 1;
+  z-index: 2;
   inset: 0;
 }
 
@@ -351,6 +356,8 @@ button:focus-visible {
   background: rgb(2 2 2 / 82%);
   color: var(--color-text);
   cursor: pointer;
+  touch-action: manipulation;
+  user-select: none;
   transition: none;
 }
 
@@ -368,6 +375,7 @@ button:focus-visible {
 }
 
 /* Tabs below the banner; layout and sizing use the tokens at the top of this file. */
+/* 5. Navigation tabs and selected/hover bracket states. */
 .site-nav {
   position: relative;
   display: flex;
@@ -398,7 +406,7 @@ button:focus-visible {
   min-height: 38px;
   display: inline-flex;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   padding: 8px 32px;
   border: 0;
   color: var(--color-muted);
@@ -411,11 +419,11 @@ button:focus-visible {
 }
 
 .nav-bracket-open {
-  right: calc(100% - 32px);
+  right: calc(100% - 32px + 1em);
 }
 
 .nav-bracket-close {
-  left: calc(100% - 32px);
+  left: calc(100% - 32px + 1em);
 }
 
 .nav-selected-marker {
@@ -427,16 +435,20 @@ button:focus-visible {
   transition: none;
 }
 
+.nav-label {
+  display: inline-block;
+}
+
 .nav-button:hover {
   color: var(--color-accent);
 }
 
 .nav-button:hover .nav-bracket-open {
-  right: calc(100% - 32px + 0.5em);
+  right: calc(100% - 32px + 2em);
 }
 
 .nav-button:hover .nav-bracket-close {
-  left: calc(100% - 32px + 0.5em);
+  left: calc(100% - 32px + 2em);
 }
 
 .nav-button[aria-current="page"] {
@@ -444,11 +456,7 @@ button:focus-visible {
 }
 
 .nav-button[aria-current="page"] .nav-bracket-open {
-  right: calc(100% - 32px + 0.8em);
-}
-
-.nav-button[aria-current="page"] .nav-bracket-close {
-  left: calc(100% - 32px + 0.25em);
+  right: calc(100% - 32px + 1em);
 }
 
 .nav-button[aria-current="page"] .nav-selected-marker {
@@ -456,22 +464,23 @@ button:focus-visible {
   opacity: 1;
 }
 
+.nav-button[aria-current="page"] .nav-bracket-close {
+  left: calc(100% - 32px + 1em);
+}
+
 .nav-button[aria-current="page"]:hover .nav-bracket-open {
-  right: calc(100% - 32px + 1.05em);
+  right: calc(100% - 32px + 2em);
 }
 
 .nav-button[aria-current="page"]:hover .nav-bracket-close {
-  left: calc(100% - 32px + 0.5em);
+  left: calc(100% - 32px + 2em);
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .nav-bracket,
-  .nav-selected-marker {
-    transition: none;
-  }
+.nav-button[aria-current="page"]:hover .nav-selected-marker {
+  width: 0.55em;
 }
 
-/* Main page sections and headings */
+/* 6. Shared page sections, headings, and links. */
 .page-section {
   min-height: 300px;
   padding: 43px 0 78px;
@@ -524,6 +533,7 @@ button:focus-visible {
   line-height: 1.8;
 }
 
+/* 7. Optional celestial range game. */
 .range-game {
   padding-top: 0;
 }
@@ -688,7 +698,7 @@ button:focus-visible {
   font-weight: 400;
 }
 
-/* Artwork gallery: change the grid columns, gaps, and placeholder proportions here. */
+/* 8. Artwork galleries: change grid columns, gaps, and thumbnail proportions here. */
 .work-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -714,22 +724,30 @@ button:focus-visible {
   background-color: var(--color-surface);
 }
 
-.art-placeholder::before,
-.art-placeholder::after {
+.work-art-image {
   position: absolute;
-  z-index: 0;
+  z-index: 2;
+  top: 6%;
+  left: 6%;
+  width: 88%;
+  height: 88%;
+  object-fit: cover;
+}
+
+.art-placeholder::before {
+  position: absolute;
+  z-index: 1;
   inset: 12px;
   border: 1px dashed rgb(124 124 124 / 19%);
   content: "";
 }
 
-.art-placeholder::after {
-  inset: 22px;
-  border-style: dotted;
-  border-color: rgb(2 20 126 / 35%);
+.art-placeholder:has(.work-art-image)::before {
+  display: none;
 }
 
 /* ASCII outline used by the banner, search field, and artwork placeholder boxes. */
+/* 9. Reusable ASCII frames and their hover states. */
 .ascii-frame {
   position: absolute;
   z-index: 2;
@@ -766,6 +784,18 @@ button:focus-visible {
   bottom: 0;
 }
 
+.feature-banner > .ascii-frame .ascii-bottom {
+  right: 0;
+}
+
+.feature-banner > .ascii-frame {
+  overflow: visible;
+}
+
+.feature-banner > .ascii-frame .ascii-top {
+  top: -3px;
+}
+
 .ascii-corner {
   position: absolute;
   z-index: 1;
@@ -792,7 +822,7 @@ button:focus-visible {
   color: var(--color-line);
   line-height: 1.4;
   pointer-events: none;
-  white-space: normal;
+  white-space: pre-line;
 }
 
 .ascii-left {
@@ -888,7 +918,7 @@ button:focus-visible {
   white-space: nowrap;
 }
 
-/* About page: portrait placeholder and artist biography */
+/* 10. Artist biography and portrait. */
 .simple-page {
   max-width: 760px;
 }
@@ -906,18 +936,19 @@ button:focus-visible {
 }
 
 .artist-image {
+  display: block;
   width: 100%;
-  max-width: 270px;
-  aspect-ratio: 1;
-  object-fit: cover;
+  height: auto;
+  object-fit: contain;
   border: 0;
-  background: var(--color-surface);
 }
 
 .artist-image-frame {
   position: relative;
-  width: fit-content;
+  width: min(282px, 100%);
   max-width: 100%;
+  padding: 6px;
+  background: var(--color-surface);
 }
 
 .artist-image-frame .ascii-frame {
@@ -936,7 +967,7 @@ button:focus-visible {
   font-weight: 500;
 }
 
-/* Individual artwork page: large placeholder, title, and caption */
+/* 11. Artwork detail pages and captions. */
 .detail-page {
   padding-top: 32px;
 }
@@ -975,13 +1006,37 @@ button:focus-visible {
   max-height: 670px;
 }
 
+.detail-art::before {
+  display: none;
+}
+
+.detail-art:has(.work-art-image) {
+  display: flex;
+  aspect-ratio: auto;
+  max-height: none;
+  justify-content: center;
+  overflow: visible;
+  background: transparent;
+}
+
+.detail-art .work-art-image {
+  position: static;
+  inset: auto;
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: 110%;
+  max-height: min(82.5vh, 990px);
+  object-fit: contain;
+}
+
 .detail-note {
   margin: 13px 0 0;
   color: var(--color-muted);
   font-size: 11px;
 }
 
-/* Footer links and loading fallback */
+/* 12. Footer and loading fallback. */
 .site-footer {
   position: relative;
   min-height: 70px;
@@ -1016,7 +1071,7 @@ button:focus-visible {
   padding: 45px 0;
 }
 
-/* Tablet and small-screen layout adjustments */
+/* 13. Tablet and small-screen layout adjustments. */
 @media (max-width: 650px) {
   .site-header {
     min-height: 66px;
@@ -1057,7 +1112,11 @@ button:focus-visible {
   }
 
   .artist-image {
-    max-width: 220px;
+    max-width: none;
+  }
+
+  .artist-image-frame {
+    width: min(232px, 100%);
   }
 
   .detail-art {
@@ -1065,7 +1124,7 @@ button:focus-visible {
   }
 }
 
-/* Narrow phone layout adjustments */
+/* 14. Narrow phone layout adjustments. */
 @media (max-width: 430px) {
   .wordmark {
     display: grid;
