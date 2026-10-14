@@ -96,6 +96,7 @@ const artSearchResults = document.querySelector("#art-search-results");
 let activeFeature = 0;
 
 const featuredImageCache = new Map([["./pfpalpha.png", featureImage]]);
+let activeFeatureImage = featureImage;
 for (const src of new Set(allWork.map((work) => work.featureImage ?? work.image).filter(Boolean))) {
   const image = new Image();
   image.className = "feature-image";
@@ -219,7 +220,7 @@ function renderCollection(category) {
       <div class="section-heading">
         <div>
           <p class="section-overline">${collection.items.length ? `// 收藏 · 作品 ${collection.items.length}` : "WiP"}</p>
-          <h2>${collection.label} / ${{ art: "藝術", comics: "漫畫", animations: "動畫" }[category]}</h2>
+          <h2>${collection.label} / ${categoryTranslations[category]}</h2>
           <p class="page-lede">${collection.description}</p>
         </div>
       </div>
@@ -308,8 +309,7 @@ function renderSearchResults() {
   artSearchResults.replaceChildren();
 
   if (!query) {
-    artSearchResults.hidden = true;
-    artSearchInput.setAttribute("aria-expanded", "false");
+    closeSearchResults();
     return;
   }
 
@@ -353,16 +353,21 @@ function renderSearchResults() {
   artSearchInput.setAttribute("aria-expanded", "true");
 }
 
+function closeSearchResults() {
+  artSearchResults.hidden = true;
+  artSearchInput.setAttribute("aria-expanded", "false");
+}
+
 // 5. Featured carousel updates only the cached image visibility and destination.
 function renderFeature() {
   const work = featuredWorks[activeFeature];
   const imageSrc = work.featureImage ?? work.image ?? "./pfpalpha.png";
   featureBanner.dataset.category = work.category;
   featureBanner.dataset.artwork = work.id;
-  for (const [src, image] of featuredImageCache) {
-    image.hidden = src !== imageSrc;
-  }
   const image = featuredImageCache.get(imageSrc);
+  activeFeatureImage.hidden = true;
+  image.hidden = false;
+  activeFeatureImage = image;
   image.style.objectPosition = imageSrc === "./pfpalpha.png"
     ? "50% 17%"
     : work.id === "marching-band"
@@ -432,8 +437,7 @@ artSearch.addEventListener("submit", (event) => {
   const firstResult = artSearchResults.querySelector(".search-result");
   if (firstResult) {
     window.location.hash = firstResult.getAttribute("href");
-    artSearchResults.hidden = true;
-    artSearchInput.setAttribute("aria-expanded", "false");
+    closeSearchResults();
   } else {
     renderSearchResults();
   }
@@ -449,15 +453,13 @@ artSearchInput.addEventListener("keydown", (event) => {
 
 artSearchResults.addEventListener("click", (event) => {
   if (event.target.closest(".search-result")) {
-    artSearchResults.hidden = true;
-    artSearchInput.setAttribute("aria-expanded", "false");
+    closeSearchResults();
   }
 });
 
 document.addEventListener("click", (event) => {
   if (!artSearch.contains(event.target)) {
-    artSearchResults.hidden = true;
-    artSearchInput.setAttribute("aria-expanded", "false");
+    closeSearchResults();
   }
 });
 
