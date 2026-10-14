@@ -41,7 +41,7 @@ body {
 }
 
 .ambient-glyphs {
-  --pillar-left: calc(76% + 50px);
+  --pillar-left: calc(81% + 50px);
   --pillar-width: min(30vw, 350px);
   position: fixed;
   z-index: 0;
@@ -202,7 +202,7 @@ body {
 
 @media (max-width: 600px) {
   .ambient-glyphs {
-    --pillar-left: calc(68% + 50px);
+    --pillar-left: calc(72% + 50px);
     --pillar-width: 34vw;
   }
 
@@ -298,17 +298,45 @@ button:focus-visible {
 }
 
 .wordmark {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
   display: inline-flex;
   align-items: baseline;
   flex-wrap: wrap;
   gap: 10px;
+  text-align: left;
+}
+
+.wordmark:hover .wordmark-name {
+  color: var(--color-accent);
 }
 
 .wordmark-name {
+  display: inline-block;
   color: var(--color-text);
   font-size: 15px;
   font-weight: 700;
   letter-spacing: 0.015em;
+  transform-origin: center;
+}
+
+.wordmark-name.is-jiggling {
+  animation: wordmark-jiggle 240ms ease-in-out;
+}
+
+@keyframes wordmark-jiggle {
+  0%, 100% { transform: translateX(0); }
+  30% { transform: translateX(-1px); }
+  70% { transform: translateX(1px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wordmark-name.is-jiggling {
+    animation: none;
+  }
 }
 
 .wordmark-translation {
@@ -664,7 +692,7 @@ button:focus-visible {
   font-size: 11px;
 }
 
-.substack-link {
+.patreon-link {
   text-decoration: underline;
 }
 
@@ -1066,7 +1094,10 @@ button:focus-visible {
 }
 
 .footer-wordmark {
+  min-height: auto;
+  padding: 0 32px;
   color: var(--color-text);
+  font-size: inherit;
 }
 
 .loading-state {

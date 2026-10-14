@@ -90,6 +90,8 @@ const featureImage = document.querySelector("#feature-image");
 const featureLink = document.querySelector("#feature-link");
 const pageContent = document.querySelector("#page-content");
 const siteNav = document.querySelector("#site-nav");
+const copyWebsiteLink = document.querySelector("#copy-website-link");
+const copyLinkStatus = document.querySelector("#copy-link-status");
 const artSearch = document.querySelector(".art-search");
 const artSearchInput = document.querySelector("#art-search-input");
 const artSearchResults = document.querySelector("#art-search-results");
@@ -247,7 +249,7 @@ function renderAbout() {
           <br>Oh, Epics, Myths, and Legends.<br>
           ♓︎(雙魚座) 申猴.</p>
           <p>An artist destroys as much as he creates.</p>
-          <a class="text-link substack-link" href="https://substack.com/@blindchicxulub" target="_blank" rel="noopener noreferrer">Substack ↗  $$ :D</a>
+          <a class="text-link patreon-link" href="https://www.patreon.com/c/BlindChicxulub" target="_blank" rel="noopener noreferrer">Patreon ↗  $$ :D</a>
         </div>
       </div>
     </section>`;
@@ -486,6 +488,24 @@ window.setInterval(() => {
 }, 8000);
 
 window.addEventListener("hashchange", renderPage);
+
+copyWebsiteLink.addEventListener("click", async () => {
+  const wordmarkName = copyWebsiteLink.querySelector(".wordmark-name");
+  wordmarkName.classList.remove("is-jiggling");
+  void wordmarkName.offsetWidth;
+  wordmarkName.classList.add("is-jiggling");
+
+  const websiteUrl = new URL(window.location.href);
+  websiteUrl.hash = "";
+
+  try {
+    await navigator.clipboard.writeText(websiteUrl.href);
+    copyLinkStatus.textContent = "Website link copied.";
+  } catch (error) {
+    copyLinkStatus.textContent = "Unable to copy website link.";
+    console.error("Unable to copy website link.", error);
+  }
+});
 
 const astroPillar = document.querySelector(".astro-pillar");
 const pillarShaft = astroPillar.querySelector(".pillar-shaft");

@@ -63,11 +63,12 @@
     </div>
     <div class="site-shell">
       <header class="site-header">
-        <a class="wordmark" href="#featured" aria-label="Palace of Dionysus home">
+        <button class="wordmark" id="copy-website-link" type="button" aria-label="Copy website link">
           <span class="wordmark-name">Palace of Dionysus</span>
           <span class="wordmark-separator" aria-hidden="true">·</span>
           <span class="wordmark-translation" lang="zh">酒神的宮殿</span>
-        </a>
+          <span class="visually-hidden" id="copy-link-status" aria-live="polite"></span>
+        </button>
         <form class="art-search" role="search" autocomplete="off">
           <label class="visually-hidden" for="art-search-input">Search artwork / 搜尋作品</label>
           <span class="search-prefix" aria-hidden="true">/</span>
@@ -84,7 +85,7 @@
       </header>
 
       <main>
-        <section class="feature-wrap" aria-label="Featured work">
+        <section class="feature-wrap" id="featured" aria-label="Featured work">
           <div class="feature-banner" id="feature-banner" role="group" aria-label="Featured artwork">
             <img class="feature-image" id="feature-image" src="./pfpalpha.png" alt="" fetchpriority="high" decoding="async">
             <a class="feature-art-link" id="feature-link" href="#art" aria-label="View featured work"></a>
@@ -111,7 +112,12 @@
       </main>
 
       <footer class="site-footer">
-        <a class="footer-wordmark" href="#featured">[ Palace of Dionysus ]</a>
+        <a class="nav-button footer-wordmark" href="#">
+          <span class="nav-bracket nav-bracket-open" aria-hidden="true">[</span>
+          <span class="nav-selected-marker" aria-hidden="true">*</span>
+          <span class="nav-label">Palace of Dionysus</span>
+          <span class="nav-bracket nav-bracket-close" aria-hidden="true">]</span>
+        </a>
         <span>藝術 Art · 漫畫 Comics · 動畫 Animation</span>
       </footer>
     </div>
