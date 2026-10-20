@@ -207,8 +207,8 @@ function renderHome() {
         <div>
           <p class="section-overline">// 最新作品</p>
           <h2>Recent work / 最近作品</h2>
+          <a class="text-link section-collection-link" href="#art">Explore the collections ↗</a>
         </div>
-        <a class="text-link" href="#art">Explore the collections ↗</a>
       </div>
       <div class="work-grid">${recentWork.map(renderCard).join("")}</div>
     </section>
