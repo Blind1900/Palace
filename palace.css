@@ -172,18 +172,41 @@ body {
 }
 
 .pillar-blue-spine {
+  --spine-gradient-shift: 0%;
+  --spine-saturation: 1.05;
+  --spine-contrast: 1.08;
+  --spine-brightness: 0.72;
   position: absolute;
   z-index: 3;
   top: 0;
   bottom: 0;
   left: 50%;
   overflow: hidden;
-  color: #0225ea;
+  color: transparent;
   font-size: 9px;
   letter-spacing: 0.2em;
   line-height: 1.6;
   writing-mode: vertical-rl;
   white-space: nowrap;
+  background-image: linear-gradient(
+    to bottom,
+    hsla(223, 100%, 58%, 0.08) 0%,
+    hsla(223, 100%, 43%, 0.12) 10%,
+    hsla(223, 100%, 28%, 0.5) 20%,
+    hsla(223, 100%, 20%, 0.85) 32%,
+    hsla(223, 100%, 12%, 0.96) 48%,
+    hsla(223, 100%, 10%, 0.98) 62%,
+    hsla(223, 100%, 16%, 0.88) 76%,
+    hsla(223, 100%, 22%, 0.2) 88%,
+    hsla(223, 100%, 26%, 0.08) 100%
+  );
+  background-size: 100% 220%;
+  background-position: 50% var(--spine-gradient-shift);
+  background-repeat: no-repeat;
+  -webkit-background-clip: text;
+  background-clip: text;
+  text-shadow: 0 0 1em hsla(225, 88%, 62%, 0.18), 0 0 0.8em hsla(224, 82%, 48%, 0.1);
+  filter: saturate(var(--spine-saturation)) contrast(var(--spine-contrast)) brightness(var(--spine-brightness));
   transform: translateX(-50%);
 }
 

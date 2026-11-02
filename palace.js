@@ -568,6 +568,33 @@ function updateAmbientScroll() {
   compassReading.textContent = `${String(bearing).padStart(3, "0")}°`;
 }
 
+function updatePillarSpineColor() {
+  const now = performance.now() * 0.001;
+  const waveA = 0.5 + 0.5 * Math.sin(now * 0.42 - 1.2);
+  const waveB = 0.5 + 0.5 * Math.sin(now * 0.9 + 0.7);
+  const waveC = 0.5 + 0.5 * Math.sin(now * 1.8 + 2.4);
+  const twinkle = 0.5 + 0.5 * Math.sin(now * 4.2 + 1.4);
+
+  const overlap = 0.24 * waveA + 0.36 * waveB + 0.28 * waveC;
+  const intensity = Math.min(1, 0.12 + Math.pow(Math.max(0, overlap), 1.5) * 1.3 + waveB * 0.26 + twinkle * 0.18);
+
+  const saturation = 1.05 + intensity * 1.6;
+  const contrast = 1.08 + intensity * 2.4;
+  const brightness = 0.72 + intensity * 0.46 + twinkle * 0.12;
+  const travel = 12 + (0.5 + 0.5 * Math.sin(now * 0.38 + 1.7)) * 88;
+  const glow = 0.5 + 0.5 * Math.sin(now * 3.6 + 2.8);
+  const gradientShift = `${travel.toFixed(2)}%`;
+
+  pillarSpine.style.setProperty("--spine-saturation", saturation.toFixed(3));
+  pillarSpine.style.setProperty("--spine-contrast", contrast.toFixed(3));
+  pillarSpine.style.setProperty("--spine-brightness", brightness.toFixed(3));
+  pillarSpine.style.setProperty("--spine-gradient-shift", gradientShift);
+  pillarSpine.style.filter = `saturate(${saturation.toFixed(3)}) contrast(${contrast.toFixed(3)}) brightness(${brightness.toFixed(3)})`;
+  pillarSpine.style.textShadow = `0 0 ${10 + glow * 16}px rgba(75, 110, 255, ${0.14 + glow * 0.22}), 0 0 ${22 + glow * 28}px rgba(35, 52, 120, ${0.12 + glow * 0.2})`;
+
+  requestAnimationFrame(updatePillarSpineColor);
+}
+
 window.addEventListener("scroll", () => {
   if (scrollFrame) {
     return;
@@ -584,6 +611,7 @@ window.addEventListener("load", updatePillarLength, { once: true });
 pageContent.addEventListener("load", updatePillarLength, true);
 
 updateAmbientScroll();
+updatePillarSpineColor();
 renderFeature();
 renderPage();
 fillEmptyAsciiFrames();
