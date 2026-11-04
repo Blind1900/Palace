@@ -10,27 +10,27 @@ const collections = {
         title: "Mech Battle",
         date: "Digital Illustration",
         mark: "01",
-        image: "IMG_5065.jpg",
+        image: "../../images/IMG_5065.jpg",
       },
       {
         id: "dragon-wall",
         title: "dragonWall",
         date: "Digital Illustration",
         mark: "12",
-        image: "./Illustration12.png",
-        featureImage: "./dragonWall-banner.png",
+        image: "../../images/Illustration12.png",
+        featureImage: "../../images/dragonWall-banner.png",
       },
       {
         id: "marching-band",
         title: "MarchingBand",
         date: "Blender Model",
         mark: "13",
-        image: "./marching-band-main.png",
+        image: "../../images/marching-band-main.png",
         gallery: [
-          "./marching-band-sight.png",
-          "./marching-band-standing.png",
-          "./marching-band-hunt.png",
-          "./marching-band-header.png",
+          "../../images/marching-band-sight.png",
+          "../../images/marching-band-standing.png",
+          "../../images/marching-band-hunt.png",
+          "../../images/marching-band-header.png",
         ],
       },
       {
@@ -38,14 +38,14 @@ const collections = {
         title: "Armada",
         date: "Digital Illustration",
         mark: "14",
-        image: "./Illustration9990.png",
+        image: "../../images/Illustration9990.png",
       },
       {
         id: "watch-dog",
         title: "watchDog",
         date: "Digital Illustration",
         mark: "15",
-        image: "./Illustration10.png",
+        image: "../../images/Illustration10.png",
       },
     ],
   },
@@ -97,7 +97,7 @@ const artSearchInput = document.querySelector("#art-search-input");
 const artSearchResults = document.querySelector("#art-search-results");
 let activeFeature = 0;
 
-const featuredImageCache = new Map([["./pfpalpha.png", featureImage]]);
+const featuredImageCache = new Map([["../../images/pfpalpha.png", featureImage]]);
 let activeFeatureImage = featureImage;
 for (const src of new Set(allWork.map((work) => work.featureImage ?? work.image).filter(Boolean))) {
   const image = new Image();
@@ -230,7 +230,7 @@ function renderCollection(category) {
         ? `<div class="work-grid">${collection.items
           .map((item) => renderCard({ ...item, category }))
           .join("")}</div>`
-        : `<div class="collection-empty-art"><img src="./cat-surprised.gif" alt="A surprised cat looking through an opening"></div>`}
+        : `<div class="collection-empty-art"><img src="../../images/cat-surprised.gif" alt="A surprised cat looking through an opening"></div>`}
     </section>`;
 }
 
@@ -241,7 +241,7 @@ function renderAbout() {
       <h2>About</h2>
       <div class="about-layout">
         <div class="artist-image-frame">
-          <img class="artist-image" src="./pfpalpha.png" alt="Abstract artwork used as a temporary artist portrait">
+          <img class="artist-image" src="../../images/pfpalpha.png" alt="Abstract artwork used as a temporary artist portrait">
           ${renderAsciiFrame()}
         </div>
         <div class="about-copy">
@@ -363,14 +363,14 @@ function closeSearchResults() {
 // 5. Featured carousel updates only the cached image visibility and destination.
 function renderFeature() {
   const work = featuredWorks[activeFeature];
-  const imageSrc = work.featureImage ?? work.image ?? "./pfpalpha.png";
+  const imageSrc = work.featureImage ?? work.image ?? "../../images/pfpalpha.png";
   featureBanner.dataset.category = work.category;
   featureBanner.dataset.artwork = work.id;
   const image = featuredImageCache.get(imageSrc);
   activeFeatureImage.hidden = true;
   image.hidden = false;
   activeFeatureImage = image;
-  image.style.objectPosition = imageSrc === "./pfpalpha.png"
+  image.style.objectPosition = imageSrc === "../../images/pfpalpha.png"
     ? "50% 17%"
     : work.id === "marching-band"
       ? "50% 35%"
