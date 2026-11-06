@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Urban Defence</title>
+    <link rel="stylesheet" href="styles/main.css">
+  </head>
+  <body class="game-shell" data-base-side="left">
+    <div class="game-root">
+      <header class="game-header">
+        <div class="game-brand">
+          <span class="nav-bracket">[</span>
+          <span class="brand-text">URBAN DEFENCE</span>
+          <span class="nav-bracket">]</span>
+        </div>
+        <div class="game-actions">
+          <button id="cycle-base-side" class="mini-button" type="button">BASE: LEFT</button>
+          <a id="fullscreen-button" class="mini-button" href="index.html?fullscreen=1" target="_blank" rel="noopener noreferrer">FULLSCREEN ↗</a>
+        </div>
+      </header>
+
+      <div class="game-body">
+        <aside class="hud resources" aria-label="Resources">
+          <div class="resource-label">RESOURCES</div>
+          <div class="resource-line">HM <span id="hm-value">68</span></div>
+          <div class="resource-line">SM <span id="sm-value">42</span></div>
+          <div class="resource-line">POP <span id="pop-value">14</span></div>
+        </aside>
+
+        <aside class="hud commands" aria-label="Build commands">
+          <div class="command-label">COMMAND</div>
+          <button type="button">BUILD</button>
+          <button type="button">TUNNEL</button>
+          <button type="button">MISSILE</button>
+        </aside>
+
+        <main class="battlefield-wrap" aria-label="Urban Defence battlefield">
+          <canvas id="game-canvas" width="1100" height="620"></canvas>
+        </main>
+      </div>
+    </div>
+
+    <script src="scripts/main.js"></script>
+  </body>
+</html>

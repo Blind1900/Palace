@@ -38,6 +38,10 @@ body {
   font-family: var(--font-ui);
   font-size: 14px;
   line-height: 1.65;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  font-synthesis-weight: none;
 }
 
 .ambient-glyphs {
@@ -1094,6 +1098,38 @@ button:focus-visible {
   margin: 13px 0 0;
   color: var(--color-muted);
   font-size: 11px;
+}
+
+.detail-game-shell {
+  margin-top: 24px;
+}
+
+.detail-game-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 8px;
+  color: var(--color-muted);
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.detail-game-title {
+  color: var(--color-text);
+}
+
+.detail-game-link {
+  color: var(--color-accent);
+}
+
+.detail-game-iframe {
+  display: block;
+  width: 100%;
+  min-height: min(72vh, 820px);
+  border: 0;
+  background: #020202;
 }
 
 /* 12. Footer and loading fallback. */

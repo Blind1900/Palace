@@ -1,6 +1,21 @@
 // 1. Portfolio content and reusable labels.
 // Add or edit work here; the gallery, search, and carousel read from this data.
 const collections = {
+  games: {
+    label: "Games",
+    description: "Browser games, prototypes, and playable experiments",
+    items: [
+      {
+        id: "urban-defence",
+        title: "Urban Defence",
+        date: "Prototype",
+        mark: "01",
+        image: "../../code/games/urban-defence/assets/urban-defence-thumb.svg",
+        featureImage: "../../code/games/urban-defence/assets/urban-defence-thumb.svg",
+        gameUrl: "../games/urban-defence/index.html",
+      },
+    ],
+  },
   art: {
     label: "Art",
     description: "Illustrations, 3d, and sketches",
@@ -61,8 +76,9 @@ const collections = {
   },
 };
 
-const categoryOrder = ["art", "comics", "animations"];
+const categoryOrder = ["games", "comics", "art"];
 const categoryTranslations = {
+  games: "遊戲",
   art: "藝術",
   comics: "漫畫",
   animations: "動畫",
@@ -207,7 +223,7 @@ function renderHome() {
         <div>
           <p class="section-overline">// 最新作品</p>
           <h2>Recent work / 最近作品</h2>
-          <a class="text-link section-collection-link" href="#art">Explore the collections ↗</a>
+          <a class="text-link section-collection-link" href="#games">Explore the collections ↗</a>
         </div>
       </div>
       <div class="work-grid">${recentWork.map(renderCard).join("")}</div>
@@ -290,6 +306,23 @@ function renderDetail(route) {
         <img class="work-art-image" src="${item.image}" alt="">
       </div>`;
 
+  const gameWindow = item.gameUrl
+    ? `
+      <div class="detail-game-shell">
+        <div class="detail-game-header">
+          <span class="detail-game-title">Live prototype</span>
+          <a class="text-link detail-game-link" href="${item.gameUrl}?fullscreen=1" target="_blank" rel="noopener noreferrer">PLAY FULLSCREEN ↗</a>
+        </div>
+        <iframe
+          class="detail-game-iframe"
+          src="${item.gameUrl}?embedded=1"
+          title="Urban Defence prototype window"
+          loading="lazy"
+          referrerpolicy="no-referrer"
+        ></iframe>
+      </div>`
+    : "";
+
   return `
     <section class="page-section detail-page">
       <a class="detail-back" href="#${route.category}"><span aria-hidden="true">←</span> Back to ${collection.label}</a>
@@ -301,7 +334,8 @@ function renderDetail(route) {
         <span class="detail-meta">Work ${item.mark}</span>
       </div>
       ${artwork}
-      <p class="detail-note">A featured artwork from the studio.</p>
+      ${gameWindow}
+      <p class="detail-note">Prototype preview embedded in the Palace site. Launch the fullscreen build for the full tactical view.</p>
     </section>`;
 }
 
