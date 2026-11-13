@@ -6,17 +6,38 @@
     <title>Urban Defence - pixel world</title>
     <style>
       html, body { margin: 0; height: 100%; background: #05080a; color: #9fc28a; overflow: hidden; }
-      #world-canvas { display: block; width: 100vw; height: 100vh; image-rendering: pixelated; cursor: grab; }
+      #world-canvas { display: block; width: 100vw; height: 100vh; image-rendering: pixelated; cursor: crosshair; }
       #world-status { position: fixed; left: 8px; bottom: 6px; font: 12px Consolas, monospace; pointer-events: none;
         background: #05080acc; padding: 2px 6px; }
+      #world-tools { position: fixed; left: 8px; top: 8px; display: flex; flex-wrap: wrap; gap: 4px; max-width: 70vw;
+        font: 12px Consolas, monospace; background: #05080acc; padding: 4px; border: 1px solid #2c4030; }
+      #world-tools button { font: inherit; color: #9fc28a; background: #0b140f; border: 1px solid #2c4030; padding: 2px 7px; cursor: pointer; }
+      #world-tools button.on { background: #2c4a30; color: #e4f0c8; }
+      #world-tools label { display: flex; align-items: center; gap: 4px; padding: 0 4px; }
     </style>
   </head>
   <body>
     <canvas id="world-canvas"></canvas>
+    <div id="world-tools">
+      <button data-tool="pan" class="on">PAN</button>
+      <button data-tool="water">WATER</button>
+      <button data-tool="sand">SAND</button>
+      <button data-tool="soil">SOIL</button>
+      <button data-tool="debris">DEBRIS</button>
+      <button data-tool="concrete">CONCRETE</button>
+      <button data-tool="erase">ERASE</button>
+      <button data-tool="blastS">BLAST S</button>
+      <button data-tool="blastM">BLAST M</button>
+      <button data-tool="blastL">BLAST L</button>
+      <label>BRUSH <input id="brush-size" type="range" min="2" max="40" value="10"></label>
+      <button data-action="pause">PAUSE</button>
+      <button data-action="step">STEP</button>
+    </div>
     <div id="world-status">generating…</div>
     <script src="scripts/pw/pw-core.js"></script>
     <script src="scripts/pw/pw-gen-terrain.js"></script>
     <script src="scripts/pw/pw-gen-vegetation.js"></script>
+    <script src="scripts/pw/pw-props.js"></script>
     <script src="scripts/pw/pw-building-kit.js"></script>
     <script src="scripts/pw/pw-building-ornaments.js"></script>
     <script src="scripts/pw/pw-building-population.js"></script>
@@ -25,6 +46,9 @@
     <script src="scripts/pw/pw-stamp.js"></script>
     <script src="scripts/pw/pw-settlements.js"></script>
     <script src="scripts/pw/pw-district.js"></script>
+    <script src="scripts/pw/pw-sim.js"></script>
+    <script src="scripts/pw/pw-particles.js"></script>
+    <script src="scripts/pw/pw-explode.js"></script>
     <script src="scripts/pw/pw-render.js"></script>
     <script src="scripts/pw/pw-app.js"></script>
   </body>

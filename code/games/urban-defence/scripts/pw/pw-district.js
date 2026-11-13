@@ -22,6 +22,7 @@
       put(x, y, color) { cells.push(x | 0, y | 0, rgb(color)); },
       commit(groundY) {
         for (let i = 0; i < cells.length; i += 3) {
+          if ((PW.get(world, cells[i], cells[i + 1]) & 63) !== M.AIR) continue;   // props stand in open air only
           PW.setLayer(world, 'deco', cells[i], cells[i + 1], cells[i + 2]);
           if (owner) PW.setOwner(world, cells[i], cells[i + 1], owner);
         }
@@ -165,8 +166,7 @@
 
   // Park tree where two styles meet: a small broadleaf, flower bed and bench.
   function parkTree(world, p, x, g, random) {
-    const tree = PW.vegetation.broadleaf(random, random.range(84, 110));
-    PW.vegetation.stamp(world, tree, x, g);
+    PW.flora.plant(world, 'broadleaf', x, { row: g, size: random.range(84, 110), seed: random.int(1, 2147483646) });
     const flowers = [[226, 96, 140], [245, 196, 60], [150, 190, 240], [232, 228, 218]];
     for (let dx = -26; dx <= 26; dx += 1) {
       p.put(x + dx, g - 1, [72, 140, 70]); if ((dx & 1) === 0) p.put(x + dx, g - 2, [64, 120, 60]);

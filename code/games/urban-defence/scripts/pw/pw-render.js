@@ -167,16 +167,22 @@
       }
       return image;
     }
+    // Deco never covers terrain: plants and props buried by a debris heap or a sand slide are
+    // hidden where the ground now is, and show again if it is dug away.
+    const terrainIds = PW.mat.terrain;
     function rasterDeco(c, lod) {
       const decoChunk = world.deco[c];
       if (!decoChunk) return null;
       const size = CHUNK >> lod, step = 1 << lod, half = step >> 1;
       const { image, pixels } = scratchImage(size);
+      const x0 = (c % world.chunksX) << CHUNK_SHIFT, y0 = ((c / world.chunksX) | 0) << CHUNK_SHIFT;
       let any = false, i = 0;
       for (let ty = 0; ty < size; ty += 1) {
-        const row = (ty * step + half) << CHUNK_SHIFT;
+        const ly = ty * step + half, row = ly << CHUNK_SHIFT, worldRow = (y0 + ly) * W + x0;
         for (let tx = 0; tx < size; tx += 1) {
-          const color = decoChunk[row | tx * step + half];
+          const lx = tx * step + half;
+          let color = decoChunk[row | lx];
+          if (color && terrainIds[mat[worldRow + lx] & ID_MASK]) color = 0;
           pixels[i++] = color;
           if (color) any = true;
         }

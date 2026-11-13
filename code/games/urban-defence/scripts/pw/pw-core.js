@@ -23,6 +23,9 @@
     ASPHALT: 24, ROADBED: 25, LINING: 26, BRIDGE: 27, PILLAR: 28, PIPE: 29, CORE: 30,
     // Stairs and stairwell floors: units stand on them from above but climb up through them.
     PLATFORM: 31,
+    // Cover: boulders, stalagmites, barrels, crates, mine cars and sandbags. Units walk past them
+    // (they stand at another depth) but they stop bullets, so troops duck behind them.
+    COVER_ROCK: 32, COVER_WOOD: 33, COVER_METAL: 34, COVER_SAND: 35,
   });
   const PHASE = Object.freeze({ AIR: 0, LIQUID: 1, POWDER: 2, SOLID: 3 });
   // Debris variants (bits 6-7 of a DEBRIS cell) pick the rubble palette.
@@ -34,6 +37,9 @@
   const skyline = new Uint8Array(64);      // natural ground that ends the open sky (bridges and roof debris don't)
   const hardness = new Float32Array(64);   // 0 = no resistance to blasts, 1 = indestructible
   const breaksTo = new Uint8Array(64);     // cell byte left behind (or flung) when shattered
+  const passable = new Uint8Array(64);     // units move through it (air, water, cover)
+  const stopsShots = new Uint8Array(64);   // bullets and shells stop in it (glass lets them through)
+  const terrain = new Uint8Array(64);      // natural ground and loose heaps: nothing is drawn over it
   const palettes = new Array(64);
   const names = new Array(64).fill('');
 
@@ -124,8 +130,21 @@
     [[120, 116, 108], [112, 108, 101], [128, 124, 115], [106, 102, 96]]);
   define(M.RUBBLE, 'rubble', { ground: true, hardness: 0.15, breaksTo: M.DEBRIS },
     [[124, 122, 115], [104, 102, 97], [135, 83, 63], [115, 70, 54], [108, 79, 52], [88, 65, 43], [108, 120, 130], [85, 94, 101]]);
+  // Cover props carry their own paint; the palettes show through only on unpainted (damaged) cells.
+  define(M.COVER_ROCK, 'cover rock', { hardness: 0.65, breaksTo: M.LOOSE_STONE },
+    [[112, 104, 94], [96, 89, 80], [124, 116, 104], [88, 82, 74]]);
+  define(M.COVER_WOOD, 'cover wood', { hardness: 0.25, breaksTo: debris(DEBRIS_KIND.WOOD) },
+    [[132, 96, 60], [112, 80, 50], [146, 108, 68], [100, 72, 46]]);
+  define(M.COVER_METAL, 'cover metal', { hardness: 0.45, breaksTo: debris(DEBRIS_KIND.METAL) },
+    [[96, 84, 72], [80, 70, 60], [110, 98, 84], [72, 64, 56]]);
+  define(M.COVER_SAND, 'sandbags', { hardness: 0.5, breaksTo: M.SAND },
+    [[176, 158, 112], [150, 134, 94], [196, 178, 130], [140, 124, 88]]);
   for (const id of [M.GRASS, M.TOPSOIL, M.SOIL, M.CLAY, M.GRAVEL, M.STONE, M.BEDROCK, M.SAND, M.ORE, M.WATER,
     M.LOOSE_SOIL, M.LOOSE_STONE, M.RUBBLE, M.ASPHALT, M.ROADBED, M.LINING, M.PIPE]) skyline[id] = 1;
+  for (const id of [M.AIR, M.WATER, M.COVER_ROCK, M.COVER_WOOD, M.COVER_METAL, M.COVER_SAND]) passable[id] = 1;
+  for (let id = 1; id < 64; id += 1) if (names[id] && phase[id] >= PHASE.POWDER && id !== M.GLASS) stopsShots[id] = 1;
+  for (const id of [M.GRASS, M.TOPSOIL, M.SOIL, M.CLAY, M.GRAVEL, M.STONE, M.BEDROCK, M.SAND, M.ORE,
+    M.LOOSE_SOIL, M.LOOSE_STONE, M.DEBRIS, M.RUBBLE]) terrain[id] = 1;
 
   // ---- Hashing and random numbers ------------------------------------------------------------
   function hash2(x, y) {
@@ -217,6 +236,7 @@
       simActive: new Uint8Array(chunkCount),
       simRect: new Int32Array(chunkCount * 4),
       simIdle: new Uint16Array(chunkCount),
+      activeList: [],
       tick: 0,
     };
     for (let c = 0; c < chunkCount; c += 1) clearSimRect(world, c);
@@ -256,7 +276,7 @@
     const c = chunkIndex(world, x, y);
     const lx = x & CHUNK_MASK, ly = y & CHUNK_MASK;
     const r = world.simRect, o = c * 4;
-    world.simActive[c] = 1;
+    if (!world.simActive[c]) { world.simActive[c] = 1; world.activeList.push(c); }
     world.simIdle[c] = 0;
     if (lx - 1 < r[o]) r[o] = Math.max(0, lx - 1);
     if (ly - 1 < r[o + 1]) r[o + 1] = Math.max(0, ly - 1);
@@ -397,12 +417,42 @@
     }
     return height;
   }
+  // First cell at or below y that something could rest on (any solid or powder; water is passed
+  // through when `throughWater` is set, so reeds and pipes find the lake bed).
+  function supportBelow(world, x, y, throughWater = false) {
+    if (x < 0 || x >= world.width) return world.height;
+    const { mat, width, height } = world;
+    for (let row = Math.max(0, y | 0); row < height; row += 1) {
+      const id = mat[row * width + x] & ID_MASK;
+      if (phase[id] >= PHASE.POWDER) return row;
+      if (id === M.WATER && !throughWater) return row;
+    }
+    return height;
+  }
+  // Follow a shot cell by cell from (x0, y0) towards (x1, y1). Returns the first cell that stops
+  // it ({ x, y, id }) or null when the line is clear. Cover stops shots even though units walk
+  // through it, which is what lets a crouched trooper hide behind a barrel or a boulder.
+  function traceShot(world, x0, y0, x1, y1) {
+    let x = Math.round(x0), y = Math.round(y0);
+    const tx = Math.round(x1), ty = Math.round(y1);
+    const dx = Math.abs(tx - x), dy = -Math.abs(ty - y), sx = x < tx ? 1 : -1, sy = y < ty ? 1 : -1;
+    let err = dx + dy;
+    for (let guard = 0; guard < 65536; guard += 1) {
+      const id = get(world, x, y) & ID_MASK;
+      if (stopsShots[id]) return { x, y, id };
+      if (x === tx && y === ty) return null;
+      const e2 = 2 * err;
+      if (e2 >= dy) { err += dy; x += sx; }
+      if (e2 <= dx) { err += dx; y += sy; }
+    }
+    return null;
+  }
 
   PW.M = M;
   PW.PHASE = PHASE;
   PW.DEBRIS_KIND = DEBRIS_KIND;
   PW.ID_MASK = ID_MASK;
-  PW.mat = { phase, structural, ground, skyline, hardness, breaksTo, palettes, names };
+  PW.mat = { phase, structural, ground, skyline, hardness, breaksTo, passable, stopsShots, terrain, palettes, names };
   PW.CHUNK = CHUNK;
   PW.CHUNK_SHIFT = CHUNK_SHIFT;
   PW.CHUNK_MASK = CHUNK_MASK;
@@ -414,7 +464,7 @@
     abgr, unpack, hash2, hash3, createRandom, createNoise1D, createNoise2D,
     createWorld, chunkIndex, inside, markDirty, markWaterDirty, wake, wakeCell, wakeArea, clearSimRect,
     get, id, set, swapCells, touchGroundTop, refreshGroundTop, rebuildGroundTop,
-    getLayer, setLayer, layerCell, clearPaintAt, isSolid, isOpen, groundBelow,
+    getLayer, setLayer, layerCell, clearPaintAt, isSolid, isOpen, groundBelow, supportBelow, traceShot,
     getOwner, setOwner, getFlags, setFlag,
   });
 })();

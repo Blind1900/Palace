@@ -45,11 +45,17 @@
 
   // ---- Terrain shaping -------------------------------------------------------------------------------
   // Level the ground to padY over [x0, x1], ramping back to the natural surface no steeper than 1:1.
+  // Lakes and ponds are left alone (no soil laid on water, no bed cut out from under it).
   function terracePad(world, x0, x1, padY, ramp = 1) {
     const { mat, width: W } = world;
     const reach = 260;
     for (let x = Math.max(1, x0 - reach); x <= Math.min(W - 2, x1 + reach); x += 1) {
       const natural = world.groundTop[x];
+      if ((mat[natural * W + x] & 63) === M.WATER) continue;
+      // Never dig out from under (or bury) something already built here, like a pump's plinth,
+      // and never re-level a street or runway that is already paved.
+      if (PW.getOwner(world, x, natural) || PW.getOwner(world, x, natural - 1)) continue;
+      if (PW.getFlags(world, x, natural) & FLAG.ROAD) continue;
       const dist = x < x0 ? x0 - x : x > x1 ? x - x1 : 0;
       // Rows grow downward: higher ground is cut down, lower ground filled up, within the ramp.
       const goal = dist === 0 ? padY : (natural < padY ? Math.max(natural, padY - dist * ramp) : Math.min(natural, padY + dist * ramp));
@@ -70,6 +76,7 @@
         for (let y = goal; y < natural; y += 1) {
           const id = y < goal + 3 && dist > 0 ? M.GRASS : y < goal + 14 ? M.TOPSOIL : M.SOIL;
           PW.set(world, x, y, id | (PW.hash2(x, y) & 3) << 6, { quiet: true });
+          PW.setLayer(world, 'deco', x, y, 0);   // whatever stood here is buried by the fill
         }
       }
       // Wild deco above the new ground in the pad is cleared (grass regrows on the shoulders).
@@ -132,44 +139,105 @@
         const furrow = (x % 10) < 5;
         PW.setLayer(world, 'paint', x, y, rgb(tone(row === 0 ? (furrow ? [92, 66, 42] : [110, 82, 54]) : [96, 72, 48], 1)));
       }
-      if (x % 3 !== 0) continue;
+      if (x % 3 !== 0 || (PW.get(world, x, padY) & 63) !== M.TOPSOIL) continue;
       const h = Math.round((10 + (PW.hash2(x, 41) % 8)) * field.growth);
       field.stalks.push({ x, h });
       const lean = (PW.hash2(x, 43) & 3) === 0 ? 1 : 0;
       for (let i = 1; i <= h; i += 1) {
         const color = i > h - 4 ? heads[PW.hash2(x, i) % heads.length] : stems[(i + x) & 1];
-        PW.setLayer(world, 'deco', x + (lean && i > h - 3 ? 1 : 0), padY - i, rgb(color));
+        const sx = x + (lean && i > h - 3 ? 1 : 0);
+        if ((PW.get(world, sx, padY - i) & 63) !== M.AIR) break;
+        PW.setLayer(world, 'deco', sx, padY - i, rgb(color));
       }
     }
     return field;
   }
-  function pumpHouse(world, lake, towardX, style, owner) {
-    const shore = towardX < lake.x ? lake.left : lake.right;
-    const dir = towardX < lake.x ? -1 : 1;   // land side
+  // Pump house on the flattest dry spot near the shore. It stands level on a concrete plinth that
+  // goes down to the ground under every column, and its intake pipe leaves the lake-side wall,
+  // drops to the bank and lies on the ground down the bank and along the lake bed under the water.
+  const PUMP_WIDTH = 30;
+  function pumpHouse(world, lake, towardX, style, owner, taken = () => false) {
     const P = K.STYLES[style];
-    const x0 = shore + dir * 6;
-    const ground = world.groundTop[x0];
-    const left = dir > 0 ? x0 : x0 - 30;
-    for (let x = left; x < left + 30; x += 1) {
-      for (let y = ground - 22; y < ground; y += 1) {
-        const edge = x === left || x === left + 29 || y === ground - 22;
+    const dry = (x) => (PW.get(world, x, world.groundTop[x]) & 63) !== M.WATER;
+    // Either shore will do; the nearer one to the farm wins a tie. Streets, runways and fields
+    // are not built over.
+    let best = null;
+    for (const dir of towardX < lake.x ? [-1, 1] : [1, -1]) {
+      const shore = dir < 0 ? lake.left : lake.right;
+      for (let d = 8; d <= 120; d += 2) {
+        const left = dir > 0 ? shore + d : shore - d - PUMP_WIDTH + 1;
+        let high = Infinity, low = -Infinity, ok = left > 2 && left + PUMP_WIDTH < world.width - 2;
+        for (let x = left - 1; ok && x <= left + PUMP_WIDTH; x += 1) {
+          const g = world.groundTop[x];
+          if (!dry(x) || taken(x) || PW.getOwner(world, x, g) || PW.getOwner(world, x, g - 1) || (PW.getFlags(world, x, g) & FLAG.ROAD)) ok = false;
+          high = Math.min(high, g); low = Math.max(low, g);
+        }
+        if (!ok) continue;
+        const score = (low - high) + d * 0.08 + Math.abs(left - towardX) * 0.002;
+        if (!best || score < best.score) best = { left, floor: high, score, dir };
+      }
+    }
+    if (!best) return null;
+    const { left, dir } = best;
+    // Bench the site into the bank at its middle height (cut uphill, embankment downhill, 1:1),
+    // so the house stands on a short plinth instead of a tall pier.
+    const rows = [];
+    for (let x = left - 1; x <= left + PUMP_WIDTH; x += 1) rows.push(world.groundTop[x]);
+    rows.sort((p, q) => p - q);
+    const floor = rows[rows.length >> 1];
+    terracePad(world, left - 2, left + PUMP_WIDTH + 1, floor);
+    for (let x = left - 1; x <= left + PUMP_WIDTH; x += 1) {
+      const ground = world.groundTop[x];
+      for (let y = floor; y <= ground + 1; y += 1) {
+        PW.set(world, x, y, M.FOUNDATION, { quiet: true });
+        PW.setLayer(world, 'paint', x, y, rgb(y === floor ? [128, 126, 120] : (x + y) % 7 === 0 ? [92, 90, 86] : [108, 106, 100]));
+        PW.setOwner(world, x, y, owner);
+      }
+    }
+    for (let x = left; x < left + PUMP_WIDTH; x += 1) {
+      for (let y = floor - 22; y < floor; y += 1) {
+        const edge = x === left || x === left + PUMP_WIDTH - 1 || y === floor - 22;
         PW.set(world, x, y, edge ? P.wallMat : M.CONCRETE, { quiet: true, keepPaint: true });
         PW.setLayer(world, 'paint', x, y, rgb(edge ? tone(P.frame, 0.9) : y % 6 === 0 ? [86, 92, 100] : [120, 128, 136]));
         PW.setOwner(world, x, y, owner);
       }
-      for (let r = 0; r < 4; r += 1) { PW.set(world, x, ground - 23 - r, M.TILE, { quiet: true }); PW.setLayer(world, 'paint', x, ground - 23 - r, rgb(tone(P.roof, r === 3 ? 1.3 : 1))); }
+      for (let r = 0; r < 4; r += 1) { PW.set(world, x, floor - 23 - r, M.TILE, { quiet: true }); PW.setLayer(world, 'paint', x, floor - 23 - r, rgb(tone(P.roof, r === 3 ? 1.3 : 1))); }
     }
-    // Intake pipe down the bank into the water.
-    const px = shore - dir * 4;
-    for (let y = ground - 14; y < lake.level + 30; y += 1) {
-      for (let k = 0; k < 4; k += 1) {
-        const x = px + k * -dir;
-        PW.set(world, x, y, M.PIPE, { quiet: true });
-        PW.setLayer(world, 'paint', x, y, rgb(k === 0 || k === 3 ? [67, 115, 128] : [10, 26, 34]));
-        PW.setOwner(world, x, y, owner);
-      }
+    // Intake pipe, 4 cells (0.28 m) across.
+    const toLake = -dir;
+    const wall = toLake > 0 ? left + PUMP_WIDTH : left - 1;
+    const SHADE = [[96, 150, 160], [67, 115, 128], [67, 115, 128], [40, 70, 80]];
+    const lay = (x, y, k) => {
+      const id = PW.get(world, x, y) & 63;
+      if (id !== M.AIR && id !== M.WATER && id !== M.FOUNDATION) return;
+      PW.set(world, x, y, M.PIPE, { quiet: true });
+      PW.setLayer(world, 'paint', x, y, rgb(SHADE[Math.max(0, Math.min(3, k))]));
+      PW.setOwner(world, x, y, owner);
+    };
+    // Out of the foot of the lake-side wall, along the plinth top.
+    for (let r = 0; r < 4; r += 1) lay(wall, floor - 4 + r, r);
+    let x = wall + toLake, prevTop = floor - 4;
+    let wet = false;
+    for (let steps = 0; steps < 260; steps += 1, x += toLake) {
+      const top = world.groundTop[x];
+      const inWater = (PW.get(world, x, top) & 63) === M.WATER;
+      if (wet && !inWater) { x -= toLake; break; }   // reached the far side of a shallow pond
+      const bed = PW.supportBelow(world, x, top, true);
+      const bottom = bed - 1, pipeTop = bottom - 3;
+      // Continuous down a steep bank: fill from the previous column's top.
+      for (let y = Math.min(prevTop, pipeTop); y <= bottom; y += 1) lay(x, y, y - pipeTop);
+      prevTop = pipeTop;
+      wet = wet || inWater;
+      if (inWater && bed - lake.level > 16) break;
     }
-    return { x: left + 15, y: ground, intakeX: px, lake };
+    // Strainer head at the mouth, standing on the bed.
+    for (let k = 0; k < 3; k += 1) {
+      const sx = x + toLake * k;
+      const bed = PW.supportBelow(world, sx, world.groundTop[sx], true);
+      for (let y = prevTop - 2; y < bed; y += 1) lay(sx, y, y === prevTop - 2 ? 0 : y === bed - 1 ? 3 : 1);
+    }
+    return { x: left + (PUMP_WIDTH >> 1), y: floor, left, right: left + PUMP_WIDTH - 1, intakeX: x, lake,
+      span: [Math.min(left - 1, x), Math.max(left + PUMP_WIDTH, x)] };
   }
 
   // ---- Tunnels: lined shafts, drifts and rooms (tunnel network lab look) ---------------------------------
@@ -255,39 +323,103 @@
     const bottom = node ? node.y + 20 : top + 220;
     carveBox(world, x - 15, top, x + 15, bottom, owner);
     ladder(world, x - 14, top, bottom - 1);
+    let drift = null;
     if (node) {
       const dir = Math.sign(node.x - x) || 1;
       const reach = node.x - dir * (node.radius + 6);
       carveBox(world, Math.min(x, reach), bottom - 44, Math.max(x, reach), bottom, owner);
       tunnelLamps(world, Math.min(x, reach), Math.max(x, reach), bottom - 44);
+      drift = { x0: Math.min(x, reach), x1: Math.max(x, reach), top: bottom - 44, bottom };
     }
-    return { x, top, bottom, node };
+    return { x, top, bottom, node, shaft: { x, top, bottom }, drift };
   }
 
-  // ---- Ground defences (deco: vehicles pass behind them) --------------------------------------------------
-  function groundDefences(world, x, padY, dir, random) {
-    const sand = [[176, 158, 112], [150, 134, 94], [196, 178, 130]];
-    // Sandbag wall.
-    for (let course = 0; course < 4; course += 1) {
-      for (let b = 0; b < 5 - (course > 1 ? 1 : 0); b += 1) {
-        const bx = x + b * 10 + (course % 2) * 5, by = padY - 1 - course * 5;
-        for (let dy = -2; dy <= 2; dy += 1) for (let dx = -5; dx <= 5; dx += 1) {
-          if (dx * dx / 25 + dy * dy / 6 > 1) continue;
-          PW.setLayer(world, 'deco', bx + dx, by + dy, rgb(sand[dy < 0 ? 2 : dy > 0 ? 1 : 0]));
-        }
-      }
+  // ---- Ground defences --------------------------------------------------------------------------------------
+  // A sandbag wall (cover: it stops shots) on a levelled seat, then Czech hedgehogs and concertina
+  // wire towards the enemy. Hedgehog feet and wire coils sit on the ground wherever it slopes.
+  const STEEL = { lit: [118, 122, 128], base: [82, 86, 92], dark: [56, 58, 62] };
+  function decoAir(world, x, y, color) {
+    if ((PW.get(world, x, y) & 63) !== M.AIR) return false;
+    PW.setLayer(world, 'deco', x, y, rgb(color));
+    return true;
+  }
+  function beam(world, x0, y0, x1, y1) {
+    const n = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0), 1);
+    for (let s = 0; s <= n; s += 1) {
+      const x = Math.round(x0 + (x1 - x0) * s / n), y = Math.round(y0 + (y1 - y0) * s / n);
+      decoAir(world, x, y, STEEL.lit);
+      decoAir(world, x, y + 1, STEEL.dark);
     }
-    // Czech hedgehogs and wire in front.
+  }
+  // Czech hedgehog, 1.3 m: two beams cross at the hub (the third is seen end-on), feet on the ground.
+  function hedgehog(world, hx) {
+    const footL = hx - 10, footR = hx + 10;
+    const gL = world.groundTop[footL] - 1, gR = world.groundTop[footR] - 1;
+    const hubY = Math.round((gL + gR) / 2) - 9;
+    beam(world, footL, gL - 1, hx + Math.round((hx - footL) * 0.8), hubY + Math.round((hubY - gL) * 0.8));
+    beam(world, footR, gR - 1, hx + Math.round((hx - footR) * 0.8), hubY + Math.round((hubY - gR) * 0.8));
+    for (let dy = -2; dy <= 1; dy += 1) for (let dx = -2; dx <= 1; dx += 1) decoAir(world, hx + dx, hubY + dy, dy < 0 && dx < 0 ? STEEL.lit : STEEL.base);
+    // Feet: the lowest cell of each beam rests on the ground.
+    decoAir(world, footL, gL, STEEL.dark); decoAir(world, footR, gR, STEEL.dark);
+    return { feet: [[footL, gL], [footR, gR]] };
+  }
+  // Concertina wire: overlapping coils (0.9 m) whose lowest point touches the ground, on stakes.
+  function concertina(world, a, b) {
+    const x0 = Math.min(a, b), x1 = Math.max(a, b);
+    const touches = [];
+    for (let cx = x0; cx <= x1; cx += 3) {
+      const g = world.groundTop[cx] - 1;
+      const cy = g - 6;
+      for (let t = 0; t < 64; t += 1) {
+        const angle = t / 64 * Math.PI * 2;
+        decoAir(world, Math.round(cx + Math.cos(angle) * 4), Math.round(cy + Math.sin(angle) * 6), (t & 3) ? [110, 112, 118] : [150, 152, 156]);
+      }
+      touches.push([cx, g]);
+      if ((cx - x0) % 24 === 0) for (let y = g; y >= g - 13; y -= 1) decoAir(world, cx, y, [96, 74, 48]);
+    }
+    return touches;
+  }
+  function groundDefences(world, x, dir, random, taken = () => false) {
+    const wall = PW.props.sandbags(random, 5, 4);
+    // Start clear of anything already built (a pump house, a field), then go only as far as dry
+    // land does (the line stops at a lake shore).
+    for (let shift = 0; shift < 240; shift += 1) {
+      let free = true;
+      for (let k = 0; k <= wall.width + 4 && free; k += 1) if (taken(x + dir * k)) free = false;
+      if (free) break;
+      x += dir;
+    }
+    let reach = 0;
+    while (reach < wall.width + 214) {
+      const k = x + dir * reach;
+      if (k < 20 || k > world.width - 20 || taken(k) || (PW.get(world, k, world.groundTop[k]) & 63) === M.WATER) break;
+      reach += 1;
+    }
+    if (reach < wall.width + 12) return null;
+    const left = dir > 0 ? x : x - wall.width;
+    const rows = [];
+    for (let k = left; k < left + wall.width; k += 1) rows.push(world.groundTop[k]);
+    rows.sort((p, q) => p - q);
+    const seat = rows[rows.length >> 1];
+    terracePad(world, left - 2, left + wall.width + 2, seat);
+    const cover = PW.props.place(world, wall, left + wall.anchorX, seat, { kind: 'sandbags', setting: 'defence' });
+    if (!cover) {
+      const blockers = {};
+      for (let k = left; k < left + wall.width; k += 1) for (let y = seat - wall.height; y < seat; y += 1) {
+        const m = PW.get(world, k, y) & 63;
+        if (m !== M.AIR) blockers[PW.mat.names[m]] = (blockers[PW.mat.names[m]] || 0) + 1;
+      }
+      world.defenceIssues = (world.defenceIssues || []).concat([{ x, dir, seat, blockers }]);
+    }
+    const hedgehogs = [];
     for (let k = 0; k < 3; k += 1) {
-      const hx = x + dir * (80 + k * 46) + (dir < 0 ? 40 : 0);
-      for (let t = 0; t < 16; t += 1) {
-        for (const [ax, ay] of [[t - 8, -t], [8 - t, -t], [t - 8 + (t > 8 ? 0 : 0), -8]]) PW.setLayer(world, 'deco', hx + ax, padY - 1 + ay, rgb([82, 86, 92]));
-      }
-      for (let w = 0; w < 30; w += 1) {
-        const wy = padY - 4 - Math.round(Math.abs(Math.sin(w * 0.7)) * 5);
-        PW.setLayer(world, 'deco', hx + 20 * dir + w * dir, wy, rgb((w % 3 === 0) ? [150, 152, 156] : [110, 112, 118]));
-      }
+      const d = wall.width + 54 + k * 46;
+      if (d + 12 < reach) hedgehogs.push(hedgehog(world, x + dir * d));
     }
+    const wireFrom = x + dir * (wall.width + 18), wireTo = x + dir * Math.min(wall.width + 200, reach - 8);
+    const wire = (wireTo - wireFrom) * dir > 12 ? concertina(world, wireFrom, wireTo) : [];
+    const far = x + dir * Math.min(wall.width + 214, reach);
+    return { cover, hedgehogs, wire, span: [Math.min(left, far), Math.max(left + wall.width, far)] };
   }
 
   // ---- Generation ------------------------------------------------------------------------------------------
@@ -363,33 +495,67 @@
         paveRunway(world, b.runway.from, b.runway.direction, runwayLength, padY);
         settlement.runway = { from: b.runway.from, to: end, y: padY };
       }
-      // Farm fields on the farm's outward side, and a pump at the nearest lake.
+      // Everything laid on the surface, so wild growth keeps clear of it.
+      const footprints = settlement.footprints = [[streetLeft, streetRight]];
+      if (settlement.runway) footprints.push([Math.min(settlement.runway.from, settlement.runway.to), Math.max(settlement.runway.from, settlement.runway.to)]);
+      // Farm fields on the farm's outward side (stopping short of any water), and a pump at the
+      // nearest lake.
+      const wetAt = (x) => layout.lakes.some((lake) => lake.left !== undefined && x > lake.left - 30 && x < lake.right + 30);
       for (const b of settlement.buildings.filter((item) => item.type === 'farm')) {
         const lot = placed.find((item) => item.canvas === b.canvas);
         if (!lot || !lot.field) continue;
         const outward = b.facing;
         const start = outward > 0 ? b.body.right + 14 : b.body.left - 14;
-        const length = neutral ? 150 : 240;
-        const x0 = Math.min(start, start + outward * length), x1 = Math.max(start, start + outward * length);
-        terracePad(world, x0, x1, padY);
-        b.field = sowField(world, x0, x1, padY, random);
+        let length = neutral ? 150 : 240;
+        for (let d = 0; d <= length; d += 1) {
+          const x = start + outward * d;
+          if (x < 40 || x > world.width - 40 || wetAt(x)) { length = d - 1; break; }
+        }
+        if (length >= 60) {
+          const x0 = Math.min(start, start + outward * length), x1 = Math.max(start, start + outward * length);
+          terracePad(world, x0, x1, padY);
+          b.field = sowField(world, x0, x1, padY, random);
+          footprints.push([x0, x1]);
+        }
         const lake = layout.lakes.filter((item) => item.left !== undefined)
           .sort((p, q) => Math.abs(p.x - b.body.left) - Math.abs(q.x - b.body.left))[0];
-        if (lake && Math.abs(lake.x - b.body.left) < 2200) b.pump = pumpHouse(world, lake, b.body.left, style, b.id);
+        if (lake && Math.abs(lake.x - b.body.left) < 2200) {
+          const inUse = (spans) => (x) => spans.some(([a, c]) => x >= a - 8 && x <= c + 8);
+          const taken = (x) => inUse(footprints)(x) || world.settlements.some((s) => inUse(s.footprints || [])(x));
+          b.pump = pumpHouse(world, lake, b.body.left, style, b.id, taken);
+          if (b.pump) footprints.push(b.pump.span);
+        }
       }
       // Base workings: starter shaft from the core pit to the starter node; neutral mine shafts.
+      // Both are furnished with cover (mine cars on rails, drums, crates, sandbags...).
       const core = settlement.buildings.find((item) => item.type === 'core');
       if (core) {
         const node = layout.nodes.find((n) => n.starter === side) || layout.nodes.slice().sort((p, q) => Math.abs(p.x - core.body.left) - Math.abs(q.x - core.body.left))[0];
         core.mine = starterMine(world, core, node, dir || 1, core.id);
+        core.mine.props = PW.props.furnishMine(world, core.mine, random);
         settlement.core = core;
       }
       for (const mine of settlement.buildings.filter((item) => item.type === 'mine')) {
         mine.workings = headframeShaft(world, mine, layout.nodes, mine.id);
+        mine.workings.props = PW.props.furnishMine(world, mine.workings, random);
       }
-      // Ground defences at the front of each base; neutrals guard both ends.
-      if (!neutral) groundDefences(world, dir > 0 ? streetRight + (settlement.runway ? 0 : 20) : streetLeft - 60 - (settlement.runway ? 0 : 20), padY, dir, random);
-      else { groundDefences(world, streetLeft - 70, padY, -1, random); groundDefences(world, streetRight + 20, padY, 1, random); }
+      // Ground defences beyond the front of each base (past the runway's end); neutrals guard both
+      // ends of their street.
+      settlement.defences = [];
+      const front = (d) => {
+        if (settlement.runway && d === dir) return d > 0 ? Math.max(settlement.runway.from, settlement.runway.to) + 40 : Math.min(settlement.runway.from, settlement.runway.to) - 40;
+        return d > 0 ? streetRight + 40 : streetLeft - 40;
+      };
+      const builtOn = (x) => [footprints, ...world.settlements.map((s) => s.footprints || [])]
+        .some((spans) => spans.some(([a, c]) => x >= a - 6 && x <= c + 6));
+      for (const d of neutral ? [-1, 1] : [dir]) {
+        const start = front(d);
+        // The line's own street end is where it starts, so only other works count as taken.
+        const line = groundDefences(world, start, d, random, (x) => (x - start) * d > 0 && builtOn(x) && !(x >= streetLeft && x <= streetRight));
+        if (!line) continue;
+        settlement.defences.push(line);
+        footprints.push(line.span);
+      }
       world.settlements.push(settlement);
     }
     if (PW.generateDistricts) PW.generateDistricts(world, seed);

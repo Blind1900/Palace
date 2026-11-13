@@ -326,7 +326,7 @@
       for (let x = shoreLeft; x <= shoreRight; x += 1) {
         const ground = Math.round(surface[x]);
         if (ground <= level) continue;
-        for (let y = level; y < ground; y += 1) mat[y * W + x] = M.WATER | (PW.hash2(x, y) & 3) << 6;
+        for (let y = level; y < ground; y += 1) mat[y * W + x] = M.WATER;   // calm water: no momentum bits
         // Lake beds are sand and silt rather than grass.
         for (let y = ground; y < ground + 6; y += 1) {
           const index = y * W + x;

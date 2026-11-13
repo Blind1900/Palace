@@ -270,6 +270,9 @@ async function main() {
   } finally {
     if (socket) socket.close();
     child.kill();
+    // Edge's helper processes can keep the stderr pipe open for minutes; don't wait for them.
+    child.stderr.destroy();
+    child.unref();
     server.close();
     setTimeout(() => { try { fs.rmSync(profile, { recursive: true, force: true }); } catch (error) { /* Edge may still hold the profile */ } }, 500);
   }
@@ -286,4 +289,6 @@ async function main() {
   }
 }
 
-main().catch((error) => { console.error(error); process.exitCode = 1; });
+main().catch((error) => { console.error(error); process.exitCode = 1; })
+  // Exit once the report is printed (after the profile cleanup attempt) even if Edge lingers.
+  .finally(() => setTimeout(() => process.exit(process.exitCode || 0), 900));
