@@ -26,9 +26,14 @@
   const BAND = S.STAIR_RUN + 2 * S.LANDING;          // stair band width
   const INTERIOR_MIN = BAND + 40;                    // room beside the stairs
 
+  // facing +1 is the design as drawn in the style lab (front to the right); facing -1 mirrors every
+  // asymmetric part of it (offset block, stair flights, panel, furniture, crown and plant room) for
+  // buildings that face left. Everything is drawn in canvas coordinates, so the light still comes
+  // from the upper left like the rest of the world.
   function populationTower(options) {
     const style = options.style, level = options.level || 3, variant = options.variant || 'slab';
     const seed = options.seed || 1;
+    const facing = options.facing || 1;
     const random = PW.createRandom(seed);
     const P = STYLES[style];
     const storeys = populationStoreys(level);
@@ -44,9 +49,11 @@
     const height = bodyHeight + crownLength + 44 + coreDepth;
     const ground = height - coreDepth - 1;
     const c = K.createCanvas(width, height, ground);
-    c.meta = { type: 'population', style, level, variant, storeys, bodyWidth, margin, crownLength, seed };
+    c.meta = { type: 'population', style, level, variant, storeys, bodyWidth, margin, crownLength, seed, facing };
     const floorRow = (k) => ground - k * S.FLOOR;
     const maxIn = Math.max(0, Math.floor((bodyWidth - (INTERIOR_MIN + 2 * S.WALL)) / 2));
+    // Mirror a column about the body's centre line (identity when facing right).
+    const mx = (x) => facing > 0 ? x : 2 * margin + bodyWidth - 1 - x;
 
     // Storey outlines.
     const spans = [];
@@ -62,10 +69,15 @@
       const wall = storeys >= 9 && k >= Math.ceil(storeys / 2) ? S.WALL_UPPER : S.WALL;
       spans.push({ k, left, right, wall });
     }
-    // Stair band fits inside every storey that has a flight.
+    // Stair band fits inside every storey that has a flight (laid out facing right, then mirrored).
     const narrowest = spans.reduce((best, s) => s.right - s.left < best.right - best.left ? s : best, spans[0]);
-    const bandLeft = variant === 'offset' ? spans[0].left + S.WALL + 6
-      : Math.round((narrowest.left + narrowest.right) / 2 - BAND / 2);
+    let bandLeft = variant === 'offset' ? spans[0].left + S.WALL + 6 : Math.round((narrowest.left + narrowest.right) / 2 - BAND / 2);
+    // A centred position, mirror-exact (rounding the same way on both sides).
+    const midX = (left, right) => mx(Math.round((mx(left) + mx(right)) / 2));
+    if (facing < 0) {
+      for (const span of spans) [span.left, span.right] = [mx(span.right), mx(span.left)];
+      bandLeft = mx(bandLeft + BAND - 1);
+    }
 
     const lit = spans.map((span) => (PW.hash2(seed, span.k) & 3) !== 0);
     // Back walls, windows, furniture, lamps.
@@ -140,7 +152,7 @@
 
     // Switchback stairs (one-way platforms) and stairwell openings in the slab above.
     for (let k = 0; k < storeys - 1; k += 1) {
-      const dir = k % 2 === 0 ? 1 : -1;
+      const dir = (k % 2 === 0 ? 1 : -1) * facing;
       const fRow = floorRow(k);
       const flightStart = dir > 0 ? bandLeft + S.LANDING : bandLeft + S.LANDING + S.STAIR_RUN - 1;
       const steps = S.STAIR_RUN / S.STEP;
@@ -184,28 +196,33 @@
       const innerLeft = span.left + span.wall + 3, innerRight = span.right - span.wall - 3;
       const set = furnitureSets[(PW.hash2(seed, span.k + 11) % furnitureSets.length)];
       const free = [[innerLeft, Math.min(innerRight, bandLo)], [Math.max(innerLeft, bandHi), innerRight]].filter(([a, b]) => b - a > 12);
+      // Rooms are furnished from the front: left to right, or right to left when mirrored.
+      const rooms = facing > 0 ? free : free.slice().reverse();
       let item = 0;
-      for (const [a, b] of free) {
-        let x = a + 4;
-        while (item < set.length * 2 && x + widths[set[item % set.length]] < b - 2) {
-          const name = set[item % set.length];
-          K.FURNITURE[name](c, x, fRow, P, (item & 1) === 1);
-          x += widths[name] + 6 + (PW.hash2(x, fRow) % 8);
+      for (const [a, b] of rooms) {
+        let lead = facing > 0 ? a + 4 : b - 4;
+        while (item < set.length * 2) {
+          const name = set[item % set.length], w = widths[name];
+          const x = facing > 0 ? lead : lead - w;
+          if (facing > 0 ? x + w >= b - 2 : x <= a + 2) break;
+          K.FURNITURE[name](c, x, fRow, P, ((item & 1) === 1) !== (facing < 0));
+          lead += facing * (w + 6 + (PW.hash2(mx(x), fRow) % 8));
           item += 1;
         }
       }
       // Guard positions: evenly along the free floor, away from the stairs.
       const perFloor = Math.min(soldiers, Math.max(1, Math.floor((innerRight - innerLeft - BAND) / S.SLOT)));
       let placed = 0;
-      for (const [a, b] of free) {
-        for (let x = a + 12; x < b - 10 && placed < perFloor; x += S.SLOT) {
-          c.slots.push({ x, y: fRow, storey: span.k, facing: placed % 2 ? -1 : 1 });
+      for (const [a, b] of rooms) {
+        for (let k = 0; facing > 0 ? a + 12 + k * S.SLOT < b - 10 : b - 12 - k * S.SLOT > a + 10; k += 1) {
+          if (placed >= perFloor) break;
+          c.slots.push({ x: facing > 0 ? a + 12 + k * S.SLOT : b - 12 - k * S.SLOT, y: fRow, storey: span.k, facing: (placed % 2 ? -1 : 1) * facing });
           placed += 1;
         }
       }
     }
     const topSpan = spans[storeys - 1];
-    const panelX = topSpan.left + topSpan.wall + 6;
+    const panelX = facing > 0 ? topSpan.left + topSpan.wall + 6 : topSpan.right - topSpan.wall - 6 - 17;
     drawPanel(c, style, panelX, floorRow(storeys - 1));
     c.panels.push({ x: panelX + 9, y: floorRow(storeys - 1), storey: storeys - 1 });
 
@@ -220,10 +237,10 @@
     }
     c.roofs = roofs;
     if (PW.buildingOrnaments) {
-      PW.buildingOrnaments.roof(c, style, spans, roofs, floorRow, random);
+      PW.buildingOrnaments.roof(c, style, spans, roofs, floorRow, random, facing);
       const top = roofs.find((roof) => roof.top);
       const crown = options.crown ?? PW.buildingOrnaments.crownFor(style, `population|${variant}|${seed}`);
-      PW.buildingOrnaments.crown(c, style, crown, Math.round((top.left + top.right) / 2), top.y - 1, crownLength, random);
+      PW.buildingOrnaments.crown(c, style, crown, midX(top.left, top.right), top.y - 1, crownLength, random, facing);
       if (level >= 3) PW.buildingOrnaments.devices(c, style, roofs, ['interceptor', 'turret'], options.deviceFacing ?? (options.facing || 1), random);
     }
 
@@ -231,8 +248,8 @@
     const coreCount = populationCores(level);
     const base = spans[0];
     for (let i = 0; i < coreCount; i += 1) {
-      const cx = Math.round(base.left + S.WALL + 12 + (base.right - base.left - 2 * S.WALL - 24) * (coreCount === 1 ? 0.5 : i / (coreCount - 1)));
-      K.core(c, cx, ground + 11);
+      const cx = Math.round(margin + S.WALL + 12 + (bodyWidth - 1 - 2 * S.WALL - 24) * (coreCount === 1 ? 0.5 : i / (coreCount - 1)));
+      K.core(c, mx(cx), ground + 11);
     }
     K.bakeLights(c, style);
     c.floors = spans.map((span) => ({ storey: span.k, y: floorRow(span.k), left: span.left + span.wall, right: span.right - span.wall }));

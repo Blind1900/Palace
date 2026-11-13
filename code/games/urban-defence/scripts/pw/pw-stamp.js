@@ -102,7 +102,18 @@
       }
     };
     const T = PW.buildingTypes;
-    if (set === 'military') {
+    if (set === 'mirror') {
+      // Each design facing right, then mirrored facing left, to compare the pairs.
+      const pairs = [
+        ['population-offset', (style, f) => T.population({ style, level: 5, variant: 'offset', seed: seed + 3, facing: f })],
+        ['population-crown', (style, f) => T.population({ style, level: 4, variant: 'crown', seed: seed + 5, facing: f })],
+        ['military-fortress', (style, f) => T.military({ style, level: 4, variant: 'fortress', seed: seed + 7, facing: f })],
+        ['farm-silos', (style, f) => T.farm({ style, level: 5, variant: 'silos', seed: seed + 11, facing: f })],
+        ['farm-greenhouse', (style, f) => T.farm({ style, level: 3, variant: 'greenhouse', seed: seed + 13, facing: f })],
+        ['mine', (style, f) => T.mine({ style, facing: f, seed })],
+      ];
+      row(groundY, pairs.flatMap(([name, make]) => [1, -1].map((f) => ({ name: `${name}${f > 0 ? '' : '-mirrored'}`, make: (style) => make(style, f) }))));
+    } else if (set === 'military') {
       row(groundY, [...PW.MILITARY_VARIANTS.map((variant, index) => ({ name: `military-${variant}`,
         make: (style) => T.military({ style, level: 3 + index % 3, variant, seed: seed + index * 17, facing: 1 }) })),
       { name: 'core', make: (style) => T.core({ style, facing: 1 }) }]);

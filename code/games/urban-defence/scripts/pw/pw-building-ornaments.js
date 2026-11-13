@@ -28,7 +28,7 @@
   }
 
   // ---- Roof ornaments ------------------------------------------------------------------------------
-  function roof(c, style, spans, roofs, floorRow, random) {
+  function roof(c, style, spans, roofs, floorRow, random, facing = 1) {
     const P = STYLES[style];
     if (style === 'asian') {
       for (const r of roofs) {
@@ -47,8 +47,10 @@
       for (const r of roofs) {
         if (r.top) {
           for (let x = r.left + 2; x <= r.right - 2; x += 1) {
-            const t = (x - r.left) % 14;
-            if (t < 7) for (let dy = 1; dy <= 7; dy += 1) orn(c, x, r.y - dy, tone(P.frame, t === 0 ? 1.15 : t === 6 ? 0.82 : 1), ROLE.ORNAMENT, M.MASONRY);
+            // Merlons counted from the front edge (they mirror); each one is lit on its left.
+            const t = facing > 0 ? (x - r.left) % 14 : (r.right - x) % 14;
+            const litEdge = facing > 0 ? t === 0 : t === 6, shadeEdge = facing > 0 ? t === 6 : t === 0;
+            if (t < 7) for (let dy = 1; dy <= 7; dy += 1) orn(c, x, r.y - dy, tone(P.frame, litEdge ? 1.15 : shadeEdge ? 0.82 : 1), ROLE.ORNAMENT, M.MASONRY);
             orn(c, x, r.y - 1, tone(P.frame, 0.9), ROLE.ORNAMENT, M.MASONRY);
           }
         }
@@ -57,13 +59,15 @@
     } else {
       for (const r of roofs) {
         for (let x = r.left; x <= r.right; x += 1) {
-          if ((x - r.left) % 12 === 0 || x === r.right) for (let dy = 1; dy <= 6; dy += 1) orn(c, x, r.y - dy, [150, 158, 166]);
+          const post = facing > 0 ? (x - r.left) % 12 === 0 || x === r.right : (r.right - x) % 12 === 0 || x === r.left;
+          if (post) for (let dy = 1; dy <= 6; dy += 1) orn(c, x, r.y - dy, [150, 158, 166]);
           orn(c, x, r.y - 6, [176, 184, 190]);
         }
         for (const x of [r.left, r.right]) for (let dy = 1; dy <= 9; dy += 1) orn(c, x, r.y - dy, tone(P.frame, 1.2));
       }
+      // The plant room sits towards the back of the roof (mirrored with the building).
       const top = roofs.find((r) => r.top);
-      if (top && top.right - top.left > 70) modernPlantRoom(c, P, top.right - 44, top.y - 1);
+      if (top && top.right - top.left > 70) modernPlantRoom(c, P, facing > 0 ? top.right - 44 : top.left + 11, top.y - 1, facing);
     }
   }
   function asianEave(c, P, wallX, slabRow, side, reach) {
@@ -97,20 +101,22 @@
     }
     orn(c, cx, baseRow - height, P.ornament); orn(c, cx, baseRow - height - 1, P.ornament);
   }
-  function modernPlantRoom(c, P, x0, baseRow) {
+  function modernPlantRoom(c, P, x0, baseRow, facing = 1) {
     for (let dy = 0; dy < 16; dy += 1) for (let dx = 0; dx < 34; dx += 1) {
-      const vent = dy > 4 && dy < 12 && dx > 18 && dx < 31 && dy % 2 === 0;
-      const door = dx > 4 && dx < 11 && dy < 12;
+      const at = facing > 0 ? dx : 33 - dx;   // door and vents mirror; the lit edge stays on the left
+      const vent = dy > 4 && dy < 12 && at > 18 && at < 31 && dy % 2 === 0;
+      const door = at > 4 && at < 11 && dy < 12;
       orn(c, x0 + dx, baseRow - dy, door ? [60, 66, 74] : vent ? [86, 92, 100] : dy === 15 ? [176, 184, 190] : tone([132, 140, 148], dx < 2 ? 1.15 : 1),
         ROLE.ORNAMENT, M.CONCRETE);
     }
   }
 
   // ---- Crowns ------------------------------------------------------------------------------------------
-  function crown(c, style, name, cx, baseRow, L, random) {
+  // facing mirrors the asymmetric crowns (dragons, dish masts) with the building.
+  function crown(c, style, name, cx, baseRow, L, random, facing = 1) {
     const P = STYLES[style];
     const fn = CROWN_DRAW[name];
-    if (fn) fn(c, P, cx, baseRow, L, random);
+    if (fn) fn(c, P, cx, baseRow, L, random, facing);
   }
   const STEEL = [150, 158, 168], STEEL_DARK = [96, 104, 112], GOLD = [226, 178, 64];
   const CROWN_DRAW = {
@@ -154,7 +160,7 @@
       const mast = Math.max(12, L - tierH * 3);
       for (let dy = 0; dy < mast; dy += 1) { orn(c, cx, top - dy, dy < 3 ? BEACON : STEEL); if (dy < mast * 0.5) orn(c, cx + 1, top - dy, STEEL_DARK); }
     },
-    dish(c, P, cx, y, L) {
+    dish(c, P, cx, y, L, random, facing = 1) {
       for (let dy = 0; dy < 4; dy += 1) for (let dx = -19; dx <= 19; dx += 1) orn(c, cx + dx, y - dy, dy === 3 ? [184, 190, 196] : [140, 146, 152], ROLE.CROWN, M.CONCRETE);
       column(c, cx, y - 4, y - 12, 2, STEEL);
       for (let dx = -12; dx <= 12; dx += 1) {
@@ -164,7 +170,7 @@
       orn(c, cx, y - 20, STEEL); orn(c, cx, y - 21, STEEL); orn(c, cx, y - 22, BEACON);
       for (const [dx, h] of [[-16, 0.85], [16, 0.55]]) {
         const mh = Math.round(L * h);
-        for (let dy = 4; dy < mh; dy += 1) orn(c, cx + dx, y - dy, dy > mh - 3 ? BEACON : [200, 206, 212]);
+        for (let dy = 4; dy < mh; dy += 1) orn(c, cx + dx * facing, y - dy, dy > mh - 3 ? BEACON : [200, 206, 212]);
       }
     },
     spire(c, P, cx, y, L) {
@@ -217,17 +223,17 @@
       }
       CROWN_DRAW.spire(c, P, cx, y - 6, L - 6);
     },
-    dragon(c, P, cx, y, L, random) {
+    dragon(c, P, cx, y, L, random, facing = 1) {
       lotus(c, P, cx, y, 7);
-      dragonBody(c, P, cx, y - 6, Math.max(30, L - 18), 1, random);
+      dragonBody(c, P, cx, y - 6, Math.max(30, L - 18), facing, random);
     },
-    pillar(c, P, cx, y, L, random) {
+    pillar(c, P, cx, y, L, random, facing = 1) {
       lotus(c, P, cx, y, 5);
       const h = Math.max(36, L - 6);
       for (let dy = 0; dy < h; dy += 1) for (let dx = -1; dx <= 1; dx += 1) orn(c, cx + dx, y - 6 - dy, lit(GOLD, dx, 1));
       for (let dx = -3; dx <= 3; dx += 1) orn(c, cx + dx, y - 6 - h, P.ornament);
       orn(c, cx, y - 7 - h, BEACON); orn(c, cx, y - 8 - h, BEACON);
-      dragonBody(c, P, cx, y - 6, Math.max(36, h - 6), 1, random, true);
+      dragonBody(c, P, cx, y - 6, Math.max(36, h - 6), facing, random, true);
     },
     twin(c, P, cx, y, L, random) {
       for (let dy = 0; dy < 5; dy += 1) for (let dx = -28; dx <= 28; dx += 1) orn(c, cx + dx, y - dy, dy === 4 ? GOLD : lit(P.frame, dx, 28), ROLE.CROWN, M.WOOD);
@@ -263,13 +269,14 @@
     let headX = cx, headY = baseY - length;
     for (let i = 0; i <= length; i += 1) {
       const t = i / length;
-      const x = cx + Math.round(amp * Math.min(1, 4 * t) * Math.sin(2 * Math.PI * periods * t) * (coilAround ? 1.2 : 1));
+      // The coil, belly and spines mirror with `facing`; the light stays on the canvas left.
+      const x = cx + facing * Math.round(amp * Math.min(1, 4 * t) * Math.sin(2 * Math.PI * periods * t) * (coilAround ? 1.2 : 1));
       const yy = baseY - i;
       for (let d = -2; d <= 2; d += 1) {
-        const color = d === -2 ? tone(body, 1.15) : d === 2 ? tone(body, 0.72) : d === 1 ? belly : body;
+        const color = d === -2 ? tone(body, 1.15) : d === 2 ? tone(body, 0.72) : d === facing ? belly : body;
         orn(c, x + d, yy, color);
       }
-      if (i % 9 === 4 && i < length - 8) { orn(c, x - 3, yy, spine); orn(c, x - 4, yy - 1, spine); }
+      if (i % 9 === 4 && i < length - 8) { orn(c, x - 3 * facing, yy, spine); orn(c, x - 4 * facing, yy - 1, spine); }
       if (Math.abs(t - 0.4) < 0.012 || Math.abs(t - 0.75) < 0.012) for (let k = 3; k <= 7; k += 1) orn(c, x + k * facing, yy + (k > 5 ? 1 : 0), tone(body, 0.85));
       if (i === length) { headX = x; headY = yy; }
     }
@@ -341,27 +348,29 @@
       const hatch = dy > 12 && dy < 17 && dx % 6 > 1 && dx % 6 < 5;
       orn(c, x0 + dx, base - dy, hatch ? ROLE_ACCENT.interceptor : dy === 17 ? P.ornament : lit(body, dx - w / 2, w / 2), ROLE.DEVICE);
     }
-    // Radar mast and dish.
-    for (let dy = 18; dy < 30; dy += 1) orn(c, x0 + 11, base - dy, DEVICE_STEEL, ROLE.DEVICE);
-    for (let dx = -8; dx <= 8; dx += 1) {
+    // Radar mast and dish, centred on the 22-cell body (two cells wide so it mirrors exactly).
+    for (let dy = 18; dy < 30; dy += 1) { orn(c, x0 + 10, base - dy, DEVICE_STEEL, ROLE.DEVICE); orn(c, x0 + 11, base - dy, DEVICE_STEEL, ROLE.DEVICE); }
+    for (let x = x0 + 2; x <= x0 + 19; x += 1) {
+      const dx = x - (x0 + 10.5);
       const depth = Math.round(dx * dx / 16);
-      orn(c, x0 + 11 + dx, base - 30 - (4 - depth), [196, 204, 212], ROLE.DEVICE);
-      orn(c, x0 + 11 + dx, base - 29 - (4 - depth), DEVICE_STEEL, ROLE.DEVICE);
+      orn(c, x, base - 30 - (4 - depth), [196, 204, 212], ROLE.DEVICE);
+      orn(c, x, base - 29 - (4 - depth), DEVICE_STEEL, ROLE.DEVICE);
     }
-    orn(c, x0 + 11, base - 36, BEACON);
+    orn(c, x0 + 10, base - 36, BEACON); orn(c, x0 + 11, base - 36, BEACON);
     c.devices.push({ kind: 'interceptor', x: x0 + 11, y: base - 30, facing });
     return w;
   }
   const DEVICE_DRAW = { turret, launcher, interceptor };
   const DEVICE_WIDTH = { turret: 30, launcher: 28, interceptor: 22 };
   // Place devices on the highest, widest roofs, from the front edge, clear of crowns and each other.
-  // facing 0 (neutral buildings) alternates the devices to cover both directions.
-  function devices(c, style, roofs, plan, facingOption, random) {
+  // facing 0 (neutral buildings) alternates the devices to cover both directions, starting with
+  // `startFacing`.
+  function devices(c, style, roofs, plan, facingOption, random, startFacing = 1) {
     const P = STYLES[style];
     const candidates = roofs.slice().sort((a, b) => a.y - b.y || (b.right - b.left) - (a.right - a.left));
     const used = [];
     for (const [deviceIndex, kind] of plan.entries()) {
-      const facing = facingOption || (deviceIndex % 2 ? -1 : 1);
+      const facing = facingOption || (deviceIndex % 2 ? -startFacing : startFacing);
       const w = DEVICE_WIDTH[kind];
       let placed = false;
       for (const roof of candidates) {

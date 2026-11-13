@@ -445,9 +445,17 @@
       const neutral = side === 'neutral';
       const dir = side === 'left' ? 1 : side === 'right' ? -1 : 0;
       const plan = neutral ? neutralPlan(random) : basePlan(random);
+      // Each base's buildings face the enemy (the right base is the left base's mirror image);
+      // a farm with a field faces outward, where its crops grow. Neutral buildings are mixed,
+      // with at least one facing each way.
+      const mixed = plan.map(() => (random() < 0.5 ? -1 : 1));
+      if (neutral) {
+        const free = plan.map((lot, i) => (lot.field ? -1 : i)).filter((i) => i >= 0);
+        if (free.every((i) => mixed[i] === mixed[free[0]])) mixed[free[free.length >> 1]] *= -1;
+      }
       // Build canvases and measure the cluster.
       const lots = plan.map((lot, index) => {
-        const facing = lot.field ? -(dir || (index === 0 ? -1 : 1)) : (dir || (index < plan.length / 2 ? -1 : 1));
+        const facing = lot.field ? -(dir || (index === 0 ? -1 : 1)) : (dir || mixed[index]);
         const canvas = make(lot, style, facing, neutral ? 0 : dir, index);
         return { ...lot, facing, canvas, bodyWidth: canvas.body.right - canvas.body.left + 1 };
       });

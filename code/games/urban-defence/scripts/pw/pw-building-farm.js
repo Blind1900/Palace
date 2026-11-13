@@ -59,7 +59,8 @@
         const fill = 0.25 + 0.6 * ((PW.hash2(seed, i) & 255) / 255);
         for (let lx = 0; lx < d; lx += 1) {
           const u = (lx - d / 2) / (d / 2);
-          const shade = 1.18 - (u + 1) * 0.28;
+          // Cylinder shading by the canvas side (light from the upper left either way round).
+          const shade = 1.18 - (u * facing + 1) * 0.28;
           for (let y = ground - h; y < ground; y += 1) {
             const wall = lx < 3 || lx > d - 4;
             const rib = (ground - y) % 12 === 0;
@@ -110,13 +111,15 @@
         else K.back(c, x, y, (x + y) % 9 === 0 ? [92, 124, 100] : (x % 20 === 0 ? [70, 96, 80] : [78, 108, 88]));
       }
       // Sawtooth roof: vertical glazed faces and sloped panels.
+      // The glazed faces of the sawtooth look towards the front (mirrored with the farm).
       for (let t = 0; t < teeth; t += 1) {
         for (let k = 0; k < toothW; k += 1) {
           const x = Math.round(g0 + t * toothW + k);
-          const rise = Math.round(k / toothW * 26);
+          const along = facing > 0 ? k : toothW - 1 - k;
+          const rise = Math.round(along / toothW * 26);
           for (let r = 0; r < 4; r += 1) K.solid(c, x, ground - wallH - rise + r, M.STEEL, tone(P.roof, r === 0 ? 1.3 : 1), ROLE.ROOF);
           for (let y = ground - wallH - rise + 4; y < ground - wallH; y += 1) K.back(c, x, y, [86, 116, 96]);
-          if (k === Math.round(toothW) - 1) for (let y = ground - wallH - 26; y < ground - wallH; y += 1) K.solid(c, x, y, M.GLASS, mix(K.GLASS_SIDE, [220, 240, 210], 0.45), ROLE.GLASS);
+          if (along === Math.round(toothW) - 1) for (let y = ground - wallH - 26; y < ground - wallH; y += 1) K.solid(c, x, y, M.GLASS, mix(K.GLASS_SIDE, [220, 240, 210], 0.45), ROLE.GLASS);
         }
       }
       // Grow lights along the roof line.
@@ -157,7 +160,7 @@
       }
       const hubY = ground - towerH - 2;
       for (let a = 0; a < 4; a += 1) {
-        const angle = a * Math.PI / 2 + 0.35;
+        const angle = facing > 0 ? a * Math.PI / 2 + 0.35 : Math.PI - (a * Math.PI / 2 + 0.35);
         for (let r = 3; r < 50; r += 1) {
           const sx = Math.round(mx + Math.cos(angle) * r), sy = Math.round(hubY + Math.sin(angle) * r);
           K.solid(c, sx, sy, M.WOOD, [140, 110, 76], ROLE.ORNAMENT);
@@ -181,10 +184,11 @@
   function mine(options) {
     const style = options.style, facing = options.facing || 1, seed = options.seed || 1;
     const P = STYLES[style];
-    const width = 200, height = 260, ground = height - 30;
+    // Headframe at the front, hoist house behind it (the whole frame fits the canvas either way).
+    const width = 220, height = 260, ground = height - 30;
     const c = K.createCanvas(width, height, ground);
     c.meta = { type: 'mine', style, facing, seed };
-    const shaftX = Math.round(width / 2) - 10 * facing;
+    const shaftX = facing > 0 ? width - 70 : 69;
     const frameColor = style === 'asian' ? [176, 58, 46] : style === 'gothic' ? [74, 70, 80] : [96, 140, 170];
     const towerH = 160;
     for (let y = 0; y < towerH; y += 1) {

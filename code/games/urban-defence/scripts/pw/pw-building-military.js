@@ -184,7 +184,9 @@
       for (let dy = 0; dy < 34; dy += 1) for (let dx = 0; dx < 30; dx += 1) {
         const crenel = dy > 27 && dx % 8 > 3;
         if (crenel) continue;
-        K.solid(c, X(tx + dx), roofTop - 1 - dy, M.MASONRY, K.wallColor(style, dx < 3 ? 0 : dx > 26 ? 2 : 1, 3, dy, X(tx + dx), dy), ROLE.WALL);
+        // Lit face on the canvas left whichever way the compound faces.
+        const seen = facing > 0 ? dx : 29 - dx;
+        K.solid(c, X(tx + dx), roofTop - 1 - dy, M.MASONRY, K.wallColor(style, seen < 3 ? 0 : seen > 26 ? 2 : 1, 3, dy, X(tx + dx), dy), ROLE.WALL);
       }
       for (let dy = 8; dy < 22; dy += 1) for (let dx = 11; dx < 19; dx += 1) K.solid(c, X(tx + dx), roofTop - 1 - dy, M.GLASS, mix(K.GLASS_SIDE, P.lamp, 0.5), ROLE.GLASS);
       rearRoof.left += facing > 0 ? 34 : 0; rearRoof.right -= facing > 0 ? 0 : 34;
@@ -210,20 +212,26 @@
     if (O()) {
       const ornament = O();
       ornament.roof(c, style, rearFloors.map((f) => ({ k: f.k, left: Math.min(X(f.left), X(f.right)), right: Math.max(X(f.left), X(f.right)), wall: S.WALL })),
-        [rearRoof], floorRow, random);
+        [rearRoof], floorRow, random, facing);
       if (variant === 'command' || variant === 'fortress') {
         const crown = ornament.crownFor(style, `military|${variant}|${seed}`);
-        ornament.crown(c, style, crown, Math.round((rearRoof.left + rearRoof.right) / 2) + (variant === 'fortress' ? 14 * facing : 0), roofTop - 1, 60, random);
+        ornament.crown(c, style, crown, Math.round((rearRoof.left + rearRoof.right) / 2) + (variant === 'fortress' ? 14 * facing : 0), roofTop - 1, 60, random, facing);
       }
       const hangarRoof = { left: Math.min(X(hx0 + 16), X(hx1 - 16)), right: Math.max(X(hx0 + 16), X(hx1 - 16)),
         y: vault ? wallTop - HANGAR.vaultRise + 1 : wallTop - 7, top: false };
       const plan = level >= 4 ? ['launcher', 'interceptor', 'turret'] : level >= 3 ? ['launcher', 'turret'] : ['turret'];
       // Neutral compounds (deviceFacing 0) cover both directions until captured.
       const deviceFacing = options.deviceFacing ?? facing;
-      ornament.devices(c, style, [rearRoof], plan.slice(0, 2), deviceFacing, random);
+      ornament.devices(c, style, [rearRoof], plan.slice(0, 2), deviceFacing, random, -facing);
       // Neutral: the rear-roof device faces +1 first, so the hangar turret covers the other way.
-      if (!vault) ornament.devices(c, style, [hangarRoof], ['turret'], deviceFacing || -1, random);
-      else { const tx = Math.round(hcx) + 10 * facing; ornament.DEVICE_DRAW.turret(c, P, X(tx) - 15, wallTop - HANGAR.vaultRise, deviceFacing || -1); }
+      // Neutral compounds: the rear-roof devices alternate from +1, and the hangar turret guards the
+      // compound's own front, so a cluster of mixed-facing compounds covers both ways.
+      if (!vault) ornament.devices(c, style, [hangarRoof], ['turret'], deviceFacing || facing, random);
+      else {
+        // Turret just forward of the vault's crest: logical span [tx - 15, tx + 14], mirrored by X.
+        const tx = Math.round(hcx) + 10;
+        ornament.DEVICE_DRAW.turret(c, P, Math.min(X(tx - 15), X(tx + 14)), wallTop - HANGAR.vaultRise, deviceFacing || facing);
+      }
     }
     // Buried extra cores.
     const extraCores = level >= 4 ? 3 : 2;
