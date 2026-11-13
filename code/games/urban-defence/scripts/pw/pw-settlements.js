@@ -574,11 +574,13 @@
         const node = layout.nodes.find((n) => n.starter === side) || layout.nodes.slice().sort((p, q) => Math.abs(p.x - core.body.left) - Math.abs(q.x - core.body.left))[0];
         core.mine = starterMine(world, core, node, dir || 1, side);
         core.mine.props = PW.props.furnishMine(world, core.mine, random);
+        if (PW.mining) core.mine.operation = PW.mining.openFromWorkings(world, core.mine, side);
         settlement.core = core;
       }
       for (const mine of settlement.buildings.filter((item) => item.type === 'mine')) {
         mine.workings = headframeShaft(world, mine, layout.nodes, side);
         mine.workings.props = PW.props.furnishMine(world, mine.workings, random);
+        if (PW.mining) mine.workings.operation = PW.mining.openFromWorkings(world, mine.workings, side);
       }
       // Ground defences beyond the front of each base (past the runway's end); neutrals guard both
       // ends of their street.

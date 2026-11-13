@@ -14,6 +14,13 @@
       #world-tools button { font: inherit; color: #9fc28a; background: #0b140f; border: 1px solid #2c4030; padding: 2px 7px; cursor: pointer; }
       #world-tools button.on { background: #2c4a30; color: #e4f0c8; }
       #world-tools label { display: flex; align-items: center; gap: 4px; padding: 0 4px; }
+      @font-face { font-family: 'Ithaca'; src: url('assets/Ithaca-LVB75.ttf') format('truetype'); }
+      /* Notes next to the cursor (pixel font, square pixel border). */
+      #cursor-note { position: fixed; pointer-events: none; display: none; font: 16px 'Ithaca', Consolas, monospace;
+        color: #e8f0d8; background: #0a120ee8; border: 2px solid #3c5a40; padding: 3px 7px 2px; white-space: nowrap;
+        box-shadow: 2px 2px 0 #000; image-rendering: pixelated; }
+      #cursor-note.good { border-color: #c8b040; color: #fff0b8; }
+      #cursor-note.bad { border-color: #b04030; color: #ffc8b8; }
     </style>
   </head>
   <body>
@@ -39,11 +46,17 @@
       <button data-action="step">STEP</button>
     </div>
     <div id="world-status">generating…</div>
+    <div id="cursor-note"></div>
+    <script src="assets/unit-reference.js"></script>
     <script src="scripts/pw/pw-core.js"></script>
     <script src="scripts/pw/pw-gen-terrain.js"></script>
     <script src="scripts/pw/pw-gen-vegetation.js"></script>
     <script src="scripts/pw/pw-props.js"></script>
     <script src="scripts/pw/pw-tunnels.js"></script>
+    <script src="scripts/pw/pw-unit-art.js"></script>
+    <script src="scripts/pw/pw-mining.js"></script>
+    <script src="scripts/pw/pw-pipes.js"></script>
+    <script src="scripts/pw/pw-notify.js"></script>
     <script src="scripts/pw/pw-building-kit.js"></script>
     <script src="scripts/pw/pw-building-ornaments.js"></script>
     <script src="scripts/pw/pw-building-population.js"></script>

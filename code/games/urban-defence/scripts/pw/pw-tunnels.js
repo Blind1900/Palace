@@ -247,7 +247,7 @@
           continue;
         }
         const id = mat[i] & ID_MASK;
-        if (id === M.BEDROCK) continue;
+        if (id === M.BEDROCK || (options.keepOre && id === M.ORE)) continue;
         if (id !== M.AIR) PW.set(world, x, y, M.AIR, { quiet: true });
         PW.setLayer(world, 'deco', x, y, 0);
         setL(world, 'tunnelNet', Uint16Array, x, y, net.id);
@@ -293,6 +293,22 @@
     net.cells += fresh.length;
     schedule(world, net, fresh);
     return { ok: true, blocked: false, cells: fresh.length, segment: seg, breached: [...breached] };
+  }
+
+  // A single cell opened by mining (ore removed at the face) joins the network as raw tunnel of
+  // segment `seg`, and develops in its turn like the rest.
+  function claimCell(world, net, seg, x, y) {
+    if (netAt(world, x, y)) return false;
+    if ((PW.get(world, x, y) & ID_MASK) !== M.AIR) PW.set(world, x, y, M.AIR, { quiet: true });
+    setL(world, 'tunnelNet', Uint16Array, x, y, net.id);
+    setL(world, 'tunnelSeg', Uint16Array, x, y, seg.id);
+    PW.setFlag(world, x, y, FLAG.TUNNEL | FLAG.CARVED | FLAG.RAW);
+    PW.setOwner(world, x, y, net.owner);
+    PW.setLayer(world, 'deco', x, y, 0);
+    PW.setLayer(world, 'back', x, y, rgb(rawBack(net, seg, x, y)));
+    net.cells += 1;
+    schedule(world, net, [y * world.width + x]);
+    return true;
   }
 
   // When each new cell develops: the wave reaches it one step (1 / rate s) after its neighbour,
@@ -352,15 +368,17 @@
     const seg = T.segments[segAt(world, x, y) - 1];
     if (!net || !seg) return false;
     if ((flags & FLAG.OVERBREAK) && !insideAnyBox(world, net, x, y)) {
-      // Rock that broke away past the profile is filled with concrete: the lining's face.
+      // Rock that broke away past the profile is filled with concrete: the lining's face. A
+      // fitting fixed there (a pipe along the wall) is cast into the concrete in a sleeve.
+      const fitting = flags & FLAG.FIXTURE ? PW.getLayer(world, 'back', x, y) : 0;
       setL(world, 'tunnelNet', Uint16Array, x, y, 0);
       setL(world, 'tunnelSeg', Uint16Array, x, y, 0);
       PW.setFlag(world, x, y, FLAG.TUNNEL | FLAG.CARVED | FLAG.RAW | FLAG.OVERBREAK, false);
       PW.setLayer(world, 'back', x, y, 0);
-      if ((mat[i] & ID_MASK) === M.AIR) {
+      if (PW.mat.open[mat[i] & ID_MASK]) {
         const facing = y < seg.y0 ? 'ceiling' : y > seg.y1 ? 'floor' : 'wall';
         PW.set(world, x, y, M.REINFORCED, { quiet: true });
-        PW.setLayer(world, 'paint', x, y, rgb(liningColor(net, x, y, 1, facing, seg.y1 - y)));
+        PW.setLayer(world, 'paint', x, y, fitting || rgb(liningColor(net, x, y, 1, facing, seg.y1 - y)));
         PW.setOwner(world, x, y, net.owner);
       }
       net.developed += 1;
@@ -421,6 +439,6 @@
       networks: T.networks.map((n) => ({ id: n.id, side: n.side, cells: n.cells, developed: n.developed, lined: n.lined })) };
   }
 
-  PW.tunnels = { RATE, LINE, SET_PITCH, RIB_PITCH, createNetwork, digBox, step, advanceTo, networkAt, networkOfOwner, stats, state,
+  PW.tunnels = { RATE, LINE, SET_PITCH, RIB_PITCH, createNetwork, digBox, claimCell, step, advanceTo, networkAt, networkOfOwner, stats, state,
     netAt, devAtOf, rawBack, devBack };
 })();
