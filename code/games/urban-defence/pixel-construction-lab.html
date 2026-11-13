@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Urban Defence pixel material construction lab</title>
+    <style>
+      body { margin: 24px; background: #070b08; color: #bce6a0; font: 16px sans-serif; line-height: 1.5; }
+      a { color: #9edcf0; }
+      button, select { margin: 6px 6px 6px 0; padding: 8px; }
+      .canvas-viewport { max-width: 960px; overflow-x: auto; }
+      canvas { display: block; background: #020202; image-rendering: pixelated; }
+      #results { white-space: pre-wrap; }
+    </style>
+  </head>
+  <body>
+    <h1>Pixel material construction lab</h1>
+    <p><a href="pixel-shared-world-lab.html">Shared-world construction lab</a></p>
+    <p>A separate prototype combines building material, water and debris in one particle grid. The cell-outline blueprint branches outward over four simulated seconds, then up to six bright material pixels crawl from foundation-side delivery points along the outside of constructed parts and terrain toward supported sites. They follow edges and round corners, never take open-air shortcuts, and settle into green building cells, not an invisible line frame. Vertical supports are three cells thick; horizontal beams are one.</p>
+    <p>This is guided cellular construction inspired by Game of Life and ant-like movement, not literal Conway rules or Powder Toy ANT behavior. One HM is charged when a material pixel is delivered. Branches work together on each distance layer of the plan; the next layer waits until the previous one is complete so thick supports do not seal unfilled cells inside. Blocked routes wait and paid material is retained, even if support is lost. Delivery is checked once per simulated second; travel time means completion is slower than the line-frame lab. Nine foundation cells are free.</p>
+    <p>Water cannot occupy building or moving material cells. Visual clearance between building squares is cosmetic, not an opening for water. Blast the foundation to see disconnected or overloaded building cells become falling debris in the same grid. Support uses four-neighbor connectivity and static pixel weight capacity, not beam bending, rigid-body rotation, pressure or buoyancy. Completion stops further delivery. No workers, SM, water damage, save slot or live-game integration are included.</p>
+    <p>Render FPS warns below 40 in a visible tab. If it stays below that during testing, profile simulation, outline routing and drawing before optimizing. Hidden tabs are reported separately. Startup checks run before FPS measurement; synchronous checks and many open labs can still compete for CPU. A single small lab is not a full-map performance guarantee.</p>
+    <p><a href="construction-lab.html">Line-frame construction lab</a> | <a href="particle-building-lab.html">Terrain and building lab</a> | <a href="pixel-performance-lab.html">Three-building workload</a> | <a href="index.html">Game prototype</a></p>
+    <button id="pause" type="button" aria-pressed="false">Pause</button>
+    <button id="step" type="button">Step once</button>
+    <label for="height">Next frame height</label>
+    <select id="height"><option value="5">Short</option><option value="9" selected>Medium</option><option value="11">Tall</option></select>
+    <button id="reset" type="button">Restart pixel construction</button>
+    <button id="breach" type="button">Breach water basin</button>
+    <button id="blast" type="button">Blast left foundation</button>
+    <button id="clear" type="button">Clear fallen pixels</button>
+    <label><input id="show-sites" type="checkbox"> Show current construction sites</label>
+    <label><input id="show-waiting" type="checkbox"> Mark waiting repair pixels</label>
+    <p>Optional site marks: cyan means clear and supported, pale yellow means material is incoming or occupying the site, and red means water, terrain, debris or missing support. Only the earliest unfinished layer is inspected. A clear site may still lack a reachable crawling route.</p>
+    <p>Waiting-pixel marks independently add a red square border inside each waiting material cell, leaving its bright center visible. At the smallest display size, a single red corner pixel preserves the other bright pixels instead. The coordinate list identifies the same pixels without requiring either overlay, and reports when terrain/building outline contact is lost. Waiting pixels may yield along the outline while seeking work; a marker is not a claim that the pixel is motionless.</p>
+    <p>Each blueprint square matches the visible building square inside its planned cell, including all three support columns. At scales of four display pixels or larger, building and delivery squares leave a one-display-pixel gutter on the right and bottom. Blueprints and diagnostic marks match this visible size. Two-pixel cells retain full squares for legibility. Borders disappear completely over occupied cells. Physics cells remain full-sized, and very narrow screens scroll instead of stretching cells unevenly.</p>
+    <p>A single-cell repair opening between settled or moving building cells has no blueprint border. Visual gutters make that opening roomier than the incoming visible square, without changing occupancy or support weight. Horizontal and vertical openings follow the same rule.</p>
+    <div class="canvas-viewport"><canvas id="lab" width="640" height="360" aria-label="Ant-like material pixels constructing a building in the particle world"></canvas></div>
+    <p id="status" role="status"></p>
+    <p id="load-status"></p>
+    <p id="terrain-status"></p>
+    <p>Ground occupancy counts are live and distinguish empty cells from water and other materials beneath the nine seed positions. Restoration results are historical click snapshots. Water must move away before a flooded ground cell can be restored; no automatic draining occurs.</p>
+    <p>Repairs keep the original blueprint and use current terrain. Added terrain can block planned cells or delivery points; excavation can remove support. Building material never replaces terrain automatically. Removing an obstruction may reopen a route, but lost outline contact can still strand paid material. The nine-position terrain count is not a complete support or capacity analysis. Completed frames do not automatically restart repairs.</p>
+    <p>Settled building pixels each weigh one unit. Load follows shortest four-neighbor paths to terrain, dividing equally between nearer supporting cells. Each cell carries at most 128 units; overload converts it into debris, then disconnected material falls. Wider supports offer parallel load paths. This is a simplified static weight model, not bending, torque or rigid-body physics; moving delivery pixels are not bonded structural weight. Load is recomputed when structure changes, and displayed overload counts reset on particle snapshot restore.</p>
+    <p id="site-status"></p>
+    <p id="delivery-status"></p>
+    <p id="waiting-status"></p>
+    <p>Blocker details distinguish occupied targets from occupied next steps and give coordinates. Moving construction blockers are labeled delivery traffic, not guaranteed to clear. Other occupied material remains a separate category; diagnostics never move blockers or alter assignments.</p>
+    <p>Paid-material status checks the current assignment, target support and next crawling step. A ready route can change before movement; waiting for assignment does not identify a specific obstacle. This inspection does not search for routes or consume HM.</p>
+    <p id="message" role="status"></p>
+    <p id="fps">Render FPS: measuring...</p>
+    <h2>Pixel construction checks</h2>
+    <pre id="results"></pre>
+    <script src="scripts/fixed-step.js"></script>
+    <script src="scripts/lab-fps.js"></script>
+    <script src="scripts/particle-world.js"></script>
+    <script src="scripts/pixel-construction-scenario.js"></script>
+    <script src="scripts/particle-terrain-import.js"></script>
+    <script src="scripts/pixel-city-farms.js"></script>
+    <script src="scripts/pixel-city-military.js"></script>
+    <script src="scripts/pixel-map-construction.js"></script>
+    <script src="scripts/pixel-building-styles.js"></script>
+    <script src="scripts/particle-lab-render.js"></script>
+    <script src="scripts/pixel-construction-render.js"></script>
+    <script src="scripts/pixel-construction-workload.js"></script>
+    <script src="tests/pixel-construction.js"></script>
+    <script src="scripts/pixel-construction-lab.js"></script>
+    <script src="scripts/lab-viewport.js"></script>
+  </body>
+</html>

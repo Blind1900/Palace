@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "id": "jet",
+  "source": "User-supplied Urban Defence Ref\\Units",
+  "nativeFacing": -1,
+  "tintColor": "#bce77b",
+  "clips": {
+    "fly": "Jet\\Jetflying.gif",
+    "shoot": "Jet\\jet shooting.gif",
+    "down": "Jet\\Jetshotdown.gif"
+  }
+}

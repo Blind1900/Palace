@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "id": "tank",
+  "source": "User-supplied Urban Defence Ref\\Units",
+  "nativeFacing": -1,
+  "tintColor": "#bce77b",
+  "clips": {
+    "move": "Tank\\TankMovement.gif",
+    "aim": "Tank\\TankAim.gif"
+  }
+}

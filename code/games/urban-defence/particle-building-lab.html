@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Urban Defence terrain and building integration lab</title>
+    <style>
+      body { margin: 24px; background: #070b08; color: #bce6a0; font: 16px sans-serif; line-height: 1.5; }
+      a { color: #9edcf0; }
+      button { margin: 6px 6px 6px 0; padding: 8px; }
+      canvas { display: block; width: min(100%, 960px); height: auto; background: #020202; image-rendering: pixelated; }
+      #results { white-space: pre-wrap; }
+    </style>
+  </head>
+  <body>
+    <h1>Terrain and building integration lab</h1>
+    <p>Particle terrain controls the building's three anchors and the surface beneath falling members. Vertical supports are thicker than horizontal members in both drawing and collision geometry. Breach the basin and watch water collect at the left wall, then blast that wall to open a path. This can cause the rest of the frame to collapse. You can also remove terrain under anchors to see the frame respond.</p>
+    <p>Restore ground before rebuilding. Each repair attempt costs HM only when work succeeds; blocked sites wait while other eligible repairs may proceed. If no repair can proceed, the repair message identifies any particle or foundation obstacles found; building members and connection rules can also block it. Ground restoration will not overwrite water or building members. Free lab controls clear all loose building members, including airborne ones, or clear particle debris. This lab does not yet create particle debris through its controls. Cleared building members can still be rebuilt if the frame survives.</p>
+    <p>Optional water damage gradually weakens attached members that overlap water or touch it across an unobstructed cell edge. A deeper continuous water column causes faster damage; yellow and red show increasing damage. The status shows the number of damaged attached members and the weakest member's health, from any cause. Taller, thicker walls resist damage better. This is a grid-based gameplay approximation, not a pressure simulation.</p>
+    <p>Show foundation support marks each original anchor's ground check: green + means terrain is present, red X means it is missing. The text separately shows whether the member is currently anchored. Restoring ground does not automatically reattach a detached member; use repair.</p>
+    <p><strong>Early integration only:</strong> upright attached members block a centerline-based coarse grid, allowing water to flow closer beneath beams while still stopping at walls. Cells can overlap a visible member edge. Rendering extends adjacent water to upright attached members and smooths a single supported water notch beside a wall; particle positions and damage remain grid-based. The optional loose-member experiment samples each member's last movement as a temporary water blocker and tries to push overlapping water along short connected chains into free cells. Trapped water can remain overlapping. Sweeps interpolate between step endpoints, are capped at 64 intervals, and can miss extreme or curved motion; their path blocks water for one particle step. There is no buoyancy, pressure or force on members. Terrain collisions use the topmost solid cell in each column, not full tunnel or side-wall collisions; the bottom of the grid acts as a floor. Units and game saves are not connected. The lab save is browser-local and separate from the live game. Older lab saves keep their original water-through-walls mode until reset.</p>
+    <p><a href="construction-lab.html">Construction growth lab</a> | <a href="collapse-lab.html">Building collapse lab</a> | <a href="particle-lab.html">Particle world lab</a> | <a href="index.html">Game prototype</a></p>
+    <button id="left" type="button">Undermine left anchor</button>
+    <button id="middle" type="button">Undermine middle anchor</button>
+    <button id="right" type="button">Undermine right anchor</button>
+    <button id="all" type="button">Undermine all anchors</button>
+    <button id="breach" type="button">Breach water basin</button>
+    <button id="blast-wall" type="button">Blast lower left wall</button>
+    <button id="clear-particles" type="button">Clear particle debris</button>
+    <button id="clear-building" type="button">Clear all loose building members</button>
+    <button id="restore-left" type="button">Restore ground: left</button>
+    <button id="restore-middle" type="button">Restore ground: middle</button>
+    <button id="restore-right" type="button">Restore ground: right</button>
+    <button id="repair" type="button">Repair one member / bond</button>
+    <button id="pause" type="button" aria-pressed="false">Pause</button>
+    <button id="step" type="button">Step once</button>
+    <button id="reset" type="button">Reset</button>
+    <button id="save" type="button">Save lab</button>
+    <button id="load" type="button">Load lab</button>
+    <label><input id="loose-water" type="checkbox"> Experimental loose-member water blocking and displacement</label>
+    <label><input id="water-damage" type="checkbox"> Experimental depth-based water damage</label>
+    <label><input id="foundations" type="checkbox"> Show foundation support</label>
+    <canvas id="lab" width="640" height="360" aria-label="Particle terrain and building foundation support experiment"></canvas>
+    <p id="status" role="status"></p>
+    <p id="foundation-status"></p>
+    <p id="fps">Render FPS: measuring...</p>
+    <p id="repair-status" role="status"></p>
+    <p id="save-status" role="status"></p>
+    <h2>Integration checks</h2>
+    <pre id="results"></pre>
+    <script src="scripts/fixed-step.js"></script>
+    <script src="scripts/lab-fps.js"></script>
+    <script src="scripts/particle-world.js"></script>
+    <script src="scripts/collapse-model.js"></script>
+    <script src="scripts/particle-building-scenario.js"></script>
+    <script src="scripts/particle-water-contact-render.js"></script>
+    <script src="tests/particle-building.js"></script>
+    <script src="scripts/particle-building-lab.js"></script>
+    <script src="scripts/lab-viewport.js"></script>
+  </body>
+</html>

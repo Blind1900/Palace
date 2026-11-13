@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "id": "hopper",
+  "source": "User-supplied Urban Defence Ref\\Units",
+  "nativeFacing": -1,
+  "tintColor": "#bce77b",
+  "clips": {
+    "idle": "Mechs(hoppers)\\Hopper defailt.gif",
+    "jump": "Mechs(hoppers)\\Hopper hopper jump.gif",
+    "boost": "Mechs(hoppers)\\hopper boost.gif",
+    "fall": "Mechs(hoppers)\\Hopper glide or falling.gif"
+  }
+}

@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Urban Defence collapse performance lab</title>
+    <style>
+      body { margin: 24px; background: #070b08; color: #bce6a0; font: 16px sans-serif; line-height: 1.5; }
+      h1 { color: #8de19c; }
+      a { color: #9edcf0; }
+      button { padding: 8px; }
+      #results { white-space: pre-wrap; overflow-wrap: anywhere; }
+    </style>
+  </head>
+  <body>
+    <h1>Building collapse performance lab</h1>
+    <p>Compares full searches, optimized support search and experimental spatial collision search over 180 steps for independent copies of the collapse lab building, with load, blasts and falling debris. Models do not collide with each other. Results exclude drawing, units, repair and other game systems.</p>
+    <p><a href="collapse-lab.html">Building collapse lab</a> | <a href="particle-benchmark.html">Particle performance lab</a></p>
+    <button id="run" type="button">Run benchmark</button>
+    <p id="status" role="status">Ready. Results depend on this device and browser.</p>
+    <p>Render FPS: N/A (benchmark does not render a simulation).</p>
+    <pre id="results"></pre>
+    <script src="scripts/collapse-model.js"></script>
+    <script src="scripts/collapse-benchmark.js"></script>
+  </body>
+</html>

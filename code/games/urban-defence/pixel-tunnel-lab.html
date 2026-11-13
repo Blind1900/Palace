@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Urban Defence - physical tunnels and HM storage</title>
+  <style>
+    body { background:#10191d; color:#d8e3d8; font:15px system-ui; max-width:1100px; margin:auto; padding:20px; }
+    a { color:#8bc6d6; } button { margin:4px; padding:8px; }
+    canvas { width:100%; height:auto; image-rendering:pixelated; border:1px solid #52634a; }
+    pre { white-space:pre-wrap; }
+  </style>
+</head>
+<body>
+  <p><a href="pixel-combat-lab.html">Combat</a> | <a href="pixel-city-map-lab.html?fullMap=1">Generated full map</a> |
+    <a href="pixel-tunnel-network-lab.html">Tunnel network lab</a></p>
+  <h1>Physical tunnel and mining lab</h1>
+  <p>First stage: free excavation with no HM yield. Connect the shaft and travel tunnel to the purple resource
+    node and a separate underground storage chamber. Mining starts immediately upon a valid connection:
+    two three-pixel miners begin with node HM and carry it into the chamber. There is no separate HM-production building.</p>
+  <button id="tunnel-dig">Excavate connected tunnels</button>
+  <button id="tunnel-run">Run</button>
+  <button id="tunnel-step">Step 120 ticks</button>
+  <button id="tunnel-block">Drop route obstruction</button>
+  <button id="tunnel-breach">Breach water basin</button>
+  <button id="tunnel-withdraw">Withdraw 25 stored HM</button>
+  <button id="tunnel-reset">Reset</button>
+  <p>
+    <label for="tunnel-build-kind">Construction request</label>
+    <select id="tunnel-build-kind">
+      <option value="population">Population seed</option>
+      <option value="military">Military seed</option>
+      <option value="farm">Farm seed</option>
+      <option value="road">Surface road</option>
+    </select>
+    <button id="tunnel-seed">Request HM delivery</button>
+  </p>
+  <p id="tunnel-notice" role="status"></p>
+  <canvas id="tunnel-canvas" width="360" height="180" aria-label="Excavated terrain, water, branching storage chamber and miners"></canvas>
+  <pre id="tunnel-status"></pre>
+  <p>Travel checks a dry, empty 3-by-3 clearance using a shortest-route search; obstruction/flooding makes miners
+    wait without discarding cargo. Each carries up to 5 HM, harvests every 30 ticks at the finite 300-HM node,
+    after the initial connection harvest, and moves one cell per two ticks. The chamber holds 100 HM; space is reserved for cargo in transit.
+    Withdrawals resume harvesting. Terrain, water and HM ledgers are audited independently.</p>
+  <p>This lab uses a predefined excavated corridor and chamber, not manual tunnel placement, structural lining,
+    save integration or construction costs. Chamber outlines and stored-HM fill are logical overlays,
+    not physical wall material. Miners overlap one another; flooding pauses travel rather than killing miners.
+    Reset restores the original world. Breaching the basin opens actual terrain and allows physical water flow.
+    The intended game construction charge belongs to tunnels themselves, not to a production building;
+    this lab retains free excavation pending the tunnel-cost rule.</p>
+  <p>Orange one-pixel transporters collect HM from tunnel storage first, or the blue existing-core
+    stockpile when it has no reachable stored HM. Dark ghost markers reserve a request, but no seed or road
+    becomes physical until all required HM arrives. Each load is at most 5 HM; construction costs 1 HM per
+    placed pixel (three-pixel demonstration seeds and a ten-pixel road). Dry paths are checked at every move;
+    blocked cargo stays with its transporter. Core stock starts at 50 HM and does not regenerate.
+    These are placement/delivery tests, not growing full buildings or full-map placement integration.
+    Worker paths are logical pixel routes, without gravity, worker combat or road-speed bonuses yet.</p>
+  <h2>Focused checks</h2><pre id="tunnel-results"></pre>
+  <script src="scripts/particle-world.js"></script>
+  <script src="scripts/pixel-construction-logistics.js"></script>
+  <script src="scripts/pixel-tunnel-lab.js"></script>
+  <script src="tests/pixel-tunnel-fixture.js"></script>
+</body>
+</html>

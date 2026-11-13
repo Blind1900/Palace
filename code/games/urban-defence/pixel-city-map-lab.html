@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Urban Defence generated pixel city lab</title>
+  <style>
+    body { margin: 24px; background: #070b08; color: #bce6a0; font: 16px sans-serif; line-height: 1.5; }
+    a { color: #9edcf0; } button, select { margin: 4px; padding: 8px; }
+    #viewport { max-width: 100%; height: 576px; max-height: 80vh; overflow: auto; margin-bottom: 65vh; background: #020202; }
+    canvas { display: block; image-rendering: pixelated; background: #020202; }
+  </style>
+</head>
+<body>
+  <h1>Generated-terrain pixel city lab</h1>
+  <p id="supply-status" role="status"></p>
+  <p id="economy-status" role="status"></p>
+  <p>Full-map population skyscrapers are 15-20 times the occupied standing trooper height:
+    exact quarter-size trooper artwork is 6.25 cells tall within 7 grid rows,
+    so level 1-7 towers are 94-125 cells tall.
+    The source receives empty sky rows above the entire terrain, shifting water and tunnels equally
+    without changing their shapes. A real quarter-size ground trooper stands beside the first blue population
+    tower; it obeys collision/gravity, but is not assigned patrol or automatic firing.
+    Towers use paid one-pixel structural uprights and repeating physical floors connected to their
+    independent foundations. Full-map population and military cores are spaced 6-8 cells apart,
+    rather than 20-24; population floors are 7 cells apart. This reduces hollow volume while
+    retaining worker passages and local storage. Farm silos keep their functional food cavities.
+    All four mobile unit types use reduced artwork and collision masks, not CSS scaling.
+    Fine-resolution drawing retains every original source pixel, color and GIF frame
+    duration. Zoom in to inspect native detail; whole-map views necessarily show less detail.
+    Launcher missiles rise and descend toward the opposing faction. Interceptors
+    detect hostile offensive missiles up to 960 cells away and retain homing pursuit.
+    Launchers check the whole curved projectile path and raise their aim around
+    intervening terrain. If available sky cannot provide a clear arc, they hold fire
+    and retry rather than shooting through obstructions.
+    Missiles and scattered projectiles leave no ammunition residue; damaged terrain
+    and collapsing buildings still produce normal debris.
+    Ground-supported rubble becomes solid terrain after ten seconds at rest, keeping
+    its pixels and joining the surface outline. Movement resets that timer;
+    rubble on structural roofs remains debris. Roads, placement and ground units
+    recognize the raised surface.
+    Each faction retains its Asian, Gothic or Modern design and blue, red or neutral
+    team accents across population, military and farm buildings. Population roofs
+    have paid physical upturned eaves, pointed crowns or flat rooflines respectively.
+    Lattice, pointed-arch and horizontal glazing details are visual only; they do not
+    fill worker passages or add collision mass.
+    Each tower gets a finite lab HM allowance equal to its frame-cell count plus
+    1,000 HM, rather than running out under the former small-building allowance.
+    Structural support capacity in this enlarged full-map lab is explicitly 1,024; legacy labs retain 128.
+    Run simulation or build the preview to construct the towers; the initial outlines are only plans.</p>
+  <button id="enable-upkeep">Enable farm SM transport / upkeep</button>
+  <p>Full-map population and military buildings require farm-delivered SM. A shortage pauses growth
+    and unit production without damaging buildings or removing existing units. Smaller crops and the
+    military demo can enable the same rules with the button above. The first lab balance is
+    L×(L+1)/2 SM per minute for a level-L building (1, 3, 6 … 28 at level 7), so one farm feeds an early
+    faction but a levelled city needs 2-4; each building keeps a two-minute pantry plus one five-SM delivery buffer.
+    Gold pixels are pantry stock and SM couriers; blue pixels are the existing local HM repair stockpile.
+    Red receiving-dock outlines indicate an SM shortage. These interior storage markings use empty
+    floor space, not shared structural walls. HM repairs still use the existing paid pixel-repair carriers
+    and finite starting core allowances; replenishment from tunnels is not yet linked to this map.</p>
+  <p><a href="pixel-tunnel-lab.html">Physical tunnel, miner and HM chamber tests</a> |
+    <a href="pixel-tunnel-network-lab.html">Tunnel network, storage and pipeline highway</a></p>
+  <p><a href="pixel-combat-lab.html">Open shared combat area: bases, units, roads, missiles and terrain impacts</a></p>
+  <p>Three separate buildings share one 90-cell-high terrain, water and debris crop sampled from a generated map. Crop width follows the selected sites; spacing is not forced. Each has its own 1000 HM budget, 27 buried core pixels and connecting floors. One physics tick advances the shared world, then each building advances construction without stepping physics again. No live-game economy, units or saves are changed.</p>
+  <p>Each dropped seed begins a quick, visibly animated foundation stage: middle 3-by-3 core first, buried floors branching outward and progressively excavating their basement columns, then adjacent cores and surface pillar seeds. Each building grows only one pixel every two simulation ticks; neither cores nor floor branches pop into place as a batch. The foundation takes a few seconds, and each basement column opens as its floor/extension column finishes. No HM is spent until the free foundation stage finishes and blueprint reveal permits paid construction. Water/debris block growing foundation cells; only terrain is excavated. Destroying every formed core permanently stops that building, including unfinished seed growth.</p>
+  <p>Sites must fit the same crop without flattening terrain. No suitable group stops generation explicitly. Shared water is conserved inside the closed crop. Repair pixels choose shortest physically clear routes to the nearest reachable available target and can overlap immediately, without traffic detours or yielding. Each building owns its paid deliveries and unique target reservations. Water, terrain interiors and debris still block routes. Completion stops automatic deliveries; only an explicit lab upgrade or manual repair reopens completed work. Terrain restoration is disabled during seed growth so it cannot undo or pre-empt progressive excavation.</p>
+  <p><a href="pixel-map-construction-lab.html">Single generated building lab</a> | <a href="pixel-shared-world-lab.html">Flat shared-world lab</a> | <a href="pixel-unit-lab.html">Reference-pixel unit terrain lab</a> | <a href="pixel-unit-comparison-lab.html">Four-unit movement comparison</a></p>
+  <button id="generate">Generate new city map</button>
+  <button id="generate-full">Generate full pixel world</button>
+  <button id="fit-map" disabled>Fit whole map</button>
+  <section id="world-combat-controls" hidden>
+    <h2>Full-world pixel combat</h2>
+    <label><input id="world-spawning" type="checkbox"> Automatic base spawning</label>
+    <label><input id="world-fighting" type="checkbox"> Unit auto-fire</label>
+    <label><input id="world-devices" type="checkbox"> Active turrets, guards, launchers and interceptors</label>
+    <label>Faction <select id="world-owner"><option value="left">Blue</option><option value="right">Red</option><option value="neutral">Neutral</option></select></label>
+    <label>Unit <select id="world-kind"><option value="trooper">Trooper</option><option value="tank">Tank</option><option value="hopper">Hopper</option><option value="jet">Jet</option></select></label>
+    <button id="world-spawn" disabled>Spawn native-pixel unit</button>
+    <label>Firing unit <select id="world-unit"></select></label>
+    <label><input id="world-fire" type="checkbox"> Click map to aim and fire</label>
+    <p id="world-combat-status" role="status"></p>
+    <p id="world-combat-message" role="status"></p>
+    <details><summary>Full-world generation regression results</summary><pre id="world-results"></pre></details>
+    <p>Build frames through simulation before spawning. All units, bullets, missiles and falling debris share the generated particle grid.
+      Spawn checks the entire unscaled artwork on dry, clear ground near a living military base; no hangar is artificially enlarged.
+      Automatic combat is opt-in. Architecture changes the colors/details of existing physical frame cells, never collision or budgets.
+      Roads, crops and SM remain the existing lab layers; imported tunnels remain real empty cells. Miners and live-game economy integration are not added.
+      <a href="physics-comparison-lab.html">Lava, heat, diagonal lasers and meteors remain in the separate thermal lab.</a></p>
+  </section>
+  <section id="tunnel-controls" hidden>
+    <h2>Tunnel orders (mined economy)</h2>
+    <label><input id="dig-tunnel" type="checkbox"> Dig tunnel: click a start on your ground or tunnel wall, then a target (Esc or right-click cancels)</label>
+    <label>Faction <select id="dig-owner"><option value="left">Blue</option><option value="right">Red</option></select></label>
+    <p id="dig-status" role="status"></p>
+    <p>Tunnels are paid from the faction's mine storage, one segment of up to 24 cells at a time, by built area
+      (dug interior plus new lining walls): 1 HM per 5 px in plain rock, 1 HM per 4 px where a segment bridges an open
+      gap or cave or runs under a building. Linings are only placed in rock and underground gaps, never above ground,
+      in water or in ore nodes. Orders must start on your faction's ground or tunnel wall, stay within your zone
+      plus 40 columns, keep 6 px of rock from water caves and avoid building reservations and enemy tunnels.
+      Starting tunnels and cellars are prepaid; later AI tunnels are billed as debt that mine storage pays first.
+      Add <code>&amp;tunnels=ai</code> for AI-only tunnelling.</p>
+  </section>
+  <button id="military-demo">Load military integration demo</button>
+  <button id="build-preview" disabled>Build preview through simulation</button>
+  <button id="pause" disabled>Run simulation</button>
+  <button id="step" disabled>Step 60 ticks</button>
+  <button id="step-one" disabled>Step 1 tick</button>
+  <label for="building">Selected building</label>
+  <select id="building"><option value="0">Left</option><option value="1">Middle</option><option value="2">Right</option></select>
+  <label><input id="preview" type="checkbox"> Preview selected footprint</label>
+  <button id="focus" disabled>Focus selected building</button>
+  <button id="level-up" disabled>Level up population</button>
+  <button id="repair-building" disabled>Repair selected frame</button>
+  <label><input id="defenses" type="checkbox" checked> Show military defense placements</label>
+  <label><input id="place-seed" type="checkbox"> Click terrain to add a seed</label>
+  <label for="seed-type">Seed building</label>
+  <select id="seed-type"><option value="population">Population</option><option value="military">Military</option><option value="farm">Farm</option></select>
+  <label for="seed-level">Level</label>
+  <select id="seed-level"><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option></select>
+  <label for="core">Core</label>
+  <select id="core"><option value="0">Left</option><option value="1">Middle</option><option value="2">Right</option></select>
+  <button id="blast" disabled>Blast selected core</button>
+  <label for="floor">Floor</label>
+  <select id="floor"><option value="0">Left span</option><option value="1">Right span</option></select>
+  <button id="excavate" disabled>Excavate selected floor ground</button>
+  <button id="clear" disabled>Clear shared debris</button>
+  <button id="restore" disabled>Restore original shared terrain</button>
+  <p>Blasts preserve water and charge no refunds. Floor excavation removes terrain only. Clearing debris affects the shared world and refunds nothing. Restoration preserves the intentional basements, installed foundations, tunnels and all currently occupied cells.</p>
+  <p>The optional footprint preview outlines the complete plan in cyan, intended basement excavation in magenta, original 3-by-3 cores in gold and surface seed sites in white. It is read-only. The original three test buildings keep their strict placement geometry. Added seeds adapt their core spacing and stepped frame to neighboring buildings and terrain. Population/farms allow up to 2 cells of slope across a core and 24 cells of overall height difference; military allows 4 and 32 respectively. Foundations extend into existing terrain without flattening the surface; water, tunnels and missing floor support still reject placement.</p>
+  <p>Choose the added building type and planned level before dropping a seed. Population uses 2 cores at levels 1-2, 3 at 3-4, 4 at 5-6, and 5 at 7. Military uses 3 cores at levels 1-3 and 4 at 4-7, with wider minimum spacing. Farms always use 1 core. Population can also level up after construction using the button; these remain lab-only mechanics. Width is fitted to available clearance; roof/floor heights follow local spans. A descendant core may itself parent the next core as growth branches outward.</p>
+  <p>Military roots may fit immediately beside population structures, and their own paid frame can interlock into clear
+    upper tower gaps of a completed living population building within six columns. The connected route goes around existing
+    pixels, never through walls, cores, basements or reserved repairs. Every structural pixel has exactly one owner;
+    cores, death latches, HM and repair budgets remain independent. Hover and placement use the same physical preflight.
+    Solid overlap is still rejected; enclosed rooms without an accessible clear route receive no interlocking arm.
+    Farms retain their existing footprint rules. Population roots do not gain military-style overlap permissions.</p>
+  <p>Dry, supported population gaps two to twelve columns wide gain compact paving, lamps, utility boxes and, where
+    there is room, a small planter. These are read-only logical urban details, not paid structures or collision barriers.
+    Three cells of clearance are required; water, wheat and any structural/core/basement reservation suppress details.
+    Incomplete or dead neighboring buildings also suppress their connecting detail layer.</p>
+  <p>Pause and use Step 1 tick to inspect gradual growth. The selected building's next growth pixel has a cyan outline. Growth diagnostics report current blocker coordinates, formed/pending/surviving core pixels and terrain cells actually dug by seed growth. Formed counts record issued free core pixels even after destruction; pending pixels have never been grown. Inspection does not advance growth, spend HM or excavate terrain.</p>
+  <p>Enable click-to-add and move the mouse over the preview. A vertical line joins the mouse to the surface: green means valid, red means invalid, with a written reason below. Click a green column to choose the middle seed's center. The new building must fit the existing crop and avoid existing buildings/basements. Invalid placement reports a reason without digging, spending HM or stopping the simulation. Accepted seeds start independent pixel-by-pixel growth with 1000 lab HM; this remains a lab-only free-foundation allowance. Site validation uses the imported map and current physical clearance, not terrain flattening.</p>
+  <p id="message" role="status">Preparing city...</p>
+  <p id="source"></p>
+  <p>Full pixel world imports the complete 2400-by-390 particle grid (9600-by-1560 world units), including terrain, water and tunnels. Supported building sites are distributed across the entire map, not constrained to one vertical crop. Buildings still grow through free foundations and paid physical deliveries; cyan outlines are plans, not completed structures. Fit whole map shows both world edges; zoom in to inspect individual pixels. This is an isolated physics experiment, not the live game.</p>
+  <pre id="status" role="status"></pre>
+  <p id="accounting" role="status"></p>
+  <p id="selected" role="status"></p>
+  <p id="growth" role="status"></p>
+  <p id="placement" role="status"></p>
+  <p id="farm" role="status"></p>
+  <p id="sm-storage" role="status"></p>
+  <p id="roads" role="status"></p>
+  <pre id="military" role="status"></pre>
+  <p>Completed military bases can widen in place through paid repair construction: two new right-annex columns per level, except level 4, which grows a fourth core at least 12 columns beyond the last core. Levels stop at 7. Original cores, physical ownership, clocks and HM accounting are preserved; water, neighbors, debris, missing terrain support and crop limits reject the whole upgrade. Military may displace logical crops in its own annex, never another building.</p>
+  <p>Military defense placements are a deterministic, read-only lab layer. Orange turrets, purple guard troops, red missile launchers and cyan interceptors appear after construction. Turrets mount on left/right roof corners and point outward toward those edges. Logical mounting legs accommodate roof steps up to two cells, including silo caps. Each base also considers the nearest 2 added population/farm neighbors at levels 1-3, 3 at levels 4-6, and 4 at level 7, within a horizontal gap of 40 columns plus 4 per additional level. Incomplete or dead hosts receive no rooftop defenses; missing slots are reported. Multiple bases share unique placement slots, without writing to the host's physical structure or spending its materials. Upgrades temporarily suspend that base's placements; damaged anchors or obstructed air remove affected placements immediately. These are placement previews only, not functional combat, troop routing, interception or hacking.</p>
+  <p>Ground defenses can visually overlap wheat and irrigation without clearing crops or changing farm production/storage. On each side of a living completed base, the outer-to-inner order is turrets, missile launchers, interceptors, then guards in four equal distance bands. Level increases extend range from 40 to 64 columns and increase density, reducing same-type ground spacing from 11 to 5 columns. Slots are evenly distributed immediately after construction, not added on a timed spawn clock. Each entire device stays within its own band; actual terrain support, physical structure reservations, water, debris and preview-crop edges still limit placement. Missing ground slots are reported rather than force-spawned.</p>
+  <p>Load the military integration demo for a repeatable, opt-in arrangement with a level 7 military base beside population and four farm silos; it never replaces the normal generated-city default. Build preview advances the same shared physics and paid repair deliveries in responsive batches, at most 18,000 ticks per click, rather than instantly filling structures. Blocked construction is reported, not bypassed. All other labs and the playable game remain independent.</p>
+  <p>Repair selected frame is an explicit paid lab action, not automatic repair. A completed, damaged building with at least one living core can reopen its original plan without changing level, core locations, clocks or free-foundation allowances. Each missing pixel costs one additional HM through real delivery; first clear occupied repair targets. Intact buildings, ongoing work, dead cores and insufficient HM reject the request without changes. Roads and defense placements for the affected building pause until construction finishes. Upgrades include existing missing pixels in their full HM preflight. Acceptance only queues work: later support loss, debris or water can still strand deliveries, and build preview reports unfinished work rather than bypassing physical blockers.</p>
+  <p>Completed added population buildings can level up in place: each upgrade raises the frame by two cells through paid repair delivery. Levels 3, 5 and 7 add a descendant core when dry, supported space is available to the right; blocked upgrades change nothing. Nearby completed population buildings automatically receive visible roads across dry gaps up to 40 columns. Roads are a separate lab access layer, not structural mass, and disappear when obstructed. Military placement is the most slope-tolerant: up to four cells across a core and 32 cells between core heights, subject to crop clearance, water and intact support.</p>
+  <button id="spend-sm" disabled>Spend 25 lab SM</button>
+  <p>Farms now use five-column silos with identical, symmetrical caps at a shared roof height. Levels 1-2 target one silo, 3-4 two, 5-6 three, and 7 four; fewer spawn when dry space is limited. One buried core supports their connecting floor and the pedestal below storage. Hollow food chambers have a real structural cap, side walls and base separating SM fill from the outside. Steel-blue shell pixels and warm-amber food use different colors; core-health markers keep their own colors. Food fill is a read-only view of logical SM, never additional particle mass or an overlay on a core. Each fully built, intact silo provides 100 shared SM storage. Production stops at full storage and resumes after spending. Damage reduces usable capacity without silently deleting stored SM and hides protected fill in broken silos. Silos cannot overlap wheat fields.</p>
+  <p>Completed farm structures expand golden wheat fields every 30 simulation ticks, limited by level, dry terrain and reachable basin water. Higher levels increase acreage, production speed and pipe reach; blue pipes follow clear surface routes to up to three separate basins. Select a farm to see its supply and SM output. Population footprints cannot overlap farmland; military footprints may replace wheat, but cannot overlap another building's structure. Crops and pipes are a separate lab layer with no HM cost or water consumption yet. SM storage is lab-only, not live-game income; repair-built pipes and bullet/vehicle crop damage remain deferred.</p>
+  <p id="fps">Render FPS: measuring...</p>
+  <p id="zoom">Map zoom: 100%</p>
+  <p>At 100% zoom, the preview is at least 576 pixels tall, 60 percent taller than its previous 360-pixel view, with square pixels and unchanged map proportions. Use the mouse wheel over the map to zoom in or out (25% to 400%); outside the map it scrolls the page normally. Ctrl+wheel remains browser zoom. Scroll inside the preview to see wide or enlarged maps; the extra space below lets you scroll the canvas into a comfortable viewing position.</p>
+  <div id="viewport"><canvas id="lab" aria-label="Three pixel buildings sharing generated terrain"></canvas></div>
+  <script src="scripts/particle-world.js"></script>
+  <script src="scripts/particle-terrain-import.js"></script>
+  <script src="scripts/pixel-construction-scenario.js"></script>
+  <script src="scripts/pixel-city-farms.js"></script>
+  <script src="scripts/pixel-construction-logistics.js"></script>
+  <script src="scripts/pixel-city-upkeep.js"></script>
+  <script src="scripts/pixel-city-military.js"></script>
+  <script src="scripts/pixel-map-construction.js"></script>
+  <script src="scripts/pixel-building-styles.js"></script>
+  <script src="scripts/pixel-building-interiors.js"></script>
+  <script src="scripts/pixel-building-shapes.js"></script>
+  <script src="scripts/building-render.js"></script>
+  <script src="assets/unit-reference.js"></script>
+  <script src="scripts/pixel-population-scale.js"></script>
+  <script src="assets/tank-reference.js"></script>
+  <script src="assets/hopper-reference.js"></script>
+  <script src="assets/jet-reference.js"></script>
+  <script src="assets/bullet-reference.js"></script>
+  <script src="scripts/pixel-unit.js"></script>
+  <script src="scripts/pixel-unit-vehicles.js"></script>
+  <script src="scripts/pixel-unit-combat.js"></script>
+  <script src="scripts/pixel-combat-fixture.js"></script>
+  <script src="scripts/pixel-generated-combat.js"></script>
+  <script src="scripts/pixel-tunnel-network.js"></script>
+  <script src="scripts/pixel-tunnel-mining.js"></script>
+  <script src="scripts/pixel-pipeline-network.js"></script>
+  <script src="scripts/pixel-full-map-economy.js"></script>
+  <script src="tests/pixel-full-world.js"></script>
+  <script src="scripts/particle-lab-render.js"></script>
+  <script src="scripts/pixel-construction-render.js"></script>
+  <script src="scripts/fixed-step.js"></script>
+  <script src="scripts/lab-fps.js"></script>
+  <script src="scripts/pixel-city-map-lab.js"></script>
+  <script src="scripts/lab-viewport.js"></script>
+</body>
+</html>

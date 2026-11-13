@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Urban Defence - road / tunnel entrance seams</title>
+  <style>
+    body { margin: 0; background: #14161b; color: #d8dde6; font: 13px/1.4 system-ui, sans-serif; }
+    header { padding: 10px 14px; border-bottom: 1px solid #2a2f38; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+    header h1 { font-size: 15px; margin: 0 12px 0 0; }
+    button { background: #262b34; color: inherit; border: 1px solid #3a414d; border-radius: 4px; padding: 4px 10px; cursor: pointer; }
+    #seam-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(520px, 1fr)); gap: 12px; padding: 12px; }
+    .seam-card { background: #1b1e25; border: 1px solid #2a2f38; border-radius: 6px; padding: 8px; }
+    .seam-card.failed { border-color: #c0392b; }
+    .seam-card.passed { border-color: #2e8b57; }
+    .seam-card h2 { font-size: 13px; margin: 0 0 4px; }
+    .seam-card p { margin: 2px 0; color: #9aa3b2; }
+    .seam-card canvas { width: 100%; image-rendering: pixelated; background: #0e1014; display: block; margin: 6px 0; }
+    .seam-card .status { font-family: ui-monospace, monospace; font-size: 12px; white-space: pre-wrap; }
+    .legend span { display: inline-block; margin-right: 10px; }
+    .legend i { display: inline-block; width: 10px; height: 10px; margin-right: 4px; vertical-align: -1px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Road / tunnel entrance seams</h1>
+    <button id="seam-run">Run units</button>
+    <button id="seam-reset">Reset</button>
+    <span id="seam-status">Preparing...</span>
+    <span class="legend">
+      <span><i style="background:#5a5e66"></i>road</span>
+      <span><i style="background:#c9a227"></i>portal ramp / landing</span>
+      <span><i style="background:#8a96a8"></i>lid</span>
+      <span><i style="background:#e0e6ef"></i>manhole</span>
+      <span><i style="background:#d94f3d"></i>guard rail</span>
+      <span><i style="background:#b07a3c"></i>ladder</span>
+    </span>
+  </header>
+  <main id="seam-grid"></main>
+  <script>window.addEventListener('error', (e) => { document.body.dataset.err = String((e.error && e.error.stack) || e.message).replace(/"/g, "'"); });</script>
+  <script src="scripts/particle-world.js"></script>
+  <script src="assets/unit-reference.js"></script>
+  <script src="assets/tank-reference.js"></script>
+  <script src="scripts/pixel-unit.js"></script>
+  <script src="scripts/pixel-unit-vehicles.js"></script>
+  <script src="scripts/pixel-tunnel-network.js"></script>
+  <script src="scripts/pixel-surface-roads.js"></script>
+  <script src="scripts/pixel-road-tunnel-seam.js"></script>
+  <script src="scripts/pixel-road-tunnel-seam-lab.js"></script>
+</body>
+</html>

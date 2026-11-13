@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Urban Defence - building type, shape and style lab</title>
+  <style>
+    body { background:#10191d; color:#d8e3d8; font:15px system-ui; max-width:1500px; margin:auto; padding:20px; }
+    a { color:#8bc6d6; } button, select { margin:4px; padding:6px 8px; }
+    #style-grid { display:grid; gap:8px; align-items:end; }
+    .head { font-weight:600; text-align:center; font-size:14px; } .row-head { font-weight:600; align-self:center; }
+    .card { background:#0b1215; border:1px solid #31423c; padding:4px; min-width:0; }
+    .card canvas { width:100%; height:auto; image-rendering:pixelated; display:block; }
+    /* Fixed-size status text so live updates never reflow the grid (prevents the build "shake"). */
+    .card pre { margin:4px 0 0; font-size:11px; line-height:14px; height:56px; white-space:pre;
+      overflow:hidden; text-overflow:ellipsis; font-variant-numeric:tabular-nums; }
+    #style-fps { display:inline-block; min-width:16em; font-variant-numeric:tabular-nums; }
+    .done { border-color:#6fae6a; } .failed { border-color:#c85a4a; }
+    .legend span { display:inline-block; margin-right:14px; } .legend i { display:inline-block; width:12px; height:12px;
+      vertical-align:-2px; margin-right:4px; border:1px solid #0008; }
+    pre { white-space:pre-wrap; }
+  </style>
+</head>
+<body>
+  <p><a href="pixel-city-map-lab.html?fullMap=1">Generated full map</a> |
+    <a href="pixel-construction-lab.html">Construction</a></p>
+  <h1>Building type, shape &amp; style lab</h1>
+  <p>Pick a building type: columns are its shape variants and rows are the three faction styles (Asian, Gothic, modern).
+    Every card is its own particle world, so the preview is real structure under load. Floors are spaced so a trooper
+    fits with step headroom, every storey holds a few soldiers (more at higher levels) and one-way switchback stairs
+    let units walk up through the building. Military buildings spawn units from the hangar, which houses the primary core.
+    The <b>Defences</b> sheet shows the turrets, missile launchers, interceptors, control panels and guard troops.
+    On the <b>Garrison</b> sheet guard troops man the side windows of population buildings and shoot out at red
+    attackers, who return fire; walls and roofs block shots and only window glass lets them through.</p>
+  <p>The <b>District</b> sheet tests how buildings fit together on a real street instead of alone. Columns are layouts:
+    <b>Wide plaza</b> (three towers with wide gaps for street furniture and pocket parks), <b>Military merge</b> (a military compound squeezed between two population towers), <b>Tight block</b> (four population towers with 5, 12 and 28 px gaps) and <b>Military base</b> (a military compound
+    beside a population tower and a farm). Rows are each style, plus <b>Mixed</b>, where neighbours have different styles.
+    Each card shows the infill between neighbours (skybridges across narrow gaps, street lamps, landmarks, or a park tree
+    where two styles meet), the paved road along the building bases, and the hangar runway. The text under each card
+    reports bridges and props per gap, blocked doors or runway pixels, whether a mech fits the hangar, and the structural
+    load. <b>Unit demo</b> sends a trooper walking down the whole street through every ground floor, plus hangar traffic.</p>
+  <p>The <b>Antenna variants</b> sheet puts every rooftop crown on every population shape (columns: slab to needle; rows: style and crown), and each card reports how many crown pixels were built, flagging CLIPPED crowns. The crowns are: Asian dragon, dragon pillar and twin dragons around a sorin; Gothic angel spire, belfry and triple spires; modern broadcast mast, stepped needle and dish deck. Elsewhere each building picks its crown from a stable hash of its type, level, shape and roof position, so a street mixes them.</p>
+  <p class="legend">
+    <span><i style="background:rgb(255,164,20)"></i>core / seeds</span>
+    <span><i style="background:rgb(150,78,8)"></i>core cradle</span>
+    <span><i style="background:rgb(214,152,232)"></i>guard troops</span>
+    <span><i style="background:rgb(150,230,90)"></i>trooper</span>
+    <span><i style="background:rgb(236,70,60)"></i>attacker</span>
+    <span><i style="background:rgb(239,173,103)"></i>turret</span>
+    <span><i style="background:rgb(241,126,120)"></i>launcher</span>
+    <span><i style="background:rgb(139,217,238)"></i>interceptor</span>
+    <span><i style="background:rgb(120,230,140)"></i>panel screen</span>
+    <span>darker frame = stairs (one-way) and door leaves (walk-through)</span>
+  </p>
+  <p>
+    <label for="style-type">Type</label> <select id="style-type"></select>
+    <label for="style-level">Level</label> <select id="style-level"></select>
+    <label for="style-speed">Speed</label>
+    <select id="style-speed">
+      <option value="1">1&times;</option><option value="10">10&times;</option>
+      <option value="40" selected>40&times;</option><option value="150">150&times;</option>
+    </select>
+    <label><input type="checkbox" id="style-interior" checked> Interiors &amp; guards</label>
+    <button id="style-build">Build all through simulation</button>
+    <button id="style-instant">Finish instantly</button>
+    <button id="style-demo">Unit demo (climb, hangar spawn, garrison fight)</button>
+    <button id="style-pause">Pause</button>
+    <button id="style-reset">Reset to finished preview</button>
+    <span id="style-fps"></span>
+  </p>
+  <div id="style-grid"></div>
+  <h2>Focused checks</h2>
+  <button id="style-run-checks">Run checks (slow)</button>
+  <pre id="style-results"></pre>
+  <script src="scripts/particle-world.js"></script>
+  <script src="scripts/particle-terrain-import.js"></script>
+  <script src="scripts/pixel-construction-scenario.js"></script>
+  <script src="scripts/pixel-city-farms.js"></script>
+  <script src="scripts/pixel-construction-logistics.js"></script>
+  <script src="scripts/pixel-city-military.js"></script>
+  <script src="scripts/pixel-map-construction.js"></script>
+  <script src="assets/unit-reference.js"></script>
+  <script src="assets/tank-reference.js"></script>
+  <script src="assets/hopper-reference.js"></script>
+  <script src="assets/jet-reference.js"></script>
+  <script src="scripts/pixel-unit.js"></script>
+  <script src="scripts/pixel-unit-vehicles.js"></script>
+  <script src="scripts/pixel-population-scale.js"></script>
+  <script src="scripts/pixel-building-interiors.js"></script>
+  <script src="scripts/pixel-building-shapes.js"></script>
+  <script src="scripts/pixel-building-styles.js"></script>
+  <script src="scripts/pixel-building-devices.js"></script>
+  <script src="scripts/pixel-building-garrison.js"></script>
+  <script src="scripts/pixel-building-district.js"></script>
+  <script src="scripts/pixel-building-style-lab.js"></script>
+  <script src="tests/pixel-building-styles.js"></script>
+</body>
+</html>

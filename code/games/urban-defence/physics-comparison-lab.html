@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Urban Defence physics comparison lab</title>
+    <style>
+      :root { color-scheme: dark; font: 16px/1.5 system-ui, sans-serif; background: #101510; color: #d3e8c5; }
+      body { margin: 24px auto; padding: 0 16px; max-width: 1200px; }
+      a { color: #9edcf0; }
+      button { margin: 4px 6px 4px 0; padding: 8px 12px; }
+      .toolbar, .cards { display: flex; flex-wrap: wrap; gap: 12px; }
+      .card { flex: 1 1 320px; min-width: 280px; border: 1px solid #40503d; background: #151d16; padding: 12px; }
+      canvas { display: block; width: 100%; height: auto; background: #020402; image-rendering: pixelated; }
+      .stats { min-height: 3em; color: #bce6a0; }
+      .checks { white-space: pre-wrap; }
+      .recommendation { border-left: 4px solid #86b86a; padding-left: 12px; }
+      table { width: 100%; border-collapse: collapse; }
+      th, td { border: 1px solid #40503d; text-align: left; vertical-align: top; padding: 8px; }
+      @media (max-width: 640px) { body { margin-top: 12px; } }
+    </style>
+  </head>
+  <body>
+    <h1>Physics comparison lab</h1>
+    <p>Three small, separate simulations use models already present in Urban Defence labs. They do not load or edit the live game world, saves, or resources. Use the controls to compare how they behave under the same fixed-step clock.</p>
+    <p><a href="physics-lab.html">Water physics lab</a> | <a href="particle-lab.html">Particle world lab</a> | <a href="collapse-lab.html">Building collapse lab</a> | <a href="tests/rendering.html">Building style and damage rendering checks</a> | <a href="pixel-unit-comparison-lab.html">Bullet/missile damage checks</a> | <a href="index.html">Live game</a></p>
+
+    <div class="toolbar" aria-label="Shared simulation controls">
+      <button id="run" type="button" aria-pressed="false">Run all</button>
+      <button id="step" type="button">Step 60 ticks</button>
+      <button id="reset" type="button">Reset all</button>
+      <span id="clock-status" role="status">Paused</span>
+    </div>
+
+    <div class="cards">
+      <section class="card" aria-labelledby="water-title">
+        <h2 id="water-title">A · Continuous water</h2>
+        <p>Fractional water volumes flow under gravity and level sideways. Open the divider and observe flow into the dry chamber.</p>
+        <button id="water-breach" type="button">Open divider</button>
+        <canvas id="water-view" width="400" height="240" aria-label="Fractional water flow simulation"></canvas>
+        <p id="water-stats" class="stats" role="status"></p>
+        <p><strong>Strength:</strong> stable, cheap flood-depth rules. <strong>Limitation:</strong> coarse pressure and no fluid force on structures.</p>
+      </section>
+
+      <section class="card" aria-labelledby="collapse-title">
+        <h2 id="collapse-title">B · Structural members</h2>
+        <p>Connected beams, support loss, damage and collisions create falling debris. Blast the lower support to start a progressive collapse.</p>
+        <button id="collapse-blast" type="button">Damage lower support</button>
+        <canvas id="collapse-view" width="400" height="240" aria-label="Building member collapse simulation"></canvas>
+        <p id="collapse-stats" class="stats" role="status"></p>
+        <p><strong>Strength:</strong> legible building-scale damage and repair. <strong>Limitation:</strong> a gameplay approximation, not engineering analysis.</p>
+      </section>
+
+      <section class="card" aria-labelledby="particle-title">
+        <h2 id="particle-title">C · Shared material grid</h2>
+        <p>Terrain, barriers, water and debris occupy one cell each. Blast the left support and watch solid debris fall while water routes around it.</p>
+        <button id="particle-blast" type="button">Blast left support</button>
+        <button id="particle-build" type="button">Place supported material</button>
+        <canvas id="particle-view" width="400" height="240" aria-label="Shared terrain, water and debris simulation"></canvas>
+        <p id="particle-stats" class="stats" role="status"></p>
+        <p><strong>Strength:</strong> one authority for terrain, water and debris interactions. <strong>Limitation:</strong> grid-scale geometry; higher cost and larger-world performance need measurement.</p>
+      </section>
+
+      <section class="card" aria-labelledby="hazard-title">
+        <h2 id="hazard-title">D · Experimental hazards</h2>
+        <p>Pour lava to watch it flow, conduct heat, damage nearby buildings and cool into basalt. Fire a limited-energy beam through a building or just below the ground surface; call a meteor for an impact crater.</p>
+        <button id="pour-lava" type="button">Pour lava</button>
+        <button id="laser-building" type="button">Laser through building</button>
+        <button id="laser-up" type="button">Diagonal laser ↗</button>
+        <button id="laser-down" type="button">Diagonal laser ↘</button>
+        <button id="laser-ground" type="button">Laser through surface</button>
+        <button id="meteor" type="button">Meteor impact</button>
+        <canvas id="hazard-view" width="400" height="240" aria-label="Isolated lava, laser and meteor experiment"></canvas>
+        <p id="hazard-stats" class="stats" role="status"></p>
+        <p><strong>Strength:</strong> heat conduction, energy transfer, cooling and phase changes create persistent local effects. <strong>Limitation:</strong> temperatures and material values are qualitative gameplay parameters, not real-world measurements.</p>
+      </section>
+    </div>
+
+    <h2>Integration recommendation</h2>
+    <div class="recommendation">
+      <p><strong>Do not replace the live game's physics wholesale yet.</strong> The live game currently uses a heightfield plus separate building and water approximations. A staged approach is safer: keep heightfield and current economy/combat authoritative, selectively add tested cell-based interactions in small areas, and only expand after save compatibility and target-device benchmarks.</p>
+      <table>
+        <thead><tr><th>Model</th><th>Best fit</th><th>Recommendation</th></tr></thead>
+        <tbody>
+          <tr><td>Continuous water</td><td>Fast surface pools, depth-based flooding</td><td>Keep for the broad map; improve only measured gaps such as connectivity and drainage.</td></tr>
+          <tr><td>Structural members</td><td>Building damage, support, repair and readable collapse</td><td>Promising to extend after terrain support and load rules are validated together.</td></tr>
+          <tr><td>Shared material grid</td><td>Local terrain/water/debris/building contact</td><td>Best candidate for an opt-in local-area experiment, not yet a full-map replacement.</td></tr>
+          <tr><td>Arcade hazards</td><td>Memorable weapons and environmental events</td><td>Worth prototyping as optional abilities after the core loop is stable; tune energy, cooling, crater size and counterplay before adding them to matches.</td></tr>
+        </tbody>
+      </table>
+      <p>These are prototype comparisons, not evidence that a model is production-ready. The thermal model tracks per-cell enthalpy, conduction, ambient heat loss and simplified melt/freeze transitions; its temperatures, heat capacities and phase thresholds are qualitative gameplay parameters, not real-world material constants. Full-map simulation cost, mobile performance, deterministic saves, tunneling, pathing, and unit interaction remain integration gates.</p>
+    </div>
+
+    <h2>Sanity checks</h2>
+    <pre id="checks" class="checks" aria-live="polite"></pre>
+
+    <script src="scripts/fixed-step.js"></script>
+    <script src="scripts/physics-test-world.js"></script>
+    <script src="scripts/collapse-model.js"></script>
+    <script src="scripts/particle-world.js"></script>
+    <script src="scripts/thermal-hazard-world.js"></script>
+    <script src="scripts/physics-comparison-lab.js"></script>
+  </body>
+</html>

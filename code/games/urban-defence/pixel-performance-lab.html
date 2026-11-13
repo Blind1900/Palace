@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Urban Defence three-building pixel workload</title>
+    <style>
+      body { margin: 24px; background: #070b08; color: #bce6a0; font: 16px sans-serif; line-height: 1.5; }
+      a { color: #9edcf0; }
+      button { margin: 6px 6px 6px 0; padding: 8px; }
+      .canvas-viewport { max-width: 640px; overflow-x: auto; }
+      canvas { display: block; background: #020202; image-rendering: pixelated; }
+      pre { white-space: pre-wrap; }
+    </style>
+  </head>
+  <body>
+    <h1>Three-building pixel workload</h1>
+    <p>Blueprint squares match the visible building squares inside each empty planned cell. At scales of four display pixels or larger, building and delivery squares leave one-pixel right/bottom visual gutters for roomier repair openings; two-pixel cells stay full-sized. Occupancy and support remain full-cell physics. Occupied cells show no blueprint border.</p>
+    <p>Settled pixels contribute weight along connected paths to terrain. Support capacity is 128 cell-weight units; overload turns support cells into debris. Reported load and overload failures are per world. This is static load sharing, not bending or rigid-body dynamics.</p>
+    <p>Three tall frames run together on one browser animation loop, each in its own 160 by 90 particle world. All three basins are breached; the middle foundation is blasted. Each frame starts after 40 simulated seconds of dry construction so crawling material is already active. Preparation is excluded from startup FPS measurement.</p>
+    <p>This is an aggregate simulation and rendering workload, not three buildings sharing terrain or water. It does not measure cross-building collisions, a full battlefield, workers or live-game integration. All three canvases redraw each animation frame, even when below the viewport. Hidden tabs are reported separately.</p>
+    <p><a href="pixel-construction-lab.html">Pixel construction lab</a> | <a href="pixel-shared-world-lab.html">Shared-world workload</a></p>
+    <button id="pause" type="button" aria-pressed="false">Pause</button>
+    <button id="reset" type="button">Restart workload</button>
+    <p id="fps">Render FPS: measuring...</p>
+    <p id="accounting" role="status"></p>
+    <pre id="status"></pre>
+    <div class="canvas-viewport"><canvas id="world-1" width="640" height="360" aria-label="Tall pixel building one"></canvas></div>
+    <div class="canvas-viewport"><canvas id="world-2" width="640" height="360" aria-label="Damaged tall pixel building two"></canvas></div>
+    <div class="canvas-viewport"><canvas id="world-3" width="640" height="360" aria-label="Tall pixel building three"></canvas></div>
+    <script src="scripts/fixed-step.js"></script>
+    <script src="scripts/lab-fps.js"></script>
+    <script src="scripts/particle-world.js"></script>
+    <script src="scripts/pixel-construction-scenario.js"></script>
+    <script src="scripts/particle-lab-render.js"></script>
+    <script src="scripts/pixel-construction-render.js"></script>
+    <script src="scripts/pixel-construction-workload.js"></script>
+    <script src="scripts/pixel-performance-lab.js"></script>
+    <script src="scripts/lab-viewport.js"></script>
+  </body>
+</html>

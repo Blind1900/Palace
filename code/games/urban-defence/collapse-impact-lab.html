@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Urban Defence impact rotation experiment</title>
+    <style>
+      body { margin: 24px; background: #070b08; color: #bce6a0; font: 16px sans-serif; line-height: 1.5; }
+      a { color: #9edcf0; }
+      button { margin: 6px 6px 6px 0; padding: 8px; }
+      canvas { display: block; width: min(100%, 640px); height: auto; background: #020202; image-rendering: pixelated; }
+    </style>
+  </head>
+  <body>
+    <h1>Impact rotation experiment</h1>
+    <p>Two loose line-shaped beams fall together: gold starts above cyan. The camera follows their fall. Compare a centered hit with left- and right-offset hits, then watch the resting slabs settle to the ground. This is an isolated experiment: dense debris piles can still overlap, so impact spin is not enabled in the building lab or the game.</p>
+    <p><a href="collapse-lab.html">Building collapse lab</a> | <a href="collapse-benchmark.html">Collapse performance lab</a></p>
+    <button id="left" type="button">Reset: left offset</button>
+    <button id="center" type="button">Reset: centered</button>
+    <button id="right" type="button">Reset: right offset</button>
+    <button id="pause" type="button" aria-pressed="false">Pause</button>
+    <button id="step" type="button">Step once</button>
+    <canvas id="lab" width="640" height="340" aria-label="Two falling beams in an isolated impact test"></canvas>
+    <p id="status" role="status"></p>
+    <p id="fps">Render FPS: measuring...</p>
+    <script src="scripts/fixed-step.js"></script>
+    <script src="scripts/lab-fps.js"></script>
+    <script src="scripts/collapse-model.js"></script>
+    <script src="scripts/collapse-impact-scenario.js"></script>
+    <script src="scripts/collapse-impact-lab.js"></script>
+    <script src="scripts/lab-viewport.js"></script>
+  </body>
+</html>

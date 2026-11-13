@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Urban Defence - tunnel network, storage and pipeline highway</title>
+  <style>
+    body { background:#10191d; color:#d8e3d8; font:15px system-ui; max-width:1100px; margin:auto; padding:20px; }
+    a { color:#8bc6d6; } button, select, input { margin:4px; padding:6px; }
+    canvas { width:100%; height:auto; image-rendering:pixelated; border:1px solid #52634a; cursor:crosshair; }
+    pre { white-space:pre-wrap; font-size:13px; }
+    .legend span { display:inline-block; margin-right:12px; }
+    .legend i { display:inline-block; width:10px; height:10px; margin-right:4px; vertical-align:middle; }
+    .cols { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+    .bridge-row { display:flex; gap:16px; align-items:flex-end; flex-wrap:wrap; margin-bottom:10px; }
+    .bridge-row h3 { width:100%; margin:6px 0 0; }
+    .bridge-row figure { margin:0; }
+    .bridge-row canvas { cursor:default; }
+    #net-view { position:relative; overflow:hidden; border:1px solid #52634a; touch-action:none; }
+    #net-view canvas { display:block; border:0; transform-origin:0 0; }
+    #net-view.panning canvas { cursor:grabbing; }
+    .view-help { font-size:13px; margin:4px 0; color:#9fb3a3; }
+    .bridge-row figcaption { font:12px monospace; max-width:420px; }
+  </style>
+</head>
+<body>
+  <p><a href="pixel-tunnel-lab.html">Original tunnel lab</a> | <a href="pixel-combat-lab.html">Combat</a> |
+    <a href="pixel-city-map-lab.html?fullMap=1">Generated full map</a></p>
+  <h1>Tunnel network lab</h1>
+  <p>Each faction generates a surface entrance shaft, a trunk tunnel and a branch to its resource node.
+    Crews survey the centre line with markers, dig while lining both sides with orange wall pixels, then clear the markers.
+    When a tunnel reaches a node, two miners start hauling HM, dig out their own storage shaft and room,
+    and fill it. The storage room then joins the pipeline highway: two separate 3 px tubes just under the surface,
+    an SM tube (green casing, channel 2 px down, fed by farm silos) and an HM tube (gold casing, channel 5 px down) that
+    drops HM into an underground cellar beneath each allied building. Cargo particles travel inside each dark channel.
+    Blasted pipe cells flash red, then repair themselves one pixel at a time (flooded cells wait for the water to drain).</p>
+  <p>Dig tool: the surface line and every tunnel's outer wall glow; the section nearest the mouse glows cyan to show
+    where the new tunnel will start. Click it, then move to preview the route and click again. The end snaps onto a
+    nearby tunnel or onto the ground (with a pulsing ring), so hovering over the far side of the mountain digs a level
+    pass all the way through. If the direct route is blocked the preview reroutes itself (water and structures are
+    marked red and named in the tooltip by the mouse). Tunnels build straight through open caves, walling off the gap.
+    Right-click or Esc cancels.</p>
+  <p>Surface roads: each faction gets a road from its entrance shaft past every building front. Building pads are
+    terraced so the road stays level under each building and ramps between them. With <b>Build road</b>, the start and end
+    snap to road ends (to join them), tunnel-pass floors or the ground. The preview grades the deck at 1:2 where it can
+    (steeper ramps up to 1:1 are flagged), cuts bumps (orange), fills dips (tan), and bridges water and deep gaps with
+    concrete decks on pillars (blue). Road ends snap from up to 12 px away (hovering anywhere on a road jumps to its
+    nearest open end), so any road can be extended; a dashed guide links the mouse to the snapped surface marker.
+    A road over a surface shaft lays a flush steel hatch (hazard-striped frame, manhole lid on the ladder): walkers
+    cross it like the rest of the road and cannot fall in, the ladder no longer pokes up into the roadway, and the
+    shaft below stays open for climbers. Roads refuse to overlap other roads, sit under water or cut
+    the pipeline, and a cut deeper than 14 px asks for a tunnel pass instead; a road then follows the pass floor through
+    the mountain. Roads pave one column at a time, repair blast damage on their own, and give allied ground units a
+    ×1.25 speed bonus. Bridges take the faction's style (blue modern, red gothic) or the <b>Bridge style</b> choice;
+    see the bridge sheet below.</p>
+  <p>
+    <label>Seed <input id="net-seed" type="number" value="1" min="1" style="width:6em"></label>
+    <button id="net-regen">Regenerate</button>
+    <button id="net-run">Run</button>
+    <button id="net-step">Step 60 ticks</button>
+    <label>Speed <select id="net-speed"><option value="1">1x</option><option value="4" selected>4x</option>
+      <option value="16">16x</option></select></label>
+  </p>
+  <p>
+    <label>Click mode <select id="net-mode">
+      <option value="dig" selected>Dig tunnel (click the glowing surface or a tunnel wall, then a target)</option>
+      <option value="road">Build road (click a start on the ground, then an end)</option>
+      <option value="blast">Blast radius 4</option>
+    </select></label>
+    <label>Bridge style <select id="net-bridge-style">
+      <option value="auto" selected>Faction (blue modern)</option><option value="asian">Asian</option>
+      <option value="gothic">Gothic</option><option value="modern">Modern</option>
+    </select></label>
+    <button id="net-checks">Run focused checks</button>
+  </p>
+  <p id="net-notice" role="status"></p>
+  <p class="view-help">Scroll to zoom toward the mouse, click and drag (or middle-drag) to pan, and press 0 or
+    <button id="net-view-reset">Reset view</button> to fit. Zoom <span id="net-zoom">1.0x</span></p>
+  <div id="net-view"><canvas id="net-canvas" width="360" height="180" aria-label="Tunnel network, walls, ladders, storage rooms and pipeline"></canvas></div>
+  <p class="legend">
+    <span><i style="background:#bf7b19"></i>Wall</span><span><i style="background:#c9a66b"></i>Ladder</span>
+    <span><i style="background:#f2f2f2"></i>Survey marker</span><span><i style="background:#a35bd6"></i>HM node</span>
+    <span><i style="background:#967828"></i>HM tube</span><span><i style="background:#34822e"></i>SM tube</span>
+    <span><i style="background:#12100c;border:1px solid #666"></i>Tube channel</span>
+    <span><i style="background:#e0453a"></i>Broken pipe</span><span><i style="background:#fffadc"></i>Just repaired</span>
+    <span><i style="background:#e6cd72"></i>HM particle / stored HM</span><span><i style="background:#7fd65b"></i>SM particle</span>
+    <span><i style="background:#ffd678"></i>Dig glow</span><span><i style="background:#5ae6ff"></i>Dig start section</span>
+    <span><i style="background:#ffe14d"></i>Miner</span><span><i style="background:#ffdc8c"></i>Tunnel lamp</span>
+    <span><i style="background:#4c3620"></i>Timber prop</span><span><i style="background:#58a028"></i>Supply gauge</span>
+    <span><i style="background:#323438"></i>Road deck</span><span><i style="background:#eccc5c"></i>Lane dash</span>
+    <span><i style="background:#9c988e"></i>Bridge / pillar</span><span><i style="background:#ff963c"></i>Road cut</span>
+    <span><i style="background:#e6c878"></i>Road fill</span>
+    <span><i style="background:#76808a"></i>Tunnel hatch</span><span><i style="background:#464c54"></i>Manhole lid</span>
+  </p>
+  <div class="cols"><pre id="net-status"></pre><pre id="net-log"></pre></div>
+  <p>Units use a dry 3×3 footprint: they walk on solid ground, climb only where a ladder is present, and fall down open shafts.
+    Routes are rejected if they cross water or structures (the dig tool reroutes around them); a flooded dig face pauses the crew.
+    Pipes are logical, like farm pipes: farms and silos do not drain the water basin, but blasting a pipe pixel
+    breaks that line and particles wait at the break with their cargo until the pipe repairs itself. Buildings are drawn
+    with the building lab's styled art (blue modern, red gothic; visual only, the supply logic uses their footprints).
+    Add <code>?classic=1</code> for the small outline layout.</p>
+  <h2>Bridge styles</h2>
+  <p>Each panel is a small river world with one road planned straight across it by the same road planner, in each
+    building style. Only the deck (and pillars on dry land) are real wall pixels, so bridges never drain the river; the
+    superstructure is drawn around it: <b>Asian</b> - a red covered "wind and rain" gallery with tiled roofs and pagodas
+    on bracketed stone piers, or a red moon arch with end pavilions on short spans; <b>Gothic</b> - a stone viaduct of
+    keystoned arches with a balustrade, spired towers and a pointed-arch arcade; <b>Modern</b> - a white tied arch with
+    hanger cables over a slim girder on Y piers.</p>
+  <div id="net-bridges"></div>
+  <h2>Focused checks</h2><pre id="net-results"></pre>
+  <script src="scripts/particle-world.js"></script>
+  <!-- Building lab styling (visual sprites only); the lab falls back to outlines if these fail to load. -->
+  <script src="scripts/particle-terrain-import.js"></script>
+  <script src="scripts/pixel-construction-scenario.js"></script>
+  <script src="scripts/pixel-city-farms.js"></script>
+  <script src="scripts/pixel-construction-logistics.js"></script>
+  <script src="scripts/pixel-city-military.js"></script>
+  <script src="scripts/pixel-map-construction.js"></script>
+  <script src="assets/unit-reference.js"></script>
+  <script src="scripts/pixel-unit.js"></script>
+  <script src="scripts/pixel-population-scale.js"></script>
+  <script src="scripts/pixel-building-interiors.js"></script>
+  <script src="scripts/pixel-building-shapes.js"></script>
+  <script src="scripts/pixel-building-styles.js"></script>
+  <script src="scripts/pixel-building-devices.js"></script>
+  <script src="scripts/pixel-tunnel-network.js"></script>
+  <script src="scripts/pixel-tunnel-mining.js"></script>
+  <script src="scripts/pixel-surface-roads.js"></script>
+  <script src="scripts/pixel-pipeline-network.js"></script>
+  <script src="tests/pixel-tunnel-network.js"></script>
+  <script src="scripts/pixel-tunnel-network-lab.js"></script>
+</body>
+</html>

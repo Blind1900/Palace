@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Urban Defence generated-terrain construction lab</title>
+    <style>
+      body { margin: 24px; background: #070b08; color: #bce6a0; font: 16px sans-serif; line-height: 1.5; }
+      a { color: #9edcf0; } button { margin: 4px; padding: 8px; }
+      #viewport { max-width: 100%; overflow: auto; }
+      canvas { display: block; image-rendering: pixelated; background: #020202; }
+    </style>
+  </head>
+  <body>
+    <h1>Generated-terrain pixel construction lab</h1>
+    <p>A one-way crop of a newly generated game map, including sampled terrain, water and tunnels. No live buildings, economy, units or saves are imported or changed. A short frame is placed only on suitable ground; its three supports can start at different heights. Buried-core mode excavates a local basement and places underground bases; it does not flatten the surrounding terrain. Generate another map if no site is available.</p>
+    <p>The frame retains nine free seeds, a separate 1000 HM budget, one HM per delivered pixel and support capacity 128. Its 43-cell footprint is experimental, not the live housing footprint. Water is conserved within this closed crop; crop edges do not exchange particles with the rest of the map. Completion stops delivery permanently. Paid material left outside the completed frame remains in the world without refunds or teleporting.</p>
+    <p><a href="pixel-city-map-lab.html">Generated pixel city lab</a> | <a href="pixel-shared-world-lab.html">Shared pixel-world lab</a> | <a href="particle-map-lab.html">Full-map import lab</a> | <a href="index.html">Unchanged game prototype</a></p>
+    <button id="generate" type="button">Generate new map</button>
+    <label for="delivery-mode">Delivery mode on next generation</label>
+    <select id="delivery-mode">
+      <option value="inside" selected>Experimental inside surfaces (overlapping deliveries)</option>
+      <option value="outside">Original outside outline (solid deliveries)</option>
+    </select>
+    <label><input id="buried-core" type="checkbox" checked> Buried pillar cores and basement on next generation</label>
+    <label><input id="connecting-floors" type="checkbox" checked> Level connecting floor sections on next generation</label>
+    <p>Inside-mode deliveries originate at the center pixel of each 3-by-3 buried core, costing one HM each. Overlapping deliveries can share that center. If it is destroyed, another surviving pixel in the same core supplies deliveries; a fully destroyed base stops emitting until repaired. Connecting floors are one-cell-thick horizontal sections directly below the deeper neighboring core, with higher pillars extended down to meet them. Floors/extensions are free initial lab foundation material, not additional cores. Terrain below stays intact; water, tunnels or other material in a proposed floor reject that site rather than being overwritten. Basement excavation reaches each level floor without flattening the surrounding ground.</p>
+    <p>Buried-core mode extends each three-cell-wide pillar three cells into the ground: 27 additional free core pixels plus the original nine seeds. Without connecting floors, the basement follows the local surface three cells down; with floors, excavation reaches the level floor sections. Water and other occupied material are never removed. Gold marks surviving buried core pixels. Any surviving core pixel permits paid repair. Losing all 27 permanently disables construction and repair; terrain restoration cannot revive the building. Existing travelling material remains accounted for but stops repairing. These placement earthworks are free lab fixtures, not live gameplay costs.</p>
+    <p>Inside mode carries paid pixels in a separate travelling layer: they crawl cardinally over settled beams/supports and ground access. They choose the nearest reachable available repair target using shortest routes and can overlap other deliveries immediately, without traffic detours or yielding. Pale squares are deliveries; white means multiple deliveries at that position. Terrain interiors, water and debris cannot be traversed. Targets remain unique, and a repair becomes solid only in an empty, supported cell. Overlap does not merge material or charge/refund HM. Blasts also destroy travelling pixels in their radius. Unsupported or flooded deliveries wait; no teleporting. This mode is lab-only.</p>
+    <button id="pause" type="button" disabled>Run simulation</button>
+    <button id="step" type="button" disabled>Step 60 ticks (paused)</button>
+    <button id="blast" type="button" disabled>Blast foundation</button>
+    <button id="clear" type="button" disabled>Clear debris</button>
+    <button id="restore" type="button" disabled>Restore original terrain crop</button>
+    <button id="audit" type="button" disabled>Audit current repair routes</button>
+    <label for="core-selection">Buried base</label>
+    <select id="core-selection"><option value="0">Left</option><option value="1">Middle</option><option value="2">Right</option></select>
+    <button id="blast-core" type="button" disabled>Blast selected buried core</button>
+    <label for="floor-selection">Floor section</label>
+    <select id="floor-selection"><option value="0">Left span</option><option value="1">Right span</option></select>
+    <button id="excavate-floor" type="button" disabled>Excavate ground below selected floor</button>
+    <p>Floor excavation removes only three terrain cells beneath the span midpoint. It never removes floor/core material, water or debris, and gives no HM refund. Support and weight react on the next physics tick; remaining ground may still hold the floor.</p>
+    <p>Restoration refills only originally imported terrain that is now empty. Water, debris and building material are never overwritten; lab restoration costs no HM. Clearing debris gives no refund.</p>
+    <p id="message" role="status">Preparing a generated map...</p>
+    <p id="source-status"></p>
+    <p id="status" role="status"></p>
+    <p id="accounting" role="status"></p>
+    <p id="core-status" role="status"></p>
+    <p id="delivery-status" role="status"></p>
+    <p id="floor-status" role="status"></p>
+    <p id="sites" role="status"></p>
+    <p id="routes" role="status">No route audit yet.</p>
+    <p id="fps">Render FPS: measuring...</p>
+    <p>Diagnostic legend: gold core pixels; cyan outlines usable source slots; magenta outlines current repair blockers (including missing support); red outlines waiting deliveries. Load fill is amber at 50% capacity and red at 80%; the core/delivery colors may cover that fill. Floor peak values remain available above. Overload failures count actual pixels shed into debris, not merely red warnings. Outlines preserve the underlying water/debris color. Diagnostics do not move particles or spend HM.</p>
+    <p>Click a map cell to inspect it without digging or spending HM, or enter grid coordinates below. A cyan full-cell outline marks your selection and follows canvas resizing. Inspection is a snapshot at the reported tick; inspect again to update. Initial material means immediately after intentional basement/foundation placement. Original imported tunnel spaces are identified separately from the dug basement. Incoming reservations and delivery blocker coordinates are included; selection resets on a new map or invalid input.</p>
+    <label for="inspect-x">Grid x</label><input id="inspect-x" type="number" min="0" max="159" step="1" value="61">
+    <label for="inspect-y">Grid y</label><input id="inspect-y" type="number" min="0" max="89" step="1" value="73">
+    <button id="inspect-cell" type="button" disabled>Inspect cell</button>
+    <p id="cell-status" role="status">No cell inspected.</p>
+    <div id="viewport"><canvas id="lab" aria-label="Pixel construction on imported game terrain"></canvas></div>
+    <script src="scripts/particle-world.js"></script>
+    <script src="scripts/particle-terrain-import.js"></script>
+    <script src="scripts/pixel-construction-scenario.js"></script>
+    <script src="scripts/pixel-city-farms.js"></script>
+    <script src="scripts/pixel-city-military.js"></script>
+    <script src="scripts/pixel-map-construction.js"></script>
+    <script src="scripts/pixel-building-styles.js"></script>
+    <script src="scripts/particle-lab-render.js"></script>
+    <script src="scripts/pixel-construction-render.js"></script>
+    <script src="scripts/fixed-step.js"></script>
+    <script src="scripts/lab-fps.js"></script>
+    <script src="scripts/pixel-map-construction-lab.js"></script>
+    <script src="scripts/lab-viewport.js"></script>
+  </body>
+</html>

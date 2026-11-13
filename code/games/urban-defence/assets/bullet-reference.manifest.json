@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "id": "bullet",
+  "source": "User-supplied Urban Defence Ref\\Units Bullet.gif (animated original)",
+  "nativeFacing": -1,
+  "tintColor": null,
+  "clips": {
+    "fly": "Mechs(hoppers)\\Bullet.gif"
+  }
+}

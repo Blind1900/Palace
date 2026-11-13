@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Urban Defence shared pixel world</title>
+    <style>
+      body { margin: 24px; background: #070b08; color: #bce6a0; font: 16px sans-serif; line-height: 1.5; }
+      a { color: #9edcf0; }
+      button, select { margin: 6px 6px 6px 0; padding: 8px; }
+      .canvas-viewport { max-width: 960px; overflow-x: auto; }
+      canvas { display: block; background: #020202; image-rendering: pixelated; }
+      pre { white-space: pre-wrap; }
+    </style>
+  </head>
+  <body data-workload="shared">
+    <h1>Shared pixel construction world</h1>
+    <p>Blueprint squares match the visible building squares on a uniform grid. At scales of four display pixels or larger, building and delivery squares leave a one-display-pixel gutter on their right and bottom edges. This makes repair openings visibly roomier; every square still occupies its full physics cell, and water cannot enter the visual gutters. The smallest two-pixel scale retains full squares for legibility. Occupied cells show no blueprint border.</p>
+    <p>Single-cell repair openings between settled or moving building cells show no blueprint border. With visual gutters, their clear opening is larger than the incoming visible repair square. This applies horizontally and vertically; physics, support weight and planned dimensions are unchanged.</p>
+    <p>Weight is enabled: settled cells each weigh one unit, distributed along shortest connected routes to terrain. Cells exceeding the selected capacity become debris; the default is 128 units. Wider supports create parallel load paths. Reported peak load and overload totals apply to this entire world. This simplified static model excludes bending, torque and the weight of unbonded delivery pixels, water and debris.</p>
+    <p>Three tall buildings now occupy one 240 by 90 particle grid. Water, terrain, debris and moving material use the same occupancy and collision rules. Each building has its own 1000 HM budget, nine free seeds, plan and delivery agents. Plans and delivery points cannot overlap. Placement reservations persist for the life of the world, even after destruction.</p>
+    <p>The default prepared workload advances all buildings together for 40 dry simulated seconds, then breaches the left basin and blasts the middle foundation. Natural mode instead starts at tick zero with a sealed basin and no automatic damage. Shared particles advance once per tick, followed by building updates in left-to-right order. This order can affect traffic; it is not a fairness guarantee. Support remains connectivity to any terrain or settled building, not an ownership-specific strength model.</p>
+    <p>Debris and water totals are shared; settled plan cells and active agents are reported per building. Select a building to blast its left foundation, including while paused; weight and connectivity respond on the next simulation tick. The destroyed-material ledger records the initial middle blast and each subsequent selected blast. Ledger entries identify the blast location, not particle ownership after debris moves. Accounting checks conserve all building material and water while checking HM separately. No rigid-body collisions, workers, save slot or live-game integration are included.</p>
+    <p><a href="pixel-construction-lab.html">Pixel construction lab</a> | <a href="pixel-performance-lab.html">Independent-world workload</a> | <a href="pixel-map-construction-lab.html">Generated-terrain construction lab</a></p>
+    <button id="pause" type="button" aria-pressed="false">Pause</button>
+    <button id="step-second" type="button">Step one simulated second (paused)</button>
+    <label for="capacity">Support capacity on restart</label>
+    <select id="capacity">
+      <option value="16">Weak: 16 weight units</option>
+      <option value="128" selected>Standard: 128 weight units</option>
+      <option value="256">Strong: 256 weight units</option>
+    </select>
+    <label for="setup">Experiment on restart</label>
+    <select id="setup">
+      <option value="prepared" selected>Prepared water and damage workload</option>
+      <option value="natural">Natural dry construction from free seeds</option>
+    </select>
+    <label for="layout">Building layout on restart</label>
+    <select id="layout">
+      <option value="standard" selected>Three standard frames</option>
+      <option value="asymmetric">Standard + mirrored uneven spans</option>
+    </select>
+    <label for="ground">Terrain on restart</label>
+    <select id="ground">
+      <option value="flat" selected>Flat foundation terrain</option>
+      <option value="raised">Raised steps beside left delivery points</option>
+    </select>
+    <button id="reset" type="button">Restart workload</button>
+    <p>Raised terrain adds six terrain cells in a three-column staircase beside each building's left foundation before construction begins. It occupies one of six delivery points, stays outside the blueprint and leaves the nine original ground contacts intact. Other sources must deliver material around the changed outline. Select Natural to watch from tick zero. The prepared experiment still breaches water and damages the middle foundation; blasts can remove parts of the raised steps. Foundation restoration refills original ground only, not raised steps. Terrain settings apply only on restart and cost no HM in this lab.</p>
+    <p>Blocked delivery points and longer routes can substantially slow construction. The Standard-capacity, Natural, uneven-span raised-terrain fixture completes within 120,000 simulated ticks; this is not a completion-time promise for damaged or flooded sites. Prepared blasts can remove different amounts of building material because the terrain changes how far construction progresses before damage.</p>
+    <p>The uneven-span comparison keeps the left frame standard, moves the middle frame's center support toward its left side, and mirrors that spacing in the right frame. Each still uses three equally thick supports, the same outer footprint and nine free seeds. Select Natural with Standard capacity to watch paid construction without automatic damage. Layout changes apply only on restart. Uneven spans change carried load through the existing static connectivity model, not bending or torque.</p>
+    <p>To watch weight failures emerge during construction, select Weak and Natural, then restart. No building material is preloaded: each building begins with nine free seeds and pays for all emitted pixels. Standard is the existing 128-unit baseline; capacity changes only on restart, never on an existing cell. Natural mode keeps the basin sealed and applies no automatic blast. Weak supports can repeatedly fail and consume HM; clearing debris does not strengthen them.</p>
+    <p id="experiment-status"></p>
+    <label for="building">Selected building</label>
+    <select id="building">
+      <option value="0">Building 1 (left)</option>
+      <option value="1" selected>Building 2 (middle)</option>
+      <option value="2">Building 3 (right)</option>
+    </select>
+    <button id="blast-building" type="button">Blast selected left foundation</button>
+    <button id="breach-basin" type="button">Breach shared water basin</button>
+    <p>The basin can be breached manually in Natural mode without restarting or blasting a building. The prepared experiment already opens this outlet. Breaching removes only the original outlet terrain and does not create water, drain it or guarantee that it reaches a foundation. Water movement and occupancy determine whether excavated ground floods; flooded ground cannot be restored while water occupies it.</p>
+    <button id="excavate-ground" type="button">Excavate ground below selected left support</button>
+    <p>Ground-only excavation removes up to three terrain cells directly beneath the selected left support. Water, debris and building or delivery pixels are never removed by this tool. Neighboring terrain and other supports can still carry weight through cardinal connections; losing direct ground contact does not guarantee collapse. Support and load respond on the next physics tick. Use Natural mode to separate this experiment from the default automatic blast. Terrain restoration can refill empty excavated cells, but must not overwrite material occupying them.</p>
+    <button id="restore-foundation" type="button">Restore selected foundation terrain</button>
+    <p>Partial restoration reports every blocked ground cell's zero-based coordinates and material: water, fallen debris, settled building or moving construction. These cells remain untouched. The result is a snapshot of that click, not an automatic retry; restoration can be requested again after blockers move or are removed.</p>
+    <p>Terrain restoration is a free lab testing tool, not a gameplay repair: it refills only empty original ground cells inside the selected foundation's blast radius. Occupied cells are reported and never overwritten. Clear fallen debris first if needed. Building pixels are not recreated for free; retained material and further paid deliveries must rebuild them. Restore may be partial if water or material occupies the ground.</p>
+    <button id="clear-debris" type="button">Clear all shared debris</button>
+    <label><input id="show-waiting" type="checkbox"> Mark waiting repair pixels</label>
+    <label><input id="show-loads" type="checkbox"> Show heavy support loads</label>
+    <p>Load colors apply only to settled cells: yellow at 50% of capacity, red at 80%. Unmarked cells carry less than 50%. This is carried weight, not bending stress. The overlay waits for the next particle update after a structural change rather than showing stale loads; cells that overload become debris instead. Blueprint and unbonded moving material are not recolored.</p>
+    <p>Clearing removes only fallen debris across the world, records it separately from blast destruction and refunds no HM. It does not restore terrain or guarantee repair can resume. Waiting marks use red borders with bright centers (a red corner at the smallest size); listed coordinates identify each building's retained agents. Waiting agents may still yield along outlines.</p>
+    <p id="action-status" role="status"></p>
+    <p id="fps">Render FPS: measuring...</p>
+    <p id="accounting" role="status"></p>
+    <pre id="status"></pre>
+    <pre id="throughput-status"></pre>
+    <p>Delivery throughput is a lifetime average of paid pixels emitted per simulated minute after the four-second reveal, not settled-pixel speed or a recent-rate estimate. Productive checks emit at least one pixel; zero-emission checks can mean traffic, occupied sources, reserved sites, lost support or exhausted HM, not necessarily idle agents. Paused wall time is excluded; manual stepping advances simulated time. Completion freezes timing even if later damage removes material. Restart resets these metrics.</p>
+    <p id="waiting-status"></p>
+    <p>Waiting diagnostics identify occupied target or next-step coordinates. Construction material blocking another delivery is labeled delivery traffic; other occupied material is labeled separately. Traffic may move, yield or settle, but the label is not a guarantee of clearance. Routes may cross at different times; particles never share a physics cell. Diagnostics do not change assignments or move blockers.</p>
+    <p id="selected-sites"></p>
+    <p id="terrain-status"></p>
+    <p>Current ground occupancy updates as particles move: empty ground is distinguished from water, debris, settled building and moving material below the nine original seed positions. Unlike a restoration-click result, these counts are live. Water must leave a cell through physics before that cell can be restored; no automatic draining is performed. Occupancy counts alone do not prove that repair routes or sufficient support capacity exist.</p>
+    <button id="audit-recovery" type="button">Audit selected building repair routes</button>
+    <p id="recovery-status" role="status">No route audit yet.</p>
+    <p>Audits also inspect all six delivery points: occupied material, routes to currently unreserved sites, available agent slots and HM. A route can exist even when the six-agent limit or HM prevents emission. Sources are checked sequentially every 60 simulated ticks; the snapshot does not allocate targets, and several ready sources can identify the same site. Blueprint reveal and completed frames do not emit material.</p>
+    <p>During unfinished construction, damage can reopen an earlier blueprint layer. On the next three-tick movement update, all assignments to later layers, unsupported targets or targets occupied by other material are released before agents seek new sites. Paid pixels remain in the world and must crawl through valid routes to repair the earliest layer; reassignment does not guarantee recovery. Completed frames still do not restart deliveries.</p>
+    <p>Before reassignment, occupied-target diagnostics name the blocking material, including water and fallen debris. Clearing debris removes only debris; it does not remove water or restore terrain. When a target becomes clear again, retained material must find a supported outline route rather than teleporting into the opening.</p>
+    <p>Route audits run only on request, not every frame. They search current empty cardinal outline routes to eligible sites in the earliest unfinished layer, respecting other agents' target reservations. An agent's own supported target is included. Reports identify lost current outline contact separately: an adjacent step may regain contact. A route is a snapshot, not a traffic or future-support guarantee. No agents, targets, terrain or HM are changed. Pause first for a stable inspection.</p>
+    <p>Rebuilding checks the current terrain rather than assuming the original flat ground survives. Added terrain inside the blueprint blocks those cells; excavation can remove support, and occupied delivery points stop new material there. Repairs do not flatten terrain, shift the blueprint or replace terrain with building pixels. Removing an obstruction can reopen a route, but disconnected paid pixels may still need outline contact restored. Foundation counts describe only terrain directly below the nine original seed positions, not all structural support paths. Completed frames still do not restart delivery after damage.</p>
+    <div class="canvas-viewport"><canvas id="world-1" width="960" height="360" aria-label="Three tall buildings sharing terrain, water and debris"></canvas></div>
+    <script src="scripts/fixed-step.js"></script>
+    <script src="scripts/lab-fps.js"></script>
+    <script src="scripts/particle-world.js"></script>
+    <script src="scripts/pixel-construction-scenario.js"></script>
+    <script src="scripts/particle-lab-render.js"></script>
+    <script src="scripts/pixel-construction-render.js"></script>
+    <script src="scripts/pixel-construction-workload.js"></script>
+    <script src="scripts/pixel-performance-lab.js"></script>
+    <script src="scripts/lab-viewport.js"></script>
+  </body>
+</html>

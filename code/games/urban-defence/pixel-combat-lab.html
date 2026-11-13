@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Urban Defence — bounded shared combat</title>
+  <style>
+    body { background:#10191d; color:#d8e3d8; font:15px system-ui; max-width:1200px; margin:auto; padding:20px; }
+    a { color:#8bc6d6; } button, select { margin:4px; padding:8px; }
+    .combat-viewport { overflow:auto; max-height:70vh; border:1px solid #52634a; }
+    canvas { display:block; width:100%; height:auto; image-rendering:pixelated; }
+    pre { white-space:pre-wrap; } #combat-status { min-height:7em; }
+  </style>
+</head>
+<body>
+  <p><a href="index.html">Game</a> · <a href="pixel-unit-comparison-lab.html">Original comparison controls/tests</a> ·
+    <a href="pixel-city-map-lab.html">Generated city (separate)</a> |
+    <a href="pixel-tunnel-lab.html">Tunnels, miners and HM chamber</a></p>
+  <h1>Bounded shared combat fixture</h1>
+  <p>One 1100 × 400 physical cell world: two opposing military hangars, population towers,
+    steel-blue farm silos/amber stores/wheat, a water-filled basin, hill and mountain.
+    Units use the city scale with comparison-relative proportions: trooper 1x, tank 3x, mech/hopper 2x,
+    plane 4x, then all are reduced by four into physical cells. Fine sprite details, original timing
+    and integer collision/foot anchors are preserved. Tank passengers remain infantry-sized.</p>
+  <p>Population buildings and hangars have troop-sized entrances. Infantry walks into real openings;
+    larger tanks drive the background route behind every building (friendly or enemy), visible through tinted glass
+    windows, but stop at an enemy core. Mechs pass building walls sideways and land on roofs and floors, walking
+    on them like one-way platforms. Tank and mech fire passes their own building layer; enemy structure still
+    intercepts shots, so attackers breach it, chipping through walls toward their target. Loose debris never stops
+    a round or a unit. With no closer enemy unit, everyone advances on the enemy core, opens fire within 200 cells
+    (no cross-map sniping), digs out rubble settled over it and keeps attacking until it is destroyed.
+    Terrain, water and enemy units remain physical obstacles. Planes never use the background route:
+    flying into any building crashes the plane, damages actual building cells and emits velocity-driven sparks.</p>
+  <button id="combat-run" aria-pressed="true">Pause</button>
+  <button id="combat-step">Step 1/60 second</button>
+  <button id="combat-reset">Reset fixture</button>
+  <label>Scenario <select id="combat-scenario">
+    <option value="original">Original hills and water basin</option>
+    <option value="dry-route">Dry route: automatic troop deployment</option>
+  </select></label>
+  <label><input id="combat-transporting" type="checkbox" checked> Load tank passengers</label>
+  <label><input id="combat-spawning" type="checkbox" checked> Base spawning</label>
+  <label><input id="combat-devices" type="checkbox" checked> Launchers / interceptors</label>
+  <label><input id="combat-fighting" type="checkbox" checked> Unit auto-fire</label>
+  <p>
+    <label>Preview zoom <select id="combat-zoom"><option value="fit">Fit area</option><option value="1">100%</option><option value="2">200%</option><option value="3">300%</option><option value="4">400%</option><option value="8">800%</option><option value="custom" disabled>Wheel zoom</option></select></label>
+    <button id="combat-fit">Fit battlefield</button><span id="combat-zoom-status"></span>
+    <label>Spawn faction <select id="combat-owner"><option value="blue">Blue</option><option value="red">Red</option></select></label>
+    <label>Unit type <select id="combat-kind"><option value="trooper">Trooper</option><option value="tank">Tank</option><option value="hopper">Hopper</option><option value="jet">Jet</option></select></label>
+    <button id="combat-spawn">Spawn selected unit</button>
+    <span id="combat-spawn-status" role="status"></span>
+  </p>
+  <p>
+    <label>Firing unit <select id="combat-unit"></select></label>
+    <label>Target unit <select id="combat-target"></select></label>
+    <button id="combat-fire-target">Fire at target</button>
+    Click the scene to aim/fire. <button id="combat-core">Impact blue base core (gating test)</button>
+    <button id="combat-benchmark">Measure 30 seconds ACTIVE combat</button>
+  </p>
+  <div class="combat-viewport"><canvas id="combat-canvas" width="1100" height="400" aria-label="Shared terrain, water, buildings and fighting units"></canvas></div>
+  <p>Scroll over the scene to zoom at the cursor (25% to 800%). Shift-drag or middle-drag to pan;
+    panning never fires. Ctrl+wheel keeps normal browser zoom. Fit battlefield resets the view.</p>
+  <pre id="combat-selected"></pre>
+  <p id="combat-fire-status" role="status"></p>
+  <details open><summary>Recent projectile impacts (newest first)</summary><pre id="combat-impacts"></pre></details>
+  <pre id="combat-status" aria-live="off"></pre>
+  <h2>Automatic transport and death effects</h2>
+  <p><a href="pixel-combat-lab.html?scenario=dry-route">Watch the automatic dry-route test</a>:
+    starts running immediately with base spawning, troop transport and auto-fire enabled,
+    rooftop weapons initially off so carriers can demonstrate deployment. No movement or firing input is needed.
+    Changing the scenario resets the physical world; the original hills and water remain unchanged in the original scenario.</p>
+  <pre id="combat-behavior" aria-live="off"></pre>
+  <p>Tanks automatically load up to three newly issued troopers while grounded inside their living hangar.
+    Passengers count toward the four-living-unit and 64-lifetime-unit limits, travel protected inside the tank,
+    and do not move, fire or occupy world cells until deployed. Tanks carry them toward the opposing hangar's
+    160-cell approach, or deploy at a nearby hostile frontline within 120 cells of midfield.
+    Every half second they attempt to deploy one trooper directly from their rear hatch into dry, supported
+    space clear of debris and other units. Troops briefly walk out away from the hatch before advancing;
+    they never appear at an enemy's position or teleport to a distant clear spot.
+    Blocked deployment waits and retries without deleting material or passengers. Tanks with cargo prioritize
+    delivery over firing, then join combat after unloading. Near water, a friendly hopper automatically approaches,
+    grips the tank with its feet, lifts it, flies across and lowers it onto checked dry ground.
+    Passengers remain aboard. Automatic wet-route loading reserves a living-unit slot for a hopper
+    (two passengers instead of three). Blocked flight paths or landing sites wait and report the reason;
+    losing the hopper releases the tank to real gravity. Disabling loading prevents new cargo,
+    but already loaded tanks finish their missions. Destroying or drowning a carrier loses its remaining passengers.</p>
+  <p>Actual troop deaths emit a short red pixel burst; tanks, hoppers and jets emit yellow/orange sparks.
+    Hits flash the entire unit bright red for 0.12 seconds and release a small burst at the contact point.
+    Death fragments originate from sampled occupied artwork, burst only a short distance, fall under strong
+    260-cell gravity with air drag,
+    sweep one cell at a time against terrain, structures and debris, bounce with energy loss, and slow in water.
+    They fade automatically and persist after
+    the dead unit is removed. The shared effect cap is 512 particles, with suppressed issuance reported.
+    These are cosmetic particles, not damaging projectiles or physical material; conservation and resource
+    accounting are unchanged.</p>
+  <pre id="combat-measurement"></pre>
+  <h2>Bounded milestone, not live-game integration</h2>
+  <p>Loose debris no longer traps units. Movement scales linearly with the fraction of collision pixels touching
+    debris: 100% speed when clear, 67.5% at half coverage and 35% when fully covered.
+    The current and next one-cell positions are checked so entry is slowed too. Debris is neither deleted
+    nor treated as solid support. Resting or already-overlapping debris causes no HP damage.
+    Resting rubble stays loose in living collision cells and can harden into terrain only after they clear.
+    Loose debris embedded in a live sprite is not hard cover: shots can still hit the exposed unit.
+    Actual downward debris movement entering a unit from outside causes 5 HP damage per cell,
+    capped at 20 HP per unit per simulation tick. Readouts show debris speed and cumulative falling damage.</p>
+  <p>Troops and tanks target the nearest ground enemy. They advance until it is inside weapon range
+    (troops 150 cells, tanks 210 cells between silhouettes), stop there to fire, and back off while
+    still firing if the enemy closes within 70 / 100 cells, so opposing ground units no longer run into
+    each other. If terrain, cover or shell range blocks the shot, they reposition toward the nearest
+    enemy until they can hit it, even if that brings them closer and puts them at risk; only actual
+    contact distance still makes them back off.
+    Tanks drive in reverse (60% speed) without turning the hull and keep firing while backing up. The
+    turret turns independently and can face opposite the treads. Shells fly a real gravity arc (185
+    cells/s, 90 cells/s&sup2;): the barrel elevates through the tank's aim frames (up to about 32&deg;)
+    and the shell leaves the tip of the elevated barrel. This limits reach to about 340 cells on level
+    ground, and targets too far, too high or too far below the barrel cannot be shot. While at least
+    one troop rides inside, a troop gunner appears in the top hatch and fires bullets as well.
+    Mechs (hoppers) are the toughest unit at 600 HP (tanks 400, planes 150, troops 100) and keep moving
+    around a nearby enemy while firing, holding one flank then hopping over to the other side.
+    A destroyed mech does not vanish: its body turns black and keeps falling under gravity while
+    white light cones burst outward from its center in every direction, lengthening, widening and
+    brightening for 1.5 s while each cone fades toward its tip; then it explodes. The blast radius is
+    half the mech's size (half the mean of its collision width and height, about its own outline);
+    it turns terrain and structures in that radius into debris and damages every unit inside it (up to
+    220 HP, falling off with distance, friend or foe), so mechs can chain-detonate. During the fuse,
+    troops and tanks inside the zone (plus an 8-cell margin) stop what they are doing and run straight
+    away from the wreck, so survivors can get clear before it blows.
+    Mechs only pick up tanks for an airlift when they are not fighting (no ground enemy within 260
+    cells across / 160 cells vertically); a pickup still on approach is called off if an enemy appears,
+    while a tank already gripped is carried through to the landing.</p>
+  <p>Hoppers use continuous aggressive assault: they advance toward the enemy base, rather than turning
+    back toward distant enemies behind them. They jump over obstacles when clearance permits and
+    fire whenever a clear path and reload permit. They do not bait, withhold shots to avoid damage,
+    or retreat from hostile projectiles or falling debris. This also applies in generated-city combat.
+    They accept lethal damage risk, but retain real collision, water/ceiling safety, jump charges
+    and the clear-firing-path requirement. This is local strategy, not global pathfinding.</p>
+  <p>Automatic units check the swept weapon sprite path before firing: solid terrain, structures and debris
+    block shots. Ground units advance to seek a clear angle; blocked hoppers try jumps, and jets climb.
+    Other units retreat from unsupported debris overhead. Their retreat decisions persist for
+    half a second to reduce direction jitter. Collision and water safety remain authoritative, so escape
+    or a clear angle is not guaranteed. The selected-unit readout reports the current tactical decision.
+    Manual fire remains an explicit override for testing material impacts.</p>
+  <p>Automated hoppers also sweep their actual collision-mask leading edge 24 cells ahead (farther
+    at high speed), refreshing at 10 Hz or when commanded direction changes. Assault routing cancels
+    blocked boost momentum but never reverses away from the enemy base; it attempts a safe forward
+    jump or waits at actual collisions. Pickup approach is the deliberate exception to baseward movement.
+    Takeoff checks 18 cells of overhead clearance before spending a jump charge.
+    The carrying pose plays one whole hopper frame at a time (no stacked or spliced sprite parts): it reaches
+    down with fall frames, clenches with jump frames 0–1, springs up with jump frames 2–3 and glides on
+    fall frames, each shifted so its feet rest on the tank roof. Both units sweep collision masks one cell at a time.
+    Loaded flight eases acceleration and braking at waypoints; the sequence only moves forward and
+    settles on its last glide frame, avoiding repeated pose snaps. Shared quarter-cell preview offsets keep the payload attached,
+    and obstacle climbs commit to a clearance segment rather than jittering between axes.
+    Route decisions appear alongside tactical decisions. Manual movement retains its original controls.</p>
+  <p>Fit area shows the full battlefield; larger zoom levels scroll without changing physics or aim coordinates.
+    For controlled unit tests, disable base spawning, reset, pause, then manually spawn the desired units.
+    Manual spawning respects the same living-unit, lifetime and core limits as automatic spawning.</p>
+  <p>Both spawn paths check the actual initial collision mask against solid material, water and opposing
+    units. Blocked attempts consume no lifetime slot and leave no registered unit behind. Automatic spawning
+    retries after one second, without clearing debris or changing the queued unit type. Base status reports
+    the most recent issuance or reason for waiting; friendly overlap retains the existing faction rule.</p>
+  <p>Select a firing unit from either faction: cyan brackets identify it, amber brackets identify the selected
+    opposing target. Fire at target aims at a current occupied sprite pixel; it does not guarantee a hit or
+    bypass terrain, buildings, reload time or projectile travel. The selected-unit readout shows HP, reload,
+    position and current road-speed multiplier. Disable unit auto-fire for manual weapon tests.</p>
+  <p>Health bars and selection outlines follow the visible artwork, not transparent animation padding.
+    Brief impact markers show hits: red for units, cyan for interceptions and amber for material.
+    The recent-impact log reports actual HP lost and physical debris issued per hit; only the latest
+    eight events are displayed from a bounded 32-event history. Misses leaving the area are labelled crop edge.</p>
+  <p>Each living base core may issue at most four simultaneous units and 64 lifetime units. A broken core
+    stops subsequent spawning and its rooftop weapons; surviving troops remain active. Units use existing
+    pixel collision, gravity, water drag/drowning and opposing-owner collision. Ground units wait at deep water, and troops check open drops so they stop dry at the bank;
+    automated troops that cannot cross then roam the shore, wandering 14&ndash;56 cells inland, idling 0.7&ndash;2.7 s and strolling back to the edge, while still holding to fire at enemies in range;
+    hopper jumps lunge forward, tanks accelerate/animate their tracks faster, and all four types move 1.8×
+    comparison defaults.     No source GIF timing or original comparison controls are changed.</p>
+  <p>Bullets, shells and hopper missiles are swept projectiles with unit HP and real building/terrain impacts.
+    Rooftop launchers steer missiles toward a fixed enemy-building point; interceptors steer toward actual
+    hostile missiles and destroy both projectiles on swept proximity contact. These are real damaging/intercepting
+    projectiles, not detached GIF streaks. They are bounded kinematic flight, not rigid-body rockets or blast pressure.
+    Missiles stay compact throughout flight; the reference supplies particle styling, not an explosion
+    animation. Impact or interception scatters 12 radial damaging fragments from the blast rim (12 HP, 160 cells/second,
+    0.7-second lifetime). Fragments use the same swept collision and debris accounting and do not produce
+    further fragments. Empty-air flight and lifetime expiry never trigger a burst. The shared 128-projectile
+    cap also applies to fragments; diagnostics explicitly report any suppressed fragment issuance.
+    Shells, debris and water share the existing physical particle world. Frame/core pixels have one building owner.
+    Windows, wheat and amber storage fill are visual details, not additional physical material or production.</p>
+  <p>All fixture structures, units and ammo are explicitly free lab issuance. Barrier + debris + construction is
+    audited against initial structure + converted terrain + issued ammo fragments; water and terrain are also
+    audited. No HM/SM, saves, capture, city production or live-game files are integrated. Terrain raster updates
+    at 30 Hz; physics and units remain 60 Hz, sprites are cached, diagnostics update at 4 Hz, and flight is capped
+    at 128 projectiles with an eight-second lifetime. Measurements include rendering and active physics, report
+    actual elapsed render/step rates and frame-time tails, and invalidate hidden-tab/error runs.</p>
+  <p>Faction-colored surface roads are generated along dry approaches between buildings and the terrain obstacles.
+    Friendly grounded units move 25% faster only while fully supported by intact owned road cells.
+    Enemies, jets, airborne units and wet units receive no road bonus. Damaged or flooded road support removes
+    the bonus. Manual road placement and resource tunnels with miners and branching underground HM chambers
+    remain future work.</p>
+  <h2>Focused checks</h2><pre id="combat-results"></pre>
+  <script src="scripts/particle-world.js"></script>
+  <script src="assets/unit-reference.js"></script>
+  <script src="assets/tank-reference.js"></script>
+  <script src="assets/hopper-reference.js"></script>
+  <script src="assets/jet-reference.js"></script>
+  <script src="assets/bullet-reference.js"></script>
+  <script src="scripts/pixel-unit.js"></script>
+  <script src="scripts/pixel-unit-vehicles.js"></script>
+  <script src="scripts/pixel-unit-combat.js"></script>
+  <script src="scripts/pixel-combat-fixture.js"></script>
+  <script src="tests/pixel-combat-fixture.js"></script>
+  <script src="scripts/pixel-combat-lab.js"></script>
+</body>
+</html>

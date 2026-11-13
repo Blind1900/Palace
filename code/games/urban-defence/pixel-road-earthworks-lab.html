@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Urban Defence - road earthworks and mountain tunnels</title>
+  <style>
+    body { margin: 0; background: #14161b; color: #d8dde6; font: 13px/1.4 system-ui, sans-serif; }
+    header { padding: 10px 14px; border-bottom: 1px solid #2a2f38; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+    header h1 { font-size: 15px; margin: 0 12px 0 0; }
+    button { background: #262b34; color: inherit; border: 1px solid #3a414d; border-radius: 4px; padding: 4px 10px; cursor: pointer; }
+    #earth-grid { display: grid; grid-template-columns: repeat(3, minmax(360px, 1fr)); gap: 10px; padding: 12px; }
+    .earth-card { background: #1b1e25; border: 1px solid #2a2f38; border-radius: 6px; padding: 8px; }
+    .earth-card.failed { border-color: #c0392b; }
+    .earth-card.passed { border-color: #2e8b57; }
+    .earth-card h2 { font-size: 13px; margin: 0 0 4px; }
+    .earth-card canvas { width: 100%; image-rendering: pixelated; display: block; margin: 6px 0; }
+    .earth-card .status { font-family: ui-monospace, monospace; font-size: 12px; white-space: pre-wrap; }
+    .legend span { display: inline-block; margin-right: 10px; }
+    .legend i { display: inline-block; width: 10px; height: 10px; margin-right: 4px; vertical-align: -1px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Road earthworks and mountain tunnels</h1>
+    <button id="earth-run">Run units</button>
+    <button id="earth-reset">Reset</button>
+    <span id="earth-status">Preparing...</span>
+    <span class="legend">
+      <span><i style="background:#5a5e66"></i>road</span>
+      <span><i style="background:#2c3240"></i>excavated</span>
+      <span><i style="background:#969aa0"></i>tunnel lining / portal</span>
+      <span><i style="background:#82786c"></i>bridge</span>
+    </span>
+  </header>
+  <main id="earth-grid"></main>
+  <script>window.addEventListener('error', (e) => { document.body.dataset.err = String((e.error && e.error.stack) || e.message).replace(/"/g, "'"); });</script>
+  <script src="scripts/particle-world.js"></script>
+  <script src="assets/unit-reference.js"></script>
+  <script src="assets/tank-reference.js"></script>
+  <script src="assets/hopper-reference.js"></script>
+  <script src="scripts/pixel-unit.js"></script>
+  <script src="scripts/pixel-unit-vehicles.js"></script>
+  <script src="scripts/pixel-surface-roads.js"></script>
+  <script src="scripts/pixel-road-earthworks.js"></script>
+  <script src="scripts/pixel-road-earthworks-lab.js"></script>
+</body>
+</html>

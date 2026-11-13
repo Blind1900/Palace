@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Urban Defence particle world lab</title>
+    <style>
+      body { margin: 24px; background: #070b08; color: #bce6a0; font: 16px sans-serif; }
+      h1 { color: #8de19c; }
+      a { color: #9edcf0; }
+      button { margin: 6px 6px 6px 0; padding: 8px; }
+      canvas { display: block; width: min(100%, 1000px); height: auto; margin: 12px 0; background: #020202; image-rendering: pixelated; cursor: crosshair; }
+      #results { white-space: pre-wrap; }
+    </style>
+  </head>
+  <body>
+    <h1>Particle world lab</h1>
+    <p>A small, separate experiment: the green line is the surface, and sand-colored outlines mark tunnels. Build a barrier, breach the basin, then damage its supports to watch disconnected pieces fall. Click the map to blast terrain. Construction and repairs require an empty, supported site.</p>
+    <p><a href="particle-map-lab.html">Full-map import lab</a> | <a href="particle-building-lab.html">Terrain and building integration lab</a> | <a href="particle-benchmark.html">Particle performance lab</a> | <a href="physics-lab.html">Water physics lab</a> | <a href="collapse-lab.html">Building collapse lab</a> | <a href="index.html">Game prototype</a></p>
+    <button id="breach" type="button">Breach basin</button>
+    <button id="extend" type="button">Extend tunnel</button>
+    <button id="build" type="button">Build / repair barrier</button>
+    <button id="damage-supports" type="button">Damage barrier supports</button>
+    <button id="pause" type="button" aria-pressed="false">Pause</button>
+    <button id="step" type="button">Step once</button>
+    <button id="reset" type="button">Reset</button>
+    <button id="save" type="button">Save lab</button>
+    <button id="load" type="button">Load lab</button>
+    <canvas id="lab" width="200" height="120" aria-label="Particle world. Click to excavate a blast."></canvas>
+    <p id="status" role="status"></p>
+    <p id="fps">Render FPS: measuring...</p>
+    <p id="build-status" role="status"></p>
+    <p id="save-status" role="status"></p>
+    <h2>Simulation checks</h2>
+    <pre id="results"></pre>
+    <script src="scripts/fixed-step.js"></script>
+    <script src="scripts/lab-fps.js"></script>
+    <script src="scripts/particle-world.js"></script>
+    <script src="scripts/terrain-surface.js"></script>
+    <script src="scripts/particle-terrain-import.js"></script>
+    <script src="scripts/particle-lab-scenario.js"></script>
+    <script src="scripts/particle-lab-render.js"></script>
+    <script src="scripts/particle-passage-inspection.js"></script>
+    <script src="scripts/particle-debris-sweep.js"></script>
+    <script src="tests/particle-world.js"></script>
+    <script src="scripts/particle-lab.js"></script>
+    <script src="scripts/lab-viewport.js"></script>
+  </body>
+</html>

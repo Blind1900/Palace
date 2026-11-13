@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Urban Defence reference-pixel unit terrain lab</title>
+  <style>
+    body { margin: 24px; background: #070b08; color: #bce6a0; font: 16px sans-serif; line-height: 1.5; }
+    a { color: #9edcf0; } button, select { margin: 4px; padding: 8px; }
+    #viewport { overflow: auto; max-width: 100%; background: #020202; }
+    canvas { display: block; image-rendering: pixelated; outline: none; }
+    canvas:focus-visible { outline: 2px solid #9edcf0; }
+    pre { white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <h1>Reference-pixel unit terrain lab</h1>
+  <p><a href="pixel-city-map-lab.html">Shared city / military lab</a> | <a href="pixel-construction-lab.html?check=military">Military checks</a> | <a href="pixel-unit-comparison-lab.html">Trooper / tank / hopper / jet comparison</a></p>
+  <div id="viewport"><canvas id="lab" tabindex="0" aria-label="Focusable pixel troop terrain experiment"></canvas></div>
+  <h2 id="unit-options">Options</h2>
+  <label for="scene">Terrain scene</label>
+  <select id="scene">
+    <option value="steps">Small steps and a steep cliff</option>
+    <option value="tunnel">Low tunnel: crouch to enter</option>
+    <option value="roof">Supported roof: remove support to fall</option>
+    <option value="water">Shallow water: slower movement</option>
+  </select>
+  <label for="size">Unit size</label>
+  <select id="size">
+    <option value="1">1x: native pixel size</option>
+    <option value="2">2x: double size</option>
+    <option value="3">3x: triple size</option>
+    <option value="4">4x: quadruple size</option>
+  </select>
+  <button id="reset">Reset unit lab</button>
+  <button id="pause" aria-pressed="false">Run simulation</button>
+  <button id="step">Step 1 tick</button>
+  <button id="step-sixty">Step 60 ticks</button>
+  <button id="remove-support">Remove support below unit</button>
+  <button id="water-contact">Place water at unit contact</button>
+  <label><input id="collision" type="checkbox"> Show collision pixels</label>
+  <label><input id="unit-automated" type="checkbox"> Automated: wait at water edge</label>
+  <h2 id="unit-statistics">Stats</h2>
+  <p id="message" role="status">Focus the canvas to control the trooper.</p>
+  <pre id="status" role="status"></pre>
+  <p id="accounting" role="status"></p>
+  <p id="fps">Render FPS: measuring...</p>
+  <h2 id="unit-explanations">Explanations</h2>
+  <p>This isolated experiment converts the supplied troop GIFs into their native 32-by-32 pixel arrangements, not an image pasted over the world. Each source pixel becomes one unit-layer cell; the original black silhouette is tinted matrix green. Transparency, shape, frame order and 80 ms GIF timings are retained. The original art faces left and is mirrored exactly to face right. Idle holds its first walking frame; jumps and crouch transitions hold their final frames rather than restarting endlessly.</p>
+  <p>Focus the canvas: A/D or left/right arrows walk, Space/W/up jumps, S/down/Ctrl crouches. Moving troops turn around at horizontal crop ends. Crouching combines the transition and crouch-walking references; releasing crouch reverses the transition only when the next pose fits. Troops cannot stand through a low ceiling. Steps up to two cells can be crossed, larger cliffs block walking and missing support causes falling. Partial water contact permits half-speed movement; water does not support the unit, so it sinks. Fully submerged opaque artwork latches drowning, disables movement commands and continues sinking to real support. Automated troops wait at the water edge. Every move is swept one cell at a time, including fast falls.</p>
+  <p>The gold optional collision overlay is the union of opaque animation pixels for the active stance, not a filled rectangle. It reserves room for the source animation to move its limbs without clipping. Transitional crouch poses use their own exact pixels. The unit reads terrain, structures, water, debris and moving construction after the world advances once per tick. It never replaces physical cells, clears crops, spends HM/SM or contributes structural mass. Solid debris/construction entering its silhouette freezes movement with explicit overlap diagnostics; water remains passable and is neither removed nor displaced. Fluid displacement, debris damage/avoidance, loads from units and combat are not yet implemented.</p>
+  <p>Replacement artwork is data-driven: map new GIFs or ordered PNG frames in the unit asset manifest and regenerate with the local exporter described in the project README. Canvas dimensions, facing, tint, frame counts, timing and collision pixels update from that data. Size expands every source pixel into a whole-cell block; collision and feet resize with it. Size changes reset this lab rather than enlarging a body into terrain. The troop requires walk, jump, crouch and crouchWalk roles; other vehicle models have their own roles.</p>
+  <h2>Focused reference and terrain checks</h2>
+  <pre id="results"></pre>
+  <script src="scripts/particle-world.js"></script>
+  <script src="scripts/particle-lab-render.js"></script>
+  <script src="scripts/pixel-construction-render.js"></script>
+  <script src="scripts/fixed-step.js"></script>
+  <script src="scripts/lab-fps.js"></script>
+  <script src="assets/unit-reference.js"></script>
+  <script src="scripts/pixel-unit.js"></script>
+  <script src="scripts/pixel-unit-lab.js"></script>
+  <script src="tests/pixel-unit.js"></script>
+  <script src="scripts/lab-viewport.js"></script>
+</body>
+</html>

@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Urban Defence particle performance lab</title>
+    <style>
+      body { margin: 24px; background: #070b08; color: #bce6a0; font: 16px sans-serif; line-height: 1.5; }
+      h1 { color: #8de19c; }
+      a { color: #9edcf0; }
+      button { padding: 8px; }
+      #results { white-space: pre-wrap; overflow-wrap: anywhere; }
+    </style>
+  </head>
+  <body>
+    <h1>Particle performance lab</h1>
+    <p>Measure baseline and damage workloads on three isolated terrain and water grids, including a grid sized to the current game map at four world units per cell. Separate four-site, sparse-water and dense-water tests compare full scanning with experimental empty-row and chunk skipping. This does not render the grids or run the game.</p>
+    <p><a href="particle-map-lab.html">Full-map import lab</a> | <a href="particle-lab.html">Particle world lab</a> | <a href="index.html">Game prototype</a></p>
+    <button id="run" type="button">Run benchmark</button>
+    <p id="status" role="status">Ready. Results depend on this device and browser.</p>
+    <p>Render FPS: N/A (benchmark does not render a simulation).</p>
+    <pre id="results"></pre>
+    <script src="scripts/particle-world.js"></script>
+    <script src="scripts/particle-benchmark.js"></script>
+  </body>
+</html>

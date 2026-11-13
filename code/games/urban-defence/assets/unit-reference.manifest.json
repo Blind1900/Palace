@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "id": "trooper",
+  "source": "User-supplied Urban Defence Ref\\Units",
+  "nativeFacing": -1,
+  "tintColor": "#bce77b",
+  "clips": {
+    "walk": "Troopers\\Trooperwalking.gif",
+    "jump": "Troopers\\TrooperJumping.gif",
+    "crouch": "Troopers\\TrooperCrouching.gif",
+    "crouchWalk": "Troopers\\TrooperCrouch Walking.gif"
+  }
+}

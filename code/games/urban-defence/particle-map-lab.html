@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Urban Defence full-map import lab</title>
+    <style>
+      body { margin: 24px; background: #070b08; color: #bce6a0; font: 16px sans-serif; line-height: 1.5; }
+      h1 { color: #8de19c; }
+      a { color: #9edcf0; }
+      button, select { margin: 4px; padding: 8px; }
+      #viewport { overflow: auto; max-width: 100%; max-height: 70vh; border: 1px solid #536a50; background: #020202; }
+      canvas { display: block; image-rendering: pixelated; cursor: crosshair; }
+      #results { white-space: pre-wrap; overflow-wrap: anywhere; }
+    </style>
+  </head>
+  <body>
+    <h1>Full-map import lab</h1>
+    <p>Inspect a separate particle snapshot of a newly generated game map, or the synthetic diagonal-tunnel test. The green line marks the surface, cyan is water, and gold outlines underground openings; solid terrain is black, as in the particle world lab. Click to blast terrain or switch to Inspect passage. Scroll and zoom to see details.</p>
+    <p>Inspect passage highlights a local cross-section. Route test checks a four-neighbor path between two clicked cells through original imported openings, rejecting flooded or obstructed cross-sections. It is an approximation, not miner pathfinding: unit size, newly excavated passages and live gameplay are not modeled. Running or editing clears the route. Buildings, units and game saves are not imported.</p>
+    <p><a href="particle-lab.html">Particle world lab</a> | <a href="particle-building-lab.html">Terrain and building lab</a> | <a href="pixel-map-construction-lab.html">Generated-terrain construction lab</a> | <a href="particle-benchmark.html">Performance lab</a> | <a href="index.html">Game prototype</a></p>
+    <button id="generate" type="button">Generate game map</button>
+    <button id="diagonal" type="button">Synthetic diagonal test</button>
+    <button id="reset" type="button" disabled>Reset snapshot</button>
+    <button id="pause" type="button" disabled>Run simulation</button>
+    <button id="step" type="button" disabled>Step once</button>
+    <button id="benchmark" type="button" disabled>Compare scan modes</button>
+    <button id="heavy-benchmark" type="button" disabled>Compare heavy water workload</button>
+    <button id="import-benchmark" type="button" disabled>Compare diagonal import</button>
+    <button id="tunnel-left" type="button" disabled>Go to first tunnel</button>
+    <button id="tunnel-right" type="button" disabled>Go to second tunnel</button>
+    <button id="tool" type="button" disabled>Tool: Blast</button>
+    <label for="zoom">Zoom</label>
+    <select id="zoom"><option value="1">1×</option><option value="2" selected>2×</option><option value="4">4×</option></select>
+    <p id="status" role="status">Preparing a generated map...</p>
+    <p id="fps">Render FPS: measuring...</p>
+    <p id="message" role="status"></p>
+    <p id="inspection" role="status"></p>
+    <div id="viewport"><canvas id="map" width="2400" height="390" aria-label="Particle map. Scroll to explore; click to use the selected tool."></canvas></div>
+    <pre id="results"></pre>
+    <script src="scripts/particle-world.js"></script>
+    <script src="scripts/lab-fps.js"></script>
+    <script src="scripts/particle-terrain-import.js"></script>
+    <script src="scripts/particle-lab-render.js"></script>
+    <script src="scripts/particle-passage-inspection.js"></script>
+    <script src="scripts/particle-map-lab.js"></script>
+    <script src="scripts/lab-viewport.js"></script>
+  </body>
+</html>

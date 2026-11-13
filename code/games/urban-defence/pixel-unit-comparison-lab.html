@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Urban Defence four-unit movement comparison</title>
+  <style>
+    body { margin: 24px; background: #070b08; color: #bce6a0; font: 16px sans-serif; line-height: 1.5; }
+    a { color: #9edcf0; } button, select { margin: 4px; padding: 8px; }
+    #viewport { overflow: auto; max-width: 100%; background: #020202; }
+    canvas { display: block; image-rendering: pixelated; }
+    table { border-collapse: collapse; } th, td { padding: 6px 12px; border-bottom: 1px solid #385432; text-align: left; }
+    pre { white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <h1>Trooper / tank / hopper / jet comparison</h1>
+  <p><a href="pixel-unit-lab.html">Trooper terrain and size lab</a> | <a href="pixel-city-map-lab.html">Shared city lab</a> | <a href="pixel-combat-lab.html">Shared combat, bases and missiles</a></p>
+  <p>Preview movement uses 1.8x base speed, faster tank tread animation and stronger forward hopper lunges. Original artwork and shared engine defaults are retained.</p>
+  <div id="viewport"><canvas id="comparison-canvas" aria-label="Adjacent reference-pixel trooper tank hopper and jet"></canvas></div>
+  <h2 id="comparison-options">Options</h2>
+  <label for="comparison-scene">Terrain</label>
+  <select id="comparison-scene">
+    <option value="flat">Flat dry comparison</option>
+    <option value="steps">Small steps / tall obstacle</option>
+    <option value="water">Deep water edge</option>
+    <option value="submerged">All units dropped into deep water</option>
+    <option value="friendly">Friendly overlap: trooper inside tank</option>
+    <option value="opposing">Opposing troop blocks tank</option>
+    <option value="targets">Shooting targets: opponents / building / terrain</option>
+  </select>
+  <label for="tank-size">Tank size</label>
+  <select id="tank-size"><option value="1">1x</option><option value="2">2x</option><option value="3" selected>3x</option><option value="4">4x</option><option value="5">5x</option><option value="6">6x</option></select>
+  <label for="hopper-size">Hopper size</label>
+  <select id="hopper-size"><option value="1">1x</option><option value="2" selected>2x</option></select>
+  <label for="jet-size">Jet size</label>
+  <select id="jet-size"><option value="1">1x</option><option value="2">2x</option><option value="3">3x</option><option value="4" selected>4x</option><option value="5">5x</option></select>
+  <label><input id="automated" type="checkbox" checked> Automated ground units avoid water</label>
+  <label><input id="comparison-collision" type="checkbox"> Collision envelopes</label>
+  <button id="comparison-reset">Reset comparison</button>
+  <button id="comparison-run" aria-pressed="false">Run simulation</button>
+  <button id="comparison-step">Step 1 tick</button>
+  <button id="comparison-second">Step 60 ticks</button>
+  <p>
+    <button id="move-left">Move left</button><button id="move-right">Move right</button>
+    <button id="move-stop">Release movement (jet keeps flying)</button>
+    <button id="jump-units">Jump / elevated hopper jump</button>
+    <button id="boost-hopper">Burst boost hopper (ground / air)</button>
+    <label><input id="glide-hopper" type="checkbox"> Hopper glide</label>
+    <button id="jet-up">Jet altitude up 64 cells</button><button id="jet-down">Jet altitude down 64 cells</button>
+    <button id="aim-up">Raise tank aim</button><button id="aim-down">Lower tank aim</button>
+    <button id="fire-preview">Replay bullet / missile reference</button>
+  </p>
+  <label for="firing-unit">Firing unit</label>
+  <select id="firing-unit"><option value="trooper">Trooper: bullet</option><option value="tank">Tank: heavy shell</option><option value="hopper">Hopper: missile</option><option value="jet">Jet: bullet</option></select>
+  <button id="fire-aim">Fire at aim</button>
+  <h2 id="comparison-statistics">Stats</h2>
+  <p id="comparison-message" role="status"></p>
+  <p id="comparison-audit" role="status"></p>
+  <p id="combat-audit" role="status"></p>
+  <table><thead><tr><th>Unit</th><th>Scaled canvas</th><th>State</th><th>Distance X</th><th>Vertical speed</th><th>Animation</th><th>Water</th><th>Special</th></tr></thead><tbody id="comparison-states"></tbody></table>
+  <p id="comparison-fps">Render FPS: measuring...</p>
+  <h2 id="comparison-explanations">Explanations</h2>
+  <p>Four adjacent units share one terrain world and one 60 Hz simulation clock.
+    Their initial positions differ; compare distance from each starting point, not absolute X.
+    Moving units automatically reverse at horizontal crop ends. Jets make curved turns and return toward their selected altitude.
+    Default tank 3x, hopper 2x and jet 4x sizes are visual proportions only: no passengers or cockpit occupancy are implemented.
+    Size controls reset the scene safely. Each source pixel expands to a whole-cell block with matching collision, mirroring and foot anchor.
+    Friendly units overlap freely; opposing collision envelopes cannot pass through each other. Units still add no structural mass.</p>
+  <p>Tank: gradually reaches 36 cells/s over 1.5 seconds, with independent reversible aiming.
+    Hopper: stationary idle holds the first default frame; ground movement follows the GIF's forward hopping rhythm,
+    at a steady 48 cells/s with no backward loop reset; complete walking frames keep their feet anchored to the ground.
+    Jump plays once and holds its last pose during ascent; fall/glide uses the airborne poses.
+    Boost bursts at 192 cells/s for 0.18 seconds on dry ground or in air, without an upward impulse.
+    It plays the complete boost clip faster, then returns to jump/fall in air.
+    Ground bursts coast for two seconds; air bursts coast for 0.35 seconds while gravity continues.
+    Ground boost poses keep their feet aligned and hold the final frame during coasting.
+    Airborne frames stay intact as authored; the renderer does not splice wings from another frame or clip the body to force a shared pose.
+    Takeoff eases the complete frame into its airborne position.
+    Two boost charges and the separate two-second airborne glide are lab budgets.
+    Jet: sustained flight and curved direction changes, not a ground walker.
+    These are explicit lab defaults; deployment, boost recharge and route planning are not implemented.</p>
+  <p>Partial submersion halves horizontal speed; water supplies no buoyancy, so units sink.
+    Full coverage of the rendered opaque body latches drowning and disables movement commands.
+    Automated ground units wait on dry land before entering water; supported dry bridges remain usable.
+    A jet may fly above water, but a submerged jet also sinks and drowns. Units never erase or displace particle water.</p>
+  <p>The top reference strip replays the original bullet GIF. The missile is a derived preview:
+    each bullet pixel expands 3x horizontally and 2x vertically, preserving palette and GIF timing.
+    This is a longer, thicker missile, not another imported GIF. The strip demonstrates the original animated pixel travel, not weapon damage.
+    The strip and detached streaks in the jet's shooting GIF are visual previews, not extra damaging projectiles.</p>
+  <p>Choose a firing unit, then click the preview to aim/fire. Run or Step advances the shot beyond the GIF's final frame
+    until it hits or exits the crop. Dragging pans without firing. Shots follow the clicked direction; they are not homing.
+    Bullet, heavier shell and longer/thicker missile sizes use the reference artwork. Friendly fire is disabled.
+    Shooting targets adds opposing units and a free lab building frame. Hits reduce unit HP; destroyed units cannot fire
+    or move under commands. Building/terrain hits convert actual particle cells to debris; impact fragments use the engine's
+    falling, water-displacement and support physics, not cosmetic particles. Up to four ammo-fragment cells per hit are
+    explicit free lab material and audited separately. Flight is swept kinematic physics with water drag, not a new particle material
+    or full blast-pressure/fire simulation. City HM/SM, core death, capture and live-game combat are not changed.</p>
+  <h2>Focused movement / water / artwork / aiming / hit checks</h2>
+  <pre id="comparison-results"></pre>
+  <script src="scripts/particle-world.js"></script>
+  <script src="scripts/particle-lab-render.js"></script>
+  <script src="scripts/pixel-construction-render.js"></script>
+  <script src="scripts/fixed-step.js"></script>
+  <script src="scripts/lab-fps.js"></script>
+  <script src="assets/unit-reference.js"></script>
+  <script src="assets/tank-reference.js"></script>
+  <script src="assets/hopper-reference.js"></script>
+  <script src="assets/jet-reference.js"></script>
+  <script src="assets/bullet-reference.js"></script>
+  <script src="scripts/pixel-unit.js"></script>
+  <script src="scripts/pixel-unit-vehicles.js"></script>
+  <script src="scripts/pixel-unit-combat.js"></script>
+  <script src="scripts/pixel-unit-comparison-lab.js"></script>
+  <script src="scripts/lab-viewport.js"></script>
+  <script src="tests/pixel-unit-comparison.js"></script>
+</body>
+</html>

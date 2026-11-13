@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Urban Defence building collapse lab</title>
+    <style>
+      body { background: #101510; color: #bce6a0; font: 16px sans-serif; margin: 24px; }
+      a { color: #9edcf0; }
+      canvas { display: block; max-width: 100%; background: #050805; image-rendering: pixelated; cursor: crosshair; }
+      button { margin: 12px 8px 12px 0; padding: 8px; }
+      .wall-sample { display: inline-block; height: 20px; background: #d3ef6e; vertical-align: middle; margin: 0 5px 0 10px; }
+      #results { white-space: pre-wrap; }
+    </style>
+  </head>
+  <body>
+    <h1>Building collapse lab</h1>
+    <p>Click the building to blast it. Taller frames have thicker, tougher vertical walls throughout the building, rather than reinforced base blocks. Their thicker walls also have greater load capacity and use their visible width for collisions. Damaged supports can fail under the weight above them, causing a progressive collapse. Supported debris slows from friction but can still tip or be scattered by a blast. This is a gameplay approximation, not an engineering simulation. Sloped sites use a level frame with foundation piers; changing the ground profile resets the lab. Surviving frames rebuild using HM; work pauses if the site is blocked or HM runs out. Fully destroyed buildings cannot rebuild. Move with A/D or left/right arrows; use W/S or up/down arrows at the ladder to climb. Falling debris can injure the trooper.</p>
+    <p><a href="particle-building-lab.html">Terrain and building integration lab</a> | <a href="collapse-impact-lab.html">Experimental impact rotation lab</a> | <a href="collapse-benchmark.html">Collapse performance lab</a> | <a href="physics-lab.html">Back to water lab</a></p>
+    <button id="foundation" type="button">Blast foundation</button>
+    <button id="middle" type="button">Blast middle</button>
+    <button id="reset" type="button">Reset building</button>
+    <button id="slide-demo" type="button">Reset and demonstrate debris sliding</button>
+    <button id="spin-demo" type="button">Reset and demonstrate spinning debris</button>
+    <label for="terrain">Ground profile:</label>
+    <select id="terrain">
+      <option value="flat">Flat</option>
+      <option value="uphill-right">Uphill right</option>
+      <option value="downhill-right">Downhill right</option>
+      <option value="valley">Valley</option>
+    </select>
+    <button id="save" type="button">Save lab</button>
+    <button id="load" type="button">Load lab</button>
+    <label for="hm">Available HM:</label>
+    <input id="hm" type="number" min="0" step="1" value="200">
+    <label><input id="auto-repair" type="checkbox" checked> Auto-rebuild (cost scales with frame size)</label>
+    <label for="floor">Trooper destination:</label>
+    <select id="floor">
+      <option value="0">Ground floor</option>
+      <option value="1">Floor 1</option>
+      <option value="2">Floor 2</option>
+      <option value="3">Floor 3</option>
+      <option value="4">Roof</option>
+    </select>
+    <button id="send" type="button">Send trooper</button>
+    <p>Wall width comparison (magnified 3×):
+      <span id="standard-wall" class="wall-sample" aria-hidden="true"></span> shorter frame
+      <span id="tall-wall" class="wall-sample" aria-hidden="true"></span> this 11-row frame
+    </p>
+    <canvas id="lab" width="640" height="360" aria-label="Building collapse simulation. Use the blast buttons or click the building."></canvas>
+    <p id="status" role="status"></p>
+    <p id="fps">Render FPS: measuring...</p>
+    <p id="save-status" role="status"></p>
+    <h2>Automated checks</h2>
+    <pre id="results"></pre>
+    <script src="scripts/fixed-step.js"></script>
+    <script src="scripts/lab-fps.js"></script>
+    <script src="scripts/collapse-model.js"></script>
+    <script src="scripts/collapse-impact-scenario.js"></script>
+    <script src="scripts/collapse-trooper.js"></script>
+    <script src="tests/collapse-lab.js"></script>
+    <script src="scripts/collapse-lab.js"></script>
+    <script src="scripts/lab-viewport.js"></script>
+  </body>
+</html>

@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Urban Defence construction growth lab</title>
+    <style>
+      body { margin: 24px; background: #070b08; color: #bce6a0; font: 16px sans-serif; line-height: 1.5; }
+      a { color: #9edcf0; }
+      button { margin: 6px 6px 6px 0; padding: 8px; }
+      canvas { display: block; width: min(100%, 960px); height: auto; background: #020202; image-rendering: pixelated; }
+      #results { white-space: pre-wrap; }
+    </style>
+  </head>
+  <body>
+    <h1>Construction growth lab</h1>
+    <p>A separate construction experiment begins with three free foundation members. Choose a frame height and restart construction to apply it; the current frame is discarded. Vertical members are thicker than horizontal ones at every height. Taller frames have more members and cost more HM; the eleven-row frame uses thicker, stronger vertical members. The evenly spaced dotted blueprint grows from the foundation and branches at connected joints over four simulated seconds. Then, once per simulated second, all eligible connected branches can place or repair members and bonds in parallel, each using the existing repair rules and costing HM. A newly placed member can support further work on the next attempt. Completed members use the existing structural simulation.</p>
+    <p>Remove ground to interrupt support; clear loose members and restore ground before rebuilding. Other eligible sites can still be worked on. The status reports how many members or bonds were completed, HM spent and particle or foundation obstacles detected on the last attempt, even if other sites progressed. Building overlap and missing connections can also block work without appearing in that list. Completion stops automatic work. This lab has no save slot and does not change the live game or other lab saves. It does not model workers or SM.</p>
+    <p>Breach the basin to send water toward the frame. Optional water damage weakens attached members based on water depth; yellow and red show damage. Water overlapping a repair site blocks work there; water beside a clear site can still cause damage and repeated paid repairs. Upright members use a coarse centerline blocker and a visual contact fill, so particle cells can overlap visible edges. Blast the lower left anchor to test damage during construction. These are experimental grid rules, not physical pressure or live-game behavior. Restart turns water damage off.</p>
+    <p><a href="pixel-construction-lab.html">Pixel material construction lab</a> | <a href="particle-building-lab.html">Terrain and building lab</a> | <a href="particle-map-lab.html">Full-map lab</a> | <a href="index.html">Game prototype</a></p>
+    <button id="pause" type="button" aria-pressed="false">Pause</button>
+    <button id="step" type="button">Step once</button>
+    <label for="frame-height">Next frame height</label>
+    <select id="frame-height"><option value="5">Short (5 rows)</option><option value="9" selected>Medium (9 rows)</option><option value="11">Tall (11 rows)</option></select>
+    <button id="reset" type="button">Restart construction</button>
+    <button id="undermine" type="button">Undermine middle anchor</button>
+    <button id="restore" type="button">Restore middle ground</button>
+    <button id="clear" type="button">Clear loose members</button>
+    <button id="breach" type="button">Breach water basin</button>
+    <button id="blast-wall" type="button">Blast lower left anchor</button>
+    <label><input id="water-damage" type="checkbox"> Experimental depth-based water damage</label>
+    <canvas id="lab" width="640" height="360" aria-label="Building construction experiment with dotted unfinished blueprint"></canvas>
+    <p id="status"></p>
+    <p id="message" role="status"></p>
+    <p id="fps">Render FPS: measuring...</p>
+    <h2>Reference-inspired building silhouettes</h2>
+    <p>Visual concepts only: slab, tiered, offset, tapered, capped, stepped-peak and spire forms. Change the height to see the same shapes scaled vertically. These previews are not the frame above and do not yet define construction, collision, damage or collapse. The live game is unchanged.</p>
+    <label for="silhouette-height">Preview height</label>
+    <select id="silhouette-height">
+      <option value="0.65">Short</option>
+      <option value="1" selected>Medium</option>
+      <option value="1.1">Tall</option>
+    </select>
+    <canvas id="silhouettes" width="700" height="230" aria-label="Seven building silhouette concepts: slab, tiered tower, offset tower, tapered tower, capped tower, stepped peak and spire."></canvas>
+    <h2>Construction checks</h2>
+    <pre id="results"></pre>
+    <script src="scripts/fixed-step.js"></script>
+    <script src="scripts/lab-fps.js"></script>
+    <script src="scripts/particle-world.js"></script>
+    <script src="scripts/collapse-model.js"></script>
+    <script src="scripts/particle-building-scenario.js"></script>
+    <script src="scripts/particle-water-contact-render.js"></script>
+    <script src="scripts/construction-blueprint.js"></script>
+    <script src="scripts/building-silhouettes.js"></script>
+    <script src="scripts/construction-scenario.js"></script>
+    <script src="tests/construction.js"></script>
+    <script src="scripts/construction-lab.js"></script>
+    <script src="scripts/lab-viewport.js"></script>
+  </body>
+</html>

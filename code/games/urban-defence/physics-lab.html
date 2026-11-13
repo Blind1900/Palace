@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Urban Defence physics lab</title>
+    <style>
+      body { background: #101510; color: #bce6a0; font: 16px sans-serif; margin: 24px; }
+      canvas { display: block; max-width: 100%; background: #050805; image-rendering: pixelated; }
+      button { margin: 12px 8px 12px 0; padding: 8px; }
+      #results { white-space: pre-wrap; }
+    </style>
+  </head>
+  <body>
+    <h1>Physics lab</h1>
+    <p>Separate from the game: breach the basin, then extend the tunnel to watch gravity and water pressure spread the liquid.</p>
+    <p><a href="physics-comparison-lab.html">Compare physics models</a> | <a href="particle-lab.html">Open particle world lab</a> | <a href="collapse-lab.html">Open building collapse lab</a></p>
+    <button id="breach" type="button">Breach basin</button>
+    <button id="extend" type="button">Extend tunnel</button>
+    <button id="reset" type="button">Reset</button>
+    <canvas id="lab" width="640" height="320"></canvas>
+    <p id="status" role="status"></p>
+    <p id="fps">Render FPS: measuring...</p>
+    <h2>Automated checks</h2>
+    <pre id="results"></pre>
+    <script src="scripts/fixed-step.js"></script>
+    <script src="scripts/lab-fps.js"></script>
+    <script src="scripts/physics-test-world.js"></script>
+    <script src="scripts/water-lab-model.js"></script>
+    <script src="tests/physics-lab.js"></script>
+    <script src="scripts/lab-viewport.js"></script>
+  </body>
+</html>
