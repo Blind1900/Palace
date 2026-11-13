@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Urban Defence</title>
-    <link rel="stylesheet" href="styles/main.css?v=2">
+    <link rel="stylesheet" href="styles/main.css?v=4">
   </head>
   <body class="game-shell" data-base-side="left">
     <div class="game-root">
@@ -50,9 +50,12 @@
           <section id="deploy-panel" class="command-panel" hidden>
             <button id="deploy-select" type="button">SELECT BASES</button>
             <button id="deploy-all" type="button">SELECT ALL BASES</button>
+            <button id="deploy-order" type="button">ORDER ACTIVE UNITS</button>
+            <button id="deploy-select-units" type="button">SELECT ALL ACTIVE</button>
             <fieldset id="deploy-bases" class="missile-launchers"><legend>AVAILABLE BASES</legend></fieldset>
             <button id="deploy-fire" type="button">DEPLOY SELECTED</button>
             <button id="deploy-clear" type="button">CLEAR SELECTION</button>
+            <p class="command-help">ORDER ACTIVE UNITS selects troops on the map. Click selected troops to toggle them, then click a destination to move or attack.</p>
           </section>
           <button id="missile-command" type="button" aria-expanded="false" aria-controls="missile-panel">MISSILE</button>
           <section id="missile-panel" class="missile-panel" aria-label="Missile launch controls" hidden>
@@ -80,11 +83,11 @@
     <script src="scripts/world-object-render.js"></script>
     <script src="scripts/building-render.js"></script>
     <script src="scripts/missile-control.js?v=3"></script>
-    <script src="scripts/command-control.js?v=6"></script>
+    <script src="scripts/command-control.js?v=7"></script>
     <script src="scripts/fixed-step.js"></script>
     <script src="scripts/terrain-surface.js"></script>
     <script src="scripts/terrain-detail.js"></script>
-    <script src="scripts/main.js?v=8"></script>
+    <script src="scripts/main.js?v=9"></script>
     <script src="scripts/particle-map-source.js"></script>
   </body>
 </html>

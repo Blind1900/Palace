@@ -26,7 +26,7 @@ const TERRAIN_SECTION_WIDTH = 2400;
 const WORLD_WIDTH = TERRAIN_SECTION_WIDTH * 4;
 const WORLD_HEIGHT = 1560;
 const MAX_ZOOM_FACTOR = 32;
-const TUNNEL_INTERIOR_WIDTH = 14;
+const TUNNEL_INTERIOR_WIDTH = 24;
 const TUNNEL_WALL_WIDTH = 1.5;
 const FARM_BUILDING_WIDTH = 14;
 const factionArchitectureStyles = createFactionArchitectureStyles();
@@ -63,6 +63,12 @@ const terrainWaves = Array.from({ length: 4 }, (_, index) => ({
 }));
 const terrainDetail = createTerrainDetail(WORLD_WIDTH);
 const viewport = { width: 0, height: 0, pixelRatio: 1 };
+const surfaceDetails = Array.from({ length: 220 }, (_, index) => {
+  const x = 40 + (index + Math.random()) * (WORLD_WIDTH - 80) / 220;
+  const type = index % 9 === 0 ? 'tree' : index % 3 === 0 ? 'rock' : 'grass';
+  return { x, type, size: type === 'tree' ? 5 + Math.random() * 5 : 2 + Math.random() * 3,
+    phase: Math.random() * Math.PI * 2 };
+});
 
 const camera = {
   x: 0,
@@ -99,9 +105,10 @@ const terrainSurface = createTerrainSurface(WORLD_WIDTH, 4, terrainYAt);
 const waterPools = createWaterPools();
 const waterDrops = [];
 const collapsedBuildings = [];
+const buildingDebris = [];
 const cores = [
-  { x: findDryPosition(169, 36) + 11, owner: 'left' },
-  { x: findDryPosition(WORLD_WIDTH - 451, 36) + 11, owner: 'right' },
+  { x: findDryPosition(169, 36) + 11, owner: 'left', health: 1000 },
+  { x: findDryPosition(WORLD_WIDTH - 451, 36) + 11, owner: 'right', health: 1000 },
 ];
 const neutralTerritories = NEUTRAL_CENTERS.map((center) => ({
   center,
@@ -125,7 +132,7 @@ const { buildingColor, drawSettlements, drawCollapsedBuildings } = createBuildin
 });
 const worldObjectRenderer = createWorldObjectRenderer();
 const missileControl = createMissileControl({
-  canvas, ctx, buildings: buildingBlueprints, surfaceYAt, worldToScreen, screenToWorld,
+  canvas, ctx, buildings: buildingBlueprints, cores, surfaceYAt, worldToScreen, screenToWorld,
   getSide: () => baseSide, worldWidth: WORLD_WIDTH, craterSurface, waterLevelAt, splashWater, breakBuilding,
   renderer: worldObjectRenderer,
 });
@@ -134,7 +141,8 @@ const commandControl = createCommandControl({
   cores, pools: waterPools, territories, surfaceYAt, worldToScreen, screenToWorld, camera,
   getSide: () => baseSide, worldWidth: WORLD_WIDTH, worldHeight: WORLD_HEIGHT,
   canBuild: canBuildOnTerrain, farmWaterSources, tunnelWidth: TUNNEL_INTERIOR_WIDTH,
-  startingResources: STARTING_RESOURCES, renderer: worldObjectRenderer,
+  startingResources: STARTING_RESOURCES, renderer: worldObjectRenderer, craterSurface,
+  architectureStyles: factionArchitectureStyles,
 });
 for (const building of buildingBlueprints) {
   if (building.kind === 'farm') building.availableWaterSources = farmWaterSources(building);
@@ -182,11 +190,16 @@ function updateHud() {
   document.getElementById('sm-value').textContent = Math.floor(resources.sm);
   document.getElementById('pop-value').textContent = `${resources.available} / ${resources.pop}`;
   const stats = commandControl.production();
+  const core = cores.find((item) => item.owner === baseSide);
+  const objective = commandControl.objective();
+  const hold = Math.floor(objective.centerHold[baseSide] || 0);
   document.getElementById('building-stats').innerHTML = [
     `HOUSING ${stats.housing} / POP ${stats.population}`,
     `FARMS ${stats.farms} / +${stats.sm.toFixed(2)} SM/S`,
     `MINES ${stats.mines} / +${stats.hm.toFixed(2)} HM/S`,
     `MILITARY ${stats.military} / DEFENSE`,
+    `CORE ${Math.max(0, Math.ceil(core ? core.health : 0))} / 1000`,
+    `CENTER HOLD ${hold} / 60S`,
     ...(stats.floodedConstruction ? [`CONSTRUCTION PAUSED / FLOODED ${stats.floodedConstruction}`] : []),
   ].map((line) => `<div>${line}</div>`).join('');
 }
@@ -379,6 +392,16 @@ function breakBuilding(building, mark) {
     x: building.x, width, top, ground, fractureY, direction,
     color: buildingColor(building), angle: 0, angularVelocity: 0, age: 0,
   });
+  const count = 14 + Math.floor(Math.random() * 9);
+  for (let index = 0; index < count; index += 1) {
+    const x = building.x + Math.random() * width;
+    const y = fractureY + Math.random() * Math.max(2, ground - fractureY);
+    const speed = 45 + Math.random() * 150;
+    buildingDebris.push({ source: building, x, y, vx: (Math.random() - 0.5) * speed * 2 + direction * 25,
+      vy: -30 - Math.random() * speed, width: 2 + Math.random() * 4, height: 2 + Math.random() * 4,
+      rotation: Math.random() * Math.PI, spin: (Math.random() - 0.5) * 8,
+      color: Math.random() < 0.35 ? '#ddc780' : buildingColor(building), age: 0 });
+  }
   if (building.rebuildHeight === undefined) building.rebuildHeight = building.height;
   building.height = Math.max(2, ground - fractureY);
   building.damageMarks = [];
@@ -521,6 +544,7 @@ function createStarterTunnels() {
       side: index,
       node,
       interiorWidth: TUNNEL_INTERIOR_WIDTH,
+      style: factionArchitectureStyles[core.owner],
       points: [
         { x: core.x + 7, y: surfaceYAt(core.x + 7) },
         { x: core.x + 7, y: node.y },
@@ -560,9 +584,11 @@ function buildBuildingBlueprints() {
         ? 130 + ((clusterIndex * 7 + i * 11) % 36)
         : 18 + ((clusterIndex * 7 + i * 11) % 28);
       const roofColor = kind === 'tower' ? '#8fe4ff' : kind === 'bunker' ? '#9ef7aa' : kind === 'shed' ? '#ffdb7a' : '#d7ebff';
-      const building = { x, width, height, kind, color: roofColor, seed: clusterIndex + i, health: 100,
+      const residents = cluster.neutral ? 1 : i < (clusterIndex % 3 === 0 ? 4 : 3) ? 1 : 0;
+      const building = { x, width, height: cluster.neutral ? 6 : height, kind, color: roofColor, seed: clusterIndex + i, health: 100,
         cluster: clusterIndex, owner: cluster.neutral ? 'neutral' : cluster.isLeft ? 'left' : 'right',
-        neutral: Boolean(cluster.neutral), population: cluster.neutral ? 1 : 0 };
+        ...(cluster.neutral ? { construction: { stage: 0, progress: 0 } } : {}),
+        neutral: Boolean(cluster.neutral), population: residents };
       layouts.push(building);
       occupied.push(building);
       clusterBuildings.push(building);
@@ -576,15 +602,28 @@ function buildBuildingBlueprints() {
     const farmX = findDryPosition(farmPreferred, farmPairWidth, occupied, minX, maxX);
     for (let i = 0; i < 2; i += 1) {
       const farm = {
-        x: farmX + i * (farmWidth + farmGap), width: farmWidth, height: 13,
+        x: farmX + i * (farmWidth + farmGap), width: farmWidth, height: cluster.neutral ? 6 : 13,
         kind: 'farm', color: '#6ef08a', seed: clusterIndex + i,
         health: 100, neutral: Boolean(cluster.neutral), cluster: clusterIndex,
         owner: cluster.neutral ? 'neutral' : cluster.isLeft ? 'left' : 'right',
+        ...(cluster.neutral ? { construction: { stage: 0, progress: 0 } } : {}),
         cropLeft: 0, cropRight: 0, waterSources: [],
       };
       layouts.push(farm);
       occupied.push(farm);
       clusterBuildings.push(farm);
+    }
+
+    if (cluster.neutral) {
+      const mineWidth = 28;
+      const mineX = findDryPosition(cluster.center + direction * 230 - (direction < 0 ? mineWidth : 0),
+        mineWidth, occupied, minX, maxX);
+      const mine = { x: mineX, width: mineWidth, height: 6, kind: 'mine', color: '#9a9281',
+        seed: clusterIndex + 17, health: 100, neutral: true, owner: 'neutral', cluster: clusterIndex,
+        construction: { stage: 0, progress: 0 }, population: 0 };
+      layouts.push(mine);
+      occupied.push(mine);
+      clusterBuildings.push(mine);
     }
 
     const militaryWidth = 24;
@@ -598,11 +637,12 @@ function buildBuildingBlueprints() {
     militarySites.sort((a, b) => a.gap - b.gap || Math.abs(a.x - cluster.center) - Math.abs(b.x - cluster.center));
     const military = {
       x: militarySites[0].x,
-      width: militaryWidth, height: 22, kind: 'military', color: '#6ef08a',
+      width: militaryWidth, height: cluster.neutral ? 6 : 22, kind: 'military', color: '#6ef08a',
       seed: clusterIndex, health: 100, neutral: Boolean(cluster.neutral), cluster: clusterIndex,
       owner: cluster.neutral ? 'neutral' : cluster.isLeft ? 'left' : 'right',
       defenseHealth: 100,
-      level: cluster.neutral ? 4 : 1 + clusterIndex % 4, direction: cluster.isLeft ? 1 : -1,
+      ...(cluster.neutral ? { construction: { stage: 0, progress: 0 } } : {}),
+      level: cluster.neutral ? 1 : 1 + clusterIndex % 4, direction: cluster.isLeft ? 1 : -1,
     };
     layouts.push(military);
     occupied.push(military);
@@ -703,6 +743,42 @@ function drawIrrigationIntakes() {
   }
 }
 
+function drawSurfaceDetails() {
+  const left = camera.x - 40;
+  const right = camera.x + viewport.width / camera.zoom + 40;
+  ctx.save();
+  ctx.translate(-camera.x * camera.zoom, -camera.y * camera.zoom);
+  ctx.scale(camera.zoom, camera.zoom);
+  for (const detail of surfaceDetails) {
+    if (detail.x < left || detail.x > right) continue;
+    const ground = surfaceYAt(detail.x);
+    if (detail.type === 'tree') {
+      ctx.fillStyle = '#31583e';
+      ctx.fillRect(detail.x - 1, ground - detail.size * 1.8, 2, detail.size * 1.8);
+      ctx.fillStyle = '#4d8552';
+      ctx.fillRect(detail.x - detail.size, ground - detail.size * 2.7, detail.size * 2, detail.size * 1.5);
+      ctx.fillStyle = '#77a866';
+      ctx.fillRect(detail.x - detail.size * 0.5, ground - detail.size * 2.5, detail.size, detail.size * 0.6);
+    } else if (detail.type === 'rock') {
+      ctx.fillStyle = '#727468';
+      ctx.fillRect(detail.x - detail.size, ground - detail.size, detail.size * 2, detail.size);
+      ctx.fillStyle = '#9b9a85';
+      ctx.fillRect(detail.x - detail.size * 0.4, ground - detail.size, detail.size, Math.max(1, detail.size * 0.3));
+    } else {
+      ctx.strokeStyle = '#6d9660';
+      ctx.lineWidth = 0.8;
+      for (let blade = 0; blade < 3; blade += 1) {
+        const offset = blade - 1;
+        ctx.beginPath();
+        ctx.moveTo(detail.x + offset * 2, ground);
+        ctx.lineTo(detail.x + offset * 2 + Math.sin(detail.phase + blade) * 2, ground - detail.size);
+        ctx.stroke();
+      }
+    }
+  }
+  ctx.restore();
+}
+
 function drawSurfaceProfile() {
   ctx.strokeStyle = '#399a50';
   ctx.lineWidth = Math.max(1, 2.2 * camera.zoom);
@@ -735,6 +811,22 @@ function drawUnderground() {
       ctx.lineTo(source.intakeX, surfaceYAt(source.intakeX) + 10);
       ctx.lineTo(source.intakeX, (surfaceYAt(source.intakeX) + source.pool.level) / 2);
       ctx.stroke();
+      ctx.strokeStyle = '#a8c5bc';
+      ctx.lineWidth = 0.55;
+      ctx.beginPath();
+      ctx.moveTo(farmX + direction, surfaceYAt(farmX) + 11);
+      for (let x = farmX + direction * 6; direction * (source.intakeX - x) > 0; x += direction * 64) {
+        ctx.lineTo(x, surfaceYAt(x) + 11);
+        ctx.stroke();
+        ctx.fillStyle = '#76b8b2';
+        ctx.fillRect(x - 1, surfaceYAt(x) + 9, 3, 3);
+        ctx.beginPath();
+        ctx.moveTo(x, surfaceYAt(x) + 11);
+      }
+      ctx.lineTo(source.intakeX, surfaceYAt(source.intakeX) + 11);
+      ctx.stroke();
+      ctx.fillStyle = '#d7c783';
+      ctx.fillRect(farmX - 2, surfaceYAt(farmX) + 7, 4, 5);
     }
   }
   for (const military of buildingBlueprints.filter((building) => building.kind === 'military' && building.level >= 2)) {
@@ -744,13 +836,7 @@ function drawUnderground() {
       worldObjectRenderer.defensiveMine(ctx, mineX, mineY, buildingColor(military));
     }
   }
-  for (const interior of [false, true]) {
-    for (const tunnel of starterTunnels) {
-      const tunnelMode = commandControl.isTunnelMode();
-      const selected = tunnelMode && tunnel.side === (baseSide === 'left' ? 0 : 1);
-      worldObjectRenderer.tunnel(ctx, tunnel, interior, selected, tunnelMode, TUNNEL_WALL_WIDTH);
-    }
-  }
+  commandControl.drawTunnels();
   ctx.shadowBlur = 0;
   for (const node of resourceNodes) {
     ctx.fillStyle = '#9babb0';
@@ -776,8 +862,26 @@ function drawBattlefield() {
   drawSettlements();
   drawCollapsedBuildings();
   commandControl.draw();
+  drawSurfaceDetails();
+  drawBuildingDebris();
   missileControl.draw();
 
+}
+
+function drawBuildingDebris() {
+  ctx.save();
+  ctx.translate(-camera.x * camera.zoom, -camera.y * camera.zoom);
+  ctx.scale(camera.zoom, camera.zoom);
+  for (const piece of buildingDebris) {
+    ctx.save();
+    ctx.translate(piece.x, piece.y);
+    ctx.rotate(piece.rotation);
+    ctx.globalAlpha = Math.max(0, 1 - piece.age / 6);
+    ctx.fillStyle = piece.color;
+    ctx.fillRect(-piece.width / 2, -piece.height / 2, piece.width, piece.height);
+    ctx.restore();
+  }
+  ctx.restore();
 }
 
 function updateDebrisAndWaterDrops(deltaSeconds) {
@@ -787,6 +891,35 @@ function updateDebrisAndWaterDrops(deltaSeconds) {
     piece.angularVelocity = Math.min(2.2, piece.angularVelocity + 2.5 * deltaSeconds);
     piece.angle = piece.direction * Math.min(Math.PI / 2, Math.abs(piece.angle) + piece.angularVelocity * deltaSeconds);
     if (piece.age >= 12) collapsedBuildings.splice(i, 1);
+  }
+  for (let i = buildingDebris.length - 1; i >= 0; i -= 1) {
+    const piece = buildingDebris[i];
+    const previousY = piece.y;
+    piece.age += deltaSeconds;
+    piece.x += piece.vx * deltaSeconds;
+    piece.y += piece.vy * deltaSeconds;
+    piece.vy += 270 * deltaSeconds;
+    piece.vx *= Math.pow(0.994, deltaSeconds * 60);
+    piece.rotation += piece.spin * deltaSeconds;
+    let hit = false;
+    if (piece.vy > 0 && piece.age > 0.04) {
+      for (const building of buildingBlueprints) {
+        if (building === piece.source || building.health <= 0) continue;
+        const width = building.kind === 'farm' ? FARM_BUILDING_WIDTH : building.width;
+        const ground = Math.min(surfaceYAt(building.x), surfaceYAt(building.x + width));
+        const top = ground - building.height;
+        if (piece.x < building.x || piece.x > building.x + width || piece.y < top || previousY > ground) continue;
+        const damage = Math.min(14, 2 + Math.hypot(piece.vx, piece.vy) * 0.045);
+        building.health = Math.max(0, building.health - damage);
+        if (!building.damageMarks) building.damageMarks = [];
+        building.damageMarks.push({ x: piece.x - building.x, y: piece.y - top, damage: Math.min(100, damage * 5) });
+        hit = true;
+        break;
+      }
+    }
+    if (hit || piece.age > 6 || piece.x < 0 || piece.x > WORLD_WIDTH || piece.y >= surfaceYAt(piece.x)) {
+      buildingDebris.splice(i, 1);
+    }
   }
   for (let i = waterDrops.length - 1; i >= 0; i -= 1) {
     const drop = waterDrops[i];
@@ -802,7 +935,7 @@ function updateIrrigationRepairs(deltaSeconds) {
   for (const farm of buildingBlueprints) {
     if (farm.kind !== 'farm') continue;
     for (const source of farm.availableWaterSources) {
-      source.repairRemaining = Math.max(0, source.repairRemaining - deltaSeconds);
+      commandControl.repairIrrigation(farm, source, deltaSeconds);
     }
   }
 }

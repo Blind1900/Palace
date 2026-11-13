@@ -235,6 +235,16 @@ body {
 
 #command-status:empty { display: none; }
 
+.command-help {
+  max-width: 250px;
+  margin: 6px 0 2px;
+  color: #aaa;
+  font-size: 11px;
+  line-height: 1.35;
+  letter-spacing: 0.04em;
+  text-transform: none;
+}
+
 .missile-launchers {
   margin: 4px 0;
   padding: 5px;

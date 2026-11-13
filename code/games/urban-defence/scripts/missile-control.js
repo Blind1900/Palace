@@ -1,4 +1,4 @@
-function createMissileControl({ canvas, ctx, buildings, surfaceYAt, worldToScreen, screenToWorld, getSide, worldWidth, craterSurface, waterLevelAt, splashWater, breakBuilding, renderer }) {
+function createMissileControl({ canvas, ctx, buildings, cores = [], surfaceYAt, worldToScreen, screenToWorld, getSide, worldWidth, craterSurface, waterLevelAt, splashWater, breakBuilding, renderer }) {
   const command = document.getElementById('missile-command');
   const panel = document.getElementById('missile-panel');
   const status = document.getElementById('missile-status');
@@ -150,7 +150,12 @@ function createMissileControl({ canvas, ctx, buildings, surfaceYAt, worldToScree
           const bounds = buildingBounds(item);
           return point.x >= bounds.left && point.x <= bounds.right && point.y >= bounds.top && point.y <= bounds.bottom;
         });
-        targets.push({ x: point.x, y: building ? point.y : surfaceYAt(point.x), ground: !building });
+        const core = cores.find((item) => {
+          const bounds = coreBounds(item);
+          return point.x >= bounds.left && point.x <= bounds.right && point.y >= bounds.top && point.y <= bounds.bottom;
+        });
+        const structure = building || core || null;
+        targets.push({ x: point.x, y: structure ? point.y : surfaceYAt(point.x), ground: !structure, structure });
       }
     }
     refresh();
@@ -170,6 +175,12 @@ function createMissileControl({ canvas, ctx, buildings, surfaceYAt, worldToScree
     return { left: building.x, right: building.x + width, top: ground - building.height, bottom: ground };
   }
 
+  function coreBounds(core) {
+    const center = core.x + 7;
+    const ground = surfaceYAt(center);
+    return { left: core.x - 11, right: core.x + 25, top: ground - 18, bottom: ground };
+  }
+
   function buildingSide(building) {
     return building.owner;
   }
@@ -186,6 +197,10 @@ function createMissileControl({ canvas, ctx, buildings, surfaceYAt, worldToScree
   function impactAt(point, building) {
     explosionAt(point);
     if (building) {
+      if (cores.includes(building)) {
+        building.health = Math.max(0, building.health - 45);
+        return;
+      }
       const bounds = buildingBounds(building);
       if (!building.damageMarks) building.damageMarks = [];
       const x = point.x - building.x;
@@ -245,10 +260,14 @@ function createMissileControl({ canvas, ctx, buildings, surfaceYAt, worldToScree
         const bounds = buildingBounds(item);
         return point.x >= bounds.left && point.x <= bounds.right && point.y >= bounds.top && point.y <= bounds.bottom;
       });
+      const core = cores.find((item) => {
+        const bounds = coreBounds(item);
+        return point.x >= bounds.left && point.x <= bounds.right && point.y >= bounds.top && point.y <= bounds.bottom;
+      });
       const waterLevel = waterLevelAt(point.x);
-      if (building || point.y >= (waterLevel === null ? surfaceYAt(point.x) : waterLevel)) {
+      if (building || core || point.y >= (waterLevel === null ? surfaceYAt(point.x) : waterLevel)) {
         sampleTrail(start, point, time - previous);
-        impactAt(point, building);
+        impactAt(point, building || core);
         missile.elapsed = time;
         return false;
       }
@@ -465,5 +484,10 @@ function createMissileControl({ canvas, ctx, buildings, surfaceYAt, worldToScree
     ctx.restore();
   }
 
-  return { handleClick, update, draw, refresh };
+  return { handleClick, update, draw, refresh, snapshot: () => ({
+    launchers: launchers.filter((launcher) => buildings.includes(launcher.building) && eligible(launcher.building)).length,
+    selected: selected.size, targets: targets.length, pending: pendingLaunches.length,
+    missiles: missiles.length, interceptors: interceptors.length,
+    cores: cores.map((core) => ({ owner: core.owner, health: core.health })),
+  }) };
 }

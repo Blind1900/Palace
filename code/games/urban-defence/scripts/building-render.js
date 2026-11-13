@@ -132,16 +132,19 @@ function createBuildingRenderer({ ctx, camera, surfaceYAt, terrainYAt, worldToSc
     drawPixelLine(x + width - 4, top, x + width - 4, top - 7, color, 1);
     drawPixelLine(x + width - 4, top - 7, x + width + 1, top - 5, color, 1);
 
-    const turretX = x + width * 0.25;
     if (build.defenseHealth > 0) {
-      drawPixelLine(turretX - 3, top - 1, turretX + 3, top - 1, color, 1.5);
-      drawPixelLine(turretX, top - 2, turretX + direction * 7, top - 6, color, 1.5);
-      const guardX = x + width * 0.72;
-      drawPixelRect(guardX - 1, top - 9, 2, 2, color);
-      drawPixelLine(guardX, top - 7, guardX, top - 2, color, 1);
-      drawPixelLine(guardX, top - 5, guardX + direction * 4, top - 5, color, 1);
-      drawPixelLine(guardX, top - 2, guardX - 2, top, color, 1);
-      drawPixelLine(guardX, top - 2, guardX + 2, top, color, 1);
+      const defenseDirections = build.neutral ? [-1, 1] : [direction];
+      for (const facing of defenseDirections) {
+        const turretX = x + width * (facing < 0 ? 0.72 : 0.25);
+        drawPixelLine(turretX - 3, top - 1, turretX + 3, top - 1, color, 1.5);
+        drawPixelLine(turretX, top - 2, turretX + facing * 7, top - 6, color, 1.5);
+        const guardX = x + width * (facing < 0 ? 0.25 : 0.72);
+        drawPixelRect(guardX - 1, top - 9, 2, 2, color);
+        drawPixelLine(guardX, top - 7, guardX, top - 2, color, 1);
+        drawPixelLine(guardX, top - 5, guardX + facing * 4, top - 5, color, 1);
+        drawPixelLine(guardX, top - 2, guardX - 2, top, color, 1);
+        drawPixelLine(guardX, top - 2, guardX + 2, top, color, 1);
+      }
     }
 
     if (level >= 3) {
@@ -173,7 +176,7 @@ function createBuildingRenderer({ ctx, camera, surfaceYAt, terrainYAt, worldToSc
     const width = building.kind === 'farm' ? FARM_BUILDING_WIDTH : building.width;
     const ground = Math.min(surfaceYAt(building.x), surfaceYAt(building.x + width));
     const top = ground - building.height;
-    const accent = building.owner === 'left' ? '#bce77b' : building.owner === 'right' ? '#ffc58f' : '#d6d2ad';
+    const accent = style === 'asian' ? '#e9c56e' : style === 'gothic' ? '#d2b6ee' : '#98e2d0';
 
     if (style === 'asian') {
       const tiers = building.height > 55 ? 3 : 2;
@@ -220,16 +223,54 @@ function createBuildingRenderer({ ctx, camera, surfaceYAt, terrainYAt, worldToSc
     drawPixelLine(building.x + width * 0.75 + 1, top + 5, building.x + width * 0.75 + 4, top + 8, accent, 1);
   }
 
+  function drawBuildingInteriors(building, color) {
+    const width = building.kind === 'farm' ? FARM_BUILDING_WIDTH : building.width;
+    const ground = Math.min(surfaceYAt(building.x), surfaceYAt(building.x + width));
+    const top = ground - building.height;
+    if (width < 7 || building.height < 9) return;
+    drawPixelRect(building.x + 1, top + 3, Math.max(2, width - 2), Math.max(1, building.height - 4), 'rgba(12, 22, 28, 0.82)');
+    const floors = Math.max(1, Math.min(6, Math.floor((building.height - 5) / 10)));
+    const columns = Math.max(1, Math.min(4, Math.floor((width - 3) / 5)));
+    const style = architectureStyle(building);
+    for (let floor = 0; floor < floors; floor += 1) {
+      const floorTop = top + 4 + floor * (building.height - 6) / floors;
+      for (let column = 0; column < columns; column += 1) {
+        const x = building.x + 2 + (column + 0.5) * (width - 4) / columns;
+        const y = floorTop + 1;
+        const lit = ((building.seed * 13 + floor * 7 + column * 11) % 5) !== 0;
+        const light = style === 'gothic' ? '#d9c4ff' : style === 'asian' ? '#ffdb83' : '#c8f2e5';
+        drawPixelRect(x - 1, y, 2, Math.min(4, Math.max(2, (building.height - 6) / floors - 1)),
+          lit ? light : '#34434a');
+        if (lit) {
+          const glow = worldToScreen(x, y + 1);
+          ctx.fillStyle = `${light}26`;
+          ctx.fillRect(glow.x - 4 * camera.zoom, glow.y - 3 * camera.zoom, 8 * camera.zoom, 8 * camera.zoom);
+        }
+      }
+      if (floor < floors - 1) drawPixelLine(building.x + 2, floorTop + 7, building.x + width - 2, floorTop + 7, color, 0.6);
+    }
+    const doorX = building.x + width * (building.owner === 'right' ? 0.68 : 0.32);
+    drawPixelRect(doorX - 1, ground - Math.min(6, building.height * 0.3), 2, Math.min(5, building.height * 0.3), '#d1b88b');
+  }
+
+  function drawControlPanel(building) {
+    if (building.kind === 'farm' || building.kind === 'mine') return;
+    const width = building.kind === 'farm' ? FARM_BUILDING_WIDTH : building.width;
+    const ground = Math.min(surfaceYAt(building.x), surfaceYAt(building.x + width));
+    const top = ground - building.height;
+    const x = building.x + width * 0.5;
+    const y = top + 3;
+    drawPixelRect(x - 2, y, 4, 3, '#15292a');
+    drawPixelRect(x - 1, y + 1, 2, 1, building.hackSide ? '#f2c56e' : '#76d9b2');
+    if (building.hackProgress > 0) {
+      drawPixelRect(x - 3, y + 4, 6 * Math.min(1, building.hackProgress / 6), 1, '#f2c56e');
+    }
+  }
+
   function buildingColor(building) {
     const style = architectureStyle(building);
-    const architecturePalette = {
-      left: { asian: '#315b82', gothic: '#3a4b78', modern: '#285e6b' },
-      right: { asian: '#91474e', gothic: '#773e58', modern: '#8b4736' },
-      neutral: { asian: '#83745d', gothic: '#776c7a', modern: '#5d7476' },
-    };
-    if (architecturePalette[building.owner] && architecturePalette[building.owner][style]) {
-      return architecturePalette[building.owner][style];
-    }
+    const architecturePalette = { asian: '#586947', gothic: '#6b5a79', modern: '#416d6c' };
+    if (architecturePalette[style]) return architecturePalette[style];
     const palette = {
       left: { housing: '#356496', farm: '#28567a', military: '#19416d', mine: '#476c8d' },
       right: { housing: '#964343', farm: '#79332f', military: '#692326', mine: '#8b5146' },
@@ -266,7 +307,9 @@ function createBuildingRenderer({ ctx, camera, surfaceYAt, terrainYAt, worldToSc
     } else {
       drawSlab(build.x, build.width, build.height, baseY, color, roofStyle(build, 'flat'));
     }
+    drawBuildingInteriors(build, color);
     drawArchitectureDetails(build, color);
+    drawControlPanel(build);
   }
 
   function drawMainBunker(core) {
@@ -276,6 +319,7 @@ function createBuildingRenderer({ ctx, camera, surfaceYAt, terrainYAt, worldToSc
     const color = buildingColor(bunker);
     drawBaseWallSegment(bunker.x, ground, bunker.width, bunker.height, color, roofStyle(bunker, 'flat'));
     drawPixelRect(core.x, ground - 8, 14, 8, color);
+    drawBuildingInteriors(bunker, color);
     drawArchitectureDetails(bunker, color);
   }
 

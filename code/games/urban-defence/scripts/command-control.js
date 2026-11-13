@@ -21,7 +21,7 @@ function advanceSeedConstruction(building, funds, delta, dry) {
   if (building.health <= 0 || building.rebuildHeight !== undefined ||
       !building.construction || building.construction.stage >= 4 || !dry) return;
   building.construction.progress += delta;
-  if (building.construction.progress < 8 || funds.hm < 4 || funds.sm < 2) return;
+  if (building.construction.progress < 5 || funds.hm < 4 || funds.sm < 2) return;
   funds.hm -= 4;
   funds.sm -= 2;
   building.construction.progress = 0;
@@ -32,17 +32,33 @@ function advanceSeedConstruction(building, funds, delta, dry) {
   if (building.construction.stage === 4) funds.assigned -= 1;
 }
 
+function advanceNeutralConstruction(building, delta) {
+  if (building.health <= 0 || building.rebuildHeight !== undefined ||
+      !building.construction || building.construction.stage >= 4) return;
+  building.construction.progress += delta;
+  while (building.construction.progress >= 4 && building.construction.stage < 4) {
+    building.construction.progress -= 4;
+    building.construction.stage += 1;
+    building.height = 6 + building.construction.stage * (building.kind === 'farm' ? 2 : 5);
+    if (building.kind === 'military') building.level = building.construction.stage;
+  }
+}
+
 function createCommandControl(options) {
   const { canvas, ctx, buildings, nodes, tunnels, cores, pools, territories, surfaceYAt,
     worldToScreen, screenToWorld, getSide, worldWidth, worldHeight, canBuild,
-    farmWaterSources, tunnelWidth, startingResources, renderer } = options;
+    farmWaterSources, tunnelWidth, startingResources, renderer, craterSurface, architectureStyles } = options;
   const seedBuildRadius = 240;
+  const vehicleTunnelWidth = Math.max(tunnelWidth, 24);
+  const tunnelRoofClearance = 28;
   const status = document.getElementById('command-status');
   const panels = ['build', 'route', 'deploy', 'missile'];
   const economies = createStartingEconomies(startingResources, tunnels);
   const operations = tunnels.map((tunnel) => ({ node: tunnel.node, side: tunnel.side === 0 ? 'left' : 'right', miners: 1 }));
   const roads = [];
   const units = [];
+  const selectedUnits = new Set();
+  const unitEffects = [];
   const bulletTrails = [];
   const lastBulletShot = new WeakMap();
   const bulletTrailLifetime = 0.36;
@@ -54,6 +70,28 @@ function createCommandControl(options) {
   let pointer = null;
   let listKey = '';
   let elapsed = 0;
+  let outcome = '';
+  const centerHold = { left: 0, right: 0 };
+
+  function styleForSide(side) {
+    return architectureStyles && architectureStyles[side] || 'modern';
+  }
+  function captureBuilding(building, side, direction) {
+    const previousOwner = building.owner;
+    if (previousOwner === side) return;
+    if (previousOwner !== 'neutral') economies[previousOwner].pop -= building.population || 0;
+    economies[side].pop += building.population || 0;
+    if (building.construction && building.construction.stage < 4) {
+      if (previousOwner !== 'neutral') economies[previousOwner].assigned -= 1;
+      economies[side].assigned += 1;
+    }
+    building.owner = side;
+    building.neutral = false;
+    building.captured = true;
+    building.direction = direction;
+    building.hackProgress = 0;
+    delete building.hackSide;
+  }
 
   for (const [left, right, side] of [
     [0, worldWidth * 0.2, 'left'],
@@ -161,6 +199,18 @@ function createCommandControl(options) {
       : 'Select a tunnel and endpoint, or click a highlighted path to a resource. Right-click to finish.'));
   });
   document.getElementById('deploy-select').addEventListener('click', () => setMode('deploy-select', 'Select friendly military bases.'));
+  document.getElementById('deploy-order').addEventListener('click', () => {
+    setMode('unit-order', selectedUnits.size
+      ? `${selectedUnits.size} unit(s) selected. Click a destination to move or attack.`
+      : 'Click active friendly units to select them, then click a destination to move or attack.');
+  });
+  document.getElementById('deploy-select-units').addEventListener('click', () => {
+    selectedUnits.clear();
+    units.filter((unit) => unit.health > 0 && unit.side === getSide()).forEach((unit) => selectedUnits.add(unit));
+    setMode('unit-order', selectedUnits.size
+      ? `${selectedUnits.size} active unit(s) selected. Click a destination to move or attack.`
+      : 'No active friendly units are on the map.');
+  });
   document.getElementById('deploy-all').addEventListener('click', () => {
     bases().forEach((building) => selected.add(building));
     refreshBases();
@@ -180,9 +230,16 @@ function createCommandControl(options) {
     for (const building of selected) {
       const types = ['trooper', 'tank', 'tank', 'hopper'];
       const enemyCore = cores[getSide() === 'left' ? 1 : 0];
-      units.push({ x: building.x + building.width / 2, target: enemyCore.x + 7, type: types[Math.min(4, building.level) - 1], side: getSide(), health: 100 });
+      const unit = {
+        x: building.x + building.width / 2, target: enemyCore.x + 7,
+        type: types[Math.min(4, building.level) - 1], side: getSide(), style: styleForSide(getSide()),
+        health: types[Math.min(4, building.level) - 1] === 'hopper' ? 145 : 100,
+        energy: 100, dodgeCooldown: 0, dodgeTimer: 0, dodgeOffset: 0,
+      };
+      units.push(unit);
+      selectedUnits.add(unit);
     }
-    message(`Deployed ${selected.size} unit(s) toward the enemy core.`);
+    setMode('unit-order', `Deployed ${selected.size} unit(s). Click a destination to move or attack.`);
   });
 
   function worldPoint(clientX, clientY) {
@@ -288,6 +345,46 @@ function createCommandControl(options) {
     }
     return points;
   }
+
+  function roadPlan(left, right, side) {
+    const points = roadProfile(left, right);
+    const base = Math.min(surfaceYAt(left), surfaceYAt(right));
+    const ridge = points.map((point) => surfaceYAt(point.x) < base - 24);
+    const first = ridge.findIndex(Boolean);
+    const last = ridge.lastIndexOf(true);
+    if (first < 0 || last <= first || base - Math.min(...points.map((point) => surfaceYAt(point.x))) < 42) {
+      return { roads: [{ left, right, points, side }], tunnels: [] };
+    }
+
+    // Cut the tunnel at the first and last steep cutoff, then keep the roof far enough
+    // below the surrounding terrain for tanks and mechs to share the route comfortably.
+    const entry = points[Math.max(0, first - 1)];
+    const exit = points[Math.min(points.length - 1, last + 1)];
+    const tunnelLeft = Math.min(entry.x, exit.x);
+    const tunnelRight = Math.max(entry.x, exit.x);
+    const roofY = Math.max(
+      ...points.slice(Math.max(0, first - 1), Math.min(points.length, last + 2))
+        .map((point) => surfaceYAt(point.x) + tunnelRoofClearance),
+      surfaceYAt(tunnelLeft) + tunnelRoofClearance,
+      surfaceYAt(tunnelRight) + tunnelRoofClearance,
+    );
+    const tunnelPoints = [
+      { x: tunnelLeft, y: surfaceYAt(tunnelLeft) + 5 },
+      { x: tunnelLeft, y: roofY },
+      { x: tunnelRight, y: roofY },
+      { x: tunnelRight, y: surfaceYAt(tunnelRight) + 5 },
+    ];
+    const roads = [];
+    const before = points.filter((point) => point.x <= tunnelLeft);
+    const after = points.filter((point) => point.x >= tunnelRight);
+    if (before.length > 1) roads.push({ left: before[0].x, right: before[before.length - 1].x, points: before, side });
+    if (after.length > 1) roads.push({ left: after[0].x, right: after[after.length - 1].x, points: after, side });
+    return {
+      roads,
+      tunnels: [{ side: sideIndex(side), interiorWidth: vehicleTunnelWidth,
+        style: styleForSide(side), points: tunnelPoints }],
+    };
+  }
   function roadSurface(x) {
     const pool = pools.find((item) => x >= item.left && x <= item.right);
     return pool ? Math.min(pool.level, surfaceYAt(x)) : surfaceYAt(x);
@@ -301,9 +398,99 @@ function createCommandControl(options) {
     return a.y + (b.y - a.y) * Math.max(0, Math.min(1, (x - a.x) / (b.x - a.x)));
   }
   function unitY(unit) {
+    if (unit.tunnelY !== undefined) return unit.tunnelY - 3 - (unit.dodgeOffset || 0) - (unit.jumpOffset || 0);
     const road = roads.find((item) => unit.x >= item.left && unit.x <= item.right);
     return (road && unit.type !== 'jet' ? roadY(road, unit.x) : surfaceYAt(unit.x))
-      - (unit.type === 'jet' ? 55 : 3);
+      - (unit.type === 'jet' ? 55 : 3) - (unit.dodgeOffset || 0) - (unit.jumpOffset || 0);
+  }
+  function tunnelPath(tunnel, startAtEnd) {
+    const points = startAtEnd ? [...tunnel.points].reverse() : [...tunnel.points];
+    const lengths = [0];
+    for (let i = 1; i < points.length; i += 1) {
+      lengths.push(lengths[i - 1] + Math.hypot(points[i].x - points[i - 1].x, points[i].y - points[i - 1].y));
+    }
+    return { points, lengths, total: lengths[lengths.length - 1] };
+  }
+  function enterTunnel(unit, tunnel, direction, startX) {
+    const leftEndpoint = tunnel.points.reduce((best, point) => point.x < best.x ? point : best, tunnel.points[0]);
+    const rightEndpoint = tunnel.points.reduce((best, point) => point.x > best.x ? point : best, tunnel.points[0]);
+    const forward = direction > 0;
+    const pathGoesRight = tunnel.points[tunnel.points.length - 1].x >= tunnel.points[0].x;
+    const ordered = forward === pathGoesRight ? [...tunnel.points] : [...tunnel.points].reverse();
+    let segmentIndex = -1, fraction = 0, floorY = 0, widest = -1;
+    for (let i = 1; i < ordered.length; i += 1) {
+      const a = ordered[i - 1], b = ordered[i];
+      const dx = b.x - a.x;
+      if (Math.abs(dx) < 1e-6 || startX < Math.min(a.x, b.x) - 1e-6 || startX > Math.max(a.x, b.x) + 1e-6) continue;
+      if (Math.abs(dx) <= widest) continue;
+      widest = Math.abs(dx);
+      segmentIndex = i;
+      fraction = Math.max(0, Math.min(1, (startX - a.x) / dx));
+      floorY = a.y + (b.y - a.y) * fraction;
+    }
+    if (segmentIndex < 0) return false;
+    const floorStart = { x: startX, y: floorY };
+    const surfaceEntry = { x: startX, y: surfaceYAt(startX) + 5 };
+    const points = [surfaceEntry, floorStart, ...ordered.slice(segmentIndex)];
+    const compact = points.filter((point, index) => index === 0 ||
+      Math.hypot(point.x - points[index - 1].x, point.y - points[index - 1].y) > 0.01);
+    const path = tunnelPath({ points: compact }, false);
+    unit.tunnel = tunnel;
+    unit.tunnelPath = path.points;
+    unit.tunnelLengths = path.lengths;
+    unit.tunnelDistance = 0;
+    unit.tunnelTotal = path.total;
+    unit.tunnelY = path.points[0].y;
+    unit.tunnelExitX = forward ? rightEndpoint.x : leftEndpoint.x;
+    return true;
+  }
+  function tryEnterTunnel(unit) {
+    if (unit.tunnel || unit.type === 'jet') return false;
+    if (unit.tunnelExitHold) {
+      const direction = Math.sign(unit.target - unit.x);
+      if (direction === unit.tunnelExitHold.direction &&
+          direction * (unit.x - unit.tunnelExitHold.x) >= -1) return false;
+      delete unit.tunnelExitHold;
+    }
+    const candidates = tunnels.filter((tunnel) => tunnel.side === sideIndex(unit.side));
+    for (const tunnel of candidates) {
+      const first = tunnel.points[0], last = tunnel.points[tunnel.points.length - 1];
+      const leftEndpoint = tunnel.points.reduce((best, point) => point.x < best.x ? point : best, first);
+      const rightEndpoint = tunnel.points.reduce((best, point) => point.x > best.x ? point : best, first);
+      const forward = unit.target > unit.x;
+      const entry = forward ? leftEndpoint : rightEndpoint;
+      const exit = forward ? rightEndpoint : leftEndpoint;
+      const inside = unit.x >= leftEndpoint.x && unit.x <= rightEndpoint.x;
+      if ((forward && unit.target <= exit.x) || (!forward && unit.target >= exit.x)) continue;
+      if (inside || Math.hypot(unit.x - entry.x, unitY(unit) - entry.y) <= 24) {
+        if (enterTunnel(unit, tunnel, forward ? 1 : -1, inside ? unit.x : entry.x)) return true;
+      }
+    }
+    return false;
+  }
+  function advanceTunnel(unit, distance) {
+    if (!unit.tunnel || !unit.tunnelPath) return false;
+    unit.tunnelDistance = Math.min(unit.tunnelTotal, unit.tunnelDistance + distance);
+    let index = 1;
+    while (index < unit.tunnelLengths.length - 1 && unit.tunnelLengths[index] < unit.tunnelDistance) index += 1;
+    const a = unit.tunnelPath[index - 1], b = unit.tunnelPath[index];
+    const span = unit.tunnelLengths[index] - unit.tunnelLengths[index - 1] || 1;
+    const fraction = (unit.tunnelDistance - unit.tunnelLengths[index - 1]) / span;
+    unit.x = a.x + (b.x - a.x) * fraction;
+    unit.tunnelY = a.y + (b.y - a.y) * fraction;
+    if (unit.tunnelDistance >= unit.tunnelTotal - 1e-6) {
+      const exit = unit.tunnelPath[unit.tunnelPath.length - 1];
+      const entry = unit.tunnelPath[0];
+      unit.tunnelExitHold = { tunnel: unit.tunnel, direction: Math.sign(exit.x - entry.x), x: exit.x };
+      unit.x = exit.x;
+      delete unit.tunnel;
+      delete unit.tunnelPath;
+      delete unit.tunnelLengths;
+      delete unit.tunnelDistance;
+      delete unit.tunnelTotal;
+      delete unit.tunnelY;
+    }
+    return true;
   }
   function tunnelGuides() {
     return nodes.filter((node) => unclaimed(node) && !connected(node, getSide())).map((node) => {
@@ -358,7 +545,8 @@ function createCommandControl(options) {
     const cost = Math.max(1, Math.ceil(length / 20));
     if (economy().hm < cost) { message(`This segment requires ${cost} HM.`); return; }
     economy().hm -= cost;
-    tunnels.push({ side: sideIndex(getSide()), interiorWidth: tunnelWidth, points });
+    tunnels.push({ side: sideIndex(getSide()), interiorWidth: vehicleTunnelWidth,
+      style: styleForSide(getSide()), points });
     start = points[points.length - 1];
     message(`Tunnel built for ${cost} HM. Continue from the endpoint or right-click to finish.`);
   }
@@ -368,22 +556,27 @@ function createCommandControl(options) {
     const right = Math.max(start.x, end.x);
     const length = right - left;
     if (length < 4) { message('Choose a longer segment.'); return; }
-    const points = roadProfile(left, right);
+    const plan = roadPlan(left, right, getSide());
     let extra = 0;
-    for (let i = 1; i < points.length; i += 1) {
-      const a = points[i - 1];
-      const b = points[i];
-      const width = b.x - a.x;
+    for (const road of plan.roads) for (let i = 1; i < road.points.length; i += 1) {
+      const a = road.points[i - 1];
+      const b = road.points[i];
+      const width = Math.abs(b.x - a.x);
       if (pools.some((pool) => a.x < pool.right && b.x > pool.left)) extra += width * 2;
       else if (surfaceYAt((a.x + b.x) / 2) - (a.y + b.y) / 2 > 0.1
         || Math.abs(surfaceYAt(b.x) - surfaceYAt(a.x)) > width * Math.sqrt(3)) extra += width;
     }
-    const cost = Math.max(1, Math.ceil((length + extra) / 20));
+    const tunnelLength = plan.tunnels.reduce((sum, tunnel) => sum + tunnel.points.slice(1)
+      .reduce((part, point, index) => part + Math.hypot(point.x - tunnel.points[index].x, point.y - tunnel.points[index].y), 0), 0);
+    const cost = Math.max(1, Math.ceil((length + extra + tunnelLength * 0.65) / 20));
     if (economy().hm < cost) { message(`This segment requires ${cost} HM.`); return; }
     economy().hm -= cost;
-    roads.push({ left, right, points, side: getSide() });
+    roads.push(...plan.roads);
+    tunnels.push(...plan.tunnels);
     start = null;
-    message(`Road built for ${cost} HM, including ramps and bridges. Select another starting point.`);
+    message(plan.tunnels.length
+      ? `Road built for ${cost} HM. Steep terrain was cut into a vehicle tunnel with raised clearance.`
+      : `Road built for ${cost} HM, including ramps and bridges. Select another starting point.`);
   }
   function handleClick(clientX, clientY) {
     if (!mode) return false;
@@ -427,6 +620,34 @@ function createCommandControl(options) {
         refreshBases();
         message(`${selected.size} base(s) selected. Deploy toward the enemy core.`);
       } else message('Click a highlighted friendly military base or use the list.');
+    } else if (mode === 'unit-order') {
+      const click = worldToScreen(point.x, point.y);
+      const candidates = units.filter((unit) => unit.health > 0 && unit.side === getSide())
+        .map((unit) => ({ unit, distance: Math.hypot(worldToScreen(unit.x, unitY(unit)).x - click.x,
+          worldToScreen(unit.x, unitY(unit)).y - click.y) }))
+        .sort((a, b) => a.distance - b.distance);
+      if (candidates.length && candidates[0].distance < 18) {
+        const unit = candidates[0].unit;
+        if (selectedUnits.has(unit)) selectedUnits.delete(unit); else selectedUnits.add(unit);
+        message(`${selectedUnits.size} unit(s) selected. ${selectedUnits.size ? 'Click a destination to move or attack.' : 'Select an active unit.'}`);
+      } else if (selectedUnits.size) {
+        const structure = buildings.find((building) => building.health > 0 && building.owner !== getSide()
+          && building.kind !== 'farm' && building.kind !== 'mine'
+          && point.x >= building.x && point.x <= building.x + building.width
+          && point.y >= Math.min(surfaceYAt(building.x), surfaceYAt(building.x + building.width)) - building.height
+          && point.y <= surfaceYAt(point.x));
+        if (structure) {
+          const target = structure.x + structure.width / 2;
+          for (const unit of selectedUnits) { unit.target = target; unit.hackTarget = structure; }
+          message(`Ordered ${selectedUnits.size} unit(s) to infiltrate the hostile ${structure.kind} control panel.`);
+        } else {
+          const target = clamp(point.x, 0, worldWidth);
+          for (const unit of selectedUnits) { unit.target = target; delete unit.hackTarget; }
+          message(`Ordered ${selectedUnits.size} unit(s) to ${Math.round(target)}.`);
+        }
+      } else {
+        message('Select an active friendly unit first.');
+      }
     }
     return true;
   }
@@ -435,6 +656,49 @@ function createCommandControl(options) {
     for (let i = bulletTrails.length - 1; i >= 0; i -= 1) {
       bulletTrails[i].age += delta;
       if (bulletTrails[i].age >= bulletTrailLifetime) bulletTrails.splice(i, 1);
+    }
+    for (let i = unitEffects.length - 1; i >= 0; i -= 1) {
+      unitEffects[i].age += delta;
+      if (unitEffects[i].age >= 1.3) unitEffects.splice(i, 1);
+    }
+    if (outcome) return;
+    const ownCore = cores.find((core) => core.owner === getSide());
+    const enemyCore = cores.find((core) => core.owner !== getSide());
+    if (enemyCore && enemyCore.health <= 0) {
+      outcome = 'victory';
+      setMode('victory', 'VICTORY — ENEMY CORE DESTROYED.');
+      return;
+    }
+    if (ownCore && ownCore.health <= 0) {
+      outcome = 'defeat';
+      setMode('defeat', 'DEFEAT — YOUR CORE WAS DESTROYED.');
+      return;
+    }
+    const enemySide = getSide() === 'left' ? 'right' : 'left';
+    if (economies[enemySide].pop <= 0) {
+      outcome = 'victory';
+      setMode('victory', 'VICTORY — ENEMY POPULATION ELIMINATED.');
+      return;
+    }
+    if (economy().pop <= 0) {
+      outcome = 'defeat';
+      setMode('defeat', 'DEFEAT — YOUR POPULATION WAS ELIMINATED.');
+      return;
+    }
+    const centerX = worldWidth / 2;
+    const occupants = Object.fromEntries(['left', 'right'].map((side) => [side,
+      units.filter((unit) => unit.health > 0 && unit.side === side && Math.abs(unit.x - centerX) < 150).length]));
+    for (const side of ['left', 'right']) {
+      if (occupants[side] > 0 && occupants[side === 'left' ? 'right' : 'left'] === 0) {
+        centerHold[side] = Math.min(60, centerHold[side] + delta);
+      } else {
+        centerHold[side] = Math.max(0, centerHold[side] - delta * 2);
+      }
+      if (centerHold[side] >= 60) {
+        outcome = side === getSide() ? 'victory' : 'defeat';
+        setMode(outcome, `${outcome.toUpperCase()} — ${side.toUpperCase()} HELD THE CENTER FOR 60 SECONDS.`);
+        return;
+      }
     }
     for (const building of buildings) {
       if (building.kind !== 'farm' || building.neutral || building.health <= 0) continue;
@@ -451,34 +715,97 @@ function createCommandControl(options) {
       operation.node.amount = Math.max(0, operation.node.amount - time * 0.5);
     }
     for (const building of buildings) {
-      if (!building.construction || building.owner === 'neutral') continue;
-      advanceSeedConstruction(building, economies[building.owner], delta,
+      if (!building.construction) continue;
+      if (building.owner === 'neutral') advanceNeutralConstruction(building, delta);
+      else advanceSeedConstruction(building, economies[building.owner], delta,
         canBuild(building.x, building.width));
+    }
+    for (const unit of units) {
+      unit.dodgeCooldown = Math.max(0, (unit.dodgeCooldown || 0) - delta);
+      unit.energy = Math.min(100, (unit.energy === undefined ? 100 : unit.energy) + 18 * delta);
+      if (unit.dodgeTimer > 0) {
+        unit.dodgeTimer = Math.max(0, unit.dodgeTimer - delta);
+        unit.dodgeOffset = Math.sin((0.35 - unit.dodgeTimer) * Math.PI / 0.35) * 16;
+      } else unit.dodgeOffset = 0;
+      if (unit.jumpTimer > 0) {
+        unit.jumpTimer = Math.max(0, unit.jumpTimer - delta);
+        unit.jumpOffset = Math.sin((0.3 - unit.jumpTimer) * Math.PI / 0.3) * 18;
+      } else unit.jumpOffset = 0;
     }
     for (const building of buildings) {
       if (building.kind !== 'military' || building.health <= 0 || building.defenseHealth <= 0) continue;
       const center = building.x + building.width / 2;
       for (const unit of units) {
-        if (unit.health > 0 && unit.side !== building.owner && Math.abs(center - unit.x) < 70) {
+        if (unit.health > 0 && unit.side !== building.owner && !unit.tunnel && Math.abs(center - unit.x) < 70) {
+          if (unit.type === 'hopper' && unit.dodgeTimer > 0) continue;
+          if (unit.type === 'hopper' && unit.energy >= 30 && unit.dodgeCooldown <= 0) {
+            unit.energy -= 30;
+            unit.dodgeCooldown = 2.2;
+            unit.dodgeTimer = 0.35;
+            unit.dodgeOffset = 1;
+            continue;
+          }
           unit.health -= (10 + building.level * 2) * delta;
         }
       }
       const targets = units.filter((unit) => unit.health > 0 && unit.side !== building.owner
-        && Math.abs(center - unit.x) < 70);
+        && !unit.tunnel && !(unit.type === 'hopper' && unit.dodgeTimer > 0) && Math.abs(center - unit.x) < 70);
       if (!targets.length || elapsed - (lastBulletShot.get(building) || 0) < bulletFireInterval) continue;
       lastBulletShot.set(building, elapsed);
       const top = Math.min(surfaceYAt(building.x), surfaceYAt(building.x + building.width)) - building.height;
       const start = { x: building.x + building.width * 0.25, y: top - 4 };
       for (const unit of targets) {
+        const lineLeft = Math.min(start.x, unit.x), lineRight = Math.max(start.x, unit.x);
+        const cover = buildings.filter((candidate) => candidate !== building && candidate.owner === unit.side
+          && candidate.health > 0 && candidate.x + candidate.width / 2 > lineLeft
+          && candidate.x + candidate.width / 2 < lineRight && (() => {
+            const center = candidate.x + candidate.width / 2;
+            const fraction = (center - start.x) / (unit.x - start.x || 1);
+            const shotY = start.y + (unitY(unit) - 4 - start.y) * fraction;
+            const ground = surfaceYAt(center);
+            return shotY >= ground - candidate.height && shotY <= ground;
+          })())
+          .sort((a, b) => Math.abs(a.x + a.width / 2 - start.x) - Math.abs(b.x + b.width / 2 - start.x))[0];
+        if (cover && cover.health > 15) {
+          const damage = (10 + building.level * 2) * delta;
+          cover.health = Math.max(0, cover.health - damage);
+          if (!cover.damageMarks) cover.damageMarks = [];
+          let mark = cover.damageMarks.find((item) => Math.abs(item.x - cover.width / 2) < 3);
+          if (!mark) { mark = { x: cover.width / 2, y: Math.max(1, cover.height * 0.35), damage: 0 }; cover.damageMarks.push(mark); }
+          mark.damage = Math.min(100, mark.damage + damage * 4);
+          continue;
+        }
         bulletTrails.push({ start, end: { x: unit.x, y: unitY(unit) - 4 }, age: 0 });
       }
     }
     for (const unit of units) {
       if (unit.health <= 0) continue;
+      const speed = (unit.type === 'tank' ? 30 : unit.type === 'hopper' ? 26 : unit.type === 'jet' ? 65 : 20);
+      if (unit.tunnel) {
+        const opponentInTunnel = units.find((other) => other !== unit && other.health > 0 &&
+          other.side !== unit.side && other.tunnel === unit.tunnel && Math.hypot(other.x - unit.x, (other.tunnelY || 0) - (unit.tunnelY || 0)) < 24);
+        if (opponentInTunnel) {
+          opponentInTunnel.health -= (unit.type === 'tank' ? 20 : unit.type === 'hopper' ? 16 : 12) * delta;
+          continue;
+        }
+        advanceTunnel(unit, speed * delta);
+        continue;
+      }
+      tryEnterTunnel(unit);
+      if (unit.tunnel) {
+        advanceTunnel(unit, speed * delta);
+        continue;
+      }
       const direction = Math.sign(unit.target - unit.x);
-      const opponent = units.find((other) => other !== unit && other.health > 0 && other.side !== unit.side && Math.abs(other.x - unit.x) < 22);
+      const opponent = units.find((other) => other !== unit && other.health > 0 && other.side !== unit.side
+        && !other.tunnel && Math.abs(other.x - unit.x) < 22);
       if (opponent) {
-        opponent.health -= (unit.type === 'tank' ? 20 : 12) * delta;
+        opponent.health -= (unit.type === 'tank' ? 20 : unit.type === 'hopper' ? 16 : 12) * delta;
+        continue;
+      }
+      const enemyCore = cores.find((core) => core.owner !== unit.side && core.health > 0);
+      if (enemyCore && Math.abs(enemyCore.x + 7 - unit.x) < 16) {
+        enemyCore.health = Math.max(0, enemyCore.health - (unit.type === 'tank' ? 24 : 12) * delta);
         continue;
       }
       const defense = buildings.find((building) => building.kind === 'military' && building.health > 0
@@ -489,13 +816,35 @@ function createCommandControl(options) {
         defense.health = Math.max(0, defense.health - damage * 0.25);
         continue;
       }
+      if (unit.hackTarget) {
+        const target = unit.hackTarget;
+        if (!buildings.includes(target) || target.health <= 0 || target.owner === unit.side) {
+          delete unit.hackTarget;
+        } else if (Math.abs(unit.x - (target.x + target.width / 2)) <= 7) {
+          if (target.hackSide !== unit.side) { target.hackSide = unit.side; target.hackProgress = 0; }
+          target.hackProgress = Math.min(6, (target.hackProgress || 0) + delta);
+          if (target.hackProgress >= 6) {
+            captureBuilding(target, unit.side, unit.side === 'left' ? 1 : -1);
+            unit.target = unit.side === 'left' ? worldWidth : 0;
+            delete unit.hackTarget;
+          }
+          continue;
+        }
+      }
       const currentRoad = roads.find((road) => unit.x >= road.left && unit.x <= road.right);
       if (currentRoad) currentRoad.side = unit.side;
-      const speed = (unit.type === 'tank' ? 30 : unit.type === 'jet' ? 65 : 20) * (currentRoad ? 1.4 : 1);
-      const next = unit.x + direction * Math.min(Math.abs(unit.target - unit.x), speed * delta);
+      const travelSpeed = speed * (currentRoad ? 1.4 : 1) * (unit.type === 'hopper' && unit.dodgeTimer > 0 ? 2.4 : 1);
+      const next = unit.x + direction * Math.min(Math.abs(unit.target - unit.x), travelSpeed * delta);
       const inWater = pools.some((pool) => next >= pool.left && next <= pool.right);
       const hasRoad = roads.some((road) => next >= road.left && next <= road.right);
-      if (unit.type !== 'jet' && ((inWater && !hasRoad) || (!hasRoad && Math.abs(surfaceYAt(next) - surfaceYAt(unit.x)) > Math.abs(next - unit.x) * Math.sqrt(3) + 0.01))) continue;
+      const rise = Math.abs(surfaceYAt(next) - surfaceYAt(unit.x));
+      const step = Math.abs(next - unit.x);
+      const jumpSlope = unit.type === 'trooper' ? 2.8 : Math.sqrt(3);
+      if (unit.type !== 'jet' && ((inWater && !hasRoad) || (!hasRoad && rise > step * jumpSlope + 0.01))) continue;
+      if (unit.type === 'trooper' && !hasRoad && rise > step * 0.55) {
+        unit.jumpTimer = 0.3;
+        unit.jumpOffset = 1;
+      }
       for (const territory of territories) {
         if (territory.owner === unit.side) continue;
         const exit = direction > 0 ? territory.right : territory.left;
@@ -505,24 +854,33 @@ function createCommandControl(options) {
           || units.some((other) => other.health > 0 && other.side !== unit.side && other.x >= territory.left && other.x <= territory.right);
         if (!defended) {
           for (const building of buildings.filter((item) => item.cluster === territory.cluster && item.health > 0)) {
-            if (building.owner !== 'neutral') economies[building.owner].pop -= building.population || 0;
-            economies[unit.side].pop += building.population || 0;
-            if (building.construction && building.construction.stage < 4 && building.owner !== 'neutral') {
-              economies[building.owner].assigned -= 1;
-              economies[unit.side].assigned += 1;
-            }
-            building.owner = unit.side;
-            building.neutral = false;
-            building.captured = true;
-            building.direction = direction;
+            captureBuilding(building, unit.side, direction);
           }
           territory.owner = unit.side;
         }
       }
       unit.x = next;
     }
-    for (let i = units.length - 1; i >= 0; i -= 1) if (units[i].health <= 0) units.splice(i, 1);
+    for (let i = units.length - 1; i >= 0; i -= 1) {
+      const unit = units[i];
+      if (unit.health > 0) continue;
+      selectedUnits.delete(unit);
+      if (unit.type === 'hopper') {
+        unitEffects.push({ type: 'mech-death', x: unit.x, y: unitY(unit), age: 0 });
+        if (craterSurface) craterSurface(unit.x, 8, 3);
+      }
+      units.splice(i, 1);
+    }
     if (!document.getElementById('deploy-panel').hidden) refreshBases();
+  }
+  function drawTunnels() {
+    const tunnelMode = mode === 'tunnel';
+    const side = sideIndex(getSide());
+    for (const tunnel of tunnels) {
+      const selectedTunnel = tunnelMode && tunnel.side === side;
+      renderer.tunnel(ctx, tunnel, false, selectedTunnel, tunnelMode, 1.5);
+      renderer.tunnel(ctx, tunnel, true, selectedTunnel, tunnelMode, 1.5);
+    }
   }
   function draw() {
     ctx.save();
@@ -538,20 +896,57 @@ function createCommandControl(options) {
       if (operation.node.amount <= 0 || economies[operation.side].sm <= 0 || !connected(operation.node, operation.side)) continue;
       const x = operation.node.x + Math.sin(elapsed * 1.5) * 7;
       const y = operation.node.y;
-      ctx.fillStyle = '#e9e2b9';
-      ctx.fillRect(x - 1, y - 5, 2, 2);
-      ctx.fillRect(x - 1, y - 3, 2, 4);
+      const facing = operation.side === 'left' ? 1 : -1;
+      ctx.fillStyle = '#d3b18a';
+      ctx.fillRect(x - 2, y - 3, 4, 4);
+      ctx.fillStyle = '#d7c782';
+      ctx.fillRect(x - 2, y - 6, 4, 2);
+      ctx.fillStyle = '#fff1a0';
+      ctx.fillRect(x + facing, y - 6, 2, 1);
+      ctx.fillStyle = '#9a7656';
+      ctx.fillRect(x - 3, y + 1, 2, 3);
+      ctx.fillRect(x + 1, y + 1, 2, 3);
+      ctx.strokeStyle = '#d4cfbd';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(x + facing * 2, y - 1);
+      ctx.lineTo(x + facing * 5, y - 5);
+      ctx.lineTo(x + facing * 6, y - 4);
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(255, 236, 144, 0.13)';
+      ctx.beginPath();
+      ctx.moveTo(x + facing * 2, y - 6);
+      ctx.lineTo(x + facing * 22, y - 10);
+      ctx.lineTo(x + facing * 22, y - 2);
+      ctx.closePath();
+      ctx.fill();
     }
     for (const trail of bulletTrails) {
       renderer.bullet(ctx, trail.start, trail.end, 1 - trail.age / bulletTrailLifetime);
     }
     for (const unit of units) {
       const y = unitY(unit);
-      ctx.fillStyle = unit.side === 'left' ? '#e5ddb4' : '#f48c8c';
+      const colors = { asian: '#e9c870', gothic: '#c6b5e9', modern: '#82d7d2' };
+      ctx.fillStyle = colors[unit.style] || '#d7d2ba';
+      const selectedUnit = selectedUnits.has(unit);
+      if (selectedUnit) {
+        ctx.strokeStyle = '#fff0a0';
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.arc(unit.x, y - 4, 10, 0, Math.PI * 2);
+        ctx.stroke();
+      }
       if (unit.type === 'tank') {
-        ctx.fillRect(unit.x - 6, y - 4, 12, 4);
-        ctx.fillRect(unit.x - 3, y - 7, 6, 3);
-        ctx.fillRect(unit.x, y - 7, unit.side === 'left' ? 8 : -8, 1);
+        const road = roads.find((item) => unit.x >= item.left && unit.x <= item.right);
+        const leftY = road ? roadY(road, Math.max(road.left, unit.x - 5)) : surfaceYAt(Math.max(0, unit.x - 5));
+        const rightY = road ? roadY(road, Math.min(road.right, unit.x + 5)) : surfaceYAt(Math.min(worldWidth, unit.x + 5));
+        ctx.save();
+        ctx.translate(unit.x, y - 3);
+        ctx.rotate(Math.atan2(rightY - leftY, 10));
+        ctx.fillRect(-6, -1, 12, 4);
+        ctx.fillRect(-3, -4, 6, 3);
+        ctx.fillRect(unit.side === 'left' ? 0 : -8, -4, 8, 1);
+        ctx.restore();
       } else if (unit.type === 'hopper') {
         ctx.fillRect(unit.x - 4, y - 8, 8, 5);
         ctx.fillRect(unit.x - 5, y - 3, 2, 4);
@@ -562,6 +957,30 @@ function createCommandControl(options) {
         ctx.fillRect(unit.x - 3, y - 2, 2, 3);
         ctx.fillRect(unit.x + 1, y - 2, 2, 3);
       }
+      if (unit.type === 'hopper') {
+        ctx.fillStyle = '#202020';
+        ctx.fillRect(unit.x - 7, y - 13, 14, 2);
+        ctx.fillStyle = '#d9f0a0';
+        ctx.fillRect(unit.x - 7, y - 13, 14 * Math.max(0, Math.min(1, unit.energy / 100)), 2);
+      }
+    }
+    for (const effect of unitEffects) {
+      const progress = Math.min(1, effect.age / 1.3);
+      ctx.globalAlpha = 1 - progress;
+      ctx.strokeStyle = '#f4f5e6';
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.arc(effect.x, effect.y + 3, 3 + progress * 9, 0, Math.PI * 2);
+      ctx.stroke();
+      for (let streak = 0; streak < 6; streak += 1) {
+        const angle = streak * Math.PI / 3;
+        const length = 4 + progress * 12;
+        ctx.beginPath();
+        ctx.moveTo(effect.x + Math.cos(angle) * 2, effect.y + Math.sin(angle) * 2);
+        ctx.lineTo(effect.x + Math.cos(angle) * length, effect.y + Math.sin(angle) * length);
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
     }
     if (mode === 'mine') {
       for (const node of nodes.filter((item) => unclaimed(item) && connected(item, getSide()))) {
@@ -598,7 +1017,7 @@ function createCommandControl(options) {
     ctx.restore();
   }
   return {
-    handleClick, update, draw,
+    handleClick, update, draw, drawTunnels,
     repairBuilding: (building, delta) => {
       if (building.neutral || building.health <= 0 || building.health >= 100) return;
       const funds = economies[building.owner];
@@ -623,7 +1042,23 @@ function createCommandControl(options) {
     },
     isTunnelMode: () => mode === 'tunnel',
     pointerMove: (x, y) => { pointer = worldPoint(x, y); },
-    refresh: () => { selected.clear(); listKey = ''; reset(); refreshBases(); },
+    refresh: () => { selected.clear(); selectedUnits.clear(); listKey = ''; reset(); refreshBases(); },
+    unitSnapshot: () => units.map((unit) => ({ x: unit.x, target: unit.target, type: unit.type,
+      side: unit.side, health: unit.health, selected: selectedUnits.has(unit), tunnel: Boolean(unit.tunnel),
+      tunnelDistance: unit.tunnelDistance, tunnelLength: unit.tunnelTotal, tunnelY: unit.tunnelY,
+      tunnelPath: unit.tunnelPath && unit.tunnelPath.map((point) => ({ ...point })) })),
+    networkSnapshot: () => ({ roads: roads.length, tunnels: tunnels.map((tunnel) => ({ side: tunnel.side,
+      width: tunnel.interiorWidth, points: tunnel.points.map((point) => ({ ...point })) })) }),
+    repairIrrigation: (farm, source, delta) => {
+      if (source.repairRemaining <= 0) return;
+      if (farm.owner === 'neutral') { source.repairRemaining = Math.max(0, source.repairRemaining - delta); return; }
+      const funds = economies[farm.owner];
+      if (!funds) return;
+      const work = Math.min(delta, source.repairRemaining, funds.hm / 0.5);
+      funds.hm = Math.max(0, funds.hm - work * 0.5);
+      source.repairRemaining = Math.max(0, source.repairRemaining - work);
+    },
+    objective: () => ({ outcome, centerHold: { ...centerHold } }),
     resources: () => ({ ...economy(), available: availablePop(getSide()) }),
     production: () => {
       const owned = buildings.filter((building) => building.owner === getSide() && building.health > 0);
