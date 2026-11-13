@@ -65,12 +65,30 @@
     }
   }
   function explode(x, y, radius, power = 1) { return PW.explode(world, particles, { x, y, radius, power }); }
+  // Dig a raw tunnel box for a side: it joins that side's network if it touches one, otherwise it
+  // starts a new network rooted here. Another side's developed lining blocks it.
+  let devSpeed = 1, lastDig = '';
+  function dig(side, x0, y0, x1, y1) {
+    let net = null;
+    for (let y = Math.min(y0, y1) - 2; y <= Math.max(y0, y1) + 2 && !net; y += 1) {
+      for (let x = Math.min(x0, x1) - 2; x <= Math.max(x0, x1) + 2; x += 1) {
+        const found = PW.tunnels.networkAt(world, x, y);
+        if (found && found.side === side) { net = found; break; }
+      }
+    }
+    if (!net) net = PW.tunnels.createNetwork(world, { side, x: (x0 + x1) / 2, y: Math.max(y0, y1) });
+    const result = PW.tunnels.digBox(world, net, x0, y0, x1, y1);
+    lastDig = result.blocked ? `dig ${side}: blocked by developed lining` : `dig ${side}: ${result.cells} cells${result.breached.length ? ', broke into a raw tunnel' : ''}`;
+    if (result.blocked) world.effects.push({ kind: 'flash', x: result.at.x, y: result.at.y, radius: 18, age: 0, life: 0.5 });
+    return result;
+  }
   if (toolbar) {
     toolbar.addEventListener('click', (event) => {
       const button = event.target.closest('button');
       if (!button) return;
       if (button.dataset.tool) { tool = button.dataset.tool; toolbar.querySelectorAll('[data-tool]').forEach((b) => b.classList.toggle('on', b === button)); }
       if (button.dataset.action === 'pause') { paused = !paused; button.classList.toggle('on', paused); }
+      if (button.dataset.action === 'develop') { devSpeed = devSpeed === 1 ? 20 : 1; button.classList.toggle('on', devSpeed > 1); }
       if (button.dataset.action === 'step') stepWorld(1);
     });
     const size = toolbar.querySelector('#brush-size');
@@ -95,7 +113,9 @@
     canvas.setPointerCapture(event.pointerId);
     if (!drag.pan) {
       const spec = tools[tool];
-      if (spec && typeof spec === 'object') { const p = toWorld(event); explode(p.x, p.y, spec.radius, spec.power); }
+      const p = toWorld(event);
+      if (tool === 'digL' || tool === 'digR') dig(tool === 'digL' ? 'left' : 'right', Math.round(p.x - 30), Math.round(p.y - 18), Math.round(p.x + 30), Math.round(p.y + 18));
+      else if (spec && typeof spec === 'object') explode(p.x, p.y, spec.radius, spec.power);
       else useTool(event);
     }
   });
@@ -124,6 +144,7 @@
       const s = performance.now();
       sim.step(3);
       particles.step(DT);
+      if (PW.tunnels) PW.tunnels.step(world, DT * devSpeed);
       simTimes.push(performance.now() - s);
       if (simTimes.length > 240) simTimes.shift();
     }
@@ -150,14 +171,23 @@
       const p95 = sorted.length ? sorted[Math.floor(sorted.length * 0.95)] : 0;
       status.textContent = `seed ${seed} | ${fps.toFixed(0)} fps | zoom ${s.zoom.toFixed(3)} | sim ${sim.stats.ms.toFixed(1)}ms ` +
         `(p95 ${p95.toFixed(1)}) active ${sim.stats.active} moves ${sim.stats.moves} | particles ${particles.count} | ` +
+        `tunnels ${tunnelSummary()}${lastDig ? ` (${lastDig})` : ''} | ` +
         `gen ${Object.entries(timings).map(([k, v]) => `${k} ${v.toFixed(0)}`).join(' ')}`;
     }
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
 
+  function tunnelSummary() {
+    if (!world.tunnels) return '-';
+    let cells = 0, developed = 0;
+    for (const net of world.tunnels.networks) { cells += net.cells; developed += net.developed; }
+    return `${cells ? Math.round(developed / cells * 100) : 0}% developed${devSpeed > 1 ? ' x20' : ''}`;
+  }
+
   window.pwApp = { world, layout, renderer, sim, particles, seed, timings, ready: true,
-    explode, paint: (x, y, radius, material) => paint(x, y, radius, () => material),
+    explode, dig, setDevelopSpeed: (k) => { devSpeed = k; },
+    paint: (x, y, radius, material) => paint(x, y, radius, () => material),
     stepWorld, countWater: () => sim.countWater(), simTimes,
     setPaused: (value) => { paused = value; },
     focus: (x, y, zoomIndex) => renderer.focus(x, y, zoomIndex),

@@ -285,7 +285,10 @@
       for (let dx = 0; dx < 12; dx += 1) {
         const rail = dx < 2 || dx > 9;
         const rung = (y % 6) === 0;
-        if (rail || rung) PW.setLayer(world, 'back', x + dx, y, rgb(rail ? TUNNEL.rail : TUNNEL.rung));
+        if (rail || rung) {
+          PW.setLayer(world, 'back', x + dx, y, rgb(rail ? TUNNEL.rail : TUNNEL.rung));
+          PW.setFlag(world, x + dx, y, FLAG.FIXTURE);   // tunnel development paints around it
+        }
         PW.setFlag(world, x + dx, y, FLAG.LADDER);
       }
     }
@@ -301,48 +304,45 @@
     }
     return node.x - dir * (node.radius + 6);
   }
-  // Starter workings from the core pit down to the ore node: shaft, drift and storage room.
-  function starterMine(world, core, node, dir, owner) {
+  // Starter workings from the core pit down to the ore vein: shaft, drift and storage room. They
+  // are a tunnel network rooted at the top of the shaft: dug raw (timbered), then developed into
+  // reinforced concrete from the shaft head outward as the match goes on.
+  function starterMine(world, core, node, dir, side) {
     // The shaft drops from the side of the pit nearest the node; the drift runs to the vein's face.
     const toward = Math.sign(node.x - (core.pit.left + core.pit.right) / 2) || dir;
     const sx = toward > 0 ? Math.round(core.pit.right - 60) : Math.round(core.pit.left + 60);
     const pitFloor = core.ground + core.pit.depth;
     const driftBottom = node.y + 20, driftTop = driftBottom - 44;
-    carveBox(world, sx - 15, pitFloor - 2, sx + 15, driftBottom, owner);
-    ladder(world, toward > 0 ? sx - 14 : sx + 3, pitFloor - 2, driftBottom - 1);
+    const net = PW.tunnels.createNetwork(world, { side, x: sx, y: pitFloor - 2, building: core.id });
+    PW.tunnels.digBox(world, net, sx - 15, pitFloor - 2, sx + 15, driftBottom, { kind: 'shaft' });
     const face = Math.sign(node.x - sx) || toward;
     const reach = oreFace(world, node, sx + face * 16, face, driftTop, driftBottom);
     const d0 = Math.min(sx, reach), d1 = Math.max(sx, reach);
-    carveBox(world, d0, driftTop, d1, driftBottom, owner);
-    tunnelLamps(world, d0, d1, driftTop);
+    PW.tunnels.digBox(world, net, d0, driftTop, d1, driftBottom, { kind: 'drift' });
     // Storage room on the far side of the shaft from the node.
     const r0 = face > 0 ? sx - 190 : sx + 40, r1 = r0 + 150;
-    carveBox(world, Math.min(r0, sx), driftTop - 8, Math.max(r1, sx), driftBottom, owner);
-    tunnelLamps(world, Math.min(r0, sx), Math.max(r1, sx), driftTop - 8, 50);
-    // Timber props along the drift walls.
-    for (let x = d0 + 30; x < d1 - 10; x += 48) for (let y = driftTop; y <= driftBottom - 3; y += 1) {
-      PW.setLayer(world, 'back', x, y, rgb(TUNNEL.prop)); PW.setLayer(world, 'back', x + 1, y, rgb(tone(TUNNEL.prop, 0.8)));
-    }
-    return { shaft: { x: sx, top: pitFloor, bottom: driftBottom }, drift: { x0: d0, x1: d1, top: driftTop, bottom: driftBottom },
+    PW.tunnels.digBox(world, net, Math.min(r0, sx), driftTop - 8, Math.max(r1, sx), driftBottom, { kind: 'room' });
+    ladder(world, toward > 0 ? sx - 14 : sx + 3, pitFloor - 2, driftBottom - 1);
+    return { network: net.id, shaft: { x: sx, top: pitFloor, bottom: driftBottom }, drift: { x0: d0, x1: d1, top: driftTop, bottom: driftBottom },
       storage: { x0: Math.min(r0, sx), x1: Math.max(r1, sx), top: driftTop - 8, bottom: driftBottom }, node };
   }
-  // A mine headframe's own shaft: straight down to a nearby node, or a short sump if none is near.
-  function headframeShaft(world, mine, nodes, owner) {
+  // A mine headframe's own shaft: straight down to a nearby vein, or a short sump if none is near.
+  function headframeShaft(world, mine, nodes, side) {
     const x = mine.shaft.x, top = mine.shaft.top;
     const node = nodes.filter((n) => n.y > top + 200 && n.y < top + 1300 && Math.abs(n.x - x) < 420)
       .sort((a, b) => Math.abs(a.x - x) - Math.abs(b.x - x))[0];
     const bottom = node ? node.y + 20 : top + 220;
-    carveBox(world, x - 15, top, x + 15, bottom, owner);
-    ladder(world, x - 14, top, bottom - 1);
+    const net = PW.tunnels.createNetwork(world, { side, x, y: top, building: mine.id });
+    PW.tunnels.digBox(world, net, x - 15, top, x + 15, bottom, { kind: 'shaft' });
     let drift = null;
     if (node) {
       const dir = Math.sign(node.x - x) || 1;
       const reach = oreFace(world, node, x + dir * 16, dir, bottom - 44, bottom);
-      carveBox(world, Math.min(x, reach), bottom - 44, Math.max(x, reach), bottom, owner);
-      tunnelLamps(world, Math.min(x, reach), Math.max(x, reach), bottom - 44);
+      PW.tunnels.digBox(world, net, Math.min(x, reach), bottom - 44, Math.max(x, reach), bottom, { kind: 'drift' });
       drift = { x0: Math.min(x, reach), x1: Math.max(x, reach), top: bottom - 44, bottom };
     }
-    return { x, top, bottom, node, shaft: { x, top, bottom }, drift };
+    ladder(world, x - 14, top, bottom - 1);
+    return { network: net.id, x, top, bottom, node, shaft: { x, top, bottom }, drift };
   }
 
   // ---- Ground defences --------------------------------------------------------------------------------------
@@ -550,12 +550,12 @@
       const core = settlement.buildings.find((item) => item.type === 'core');
       if (core) {
         const node = layout.nodes.find((n) => n.starter === side) || layout.nodes.slice().sort((p, q) => Math.abs(p.x - core.body.left) - Math.abs(q.x - core.body.left))[0];
-        core.mine = starterMine(world, core, node, dir || 1, core.id);
+        core.mine = starterMine(world, core, node, dir || 1, side);
         core.mine.props = PW.props.furnishMine(world, core.mine, random);
         settlement.core = core;
       }
       for (const mine of settlement.buildings.filter((item) => item.type === 'mine')) {
-        mine.workings = headframeShaft(world, mine, layout.nodes, mine.id);
+        mine.workings = headframeShaft(world, mine, layout.nodes, side);
         mine.workings.props = PW.props.furnishMine(world, mine.workings, random);
       }
       // Ground defences beyond the front of each base (past the runway's end); neutrals guard both

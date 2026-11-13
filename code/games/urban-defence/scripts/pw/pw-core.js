@@ -377,7 +377,7 @@
     if (x < 0 || y < 0 || x >= world.width || y >= world.height) return;
     const c = chunkIndex(world, x, y);
     let chunk = world.flags[c];
-    if (!chunk) { if (!on) return; chunk = world.flags[c] = new Uint8Array(CHUNK_CELLS); }
+    if (!chunk) { if (!on) return; chunk = world.flags[c] = new Uint16Array(CHUNK_CELLS); }
     const i = (y & CHUNK_MASK) << CHUNK_SHIFT | x & CHUNK_MASK;
     chunk[i] = on ? chunk[i] | bit : chunk[i] & ~bit;
   }

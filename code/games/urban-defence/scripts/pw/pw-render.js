@@ -165,10 +165,14 @@
     const POWDER = PW.PHASE.POWDER;
     const DUST = [134, 118, 98], ORE_DARK = [58, 30, 78], ORE_TINT = [150, 90, 200];
     const ORE_SPECK = PW.abgr(150, 84, 198), ORE_SPECK_DIM = PW.abgr(112, 66, 142);
+    // Open underground air whose rock edges show: caves and blasted cavities (no back wall), and
+    // raw tunnels, whose walls are still freshly cut rock (lined tunnels are not).
+    const RAW_TUNNEL = PW.FLAG.RAW;
     function caveAirAt(x, y) {
       if ((mat[y * W + x] & ID_MASK) !== M.AIR || y <= groundTop[x]) return false;
       const backs = world.back[(y >> CHUNK_SHIFT) * world.chunksX + (x >> CHUNK_SHIFT)];
-      return !backs || !backs[(y & CHUNK_MASK) << CHUNK_SHIFT | x & CHUNK_MASK];
+      if (!backs || !backs[(y & CHUNK_MASK) << CHUNK_SHIFT | x & CHUNK_MASK]) return true;
+      return (PW.getFlags(world, x, y) & RAW_TUNNEL) !== 0;
     }
     function chamfer(d, w, h) {
       for (let y = 0; y < h; y += 1) for (let x = 0; x < w; x += 1) {

@@ -377,6 +377,9 @@
     for (let x = x0; x <= x1; x += 1) {
       PW.setLayer(world, 'back', x, floorAir, rgb((x % 9) < 5 ? RAIL.sleeper : RAIL.foot));
       PW.setLayer(world, 'back', x, floorAir - 1, rgb(RAIL.head));
+      // Fixtures: tunnel development paints the walls around the track, not over it.
+      PW.setFlag(world, x, floorAir, PW.FLAG.FIXTURE);
+      PW.setFlag(world, x, floorAir - 1, PW.FLAG.FIXTURE);
     }
   }
   const MINE_KINDS = ['mineCar', 'drums', 'crates', 'sandbags', 'crib', 'gas', 'drums', 'crates'];
