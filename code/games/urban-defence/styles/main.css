@@ -30,8 +30,11 @@ button { cursor: pointer; }
 
 .game-root {
   position: relative;
-  width: min(100%, 1600px);
-  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100vh;
+  min-height: 480px;
   margin: 0 auto;
   padding: 8px;
 }
@@ -106,7 +109,7 @@ select:focus-visible {
   outline-offset: 2px;
 }
 
-.game-body { position: relative; min-height: 620px; }
+.game-body { position: relative; flex: 1; min-height: 0; }
 
 .hud {
   position: absolute;
@@ -183,9 +186,8 @@ select:focus-visible {
 .battlefield-wrap {
   position: relative;
   overflow: hidden;
-  width: min(100%, 100vmin);
-  min-height: 620px;
-  aspect-ratio: 1;
+  width: 100%;
+  height: 100%;
   border: 2px solid var(--edge);
   background: var(--bg);
 }
@@ -235,7 +237,7 @@ body.fullscreen .commands > .command-label { display: none; }
 body.fullscreen[data-base-side="right"] .commands { right: 8px; left: auto; }
 
 @media (max-width: 760px) {
-  .game-root { padding: 4px; }
+  .game-root { height: auto; min-height: 100vh; padding: 4px; }
   .game-header { flex-direction: column; align-items: flex-start; }
   .game-brand { flex-wrap: wrap; }
   .game-version { font-size: 9px; }
@@ -245,7 +247,7 @@ body.fullscreen[data-base-side="right"] .commands { right: 8px; left: auto; }
   .resources { order: 1; }
   .building-stats { order: 2; min-width: 0; }
   .commands { order: 3; width: 100%; max-width: none; max-height: none; }
-  .battlefield-wrap { order: 4; width: 100%; min-height: 0; }
+  .battlefield-wrap { order: 4; width: 100%; height: 70vh; min-height: 320px; }
   .game-shell[data-base-side="right"] .commands { right: auto; left: 0; }
   body.embedded .game-body { display: block; padding: 0; }
   body.embedded .hud { position: absolute; }

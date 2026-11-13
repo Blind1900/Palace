@@ -811,16 +811,18 @@ function refreshTerrainParticleTexture() {
   const pixels = terrainTextureImage.data;
   pixels.fill(0);
   const surfaceRows = new Int32Array(width);
+  // Sample the centre cell of each texel; at step 1 that is the cell itself (an integer column).
+  const half = terrainTextureStep >> 1;
   for (let x = 0; x < width; x += 1) {
-    const sourceX = Math.min(sourceWidth - 1, x * terrainTextureStep + terrainTextureStep / 2);
+    const sourceX = Math.min(sourceWidth - 1, x * terrainTextureStep + half);
     surfaceRows[x] = particleTerrain.surfaceRow(sourceX);
   }
   const soil = [[82, 67, 46], [70, 57, 40], [59, 49, 36], [49, 42, 33]];
   for (let y = 0; y < height; y += 1) {
     const lifeRow = Math.min(lifeGrid.length - 1, Math.floor(y / height * lifeGrid.length));
     for (let x = 0; x < width; x += 1) {
-      const sourceX = Math.min(sourceWidth - 1, x * terrainTextureStep + terrainTextureStep / 2);
-      const sourceY = Math.min(sourceHeight - 1, y * terrainTextureStep + terrainTextureStep / 2);
+      const sourceX = Math.min(sourceWidth - 1, x * terrainTextureStep + half);
+      const sourceY = Math.min(sourceHeight - 1, y * terrainTextureStep + half);
       const material = particleTerrainCells[sourceY * sourceWidth + sourceX];
       if (material === PARTICLE_EMPTY) continue;
       let hash = Math.imul(x + 1, 0x45d9f3b);
