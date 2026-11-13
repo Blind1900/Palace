@@ -347,7 +347,7 @@ function createBuildingRenderer({ ctx, camera, surfaceYAt, terrainYAt, worldToSc
   }
 
   function drawPixelFarmCrops(building) {
-    const cell = URBAN_PIXEL_CELL_SIZE;
+    const cell = 2;
     for (const [left, right] of [
       [building.x - building.cropLeft, building.x],
       [building.x + building.width, building.x + building.width + building.cropRight],
@@ -355,56 +355,91 @@ function createBuildingRenderer({ ctx, camera, surfaceYAt, terrainYAt, worldToSc
       let index = 0;
       for (let x = Math.ceil(left / cell) * cell; x < right - cell; x += cell) {
         const ground = surfaceYAt(x);
-        const height = cell * (1 + ((building.seed + index * 3) % 2));
-        drawPixelRect(x, ground - height, cell, height, '#9c7934');
-        if ((index + building.seed) % 3 !== 0) drawPixelRect(x, ground - height, cell, cell, '#d7b34f');
+        const hash = Math.imul(index + 7 + building.seed * 13, 0x45d9f3b) >>> 0;
+        const height = 3 + (hash % 4);
+        // Stalk, leaf and ripe head; every third row of the field is a darker furrow.
+        if (index % 3 === 2) { drawPixelRect(x, ground - 1, cell, 1, '#4c3a24'); index += 1; continue; }
+        drawPixelRect(x + 0.5, ground - height, 1, height, '#6f8a3a');
+        if (hash & 8) drawPixelRect(x, ground - height + 2, 1, 1, '#8fae4c');
+        drawPixelRect(x, ground - height - 1.5, cell, 1.5, hash & 16 ? '#d7b34f' : '#c49a3c');
         index += 1;
       }
     }
   }
 
+  // Baked room and window light, added on top of the night scene; damaged buildings flicker and go dark.
+  function drawSpriteLights(sprite, left, top, building, time) {
+    if (!sprite.lightCanvas) return;
+    const health = building ? building.health : 100;
+    if (health <= 25) return;
+    const seed = building ? building.seed || 0 : 0;
+    const flicker = health < 60 ? (Math.sin(time * 23 + seed) > 0.2 ? 1 : 0.35) : 0.9 + 0.1 * Math.sin(time * 1.7 + seed);
+    const screen = worldToScreen(left - sprite.lightPad, top - sprite.lightPad);
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.globalAlpha = flicker;
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(sprite.lightCanvas, screen.x, screen.y,
+      sprite.lightCanvas.width * camera.zoom, sprite.lightCanvas.height * camera.zoom);
+    ctx.restore();
+    ctx.imageSmoothingEnabled = false;
+  }
+
   function drawPixelBuilding(building) {
     if (typeof getUrbanPixelBuildingSprite !== 'function') return false;
-    const sprite = syncUrbanPixelBuildingMetrics(building, factionArchitectureStyles);
-    const cell = sprite.cellSize;
-    const visibleCells = Math.max(0, Math.min(sprite.pixelHeight, Math.round(building.height / cell)));
-    const visibleHeight = visibleCells * cell;
-    const x = Math.round((building.x + (building.width - sprite.width) / 2) / cell) * cell;
-    const ground = Math.min(surfaceYAt(x), surfaceYAt(x + sprite.width));
-    const y = ground - visibleHeight;
-    const sourceY = sprite.pixelHeight - visibleCells;
-    const screen = worldToScreen(x, y);
-    if (visibleHeight <= 0) {
-      drawPixelRect(building.x + building.width / 2 - cell / 2, ground - cell, cell, cell, '#c78c3f');
-      return true;
+    syncUrbanPixelBuildingMetrics(building, factionArchitectureStyles);
+    const art = getUrbanBuildingArt(building, factionArchitectureStyles);
+    const sprite = art.sprite;
+    const centreLeft = urbanBuildingArtLeft(building, sprite.width);
+    let image = sprite.canvas, left = centreLeft, imageWidth = sprite.width, imageHeight = sprite.height, sourceY = 0;
+    if (art.frame) {
+      // Slide between the old and new alignment while the level-up edits the building.
+      const fromLeft = art.from ? urbanBuildingArtLeft(building, art.from.width) - art.transition.fromX
+        : centreLeft - art.transition.toX;
+      const toLeft = centreLeft - art.transition.toX;
+      left = Math.round(fromLeft + (toLeft - fromLeft) * art.fraction);
+      image = art.frame.canvas;
+      imageWidth = art.frame.width;
+      imageHeight = art.frame.height;
+    } else if (building.rebuildHeight !== undefined) {
+      const visible = Math.max(0, Math.min(sprite.height, Math.round(building.height)));
+      sourceY = sprite.height - visible;
+      imageHeight = visible;
     }
-    for (const light of sprite.lightCells) {
-      if (light.y < sourceY || light.y >= sprite.pixelHeight) continue;
-      const glow = worldToScreen(x + light.x * cell, y + (light.y - sourceY) * cell);
-      ctx.save();
-      ctx.globalAlpha *= 0.16;
-      ctx.fillStyle = sprite.light;
-      ctx.fillRect(glow.x - camera.zoom * cell, glow.y - camera.zoom * cell,
-        camera.zoom * cell * 3, camera.zoom * cell * 3);
-      ctx.restore();
+    const ground = Math.min(surfaceYAt(left), surfaceYAt(left + imageWidth));
+    const top = ground - imageHeight;
+    if (!art.frame && building.rebuildHeight === undefined) drawSpriteLights(sprite, left, top, building, performance.now() / 1000);
+    if (imageHeight > 0) {
+      const screen = worldToScreen(left, top);
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(image, 0, sourceY, imageWidth, imageHeight,
+        screen.x, screen.y, imageWidth * camera.zoom, imageHeight * camera.zoom);
     }
-    ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(sprite.canvas, 0, sourceY, sprite.pixelWidth, visibleCells,
-      screen.x, screen.y, sprite.width * camera.zoom, visibleHeight * camera.zoom);
-    const constructionProgress = building.construction && building.construction.stage < 4
-      ? (building.construction.stage + building.construction.progress / 5) / 4
+    const constructionProgress = art.frame ? Math.max(0.05, art.fraction)
       : building.rebuildHeight !== undefined
         ? Math.max(0, Math.min(1, building.height / Math.max(1, building.rebuildHeight))) : 1;
-    drawPixelTerrainJoin(sprite, x, ground, constructionProgress);
+    drawPixelTerrainJoin(sprite, art.frame ? left + art.transition.toX : left, ground, constructionProgress);
     if (building.kind === 'farm') drawPixelFarmCrops(building);
-    if (building.construction && building.construction.stage < 4) {
-      const progress = (building.construction.stage + building.construction.progress / 5) / 4;
-      const scaffoldY = ground - visibleHeight - cell;
-      drawPixelLine(x - cell, scaffoldY, x + sprite.width + cell, scaffoldY, '#c78c3f', cell);
-      drawPixelLine(x - cell, Math.max(ground, surfaceYAt(x - cell)), x - cell, scaffoldY, '#725b3d', cell);
-      drawPixelLine(x + sprite.width + cell, Math.max(ground, surfaceYAt(x + sprite.width + cell)),
-        x + sprite.width + cell, scaffoldY, '#725b3d', cell);
-      if (progress < 1) drawPixelLine(x, scaffoldY - cell, x + sprite.width * progress, scaffoldY - cell, '#d7b34f', cell);
+    if (art.frame) {
+      // Scaffold frames the part still to be built; a gold bar shows the stage's progress.
+      const scaffoldTop = ground - Math.max(art.frame.visibleHeight, sprite.height * 0.25) - 3;
+      const scaffoldLeft = left + art.transition.toX - 3, scaffoldRight = left + art.transition.toX + sprite.width + 3;
+      drawPixelLine(scaffoldLeft, scaffoldTop, scaffoldRight, scaffoldTop, '#c78c3f', 1.5);
+      for (const x of [scaffoldLeft, scaffoldRight]) {
+        drawPixelLine(x, Math.max(ground, surfaceYAt(x)), x, scaffoldTop, '#725b3d', 1.5);
+        for (let y = ground - 8; y > scaffoldTop; y -= 8) drawPixelLine(x - 1.5, y, x + 1.5, y - 4, '#725b3d', 0.8);
+      }
+      drawPixelLine(scaffoldLeft + 2, scaffoldTop - 3, scaffoldLeft + 2 + (scaffoldRight - scaffoldLeft - 4) * art.fraction,
+        scaffoldTop - 3, '#d7b34f', 1.5);
+    }
+    if (building.hackProgress > 0 || building.hackSide) {
+      const panel = urbanBuildingPanelPoint(building, factionArchitectureStyles, surfaceYAt);
+      if (panel) {
+        const blink = Math.floor(performance.now() / 160) % 2 === 0;
+        drawPixelRect(panel.x - 3, panel.y - 7, 6, 2, blink ? '#f2c56e' : '#8c5a2a');
+        drawPixelRect(panel.x - 6, panel.y - 11, 12, 1.5, '#261d1a');
+        drawPixelRect(panel.x - 6, panel.y - 11, 12 * Math.min(1, (building.hackProgress || 0) / 6), 1.5, '#f2c56e');
+      }
     }
     return true;
   }
@@ -445,11 +480,12 @@ function createBuildingRenderer({ ctx, camera, surfaceYAt, terrainYAt, worldToSc
   function drawMainBunker(core) {
     if (typeof createUrbanPixelBuildingSprite === 'function') {
       const style = factionArchitectureStyles && factionArchitectureStyles[core.owner] || 'modern';
-      const sprite = createUrbanPixelBuildingSprite('military', style, 4, 'compound');
+      const sprite = createUrbanPixelBuildingSprite('military', style, 4, 'compound', core.owner);
       core.pixelWidth = sprite.width;
       core.pixelHeight = sprite.height;
-      const x = Math.round((core.x - sprite.width / 2) / sprite.cellSize) * sprite.cellSize;
+      const x = Math.round(core.x - sprite.width / 2);
       const ground = Math.min(surfaceYAt(x), surfaceYAt(x + sprite.width));
+      drawSpriteLights(sprite, x, ground - sprite.height, { health: core.health / 10, seed: core.x }, performance.now() / 1000);
       const screen = worldToScreen(x, ground - sprite.height);
       ctx.drawImage(sprite.canvas, screen.x, screen.y, sprite.width * camera.zoom, sprite.height * camera.zoom);
       drawPixelTerrainJoin(sprite, x, ground);
@@ -474,11 +510,19 @@ function createBuildingRenderer({ ctx, camera, surfaceYAt, terrainYAt, worldToSc
       const width = build.width;
       const ground = Math.min(surfaceYAt(build.x), surfaceYAt(build.x + width));
       const top = ground - build.height;
-      const cell = URBAN_PIXEL_CELL_SIZE;
+      // Scorched holes with glowing edges, sized by the damage the spot has taken.
       for (const mark of build.damageMarks) {
-        const x = build.x + mark.x, y = top + mark.y;
-        drawPixelRect(Math.round(x / cell) * cell, Math.round(y / cell) * cell, cell, cell, '#c96332');
-        drawPixelRect(Math.round(x / cell) * cell, Math.round(y / cell) * cell + cell, cell, cell, '#5a3028');
+        const x = Math.round(build.x + mark.x), y = Math.round(top + mark.y);
+        const size = 1 + Math.round(mark.damage / 22);
+        for (let dy = -size; dy <= size; dy += 1) {
+          for (let dx = -size; dx <= size; dx += 1) {
+            const hash = Math.imul(x + dx * 7 + 31, 0x45d9f3b) ^ Math.imul(y + dy * 13 + 17, 0x119de1f3);
+            const distance = Math.abs(dx) + Math.abs(dy);
+            if (distance > size + (hash & 1)) continue;
+            const color = distance >= size ? ((hash >>> 3) & 3 ? '#5a3028' : '#c96332') : '#120d0b';
+            drawPixelRect(x + dx, y + dy, 1, 1, color);
+          }
+        }
       }
       return;
     }

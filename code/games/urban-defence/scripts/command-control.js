@@ -21,7 +21,7 @@ function advanceSeedConstruction(building, funds, delta, dry) {
   if (building.health <= 0 || building.rebuildHeight !== undefined ||
       !building.construction || building.construction.stage >= 4 || !dry) return;
   building.construction.progress += delta;
-  if (building.construction.progress < 5 || funds.hm < 4 || funds.sm < 2) return;
+  if (building.construction.progress < URBAN_CONSTRUCTION_STAGE_SECONDS || funds.hm < 4 || funds.sm < 2) return;
   funds.hm -= 4;
   funds.sm -= 2;
   building.construction.progress = 0;
@@ -36,8 +36,8 @@ function advanceNeutralConstruction(building, delta) {
   if (building.health <= 0 || building.rebuildHeight !== undefined ||
       !building.construction || building.construction.stage >= 4) return;
   building.construction.progress += delta;
-  while (building.construction.progress >= 4 && building.construction.stage < 4) {
-    building.construction.progress -= 4;
+  while (building.construction.progress >= URBAN_CONSTRUCTION_STAGE_SECONDS && building.construction.stage < 4) {
+    building.construction.progress -= URBAN_CONSTRUCTION_STAGE_SECONDS;
     building.construction.stage += 1;
     building.level = building.construction.stage;
     syncUrbanPixelBuildingMetrics(building, factionArchitectureStyles);
@@ -127,6 +127,12 @@ function createCommandControl(options) {
   function sideIndex(side) { return side === 'left' ? 0 : 1; }
   function coreOf(side) { return cores.find((core) => core.owner === side && core.health > 0); }
   function centerOf(building) { return building.x + building.width / 2; }
+  // Hostile infiltrators hack the control panel on the building's top floor.
+  function hackPoint(building) {
+    const panel = typeof urbanBuildingPanelPoint === 'function'
+      ? urbanBuildingPanelPoint(building, architectureStyles, surfaceYAt) : null;
+    return panel || { x: centerOf(building), y: Math.min(surfaceYAt(building.x), surfaceYAt(building.x + building.width)) - building.height + 4 };
+  }
   // A farm's pump stands on the shore nearest the farm, with its intake below the basin's surface.
   function pumpSite(farm, source) {
     const farmX = centerOf(farm), pool = source.pool;
@@ -764,7 +770,7 @@ function createCommandControl(options) {
           && point.y >= Math.min(surfaceYAt(building.x), surfaceYAt(building.x + building.width)) - building.height
           && point.y <= surfaceYAt(point.x));
         if (structure) {
-          const target = structure.x + structure.width / 2;
+          const target = hackPoint(structure).x;
           for (const unit of selectedUnits) { unit.target = target; unit.hackTarget = structure; }
           message(`Ordered ${selectedUnits.size} unit(s) to infiltrate the hostile ${structure.kind} control panel.`);
         } else {
@@ -948,7 +954,7 @@ function createCommandControl(options) {
         const target = unit.hackTarget;
         if (!buildings.includes(target) || target.health <= 0 || target.owner === unit.side) {
           delete unit.hackTarget;
-        } else if (Math.abs(unit.x - (target.x + target.width / 2)) <= 7) {
+        } else if (Math.abs(unit.x - hackPoint(target).x) <= 7) {
           if (target.hackSide !== unit.side) { target.hackSide = unit.side; target.hackProgress = 0; }
           target.hackProgress = Math.min(6, (target.hackProgress || 0) + delta);
           if (target.hackProgress >= 6) {

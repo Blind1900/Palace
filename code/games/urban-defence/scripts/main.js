@@ -140,7 +140,7 @@ const cores = [
     width: CORE_BUILDING_WIDTH, owner: 'right', health: 1000 },
 ];
 for (const core of cores) {
-  core.height = createUrbanPixelBuildingSprite('military', factionArchitectureStyles[core.owner], 4, 'compound').height;
+  core.height = createUrbanPixelBuildingSprite('military', factionArchitectureStyles[core.owner], 4, 'compound', core.owner).height;
 }
 const neutralTerritories = NEUTRAL_CENTERS.map((center) => ({
   center,
