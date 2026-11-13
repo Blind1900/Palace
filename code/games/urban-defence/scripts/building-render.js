@@ -8,7 +8,7 @@ function createFactionArchitectureStyles(random = Math.random) {
 }
 
 function createBuildingRenderer({ ctx, camera, surfaceYAt, terrainYAt, worldToScreen,
-  drawPixelLine, drawPixelRect, farmBuildingWidth: FARM_BUILDING_WIDTH,
+  drawPixelLine, drawPixelRect,
   buildingBlueprints, cores, collapsedBuildings, factionArchitectureStyles }) {
   function architectureStyle(building) {
     return building.style || (factionArchitectureStyles && factionArchitectureStyles[building.owner]);
@@ -106,13 +106,13 @@ function createBuildingRenderer({ ctx, camera, surfaceYAt, terrainYAt, worldToSc
   }
 
   function drawFarm(farm) {
-    const ground = Math.min(surfaceYAt(farm.x), surfaceYAt(farm.x + FARM_BUILDING_WIDTH));
-    drawBaseWallSegment(farm.x, ground, FARM_BUILDING_WIDTH, farm.height, buildingColor(farm),
+    const ground = Math.min(surfaceYAt(farm.x), surfaceYAt(farm.x + farm.width));
+    drawBaseWallSegment(farm.x, ground, farm.width, farm.height, buildingColor(farm),
       roofStyle(farm, farm.seed % 2 ? 'gable' : 'peak'));
 
     for (const [left, right] of [
       [farm.x - farm.cropLeft, farm.x],
-      [farm.x + FARM_BUILDING_WIDTH, farm.x + FARM_BUILDING_WIDTH + farm.cropRight],
+      [farm.x + farm.width, farm.x + farm.width + farm.cropRight],
     ]) {
       for (let stemX = left + 2; stemX < right - 1; stemX += 4) {
         const stemGround = surfaceYAt(stemX);
@@ -173,7 +173,7 @@ function createBuildingRenderer({ ctx, camera, surfaceYAt, terrainYAt, worldToSc
   function drawArchitectureDetails(building, color) {
     const style = architectureStyle(building);
     if (!['asian', 'gothic', 'modern'].includes(style)) return;
-    const width = building.kind === 'farm' ? FARM_BUILDING_WIDTH : building.width;
+    const width = building.width;
     const ground = Math.min(surfaceYAt(building.x), surfaceYAt(building.x + width));
     const top = ground - building.height;
     const accent = style === 'asian' ? '#e9c56e' : style === 'gothic' ? '#d2b6ee' : '#98e2d0';
@@ -224,7 +224,7 @@ function createBuildingRenderer({ ctx, camera, surfaceYAt, terrainYAt, worldToSc
   }
 
   function drawBuildingInteriors(building, color) {
-    const width = building.kind === 'farm' ? FARM_BUILDING_WIDTH : building.width;
+    const width = building.width;
     const ground = Math.min(surfaceYAt(building.x), surfaceYAt(building.x + width));
     const top = ground - building.height;
     if (width < 7 || building.height < 9) return;
@@ -255,7 +255,7 @@ function createBuildingRenderer({ ctx, camera, surfaceYAt, terrainYAt, worldToSc
 
   function drawControlPanel(building) {
     if (building.kind === 'farm' || building.kind === 'mine') return;
-    const width = building.kind === 'farm' ? FARM_BUILDING_WIDTH : building.width;
+    const width = building.width;
     const ground = Math.min(surfaceYAt(building.x), surfaceYAt(building.x + width));
     const top = ground - building.height;
     const x = building.x + width * 0.5;
@@ -269,18 +269,148 @@ function createBuildingRenderer({ ctx, camera, surfaceYAt, terrainYAt, worldToSc
 
   function buildingColor(building) {
     const style = architectureStyle(building);
-    const architecturePalette = { asian: '#586947', gothic: '#6b5a79', modern: '#416d6c' };
+    const architecturePalette = { asian: '#526342', gothic: '#626b52', modern: '#405a45' };
     if (architecturePalette[style]) return architecturePalette[style];
     const palette = {
-      left: { housing: '#356496', farm: '#28567a', military: '#19416d', mine: '#476c8d' },
-      right: { housing: '#964343', farm: '#79332f', military: '#692326', mine: '#8b5146' },
-      neutral: { housing: '#9a9a91', farm: '#7f8a78', military: '#737b7c', mine: '#9a9281' },
+      left: { housing: '#46623c', farm: '#3d5a35', military: '#2f4e35', mine: '#597044' },
+      right: { housing: '#566744', farm: '#4f603d', military: '#3f5439', mine: '#6c704a' },
+      neutral: { housing: '#6a705d', farm: '#68724f', military: '#606b59', mine: '#77745a' },
     };
     const type = ['farm', 'military', 'mine'].includes(building.kind) ? building.kind : 'housing';
     return palette[building.owner][type];
   }
 
+  function drawPixelTerrainJoin(sprite, x, baseY, progress = 1) {
+    const cell = sprite.cellSize;
+    const soilBands = new Map(), soilCuts = new Map(), contacts = new Map();
+    const grains = [], grass = [];
+    const soilColorAt = (y) => y < 500 ? '#665239' : y < 900 ? '#51412e' : y < 1220 ? '#40342a' : '#30271f';
+    const add = (groups, color, rectangle) => {
+      if (!groups.has(color)) groups.set(color, []);
+      groups.get(color).push(rectangle);
+    };
+    const mix = (a, b, amount) => `rgb(${a.map((value, index) =>
+      Math.round(value * (1 - amount) + b[index] * amount)).join(',')})`;
+
+    for (let column = 0; column < sprite.pixelWidth; column += 1) {
+      const worldX = x + column * cell;
+      const terrainY = surfaceYAt(worldX + cell / 2);
+      const soil = soilColorAt((terrainY + baseY) / 2);
+      const basePixel = sprite.baseColors && sprite.baseColors[column];
+      if (basePixel && progress > 0.02) {
+        const contactColor = mix(basePixel, [102, 82, 57], 0.28 + progress * 0.22);
+        add(contacts, contactColor, [worldX, baseY - cell, cell, cell]);
+      }
+      if (terrainY > baseY + 0.5) {
+        const depth = Math.ceil((terrainY - baseY) / cell) * cell;
+        add(soilBands, soil, [worldX, baseY, cell, depth]);
+        if (depth > cell && column % 9 === 4) {
+          grains.push([worldX, baseY + cell + (column % Math.max(cell, depth - cell)), cell, cell]);
+        }
+        grass.push([worldX, Math.floor(terrainY / cell) * cell, cell, cell]);
+      } else if (terrainY < baseY - 0.5) {
+        const cutDepth = Math.ceil((baseY - terrainY) / cell) * cell;
+        add(soilCuts, soil, [worldX, Math.floor(terrainY / cell) * cell, cell, cutDepth]);
+        if (cutDepth > cell && column % 8 === 3) {
+          grains.push([worldX, Math.floor(terrainY / cell) * cell + cell, cell, cell]);
+        }
+        grass.push([worldX, Math.floor(terrainY / cell) * cell, cell, cell]);
+      }
+    }
+
+    ctx.save();
+    ctx.globalAlpha = 1;
+    ctx.translate(-camera.x * camera.zoom, -camera.y * camera.zoom);
+    ctx.scale(camera.zoom, camera.zoom);
+    const paintGroups = (groups) => {
+      for (const [color, rectangles] of groups) {
+        if (!rectangles.length) continue;
+        ctx.beginPath();
+        for (const rectangle of rectangles) ctx.rect(...rectangle);
+        ctx.fillStyle = color;
+        ctx.fill();
+      }
+    };
+    const paint = (rectangles, color) => {
+      if (!rectangles.length) return;
+      ctx.beginPath();
+      for (const rectangle of rectangles) ctx.rect(...rectangle);
+      ctx.fillStyle = color;
+      ctx.fill();
+    };
+    paintGroups(soilBands);
+    paintGroups(soilCuts);
+    paintGroups(contacts);
+    paint(grains, '#725b3d');
+    paint(grass, '#70944d');
+    ctx.restore();
+  }
+
+  function drawPixelFarmCrops(building) {
+    const cell = URBAN_PIXEL_CELL_SIZE;
+    for (const [left, right] of [
+      [building.x - building.cropLeft, building.x],
+      [building.x + building.width, building.x + building.width + building.cropRight],
+    ]) {
+      let index = 0;
+      for (let x = Math.ceil(left / cell) * cell; x < right - cell; x += cell) {
+        const ground = surfaceYAt(x);
+        const height = cell * (1 + ((building.seed + index * 3) % 2));
+        drawPixelRect(x, ground - height, cell, height, '#9c7934');
+        if ((index + building.seed) % 3 !== 0) drawPixelRect(x, ground - height, cell, cell, '#d7b34f');
+        index += 1;
+      }
+    }
+  }
+
+  function drawPixelBuilding(building) {
+    if (typeof getUrbanPixelBuildingSprite !== 'function') return false;
+    const sprite = syncUrbanPixelBuildingMetrics(building, factionArchitectureStyles);
+    const cell = sprite.cellSize;
+    const visibleCells = Math.max(0, Math.min(sprite.pixelHeight, Math.round(building.height / cell)));
+    const visibleHeight = visibleCells * cell;
+    const x = Math.round((building.x + (building.width - sprite.width) / 2) / cell) * cell;
+    const ground = Math.min(surfaceYAt(x), surfaceYAt(x + sprite.width));
+    const y = ground - visibleHeight;
+    const sourceY = sprite.pixelHeight - visibleCells;
+    const screen = worldToScreen(x, y);
+    if (visibleHeight <= 0) {
+      drawPixelRect(building.x + building.width / 2 - cell / 2, ground - cell, cell, cell, '#c78c3f');
+      return true;
+    }
+    for (const light of sprite.lightCells) {
+      if (light.y < sourceY || light.y >= sprite.pixelHeight) continue;
+      const glow = worldToScreen(x + light.x * cell, y + (light.y - sourceY) * cell);
+      ctx.save();
+      ctx.globalAlpha *= 0.16;
+      ctx.fillStyle = sprite.light;
+      ctx.fillRect(glow.x - camera.zoom * cell, glow.y - camera.zoom * cell,
+        camera.zoom * cell * 3, camera.zoom * cell * 3);
+      ctx.restore();
+    }
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(sprite.canvas, 0, sourceY, sprite.pixelWidth, visibleCells,
+      screen.x, screen.y, sprite.width * camera.zoom, visibleHeight * camera.zoom);
+    const constructionProgress = building.construction && building.construction.stage < 4
+      ? (building.construction.stage + building.construction.progress / 5) / 4
+      : building.rebuildHeight !== undefined
+        ? Math.max(0, Math.min(1, building.height / Math.max(1, building.rebuildHeight))) : 1;
+    drawPixelTerrainJoin(sprite, x, ground, constructionProgress);
+    if (building.kind === 'farm') drawPixelFarmCrops(building);
+    if (building.construction && building.construction.stage < 4) {
+      const progress = (building.construction.stage + building.construction.progress / 5) / 4;
+      const scaffoldY = ground - visibleHeight - cell;
+      drawPixelLine(x - cell, scaffoldY, x + sprite.width + cell, scaffoldY, '#c78c3f', cell);
+      drawPixelLine(x - cell, Math.max(ground, surfaceYAt(x - cell)), x - cell, scaffoldY, '#725b3d', cell);
+      drawPixelLine(x + sprite.width + cell, Math.max(ground, surfaceYAt(x + sprite.width + cell)),
+        x + sprite.width + cell, scaffoldY, '#725b3d', cell);
+      if (progress < 1) drawPixelLine(x, scaffoldY - cell, x + sprite.width * progress, scaffoldY - cell, '#d7b34f', cell);
+    }
+    return true;
+  }
+
   function drawBlueprint(build) {
+    if (drawPixelBuilding(build)) return;
     const color = buildingColor(build);
     const leftGround = terrainYAt(build.x);
     const rightGround = terrainYAt(build.x + build.width);
@@ -313,19 +443,46 @@ function createBuildingRenderer({ ctx, camera, surfaceYAt, terrainYAt, worldToSc
   }
 
   function drawMainBunker(core) {
-    const center = core.x + 7;
+    if (typeof createUrbanPixelBuildingSprite === 'function') {
+      const style = factionArchitectureStyles && factionArchitectureStyles[core.owner] || 'modern';
+      const sprite = createUrbanPixelBuildingSprite('military', style, 4, 'compound');
+      core.pixelWidth = sprite.width;
+      core.pixelHeight = sprite.height;
+      const x = Math.round((core.x - sprite.width / 2) / sprite.cellSize) * sprite.cellSize;
+      const ground = Math.min(surfaceYAt(x), surfaceYAt(x + sprite.width));
+      const screen = worldToScreen(x, ground - sprite.height);
+      ctx.drawImage(sprite.canvas, screen.x, screen.y, sprite.width * camera.zoom, sprite.height * camera.zoom);
+      drawPixelTerrainJoin(sprite, x, ground);
+      const barLeft = core.x - 22;
+      drawPixelRect(barLeft, ground - sprite.height - 7, 44, 3, '#261d1a');
+      drawPixelRect(barLeft, ground - sprite.height - 7, 44 * Math.max(0, core.health / 1000), 3, '#e3bd62');
+      return;
+    }
+    const center = core.x;
     const ground = surfaceYAt(center);
     const bunker = { owner: core.owner, kind: 'military', x: center - 18, width: 36, height: 18 };
     const color = buildingColor(bunker);
     drawBaseWallSegment(bunker.x, ground, bunker.width, bunker.height, color, roofStyle(bunker, 'flat'));
-    drawPixelRect(core.x, ground - 8, 14, 8, color);
+    drawPixelRect(core.x - 7, ground - 8, 14, 8, color);
     drawBuildingInteriors(bunker, color);
     drawArchitectureDetails(bunker, color);
   }
 
   function drawBuildingDamage(build) {
     if (!build.damageMarks) return;
-    const width = build.kind === 'farm' ? FARM_BUILDING_WIDTH : build.width;
+    if (typeof getUrbanPixelBuildingSprite === 'function') {
+      const width = build.width;
+      const ground = Math.min(surfaceYAt(build.x), surfaceYAt(build.x + width));
+      const top = ground - build.height;
+      const cell = URBAN_PIXEL_CELL_SIZE;
+      for (const mark of build.damageMarks) {
+        const x = build.x + mark.x, y = top + mark.y;
+        drawPixelRect(Math.round(x / cell) * cell, Math.round(y / cell) * cell, cell, cell, '#c96332');
+        drawPixelRect(Math.round(x / cell) * cell, Math.round(y / cell) * cell + cell, cell, cell, '#5a3028');
+      }
+      return;
+    }
+    const width = build.width;
     const ground = Math.min(surfaceYAt(build.x), surfaceYAt(build.x + width));
     const top = ground - build.height;
     let roofType = 'flat';
@@ -341,7 +498,7 @@ function createBuildingRenderer({ ctx, camera, surfaceYAt, terrainYAt, worldToSc
       ctx.arc(point.x, point.y, 10 * camera.zoom, 0, Math.PI * 2);
       ctx.clip();
       ctx.globalAlpha = 0.4 + 0.6 * mark.damage / 100;
-      drawBaseWallSegment(build.x, ground, width, build.height, '#ff2920', roofType);
+      drawBaseWallSegment(build.x, ground, width, build.height, '#c35c3c', roofType);
       ctx.restore();
     }
   }

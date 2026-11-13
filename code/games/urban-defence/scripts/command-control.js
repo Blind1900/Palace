@@ -26,8 +26,8 @@ function advanceSeedConstruction(building, funds, delta, dry) {
   funds.sm -= 2;
   building.construction.progress = 0;
   building.construction.stage += 1;
-  building.height = 6 + building.construction.stage * (building.kind === 'farm' ? 2 : 5);
-  if (building.kind === 'military') building.level = building.construction.stage;
+  building.level = building.construction.stage;
+  syncUrbanPixelBuildingMetrics(building, factionArchitectureStyles);
   if (building.kind === 'flat') { funds.pop += 1; building.population += 1; }
   if (building.construction.stage === 4) funds.assigned -= 1;
 }
@@ -39,8 +39,8 @@ function advanceNeutralConstruction(building, delta) {
   while (building.construction.progress >= 4 && building.construction.stage < 4) {
     building.construction.progress -= 4;
     building.construction.stage += 1;
-    building.height = 6 + building.construction.stage * (building.kind === 'farm' ? 2 : 5);
-    if (building.kind === 'military') building.level = building.construction.stage;
+    building.level = building.construction.stage;
+    syncUrbanPixelBuildingMetrics(building, factionArchitectureStyles);
   }
 }
 
@@ -56,6 +56,9 @@ function createCommandControl(options) {
   const economies = createStartingEconomies(startingResources, tunnels);
   const operations = tunnels.map((tunnel) => ({ node: tunnel.node, side: tunnel.side === 0 ? 'left' : 'right', miners: 1 }));
   const roads = [];
+  const automaticRoads = [];
+  let automaticRoadSignature = '';
+  const AUTO_ROAD_RANGE = 260;
   const units = [];
   const selectedUnits = new Set();
   const unitEffects = [];
@@ -76,6 +79,19 @@ function createCommandControl(options) {
   function styleForSide(side) {
     return architectureStyles && architectureStyles[side] || 'modern';
   }
+  function drawTargetBrackets(x, y, radius, color) {
+    const arm = Math.min(radius * 0.45, 8 / options.camera.zoom);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.2 / options.camera.zoom;
+    ctx.beginPath();
+    for (const [sx, sy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+      const cornerX = x + sx * radius, cornerY = y + sy * radius;
+      ctx.moveTo(cornerX - sx * arm, cornerY);
+      ctx.lineTo(cornerX, cornerY);
+      ctx.lineTo(cornerX, cornerY - sy * arm);
+    }
+    ctx.stroke();
+  }
   function captureBuilding(building, side, direction) {
     const previousOwner = building.owner;
     if (previousOwner === side) return;
@@ -91,6 +107,9 @@ function createCommandControl(options) {
     building.direction = direction;
     building.hackProgress = 0;
     delete building.hackSide;
+    syncUrbanPixelBuildingMetrics(building, architectureStyles);
+    automaticRoadSignature = '';
+    syncAutomaticRoads();
   }
 
   for (const [left, right, side] of [
@@ -103,6 +122,7 @@ function createCommandControl(options) {
       roads.push({ left: segment[0].x, right: segment[segment.length - 1].x, points: segment, side });
     }
   }
+  syncAutomaticRoads();
 
   function sideIndex(side) { return side === 'left' ? 0 : 1; }
   function economy() { return economies[getSide()]; }
@@ -231,7 +251,7 @@ function createCommandControl(options) {
       const types = ['trooper', 'tank', 'tank', 'hopper'];
       const enemyCore = cores[getSide() === 'left' ? 1 : 0];
       const unit = {
-        x: building.x + building.width / 2, target: enemyCore.x + 7,
+        x: building.x + building.width / 2, target: enemyCore.x,
         type: types[Math.min(4, building.level) - 1], side: getSide(), style: styleForSide(getSide()),
         health: types[Math.min(4, building.level) - 1] === 'hopper' ? 145 : 100,
         energy: 100, dodgeCooldown: 0, dodgeTimer: 0, dodgeOffset: 0,
@@ -269,18 +289,21 @@ function createCommandControl(options) {
   }
   function unclaimed(node) { return node.amount > 0 && !operations.some((operation) => operation.node === node); }
   function seedSite(kind, x) {
-    const width = kind === 'farm' ? 14 : kind === 'military' ? 24 : 14;
+    const buildingKind = kind === 'housing' ? 'flat' : kind;
+    const seed = buildings.length;
+    const artVariant = urbanPixelArtVariant(buildingKind, seed);
+    const width = getUrbanPixelBuildingFootprintForVariant(urbanPixelArtType(buildingKind), artVariant);
     x = Math.round(x - width / 2);
     const footprint = (building) => ({
       left: building.x - (building.kind === 'farm' ? building.cropLeft : 0),
-      right: building.x + (building.kind === 'farm' ? 14 + building.cropRight : building.width),
+      right: building.x + building.width + (building.kind === 'farm' ? building.cropRight : 0),
     });
     const nearFriendly = buildings.some((building) => friendly(building)
       && Math.max(building.x - (x + width), x - (building.x + building.width), 0) <= seedBuildRadius);
     const clear = canBuild(x, width)
       && !buildings.some((building) => { const bounds = footprint(building); return x < bounds.right + 2 && x + width + 2 > bounds.left; })
-      && !cores.some((core) => x < core.x + 25 && x + width > core.x - 11);
-    return { x, width, valid: nearFriendly && clear, nearFriendly };
+      && !cores.some((core) => x < core.x + core.width / 2 && x + width > core.x - core.width / 2);
+    return { x, width, artVariant, seed, valid: nearFriendly && clear, nearFriendly };
   }
   function placeSeed(kind, x) {
     const site = seedSite(kind, x);
@@ -299,14 +322,17 @@ function createCommandControl(options) {
     economy().sm -= 5;
     economy().assigned += 1;
     const building = {
-      x, width, height: 6, kind: kind === 'housing' ? 'flat' : kind, color: '#6ef08a',
-      seed: buildings.length, health: 100, neutral: false, owner: getSide(),
+      x, width, pixelFootprint: width, height: 1, kind: kind === 'housing' ? 'flat' : kind,
+      artVariant: site.artVariant, seed: site.seed, health: 100, neutral: false, owner: getSide(),
       cluster: (territories.find((territory) => x >= territory.left && x <= territory.right && territory.owner === getSide()) || {}).cluster,
       direction: getSide() === 'left' ? 1 : -1, population: 0,
       level: 1, defenseHealth: 100, construction: { stage: 0, progress: 0 }, cropLeft: 0, cropRight: 0, waterSources: [],
     };
+    syncUrbanPixelBuildingMetrics(building, architectureStyles);
     if (kind === 'farm') building.availableWaterSources = farmWaterSources(building);
     buildings.push(building);
+    automaticRoadSignature = '';
+    syncAutomaticRoads();
     message('Seed placed. Growth pauses if resources run out or the site floods.');
   }
   function routeEnd(point) {
@@ -388,6 +414,39 @@ function createCommandControl(options) {
   function roadSurface(x) {
     const pool = pools.find((item) => x >= item.left && x <= item.right);
     return pool ? Math.min(pool.level, surfaceYAt(x)) : surfaceYAt(x);
+  }
+  function syncAutomaticRoads() {
+    const eligible = buildings.filter((building) => building.health > 0 && !building.neutral &&
+      (!building.construction || building.construction.stage >= 1));
+    const signature = eligible.map((building) => `${building.owner}:${Math.round(building.x)}:${Math.round(building.width)}`)
+      .sort().join('|');
+    if (signature === automaticRoadSignature) return;
+    automaticRoadSignature = signature;
+    for (const road of automaticRoads) {
+      const index = roads.indexOf(road);
+      if (index >= 0) roads.splice(index, 1);
+    }
+    automaticRoads.length = 0;
+
+    for (const side of ['left', 'right']) {
+      const network = eligible.filter((building) => building.owner === side)
+        .sort((a, b) => a.x + a.width / 2 - (b.x + b.width / 2));
+      for (let index = 1; index < network.length; index += 1) {
+        const first = network[index - 1], second = network[index];
+        const left = first.x + first.width / 2;
+        const right = second.x + second.width / 2;
+        if (right - left > AUTO_ROAD_RANGE) continue;
+        const points = roadProfile(left, right);
+        const bridge = pools.some((pool) => left < pool.right && right > pool.left);
+        for (let startIndex = 0; startIndex < points.length - 1; startIndex += 24) {
+          const segment = points.slice(startIndex, Math.min(startIndex + 25, points.length));
+          const road = { left: segment[0].x, right: segment[segment.length - 1].x,
+            points: segment, side, automatic: true, bridge };
+          roads.push(road);
+          automaticRoads.push(road);
+        }
+      }
+    }
   }
   function roadY(road, x) {
     const points = road.points;
@@ -720,6 +779,7 @@ function createCommandControl(options) {
       else advanceSeedConstruction(building, economies[building.owner], delta,
         canBuild(building.x, building.width));
     }
+    syncAutomaticRoads();
     for (const unit of units) {
       unit.dodgeCooldown = Math.max(0, (unit.dodgeCooldown || 0) - delta);
       unit.energy = Math.min(100, (unit.energy === undefined ? 100 : unit.energy) + 18 * delta);
@@ -804,7 +864,7 @@ function createCommandControl(options) {
         continue;
       }
       const enemyCore = cores.find((core) => core.owner !== unit.side && core.health > 0);
-      if (enemyCore && Math.abs(enemyCore.x + 7 - unit.x) < 16) {
+      if (enemyCore && Math.abs(enemyCore.x - unit.x) < 16) {
         enemyCore.health = Math.max(0, enemyCore.health - (unit.type === 'tank' ? 24 : 12) * delta);
         continue;
       }
@@ -891,108 +951,76 @@ function createCommandControl(options) {
       points.forEach((point, index) => index ? ctx.lineTo(point.x, point.y) : ctx.moveTo(point.x, point.y));
       ctx.stroke();
     }
-    for (const road of roads) renderer.road(ctx, road.points);
+    for (const road of roads) renderer.road(ctx, road.points, road);
     for (const operation of operations) {
       if (operation.node.amount <= 0 || economies[operation.side].sm <= 0 || !connected(operation.node, operation.side)) continue;
       const x = operation.node.x + Math.sin(elapsed * 1.5) * 7;
       const y = operation.node.y;
       const facing = operation.side === 'left' ? 1 : -1;
-      ctx.fillStyle = '#d3b18a';
-      ctx.fillRect(x - 2, y - 3, 4, 4);
-      ctx.fillStyle = '#d7c782';
-      ctx.fillRect(x - 2, y - 6, 4, 2);
-      ctx.fillStyle = '#fff1a0';
-      ctx.fillRect(x + facing, y - 6, 2, 1);
-      ctx.fillStyle = '#9a7656';
-      ctx.fillRect(x - 3, y + 1, 2, 3);
-      ctx.fillRect(x + 1, y + 1, 2, 3);
-      ctx.strokeStyle = '#d4cfbd';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(x + facing * 2, y - 1);
-      ctx.lineTo(x + facing * 5, y - 5);
-      ctx.lineTo(x + facing * 6, y - 4);
-      ctx.stroke();
-      ctx.fillStyle = 'rgba(255, 236, 144, 0.13)';
-      ctx.beginPath();
-      ctx.moveTo(x + facing * 2, y - 6);
-      ctx.lineTo(x + facing * 22, y - 10);
-      ctx.lineTo(x + facing * 22, y - 2);
-      ctx.closePath();
-      ctx.fill();
+      const miner = { type: 'miner', side: operation.side, style: styleForSide(operation.side),
+        x, target: x + facing * 20 };
+      if (typeof drawUrbanPixelUnit !== 'function' || !drawUrbanPixelUnit(ctx, miner, x, y, elapsed)) {
+        ctx.fillStyle = '#d7c782';
+        ctx.fillRect(x - 2, y - 5, 4, 5);
+        ctx.fillStyle = '#fff1a0';
+        ctx.fillRect(x + facing * 2, y - 6, 2, 1);
+      }
     }
     for (const trail of bulletTrails) {
       renderer.bullet(ctx, trail.start, trail.end, 1 - trail.age / bulletTrailLifetime);
     }
     for (const unit of units) {
       const y = unitY(unit);
-      const colors = { asian: '#e9c870', gothic: '#c6b5e9', modern: '#82d7d2' };
-      ctx.fillStyle = colors[unit.style] || '#d7d2ba';
+      const art = typeof URBAN_UNIT_ARTWORK === 'undefined' ? null : URBAN_UNIT_ARTWORK.get(unit.type);
       const selectedUnit = selectedUnits.has(unit);
       if (selectedUnit) {
-        ctx.strokeStyle = '#fff0a0';
-        ctx.lineWidth = 1.2;
-        ctx.beginPath();
-        ctx.arc(unit.x, y - 4, 10, 0, Math.PI * 2);
-        ctx.stroke();
+        drawTargetBrackets(unit.x, y - (art ? art.footRow / 2 : 4),
+          Math.max(8, (art ? art.width : 12) / 2 + 3), '#d6c471');
       }
+      let slope = 0;
       if (unit.type === 'tank') {
         const road = roads.find((item) => unit.x >= item.left && unit.x <= item.right);
         const leftY = road ? roadY(road, Math.max(road.left, unit.x - 5)) : surfaceYAt(Math.max(0, unit.x - 5));
         const rightY = road ? roadY(road, Math.min(road.right, unit.x + 5)) : surfaceYAt(Math.min(worldWidth, unit.x + 5));
-        ctx.save();
-        ctx.translate(unit.x, y - 3);
-        ctx.rotate(Math.atan2(rightY - leftY, 10));
-        ctx.fillRect(-6, -1, 12, 4);
-        ctx.fillRect(-3, -4, 6, 3);
-        ctx.fillRect(unit.side === 'left' ? 0 : -8, -4, 8, 1);
-        ctx.restore();
-      } else if (unit.type === 'hopper') {
-        ctx.fillRect(unit.x - 4, y - 8, 8, 5);
-        ctx.fillRect(unit.x - 5, y - 3, 2, 4);
-        ctx.fillRect(unit.x + 3, y - 3, 2, 4);
-      } else {
-        ctx.fillRect(unit.x - 1, y - 8, 2, 2);
-        ctx.fillRect(unit.x - 1, y - 6, 2, 4);
-        ctx.fillRect(unit.x - 3, y - 2, 2, 3);
-        ctx.fillRect(unit.x + 1, y - 2, 2, 3);
+        slope = Math.atan2(rightY - leftY, 10);
+      }
+      const drawn = typeof drawUrbanPixelUnit === 'function' && drawUrbanPixelUnit(ctx, unit, unit.x, y, elapsed, slope);
+      if (!drawn) {
+        ctx.fillStyle = '#d9d4c3';
+        ctx.fillRect(unit.x - 2, y - 7, 4, 7);
       }
       if (unit.type === 'hopper') {
+        const barWidth = 16;
+        const barY = y - (art ? art.footRow : 10) - 3;
         ctx.fillStyle = '#202020';
-        ctx.fillRect(unit.x - 7, y - 13, 14, 2);
+        ctx.fillRect(unit.x - barWidth / 2, barY, barWidth, 2);
         ctx.fillStyle = '#d9f0a0';
-        ctx.fillRect(unit.x - 7, y - 13, 14 * Math.max(0, Math.min(1, unit.energy / 100)), 2);
+        ctx.fillRect(unit.x - barWidth / 2, barY, barWidth * Math.max(0, Math.min(1, unit.energy / 100)), 2);
       }
     }
     for (const effect of unitEffects) {
       const progress = Math.min(1, effect.age / 1.3);
       ctx.globalAlpha = 1 - progress;
-      ctx.strokeStyle = '#f4f5e6';
-      ctx.lineWidth = 1.2;
-      ctx.beginPath();
-      ctx.arc(effect.x, effect.y + 3, 3 + progress * 9, 0, Math.PI * 2);
-      ctx.stroke();
-      for (let streak = 0; streak < 6; streak += 1) {
-        const angle = streak * Math.PI / 3;
-        const length = 4 + progress * 12;
-        ctx.beginPath();
-        ctx.moveTo(effect.x + Math.cos(angle) * 2, effect.y + Math.sin(angle) * 2);
-        ctx.lineTo(effect.x + Math.cos(angle) * length, effect.y + Math.sin(angle) * length);
-        ctx.stroke();
+      for (let particle = 0; particle < 12; particle += 1) {
+        const angle = particle * 2.399963229728653;
+        const distance = 2 + progress * (8 + particle % 4 * 2);
+        ctx.fillStyle = particle % 3 === 0 ? '#e4c661' : particle % 2 ? '#c96332' : '#9d623d';
+        ctx.fillRect(Math.round(effect.x + Math.cos(angle) * distance),
+          Math.round(effect.y + 3 + Math.sin(angle) * distance), particle % 4 === 0 ? 2 : 1, 1);
       }
       ctx.globalAlpha = 1;
     }
     if (mode === 'mine') {
       for (const node of nodes.filter((item) => unclaimed(item) && connected(item, getSide()))) {
-        ctx.strokeStyle = '#f8783e'; ctx.lineWidth = 2 / options.camera.zoom;
-        ctx.beginPath(); ctx.arc(node.x, node.y, Math.max(node.size, 8 / options.camera.zoom), 0, Math.PI * 2); ctx.stroke();
+        drawTargetBrackets(node.x, node.y, Math.max(node.size, 8 / options.camera.zoom), '#cfaa50');
       }
     }
     if (mode === 'deploy-select') {
       for (const building of bases()) {
-        ctx.strokeStyle = selected.has(building) ? '#ffd05c' : '#f8783e';
-        ctx.lineWidth = 2 / options.camera.zoom;
-        ctx.beginPath(); ctx.arc(building.x + building.width / 2, surfaceYAt(building.x) - building.height, 9 / options.camera.zoom, 0, Math.PI * 2); ctx.stroke();
+        drawTargetBrackets(building.x + building.width / 2,
+          Math.min(surfaceYAt(building.x), surfaceYAt(building.x + building.width)) - building.height,
+          selected.has(building) ? 14 / options.camera.zoom : 10 / options.camera.zoom,
+          selected.has(building) ? '#e6ce78' : '#b17140');
       }
     }
     if (mode === 'tunnel') {
@@ -1002,15 +1030,15 @@ function createCommandControl(options) {
     }
     if (start && pointer && (mode === 'road' || mode === 'tunnel')) {
       const end = routeEnd(pointer);
-      if (mode === 'road' && Math.abs(start.x - end.x) >= 0.01) path(roadProfile(Math.min(start.x, end.x), Math.max(start.x, end.x)).map((point) => ({ x: point.x, y: point.y - 2 })), '#fff0a0', 2);
-      else path([start, end], '#fff0a0', 2);
+      if (mode === 'road' && Math.abs(start.x - end.x) >= 0.01) path(roadProfile(Math.min(start.x, end.x), Math.max(start.x, end.x)).map((point) => ({ x: point.x, y: point.y - 2 })), '#d7bd67', 2);
+      else path([start, end], '#d7bd67', 2);
     }
     if (pointer && mode === 'road' && pointer.x >= 0 && pointer.x <= worldWidth) {
-      path([{ x: pointer.x, y: pointer.y }, { x: pointer.x, y: surfaceYAt(pointer.x) }], '#6ef08a', 1 / options.camera.zoom);
+      path([{ x: pointer.x, y: pointer.y }, { x: pointer.x, y: surfaceYAt(pointer.x) }], '#a8c879', 1 / options.camera.zoom);
     }
     if (pointer && mode.startsWith('seed-') && pointer.x >= 0 && pointer.x <= worldWidth) {
       const site = seedSite(mode.slice(5), pointer.x);
-      const color = site.valid ? '#6ef08a' : '#ff2920';
+      const color = site.valid ? '#a8c879' : '#c35c3c';
       path([{ x: pointer.x, y: pointer.y }, { x: pointer.x, y: surfaceYAt(pointer.x) }], color, 1 / options.camera.zoom);
       path([{ x: site.x, y: surfaceYAt(site.x) }, { x: site.x + site.width, y: surfaceYAt(site.x + site.width) }], color, 2 / options.camera.zoom);
     }
@@ -1047,7 +1075,8 @@ function createCommandControl(options) {
       side: unit.side, health: unit.health, selected: selectedUnits.has(unit), tunnel: Boolean(unit.tunnel),
       tunnelDistance: unit.tunnelDistance, tunnelLength: unit.tunnelTotal, tunnelY: unit.tunnelY,
       tunnelPath: unit.tunnelPath && unit.tunnelPath.map((point) => ({ ...point })) })),
-    networkSnapshot: () => ({ roads: roads.length, tunnels: tunnels.map((tunnel) => ({ side: tunnel.side,
+    networkSnapshot: () => ({ roads: roads.length, automaticRoads: automaticRoads.length,
+      tunnels: tunnels.map((tunnel) => ({ side: tunnel.side,
       width: tunnel.interiorWidth, points: tunnel.points.map((point) => ({ ...point })) })) }),
     repairIrrigation: (farm, source, delta) => {
       if (source.repairRemaining <= 0) return;
@@ -1087,6 +1116,8 @@ function createCommandControl(options) {
     buildingRemoved: (building) => {
       if (building.construction && building.construction.stage < 4) economies[building.owner].assigned -= 1;
       if (building.owner !== 'neutral') economies[building.owner].pop -= building.population || 0;
+      automaticRoadSignature = '';
+      syncAutomaticRoads();
     },
   };
 }

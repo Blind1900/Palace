@@ -1,107 +1,112 @@
-@font-face {
-  font-family: "Ithaca";
-  src: url("../assets/Ithaca-LVB75.ttf") format("truetype");
-  font-display: swap;
-}
-
 :root {
-  --bg: #020202;
-  --text: #d9d9d9;
-  --muted: #7f7f7f;
-  --accent: #b53201;
-  --green: #6ef08a;
-  --panel: rgba(10, 10, 10, 0.7);
+  --bg: #050806;
+  --panel: #0c120d;
+  --edge: #48583c;
+  --edge-lit: #829657;
+  --text: #c8d1b8;
+  --muted: #829077;
+  --green: #a4c66b;
+  --amber: #d3b35c;
+  --red: #cf6745;
 }
 
-* {
-  box-sizing: border-box;
-}
+* { box-sizing: border-box; }
 
 html,
 body {
-  margin: 0;
   min-height: 100%;
+  margin: 0;
   background: var(--bg);
   color: var(--text);
-  font-family: "Ithaca", "Segoe UI", Arial, sans-serif;
-}
-
-body {
-  min-height: 100vh;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  font-family: "Courier New", Consolas, monospace;
   -webkit-font-smoothing: none;
-  -moz-osx-font-smoothing: none;
   text-rendering: geometricPrecision;
 }
 
-.game-shell {
-  background: #020202;
-}
+body { min-height: 100vh; letter-spacing: 0.035em; text-transform: uppercase; }
+button, input, select { font: inherit; }
+button { cursor: pointer; }
+.game-shell { background: var(--bg); }
 
 .game-root {
   position: relative;
-  width: min(100%, 1400px);
+  width: min(100%, 1600px);
   min-height: 100vh;
   margin: 0 auto;
-  padding: 18px 18px 12px;
+  padding: 8px;
 }
 
 .game-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 10px;
-  padding-bottom: 8px;
-}
-
-.game-shell:not(.fullscreen) .game-header {
-  display: flex;
+  gap: 12px;
+  min-height: 40px;
+  margin-bottom: 8px;
+  padding: 4px 8px;
+  border: 2px solid var(--edge);
+  background: var(--panel);
 }
 
 .game-brand,
 .game-actions,
 .resource-line,
-.command-label,
-.commands button,
-.resource-label {
-  display: inline-flex;
-  align-items: center;
-}
+.commands button { display: inline-flex; align-items: center; }
 
 .game-brand {
   gap: 8px;
-  font-size: clamp(16px, 2vw, 28px);
+  color: var(--green);
+  font-size: clamp(14px, 1.6vw, 20px);
+  font-weight: 700;
+  letter-spacing: 0.1em;
 }
 
-.nav-bracket {
-  color: var(--accent);
+.game-brand::before {
+  width: 12px;
+  height: 12px;
+  content: "";
+  background: linear-gradient(90deg, transparent 4px, var(--green) 4px 8px, transparent 8px),
+    linear-gradient(transparent 4px, var(--green) 4px 8px, transparent 8px);
+  image-rendering: pixelated;
 }
 
-.game-actions {
-  gap: 10px;
-}
+.nav-bracket { display: none; }
+.game-version { padding-left: 8px; border-left: 2px solid var(--edge); color: var(--muted); font-size: 10px; }
+.game-actions { gap: 4px; }
 
-.mini-button {
+.mini-button,
+.commands button,
+.command-panel button,
+.missile-panel button {
+  min-height: 28px;
   padding: 4px 8px;
-  border: 0;
-  background: transparent;
+  border: 2px solid var(--edge);
+  border-radius: 0;
+  background: #111a12;
   color: var(--text);
-  font: inherit;
-  letter-spacing: 0.12em;
+  font: 700 11px/1.15 "Courier New", Consolas, monospace;
+  letter-spacing: 0.035em;
+  text-align: left;
   text-decoration: none;
-  cursor: pointer;
+  text-shadow: none;
 }
 
-.mini-button:hover {
-  color: var(--accent);
+.mini-button:hover,
+.commands button:hover,
+.command-panel button:hover,
+.missile-panel button:hover { border-color: var(--edge-lit); color: var(--green); }
+
+.mini-button:focus-visible,
+.commands button:focus-visible,
+.command-panel button:focus-visible,
+.missile-panel button:focus-visible,
+input:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 2px;
 }
 
-.game-body {
-  position: relative;
-  min-height: 620px;
-}
+.game-body { position: relative; min-height: 620px; }
 
 .hud {
   position: absolute;
@@ -109,310 +114,140 @@ body {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  max-width: 260px;
+  padding: 8px;
+  border: 2px solid var(--edge);
+  background: rgba(8, 13, 9, 0.94);
   color: var(--text);
-  font-size: 15px;
-  letter-spacing: 0.08em;
+  font-size: 11px;
+  letter-spacing: 0.025em;
 }
 
-.resources {
-  top: 20px;
-  left: 12px;
-}
-
-.building-stats {
-  top: 20px;
-  left: 125px;
-  max-width: min(320px, calc(100% - 130px));
-  background: rgba(2, 2, 2, 0.8);
-  font-size: 13px;
-  line-height: 1.35;
-}
-
-.building-stats div div {
-  white-space: nowrap;
-}
+.resources { top: 8px; left: 8px; min-width: 124px; }
+.building-stats { top: 8px; left: 144px; min-width: 200px; max-width: 260px; line-height: 1.4; }
+.building-stats div div { white-space: nowrap; }
+.resource-label, .command-label { margin-bottom: 2px; color: var(--amber); font-size: 10px; font-weight: 700; }
+.resource-line { justify-content: space-between; gap: 12px; line-height: 1.25; }
+.resource-line span { color: var(--green); }
 
 .commands {
-  top: 170px;
-  left: 12px;
-  max-height: calc(100% - 180px);
+  top: 144px;
+  left: 8px;
+  width: 236px;
+  max-width: min(260px, calc(100% - 16px));
+  max-height: calc(100% - 152px);
   overflow-y: auto;
   scrollbar-width: thin;
 }
 
-.game-shell[data-base-side="right"] .commands {
-  left: auto;
-  right: 12px;
-}
+.commands > button { width: 100%; justify-content: flex-start; }
+.commands > button::before { content: "■  "; color: var(--green); font-size: 8px; }
+.commands > button::after { content: ""; }
+.commands > button[aria-expanded="true"] { border-color: var(--amber); color: var(--amber); }
+.commands button[aria-pressed="true"] { color: var(--green); }
+.commands button:disabled { color: #66705e; cursor: not-allowed; }
 
-.resource-label,
-.command-label {
-  color: var(--muted);
-  margin-bottom: 2px;
-}
-
-.resource-line {
-  gap: 6px;
-  color: var(--text);
-}
-
-.resource-line span {
-  color: var(--green);
-}
-
-.commands button {
+.command-panel,
+.missile-panel {
   width: 100%;
-  justify-content: flex-start;
-  padding: 6px 12px;
-  border: 0;
-  background: transparent;
-  color: var(--text);
-  font: inherit;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  cursor: pointer;
+  max-width: 280px;
+  padding: 4px;
+  border: 2px solid var(--edge);
+  border-radius: 0;
+  background: #080d09;
+  line-height: 1.35;
 }
 
-.commands > button::before { content: "[ "; color: var(--accent); }
-.commands > button::after { content: " ]"; color: var(--accent); }
-.commands > button[aria-expanded="false"]::after { content: " ] \25BE"; }
-.commands > button[aria-expanded="true"]::after { content: " ] \25B4"; }
-
-.commands button:hover,
-.commands button:focus-visible {
-  color: var(--accent);
-}
-
-.commands button:disabled {
-  color: #666;
-  cursor: not-allowed;
-}
-
-.commands button[aria-pressed="true"] {
-  color: #ff9a4c;
-}
-
-.missile-panel,
-.command-panel {
-  width: 250px;
-  max-width: calc(100vw - 24px);
-  padding: 10px;
-  border: 1px solid #6c3a21;
-  background: rgba(2, 2, 2, 0.94);
-  letter-spacing: 0.08em;
-  line-height: 1.4;
-}
-
-.missile-panel[hidden],
-.command-panel[hidden] {
-  display: none;
-}
-
-.missile-heading {
-  color: #ff9a4c;
-}
-
-.missile-panel p {
-  margin: 8px 0;
-  color: #ddd;
-  text-transform: none;
-}
-
-.missile-panel button,
-.command-panel button {
-  padding: 5px 0;
-}
+.command-panel[hidden], .missile-panel[hidden] { display: none; }
+.command-panel button, .missile-panel button { display: block; width: 100%; margin: 2px 0; }
+.missile-heading { color: var(--amber); font-size: 11px; font-weight: 700; }
+.missile-panel p { margin: 8px 0; color: var(--text); font-size: 10px; letter-spacing: 0; text-transform: none; }
+.missile-launchers { margin: 4px 0; padding: 4px; border: 2px solid var(--edge); }
+.missile-launchers label { display: block; padding: 4px 0; cursor: pointer; }
+.missile-launchers input { accent-color: var(--green); }
+.command-help { max-width: 250px; margin: 4px 0; color: var(--muted); font-size: 10px; line-height: 1.35; text-transform: none; }
 
 #command-status {
   max-width: 250px;
-  padding: 5px;
+  padding: 4px;
   margin: 0;
-  background: rgba(2, 2, 2, 0.9);
-  line-height: 1.3;
+  border: 2px solid #786644;
+  background: #17160e;
+  color: var(--amber);
+  font-size: 10px;
+  line-height: 1.35;
   text-transform: none;
 }
 
 #command-status:empty { display: none; }
 
-.command-help {
-  max-width: 250px;
-  margin: 6px 0 2px;
-  color: #aaa;
-  font-size: 11px;
-  line-height: 1.35;
-  letter-spacing: 0.04em;
-  text-transform: none;
-}
-
-.missile-launchers {
-  margin: 4px 0;
-  padding: 5px;
-  border: 1px solid #444;
-}
-
-.missile-launchers label {
-  display: block;
-  padding: 3px 0;
-  cursor: pointer;
-}
-
-.missile-launchers input {
-  accent-color: #ff9a4c;
-}
-
 .battlefield-wrap {
   position: relative;
-  min-height: 620px;
-  background: #020202;
-  aspect-ratio: 1;
+  overflow: hidden;
   width: min(100%, 100vmin);
+  min-height: 620px;
+  aspect-ratio: 1;
+  border: 2px solid var(--edge);
+  background: var(--bg);
 }
 
-#game-canvas {
-  display: block;
-  width: 100%;
-  height: 100%;
-  max-height: none;
-  background: #020202;
-  image-rendering: pixelated;
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
-}
-
-body.embedded {
-  overflow: hidden;
-}
-
-body.embedded .game-root {
-  width: 100%;
-  height: 100vh;
-  min-height: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-body.embedded .game-header {
-  margin: 0;
-  padding: 10px 12px 8px;
-}
-
-body.embedded .game-body {
-  flex: 1;
-  min-height: 0;
-}
-
-body.embedded .battlefield-wrap {
-  width: 100%;
-  height: 100%;
-  min-height: 0;
-  aspect-ratio: auto;
-}
-
-body.embedded #game-canvas {
-  max-height: none;
-}
-
-body.fullscreen {
-  overflow: hidden;
-}
-
-body.fullscreen .game-root {
-  width: 100vw;
-  min-height: 100vh;
-  padding: 0;
-}
-
-body.fullscreen .game-header { display: none !important; }
-body.fullscreen .resources { position: absolute; top: 18px; }
-
-body.fullscreen .commands {
+.battlefield-wrap::before,
+.battlefield-wrap::after {
   position: absolute;
-  top: 130px;
-  left: 12px;
-  max-height: calc(100vh - 140px);
+  z-index: 1;
+  inset: 0;
+  content: "";
+  pointer-events: none;
 }
 
+.battlefield-wrap::before {
+  background:
+    linear-gradient(var(--edge-lit), var(--edge-lit)) left top / 12px 2px no-repeat,
+    linear-gradient(var(--edge-lit), var(--edge-lit)) left top / 2px 12px no-repeat,
+    linear-gradient(var(--edge-lit), var(--edge-lit)) right top / 12px 2px no-repeat,
+    linear-gradient(var(--edge-lit), var(--edge-lit)) right top / 2px 12px no-repeat,
+    linear-gradient(var(--edge-lit), var(--edge-lit)) left bottom / 12px 2px no-repeat,
+    linear-gradient(var(--edge-lit), var(--edge-lit)) left bottom / 2px 12px no-repeat,
+    linear-gradient(var(--edge-lit), var(--edge-lit)) right bottom / 12px 2px no-repeat,
+    linear-gradient(var(--edge-lit), var(--edge-lit)) right bottom / 2px 12px no-repeat;
+}
+
+#game-canvas { display: block; width: 100%; height: 100%; max-height: none; border: 0; background: var(--bg); image-rendering: pixelated; }
+
+body.embedded { overflow: hidden; }
+body.embedded .game-root { display: flex; flex-direction: column; width: 100%; height: 100vh; min-height: 0; padding: 0; }
+body.embedded .game-header { margin: 0; padding: 8px; }
+body.embedded .game-body { flex: 1; min-height: 0; }
+body.embedded .battlefield-wrap { width: 100%; height: 100%; min-height: 0; aspect-ratio: auto; }
+
+body.fullscreen { overflow: hidden; }
+body.fullscreen .game-root { width: 100vw; min-height: 100vh; padding: 0; }
+body.fullscreen .game-header { display: none !important; }
+body.fullscreen .game-body { position: fixed; inset: 0; min-height: 100vh; }
+body.fullscreen .battlefield-wrap { position: fixed; inset: 0; width: 100vw; height: 100vh; min-height: 0; aspect-ratio: auto; border: 0; }
+body.fullscreen #game-canvas { width: 100vw; height: 100vh; border: 0; }
+body.fullscreen .resources { top: 12px; }
+body.fullscreen .commands { top: 120px; max-height: calc(100vh - 128px); }
 body.fullscreen .commands > .command-label { display: none; }
 
-.game-shell[data-base-side="right"] .resources { left: auto; right: 12px; }
-.game-shell[data-base-side="right"] .building-stats { left: auto; right: 125px; }
-
-body.fullscreen[data-base-side="right"] .commands {
-  left: auto;
-  right: 12px;
-}
-
-body.fullscreen .game-body {
-  position: fixed;
-  inset: 0;
-  min-height: 100vh;
-}
-
-body.fullscreen .battlefield-wrap {
-  position: fixed;
-  inset: 0;
-  width: 100vw;
-  height: 100vh;
-  min-height: 0;
-  aspect-ratio: auto;
-}
-
-body.fullscreen #game-canvas {
-  width: 100vw;
-  height: 100vh;
-  max-height: none;
-  border: 0;
-  box-shadow: none;
-}
+.game-shell[data-base-side="right"] .resources { right: 8px; left: auto; }
+.game-shell[data-base-side="right"] .building-stats { right: 144px; left: auto; }
+.game-shell[data-base-side="right"] .commands { right: 8px; left: auto; }
+body.fullscreen[data-base-side="right"] .commands { right: 8px; left: auto; }
 
 @media (max-width: 760px) {
-  .game-header {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-
-  .game-actions {
-    flex-wrap: wrap;
-  }
-
-  .hud {
-    position: static;
-    max-width: none;
-  }
-
-  .game-body {
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: 12px;
-    padding-top: 8px;
-  }
-
-  .commands {
-    order: 2;
-  }
-
-  .resources {
-    order: 1;
-  }
-
-  .game-shell[data-base-side="right"] .commands {
-    right: auto;
-    left: 0;
-  }
-
-  body.embedded .game-body {
-    display: block;
-    padding: 0;
-  }
-
-  body.embedded .hud {
-    position: absolute;
-  }
-
-  body.embedded[data-base-side="right"] .commands {
-    left: auto;
-    right: 12px;
-  }
+  .game-root { padding: 4px; }
+  .game-header { flex-direction: column; align-items: flex-start; }
+  .game-brand { flex-wrap: wrap; }
+  .game-version { font-size: 9px; }
+  .game-actions { flex-wrap: wrap; }
+  .game-body { display: flex; flex-direction: column; gap: 4px; padding-top: 4px; }
+  .hud { position: static; max-width: none; }
+  .resources { order: 1; }
+  .building-stats { order: 2; min-width: 0; }
+  .commands { order: 3; width: 100%; max-width: none; max-height: none; }
+  .battlefield-wrap { order: 4; width: 100%; min-height: 0; }
+  .game-shell[data-base-side="right"] .commands { right: auto; left: 0; }
+  body.embedded .game-body { display: block; padding: 0; }
+  body.embedded .hud { position: absolute; }
+  body.embedded[data-base-side="right"] .commands { right: 8px; left: auto; }
 }

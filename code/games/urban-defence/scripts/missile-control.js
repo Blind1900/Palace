@@ -1,4 +1,4 @@
-function createMissileControl({ canvas, ctx, buildings, cores = [], surfaceYAt, worldToScreen, screenToWorld, getSide, worldWidth, craterSurface, waterLevelAt, splashWater, breakBuilding, renderer }) {
+function createMissileControl({ canvas, ctx, camera, buildings, cores = [], surfaceYAt, worldToScreen, screenToWorld, getSide, worldWidth, craterSurface, waterLevelAt, splashWater, breakBuilding, renderer }) {
   const command = document.getElementById('missile-command');
   const panel = document.getElementById('missile-panel');
   const status = document.getElementById('missile-status');
@@ -170,15 +170,15 @@ function createMissileControl({ canvas, ctx, buildings, cores = [], surfaceYAt, 
   }
 
   function buildingBounds(building) {
-    const width = building.kind === 'farm' ? 14 : building.width;
+    const width = building.width;
     const ground = Math.min(surfaceYAt(building.x), surfaceYAt(building.x + width));
     return { left: building.x, right: building.x + width, top: ground - building.height, bottom: ground };
   }
 
   function coreBounds(core) {
-    const center = core.x + 7;
-    const ground = surfaceYAt(center);
-    return { left: core.x - 11, right: core.x + 25, top: ground - 18, bottom: ground };
+    const ground = surfaceYAt(core.x);
+    return { left: core.x - core.width / 2, right: core.x + core.width / 2,
+      top: ground - core.height, bottom: ground };
   }
 
   function buildingSide(building) {
@@ -233,16 +233,6 @@ function createMissileControl({ canvas, ctx, buildings, cores = [], surfaceYAt, 
         age: elapsed * (1 - fraction),
       });
     }
-  }
-
-  function trailColor(age) {
-    const progress = Math.max(0, Math.min(1, age / trailLifetime));
-    const blend = progress < 0.3 ? progress / 0.3 : (progress - 0.3) / 0.7;
-    const from = progress < 0.3 ? [255, 255, 255] : [255, 35, 20];
-    const to = progress < 0.3 ? [255, 35, 20] : [255, 225, 40];
-    const green = Math.round(from[1] + (to[1] - from[1]) * blend);
-    const blue = Math.round(from[2] + (to[2] - from[2]) * blend);
-    return `rgba(255, ${green}, ${blue}, ${0.9 * (1 - progress)})`;
   }
 
   function advanceMissile(missile, delta) {
@@ -400,30 +390,34 @@ function createMissileControl({ canvas, ctx, buildings, cores = [], surfaceYAt, 
     }
   }
 
+  function drawScreenBrackets(x, y, size, color) {
+    const arm = Math.min(5, size * 0.45);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (const [sx, sy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+      const cornerX = x + sx * size, cornerY = y + sy * size;
+      ctx.moveTo(cornerX - sx * arm, cornerY);
+      ctx.lineTo(cornerX, cornerY);
+      ctx.lineTo(cornerX, cornerY - sy * arm);
+    }
+    ctx.stroke();
+  }
+
   function draw() {
     ctx.save();
     if (!panel.hidden) {
       for (const launcher of launchers.filter((item) => buildings.includes(item.building) && eligible(item.building))) {
         const point = launcherPosition(launcher);
         const screen = worldToScreen(point.x, point.y);
-        ctx.strokeStyle = selected.has(launcher) ? '#ffd05c' : '#f47a32';
-        ctx.lineWidth = 1.5;
-        ctx.beginPath();
-        ctx.arc(screen.x, screen.y, selected.has(launcher) ? 9 : 6, 0, Math.PI * 2);
-        ctx.stroke();
+        drawScreenBrackets(screen.x, screen.y, selected.has(launcher) ? 12 : 8,
+          selected.has(launcher) ? '#e5c86d' : '#d27737');
       }
       targets.forEach((target, index) => {
         const point = worldToScreen(target.x, target.y);
-        ctx.strokeStyle = '#ff6a30';
-        ctx.lineWidth = 1.5;
-        ctx.beginPath();
-        ctx.moveTo(point.x - 7, point.y);
-        ctx.lineTo(point.x + 7, point.y);
-        ctx.moveTo(point.x, point.y - 20);
-        ctx.lineTo(point.x, point.y + 6);
-        ctx.stroke();
-        ctx.fillStyle = '#ffad55';
-        ctx.font = '10px Ithaca, "Segoe UI", sans-serif';
+        drawScreenBrackets(point.x, point.y, 9, '#d97836');
+        ctx.fillStyle = '#e4bf62';
+        ctx.font = '10px Consolas, "Courier New", monospace';
         ctx.fillText(String(index + 1), point.x + 8, point.y - 8);
       });
     }
@@ -431,36 +425,36 @@ function createMissileControl({ canvas, ctx, buildings, cores = [], surfaceYAt, 
       const start = worldToScreen(trail.fromX, trail.fromY);
       const point = worldToScreen(trail.x, trail.y);
       if (start.x === point.x && start.y === point.y) continue;
-      const gradient = ctx.createLinearGradient(start.x, start.y, point.x, point.y);
-      gradient.addColorStop(0, trailColor(trail.startAge));
-      gradient.addColorStop(1, trailColor(trail.age));
-      ctx.strokeStyle = gradient;
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(start.x, start.y);
-      ctx.lineTo(point.x, point.y);
-      ctx.stroke();
+      renderer.missileTrail(ctx, start, point, Math.max(0.15, 1 - trail.age / trailLifetime),
+        Math.max(1, camera.zoom * URBAN_PIXEL_CELL_SIZE));
     }
     ctx.globalAlpha = 1;
     for (const missile of missiles) {
       const t = Math.min(1, missile.elapsed / missile.duration);
       const point = position(missile, t);
+      const next = position(missile, Math.min(1, t + 0.01));
       const screen = worldToScreen(point.x, point.y);
-      renderer.missile(ctx, screen, false);
+      renderer.missile(ctx, screen, false, Math.atan2(next.y - point.y, next.x - point.x),
+        Math.max(1, camera.zoom * URBAN_PIXEL_CELL_SIZE));
     }
     for (const interceptor of interceptors) {
       const screen = worldToScreen(interceptor.x, interceptor.y);
-      renderer.missile(ctx, screen, true);
+      const angle = Math.atan2(interceptor.target.y - interceptor.y, interceptor.target.x - interceptor.x);
+      renderer.missile(ctx, screen, true, angle, Math.max(1, camera.zoom * URBAN_PIXEL_CELL_SIZE));
     }
     for (const impact of impacts) {
       const point = worldToScreen(impact.x, impact.y);
       const progress = impact.age / 1.2;
-      ctx.globalAlpha = 1 - progress;
-      ctx.strokeStyle = '#ff8b32';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.arc(point.x, point.y, 3 + progress * 18, 0, Math.PI * 2);
-      ctx.stroke();
+      const pixelSize = Math.max(1, camera.zoom * URBAN_PIXEL_CELL_SIZE);
+      const flash = pixelSize * Math.max(2, Math.round((1 - progress) * 4));
+      ctx.globalAlpha = (1 - progress) * 0.38;
+      ctx.fillStyle = '#d7782c';
+      ctx.fillRect(Math.round(point.x / pixelSize) * pixelSize - flash,
+        Math.round(point.y / pixelSize) * pixelSize - flash, flash * 2, flash * 2);
+      ctx.globalAlpha = (1 - progress) * 0.86;
+      ctx.fillStyle = '#fff0a2';
+      ctx.fillRect(Math.round(point.x / pixelSize) * pixelSize - pixelSize,
+        Math.round(point.y / pixelSize) * pixelSize - pixelSize, pixelSize * 2, pixelSize * 2);
       for (const spark of impact.sparks) {
         if (impact.age >= spark.lifetime) continue;
         const x = impact.x + spark.vx * impact.age;
@@ -472,12 +466,7 @@ function createMissileControl({ canvas, ctx, buildings, cores = [], surfaceYAt, 
           impact.y + spark.vy * tailAge + 45 * tailAge * tailAge,
         );
         ctx.globalAlpha = 1 - impact.age / spark.lifetime;
-        ctx.strokeStyle = impact.age < 0.2 ? '#fff1aa' : '#ff9938';
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.moveTo(tail.x, tail.y);
-        ctx.lineTo(head.x, head.y);
-        ctx.stroke();
+        renderer.missileTrail(ctx, tail, head, 1, pixelSize);
       }
       ctx.globalAlpha = 1;
     }

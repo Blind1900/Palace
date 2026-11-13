@@ -28,12 +28,17 @@ const WORLD_HEIGHT = 1560;
 const MAX_ZOOM_FACTOR = 32;
 const TUNNEL_INTERIOR_WIDTH = 24;
 const TUNNEL_WALL_WIDTH = 1.5;
-const FARM_BUILDING_WIDTH = 14;
 const factionArchitectureStyles = createFactionArchitectureStyles();
+const CORE_BUILDING_WIDTH = getUrbanPixelBuildingFootprintForVariant('military', 'compound');
+const FARM_BUILDING_WIDTH = getUrbanPixelBuildingFootprintForVariant('farm', 'silos');
 const FARM_MAX_SOURCE_DISTANCE = 1200;
 const FARM_ADDITIONAL_SOURCE_GROWTH = 12;
 const FARM_GROWTH_PER_SECOND = 2;
 const IRRIGATION_REPAIR_SECONDS = 8;
+const LIFE_GRID_COLUMNS = 160;
+const LIFE_GRID_ROWS = 96;
+const PARTICLE_TERRAIN_CELL_SIZE = 4;
+let terrainTextureStep = 4;
 const randomBetween = (min, max) => min + Math.random() * (max - min);
 const NEUTRAL_CENTERS = [
   randomBetween(0.23, 0.37) * WORLD_WIDTH,
@@ -67,8 +72,11 @@ const surfaceDetails = Array.from({ length: 220 }, (_, index) => {
   const x = 40 + (index + Math.random()) * (WORLD_WIDTH - 80) / 220;
   const type = index % 9 === 0 ? 'tree' : index % 3 === 0 ? 'rock' : 'grass';
   return { x, type, size: type === 'tree' ? 5 + Math.random() * 5 : 2 + Math.random() * 3,
-    phase: Math.random() * Math.PI * 2 };
+    phase: Math.random() * Math.PI * 2, lifeRow: Math.floor(Math.random() * LIFE_GRID_ROWS) };
 });
+const skyDetails = Array.from({ length: 90 }, (_, index) => ({
+  x: randomBetween(0, WORLD_WIDTH), y: randomBetween(0, 240), brightness: 0.2 + (index % 5) * 0.12,
+}));
 
 const camera = {
   x: 0,
@@ -90,7 +98,12 @@ const world = {
   explosionPhase: 0,
 };
 
-const lifeGrid = createLifeGrid(72, 7, 0.18);
+let lifeGrid = createLifeGrid(LIFE_GRID_COLUMNS, LIFE_GRID_ROWS, 0.2);
+let lifeGridClock = 0;
+let particleTerrainClock = 0;
+let terrainTextureClock = 0;
+let terrainTextureDirty = true;
+let particleTerrain = null;
 const valleyProfile = {
   leftStart: 0.07 + Math.random() * 0.07,
   leftEnd: 0.32 + Math.random() * 0.12,
@@ -103,13 +116,33 @@ const valleyProfile = {
 };
 const terrainSurface = createTerrainSurface(WORLD_WIDTH, 4, terrainYAt);
 const waterPools = createWaterPools();
+particleTerrain = createParticleWorldFromSurfaceAndWater(terrainSurface, waterLevelAt, {
+  width: WORLD_WIDTH / PARTICLE_TERRAIN_CELL_SIZE,
+  height: WORLD_HEIGHT / PARTICLE_TERRAIN_CELL_SIZE,
+  cellSize: PARTICLE_TERRAIN_CELL_SIZE,
+  originX: 0,
+  originY: 0,
+  skipEmptyChunks: true,
+});
+const particleTerrainCells = new Uint8Array(particleTerrain.width * particleTerrain.height);
+const terrainTextureCanvas = document.createElement('canvas');
+terrainTextureCanvas.width = Math.ceil(particleTerrain.width / terrainTextureStep);
+terrainTextureCanvas.height = Math.ceil(particleTerrain.height / terrainTextureStep);
+const terrainTextureContext = terrainTextureCanvas.getContext('2d', { alpha: true });
+let terrainTextureImage = terrainTextureContext.createImageData(terrainTextureCanvas.width, terrainTextureCanvas.height);
+particleTerrain.configureDebrisMerging(12);
 const waterDrops = [];
 const collapsedBuildings = [];
 const buildingDebris = [];
 const cores = [
-  { x: findDryPosition(169, 36) + 11, owner: 'left', health: 1000 },
-  { x: findDryPosition(WORLD_WIDTH - 451, 36) + 11, owner: 'right', health: 1000 },
+  { x: findDryPosition(24, CORE_BUILDING_WIDTH) + CORE_BUILDING_WIDTH / 2,
+    width: CORE_BUILDING_WIDTH, owner: 'left', health: 1000 },
+    { x: findDryPosition(WORLD_WIDTH - CORE_BUILDING_WIDTH - 35, CORE_BUILDING_WIDTH) + CORE_BUILDING_WIDTH / 2,
+    width: CORE_BUILDING_WIDTH, owner: 'right', health: 1000 },
 ];
+for (const core of cores) {
+  core.height = createUrbanPixelBuildingSprite('military', factionArchitectureStyles[core.owner], 4, 'compound').height;
+}
 const neutralTerritories = NEUTRAL_CENTERS.map((center) => ({
   center,
   owner: 'neutral',
@@ -117,6 +150,14 @@ const neutralTerritories = NEUTRAL_CENTERS.map((center) => ({
 const resourceNodes = createResourceNodes();
 const starterTunnels = createStarterTunnels();
 const buildingBlueprints = buildBuildingBlueprints();
+particleTerrain.configureDebrisMergeOccupancy((x, y) => {
+  const worldX = (x + 0.5) * PARTICLE_TERRAIN_CELL_SIZE;
+  const worldY = (y + 0.5) * PARTICLE_TERRAIN_CELL_SIZE;
+  return buildingBlueprints.some((building) => building.health > 0 && worldX >= building.x
+    && worldX <= building.x + building.width
+    && worldY >= Math.min(surfaceYAt(building.x), surfaceYAt(building.x + building.width)) - building.height
+    && worldY <= surfaceYAt(worldX));
+});
 const territories = Array.from({ length: 9 }, (_, cluster) => {
   const members = buildingBlueprints.filter((building) => building.cluster === cluster);
   return {
@@ -132,7 +173,7 @@ const { buildingColor, drawSettlements, drawCollapsedBuildings } = createBuildin
 });
 const worldObjectRenderer = createWorldObjectRenderer();
 const missileControl = createMissileControl({
-  canvas, ctx, buildings: buildingBlueprints, cores, surfaceYAt, worldToScreen, screenToWorld,
+  canvas, ctx, camera, buildings: buildingBlueprints, cores, surfaceYAt, worldToScreen, screenToWorld,
   getSide: () => baseSide, worldWidth: WORLD_WIDTH, craterSurface, waterLevelAt, splashWater, breakBuilding,
   renderer: worldObjectRenderer,
 });
@@ -249,38 +290,39 @@ function drawPixelLine(x1, y1, x2, y2, color, width = 1.5) {
 
 function createLifeGrid(cols, rows, density) {
   const grid = Array.from({ length: rows }, () => Array.from({ length: cols }, () => Math.random() < density ? 1 : 0));
-
-  for (let step = 0; step < 5; step += 1) {
-    const next = grid.map((row) => row.slice());
-    for (let y = 0; y < rows; y += 1) {
-      for (let x = 0; x < cols; x += 1) {
-        let alive = 0;
-        for (let dy = -1; dy <= 1; dy += 1) {
-          for (let dx = -1; dx <= 1; dx += 1) {
-            if (dx === 0 && dy === 0) continue;
-            const nx = x + dx;
-            const ny = y + dy;
-            if (nx >= 0 && nx < cols && ny >= 0 && ny < rows) {
-              alive += grid[ny][nx];
-            }
-          }
-        }
-        const current = grid[y][x];
-        next[y][x] = (current && (alive === 2 || alive === 3)) || (!current && alive === 3) ? 1 : 0;
-      }
-    }
-    grid.splice(0, grid.length, ...next);
-  }
-
+  for (let step = 0; step < 5; step += 1) grid.splice(0, grid.length, ...nextLifeGeneration(grid));
   return grid;
 }
 
+function nextLifeGeneration(grid) {
+  const rows = grid.length, cols = grid[0].length;
+  return grid.map((line, y) => line.map((current, x) => {
+    let neighbours = 0;
+    for (let dy = -1; dy <= 1; dy += 1) for (let dx = -1; dx <= 1; dx += 1) {
+      if (!dx && !dy) continue;
+      // The reference wraps both edges, so a colony crossing the map boundary stays continuous.
+      neighbours += grid[(y + dy + rows) % rows][(x + dx + cols) % cols];
+    }
+    return neighbours === 3 || current && neighbours === 2 ? 1 : 0;
+  }));
+}
+
+function advanceLifeGrid(deltaSeconds) {
+  lifeGridClock += deltaSeconds;
+  while (lifeGridClock >= 1.25) {
+    lifeGridClock -= 1.25;
+    lifeGrid = nextLifeGeneration(lifeGrid);
+    terrainTextureDirty = true;
+  }
+}
+
 function cellValueAtLifeGrid(x, breadth) {
-  const position = clamp((x / WORLD_WIDTH) * lifeGrid[0].length - 0.5, 0, lifeGrid[0].length - 1);
+  const raw = (x / WORLD_WIDTH) * lifeGrid[0].length - 0.5;
+  const position = ((raw % lifeGrid[0].length) + lifeGrid[0].length) % lifeGrid[0].length;
   const col = Math.floor(position);
-  const row = clamp(Math.floor((breadth / 620) * lifeGrid.length), 0, lifeGrid.length - 1);
+  const row = clamp(Math.floor((breadth / WORLD_HEIGHT) * lifeGrid.length), 0, lifeGrid.length - 1);
   const t = position - col;
-  return lerp(lifeGrid[row][col], lifeGrid[row][Math.min(col + 1, lifeGrid[0].length - 1)],
+  return lerp(lifeGrid[row][col], lifeGrid[row][(col + 1) % lifeGrid[0].length],
     t * t * (3 - 2 * t));
 }
 
@@ -347,6 +389,10 @@ function terrainYAt(x) {
 }
 
 function surfaceYAt(x) {
+  if (particleTerrain) {
+    const column = clamp(Math.floor(x / PARTICLE_TERRAIN_CELL_SIZE), 0, particleTerrain.width - 1);
+    return Math.min(WORLD_HEIGHT, particleTerrain.surfaceRow(column) * PARTICLE_TERRAIN_CELL_SIZE);
+  }
   return terrainSurface.heightAt(x);
 }
 
@@ -354,7 +400,7 @@ function craterSurface(center, radius = 30, depth = 14) {
   commandControl.damageRoads(center, radius);
   for (const farm of buildingBlueprints) {
     if (farm.kind !== 'farm') continue;
-    const farmX = farm.x + FARM_BUILDING_WIDTH / 2;
+    const farmX = farm.x + farm.width / 2;
     for (const source of farm.waterSources) {
       const left = Math.min(farmX, source.intakeX);
       const right = Math.max(farmX, source.intakeX);
@@ -364,6 +410,20 @@ function craterSurface(center, radius = 30, depth = 14) {
     }
   }
   terrainSurface.crater(center, radius, depth);
+  if (particleTerrain) {
+    const first = Math.max(0, Math.floor((center - radius) / PARTICLE_TERRAIN_CELL_SIZE));
+    const last = Math.min(particleTerrain.width - 1, Math.ceil((center + radius) / PARTICLE_TERRAIN_CELL_SIZE));
+    for (let column = first; column <= last; column += 1) {
+      const worldX = (column + 0.5) * PARTICLE_TERRAIN_CELL_SIZE;
+      const craterDepth = depth * Math.max(0, 1 - Math.abs(worldX - center) / radius);
+      if (craterDepth <= 0) continue;
+      const top = particleTerrain.surfaceRow(column);
+      const bottom = Math.min(particleTerrain.height - 1,
+        top + Math.max(0, Math.ceil(craterDepth / PARTICLE_TERRAIN_CELL_SIZE) - 1));
+      if (top < particleTerrain.height && bottom >= top) particleTerrain.excavate(column, top, column, bottom);
+    }
+    terrainTextureDirty = true;
+  }
   for (const pool of waterPools) {
     if (center + radius >= pool.left && center - radius <= pool.right) reshapeWater(pool);
   }
@@ -371,7 +431,13 @@ function craterSurface(center, radius = 30, depth = 14) {
 
 function waterLevelAt(x) {
   const pool = waterPools.find((item) => x >= item.left && x <= item.right && surfaceYAt(x) > item.level);
-  return pool ? pool.level : null;
+  if (!pool) return null;
+  if (!particleTerrain) return pool.level;
+  const column = clamp(Math.floor(x / PARTICLE_TERRAIN_CELL_SIZE), 0, particleTerrain.width - 1);
+  for (let row = 0; row < particleTerrain.height; row += 1) {
+    if (particleTerrain.at(column, row) === PARTICLE_WATER) return row * PARTICLE_TERRAIN_CELL_SIZE;
+  }
+  return null;
 }
 
 function splashWater(x) {
@@ -383,7 +449,7 @@ function splashWater(x) {
 }
 
 function breakBuilding(building, mark) {
-  const width = building.kind === 'farm' ? FARM_BUILDING_WIDTH : building.width;
+  const width = building.width;
   const ground = Math.min(surfaceYAt(building.x), surfaceYAt(building.x + width));
   const top = ground - building.height;
   const fractureY = clamp(top + mark.y, top + 2, ground - 2);
@@ -495,14 +561,14 @@ function findDryPosition(preferredX, width, occupied = [], minX = 0, maxX = WORL
       }
     }
   }
-  throw new Error('No dry space available for a building or core');
+  throw new Error(`No dry space available for a ${width}px building near x=${Math.round(preferredX)} inside ${Math.round(minX)}-${Math.round(maxX)}`);
 }
 
 function createResourceNodes() {
   const startingNodes = cores.map((core, index) => {
-    const x = core.x + 7 + (index === 0 ? 110 : -110);
-    const start = Math.min(x, core.x + 7);
-    const end = Math.max(x, core.x + 7);
+    const x = core.x + (index === 0 ? 110 : -110);
+    const start = Math.min(x, core.x);
+    const end = Math.max(x, core.x);
     let ground = 0;
     for (let sample = start; sample <= end; sample += 4) {
       ground = Math.max(ground, surfaceYAt(sample));
@@ -546,8 +612,8 @@ function createStarterTunnels() {
       interiorWidth: TUNNEL_INTERIOR_WIDTH,
       style: factionArchitectureStyles[core.owner],
       points: [
-        { x: core.x + 7, y: surfaceYAt(core.x + 7) },
-        { x: core.x + 7, y: node.y },
+        { x: core.x, y: surfaceYAt(core.x) },
+        { x: core.x, y: node.y },
         { x: node.x, y: node.y },
       ],
     };
@@ -556,96 +622,79 @@ function createStarterTunnels() {
 
 function buildBuildingBlueprints() {
   const clusters = [
-    { center: 220, isLeft: true },
-    { center: 420, isLeft: true },
-    { center: 640, isLeft: true },
-    { center: WORLD_WIDTH - 640, isLeft: false },
-    { center: WORLD_WIDTH - 420, isLeft: false },
-    { center: WORLD_WIDTH - 180, isLeft: false },
-    ...neutralTerritories.map((territory) => ({ center: territory.center - 45, isLeft: true, neutral: true })),
+    { isLeft: true }, { isLeft: true }, { isLeft: true },
+    { isLeft: false }, { isLeft: false }, { isLeft: false },
+    ...neutralTerritories.map((territory) => ({ center: territory.center, isLeft: true, neutral: true })),
   ];
-
-  const palette = ['flat', 'gable', 'tower', 'bunker', 'shed'];
   const layouts = [];
-  const occupied = cores.map((core) => ({ x: core.x - 11, width: 36 }));
+  const occupied = cores.map((core) => ({ x: core.x - core.width / 2, width: core.width }));
+  const populationKinds = ['flat', 'tower', 'bunker', 'shed'];
+  const populationVariants = ['slab', 'offset', 'tapered', 'crown'];
+  const farmVariants = ['silos', 'barn'];
+  const militaryVariants = ['compound', 'fortress', 'command', 'bastion'];
+  let leftCursor = Math.max(180, cores[0].x + cores[0].width / 2 + 18);
+  let rightCursor = Math.min(WORLD_WIDTH - 180, cores[1].x - cores[1].width / 2 - 18);
 
   clusters.forEach((cluster, clusterIndex) => {
     const clusterBuildings = [];
-    const minX = cluster.neutral ? WORLD_WIDTH * 0.2 : cluster.isLeft ? 0 : WORLD_WIDTH * 0.8;
-    const maxX = cluster.neutral ? WORLD_WIDTH * 0.8 : cluster.isLeft ? WORLD_WIDTH * 0.2 : WORLD_WIDTH;
-    for (let i = 0; i < 5; i += 1) {
-      const offset = i * 14;
-      const preferredX = cluster.center + (cluster.isLeft ? offset : -offset);
-      const seed = (clusterIndex + i * 7) % palette.length;
-      const kind = palette[seed];
-      const width = 10 + ((clusterIndex + i) % 5) * 4;
-      const x = findDryPosition(preferredX, width, occupied, minX, maxX);
-      const height = kind === 'tower'
-        ? 130 + ((clusterIndex * 7 + i * 11) % 36)
-        : 18 + ((clusterIndex * 7 + i * 11) % 28);
-      const roofColor = kind === 'tower' ? '#8fe4ff' : kind === 'bunker' ? '#9ef7aa' : kind === 'shed' ? '#ffdb7a' : '#d7ebff';
-      const residents = cluster.neutral ? 1 : i < (clusterIndex % 3 === 0 ? 4 : 3) ? 1 : 0;
-      const building = { x, width, height: cluster.neutral ? 6 : height, kind, color: roofColor, seed: clusterIndex + i, health: 100,
-        cluster: clusterIndex, owner: cluster.neutral ? 'neutral' : cluster.isLeft ? 'left' : 'right',
+    const minX = cluster.neutral ? WORLD_WIDTH * 0.2 : cluster.isLeft ? 0 : WORLD_WIDTH * 0.8 - 220;
+    const maxX = cluster.neutral ? WORLD_WIDTH * 0.8 : cluster.isLeft ? WORLD_WIDTH * 0.2 + 220 : WORLD_WIDTH;
+    const specs = [];
+    for (let i = 0; i < populationKinds.length; i += 1) {
+      const seed = clusterIndex * 17 + i * 7;
+      specs.push({ kind: populationKinds[i], artType: 'population', variant: populationVariants[i], seed,
+        level: cluster.neutral ? 1 : 1 + ((clusterIndex + i) % 3), population: cluster.neutral ? 1 : i < (clusterIndex % 3 === 0 ? 4 : 3) ? 1 : 0 });
+    }
+    for (let i = 0; i < 2; i += 1) {
+      specs.push({ kind: 'farm', artType: 'farm', variant: farmVariants[i], seed: clusterIndex * 5 + i,
+        level: 1, population: 0 });
+    }
+    if (cluster.neutral) specs.push({ kind: 'mine', artType: 'farm', variant: 'elevator', seed: clusterIndex + 31,
+      level: 1, population: 0 });
+    specs.push({ kind: 'military', artType: 'military', variant: militaryVariants[clusterIndex % militaryVariants.length],
+      seed: clusterIndex, level: cluster.neutral ? 1 : 1 + clusterIndex % 4, population: 0 });
+
+    const gap = 6;
+    const widths = specs.map((spec) => getUrbanPixelBuildingFootprintForVariant(spec.artType, spec.variant));
+    const span = widths.reduce((sum, width) => sum + width, 0) + gap * (specs.length - 1);
+    let direction, cursor, bandMin, bandMax;
+    if (cluster.neutral) {
+      const neutralIndex = clusterIndex - 6;
+      bandMin = WORLD_WIDTH * (0.2 + neutralIndex * 0.2) - 180;
+      bandMax = WORLD_WIDTH * (0.4 + neutralIndex * 0.2) + 180;
+      cursor = Math.max(bandMin, Math.min(bandMax - span, cluster.center - span / 2));
+      direction = 1;
+    } else if (cluster.isLeft) {
+      bandMin = minX; bandMax = maxX;
+      cursor = leftCursor; direction = 1;
+    } else {
+      bandMin = minX; bandMax = rightCursor;
+      cursor = rightCursor; direction = -1;
+    }
+
+    specs.forEach((spec, index) => {
+      const width = widths[index];
+      const preferred = direction > 0 ? cursor : cursor - width;
+      const x = findDryPosition(preferred, width, occupied, direction > 0 ? cursor : bandMin,
+        direction > 0 ? bandMax : cursor);
+      const owner = cluster.neutral ? 'neutral' : cluster.isLeft ? 'left' : 'right';
+      const building = {
+        x, width, pixelFootprint: width, artVariant: spec.variant, height: 1, kind: spec.kind,
+        seed: spec.seed, level: spec.level, health: 100, neutral: Boolean(cluster.neutral), owner,
+        cluster: clusterIndex, population: spec.population, direction: cluster.isLeft ? 1 : -1,
         ...(cluster.neutral ? { construction: { stage: 0, progress: 0 } } : {}),
-        neutral: Boolean(cluster.neutral), population: residents };
+        ...(spec.kind === 'farm' ? { cropLeft: 0, cropRight: 0, waterSources: [] } : {}),
+        ...(spec.kind === 'military' ? { defenseHealth: 100 } : {}),
+      };
+      syncUrbanPixelBuildingMetrics(building, factionArchitectureStyles);
       layouts.push(building);
       occupied.push(building);
       clusterBuildings.push(building);
-    }
+      cursor = direction > 0 ? x + width + gap : x - gap;
+    });
 
-    const direction = cluster.isLeft ? 1 : -1;
-    const farmWidth = 42;
-    const farmGap = 4;
-    const farmPairWidth = farmWidth * 2 + farmGap;
-    const farmPreferred = cluster.center + direction * 105 - (direction < 0 ? farmPairWidth : 0);
-    const farmX = findDryPosition(farmPreferred, farmPairWidth, occupied, minX, maxX);
-    for (let i = 0; i < 2; i += 1) {
-      const farm = {
-        x: farmX + i * (farmWidth + farmGap), width: farmWidth, height: cluster.neutral ? 6 : 13,
-        kind: 'farm', color: '#6ef08a', seed: clusterIndex + i,
-        health: 100, neutral: Boolean(cluster.neutral), cluster: clusterIndex,
-        owner: cluster.neutral ? 'neutral' : cluster.isLeft ? 'left' : 'right',
-        ...(cluster.neutral ? { construction: { stage: 0, progress: 0 } } : {}),
-        cropLeft: 0, cropRight: 0, waterSources: [],
-      };
-      layouts.push(farm);
-      occupied.push(farm);
-      clusterBuildings.push(farm);
-    }
-
-    if (cluster.neutral) {
-      const mineWidth = 28;
-      const mineX = findDryPosition(cluster.center + direction * 230 - (direction < 0 ? mineWidth : 0),
-        mineWidth, occupied, minX, maxX);
-      const mine = { x: mineX, width: mineWidth, height: 6, kind: 'mine', color: '#9a9281',
-        seed: clusterIndex + 17, health: 100, neutral: true, owner: 'neutral', cluster: clusterIndex,
-        construction: { stage: 0, progress: 0 }, population: 0 };
-      layouts.push(mine);
-      occupied.push(mine);
-      clusterBuildings.push(mine);
-    }
-
-    const militaryWidth = 24;
-    const militarySites = clusterBuildings.flatMap((anchor) =>
-      [anchor.x - militaryWidth - 2, anchor.x + anchor.width + 2].map((preferred) => {
-        const x = findDryPosition(preferred, militaryWidth, occupied, minX, maxX);
-        const gap = Math.max(0, Math.max(x, anchor.x) - Math.min(x + militaryWidth, anchor.x + anchor.width));
-        return { x, gap };
-      })
-    );
-    militarySites.sort((a, b) => a.gap - b.gap || Math.abs(a.x - cluster.center) - Math.abs(b.x - cluster.center));
-    const military = {
-      x: militarySites[0].x,
-      width: militaryWidth, height: cluster.neutral ? 6 : 22, kind: 'military', color: '#6ef08a',
-      seed: clusterIndex, health: 100, neutral: Boolean(cluster.neutral), cluster: clusterIndex,
-      owner: cluster.neutral ? 'neutral' : cluster.isLeft ? 'left' : 'right',
-      defenseHealth: 100,
-      ...(cluster.neutral ? { construction: { stage: 0, progress: 0 } } : {}),
-      level: cluster.neutral ? 1 : 1 + clusterIndex % 4, direction: cluster.isLeft ? 1 : -1,
-    };
-    layouts.push(military);
-    occupied.push(military);
+    if (!cluster.neutral && cluster.isLeft) leftCursor = cursor + 8;
+    if (!cluster.neutral && !cluster.isLeft) rightCursor = cursor - 8;
   });
 
   return layouts;
@@ -654,12 +703,12 @@ function buildBuildingBlueprints() {
 function farmBuildingBounds(building) {
   return {
     left: building.x,
-    right: building.x + (building.kind === 'farm' ? FARM_BUILDING_WIDTH : building.width),
+    right: building.x + building.width,
   };
 }
 
 function farmWaterSources(farm) {
-  const farmX = farm.x + FARM_BUILDING_WIDTH / 2;
+  const farmX = farm.x + farm.width / 2;
   return waterPools.map((pool) => {
     const intakeX = (pool.left + pool.right) / 2;
     const distance = Math.abs(farmX - intakeX);
@@ -689,7 +738,7 @@ function updateFarmGrowth(farm, deltaSeconds) {
       left: bounds.left - (building.kind === 'farm' ? building.cropLeft : 0),
       right: bounds.right + (building.kind === 'farm' ? building.cropRight : 0),
     };
-  }).concat(cores.map((core) => ({ left: core.x - 11, right: core.x + 25 })))
+  }).concat(cores.map((core) => ({ left: core.x - core.width / 2, right: core.x + core.width / 2 })))
     .concat(waterPools.map((pool) => ({ left: pool.left, right: pool.right })));
   const leftLimit = Math.max(0, ...obstacles.filter((item) => item.right <= farmBounds.left).map((item) => item.right + 2));
   const rightLimit = Math.min(WORLD_WIDTH, ...obstacles.filter((item) => item.left >= farmBounds.right).map((item) => item.left - 2));
@@ -710,25 +759,108 @@ function drawWaterPools() {
   ctx.save();
   ctx.translate(-camera.x * camera.zoom, -camera.y * camera.zoom);
   ctx.scale(camera.zoom, camera.zoom);
-  ctx.fillStyle = '#008aa3';
   for (const pool of waterPools) {
-    ctx.beginPath();
-    ctx.moveTo(pool.left, pool.level);
-    ctx.lineTo(pool.right, pool.level);
-    for (let x = Math.floor(pool.right / 4) * 4; x > pool.left; x -= 4) {
-      ctx.lineTo(x, surfaceYAt(x));
+    for (let x = Math.ceil(pool.left / 24) * 24; x < pool.right; x += 24) {
+      const level = waterLevelAt(x + 1);
+      if (level === null) continue;
+      const shimmer = Math.sin(x * 0.07 + state.time * 0.12) > 0.15;
+      ctx.fillStyle = shimmer ? '#7bcbd0' : '#397d88';
+      ctx.fillRect(x, level, 6 + (Math.floor(x / 24) % 3) * 2, 1);
     }
-    ctx.closePath();
-    ctx.fill();
-    ctx.strokeStyle = '#23d6e8';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(pool.left, pool.level);
-    ctx.lineTo(pool.right, pool.level);
-    ctx.stroke();
   }
-  ctx.fillStyle = '#23d6e8';
-  for (const drop of waterDrops) ctx.fillRect(drop.x - 1, drop.y - 1, 2, 2);
+  for (const drop of waterDrops) {
+    ctx.fillStyle = '#4aabba';
+    ctx.fillRect(Math.round(drop.x), Math.round(drop.y), 2, 3);
+    ctx.fillStyle = '#a0e3db';
+    ctx.fillRect(Math.round(drop.x), Math.round(drop.y), 1, 1);
+  }
+  ctx.restore();
+}
+
+function drawWorldBackdrop() {
+  const gradient = ctx.createLinearGradient(0, 0, 0, viewport.height);
+  gradient.addColorStop(0, '#020403');
+  gradient.addColorStop(0.72, '#050b08');
+  gradient.addColorStop(1, '#101713');
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, viewport.width, viewport.height);
+  for (const star of skyDetails) {
+    const screen = worldToScreen(star.x, star.y);
+    if (screen.x < -2 || screen.x > viewport.width + 2 || screen.y < -2 || screen.y > viewport.height + 2) continue;
+    ctx.globalAlpha = star.brightness;
+    ctx.fillStyle = star.brightness > 0.65 ? '#b9cf8b' : '#697d57';
+    ctx.fillRect(Math.round(screen.x), Math.round(screen.y), 1, 1);
+  }
+  ctx.globalAlpha = 1;
+}
+
+function refreshTerrainParticleTexture() {
+  if (!particleTerrain) return;
+  const desiredStep = camera.zoom < 0.35 ? 4 : camera.zoom < 0.9 ? 2 : 1;
+  if (desiredStep !== terrainTextureStep) {
+    terrainTextureStep = desiredStep;
+    terrainTextureCanvas.width = Math.ceil(particleTerrain.width / terrainTextureStep);
+    terrainTextureCanvas.height = Math.ceil(particleTerrain.height / terrainTextureStep);
+    terrainTextureImage = terrainTextureContext.createImageData(terrainTextureCanvas.width, terrainTextureCanvas.height);
+    terrainTextureDirty = true;
+  }
+  if (!terrainTextureDirty) return;
+  particleTerrain.copyCells(particleTerrainCells);
+  const { width: sourceWidth, height: sourceHeight } = particleTerrain;
+  const width = terrainTextureCanvas.width, height = terrainTextureCanvas.height;
+  const pixels = terrainTextureImage.data;
+  pixels.fill(0);
+  const surfaceRows = new Int32Array(width);
+  for (let x = 0; x < width; x += 1) {
+    const sourceX = Math.min(sourceWidth - 1, x * terrainTextureStep + terrainTextureStep / 2);
+    surfaceRows[x] = particleTerrain.surfaceRow(sourceX);
+  }
+  const soil = [[82, 67, 46], [70, 57, 40], [59, 49, 36], [49, 42, 33]];
+  for (let y = 0; y < height; y += 1) {
+    const lifeRow = Math.min(lifeGrid.length - 1, Math.floor(y / height * lifeGrid.length));
+    for (let x = 0; x < width; x += 1) {
+      const sourceX = Math.min(sourceWidth - 1, x * terrainTextureStep + terrainTextureStep / 2);
+      const sourceY = Math.min(sourceHeight - 1, y * terrainTextureStep + terrainTextureStep / 2);
+      const material = particleTerrainCells[sourceY * sourceWidth + sourceX];
+      if (material === PARTICLE_EMPTY) continue;
+      let hash = Math.imul(x + 1, 0x45d9f3b);
+      hash ^= Math.imul(y + 3, 0x119de1f3);
+      hash = Math.imul(hash ^ hash >>> 16, 0x45d9f3b);
+      const noise = hash >>> 0;
+      let color;
+      if (material === PARTICLE_WATER) {
+        color = noise & 2 ? [46, 113, 125] : [37, 91, 105];
+      } else if (material === PARTICLE_DEBRIS) {
+        color = noise & 1 ? [171, 116, 62] : [127, 85, 51];
+      } else if (material === PARTICLE_TERRAIN || material === PARTICLE_WALL) {
+        const depth = sourceY - surfaceRows[x];
+        const lifeColumn = Math.min(lifeGrid[0].length - 1,
+          Math.floor(x / width * lifeGrid[0].length));
+        const alive = lifeGrid[lifeRow][lifeColumn] === 1;
+        if (depth < 3) color = alive && (noise & 3) === 0 ? [119, 146, 75] : [77, 92, 57];
+        else if (alive && (noise & 7) === 0) color = [75, 96, 57];
+        else color = soil[Math.min(soil.length - 1, Math.floor(Math.max(0, depth) / 56) + (noise & 1))];
+      } else {
+        color = [90, 96, 69];
+      }
+      const offset = (y * width + x) * 4;
+      pixels[offset] = color[0];
+      pixels[offset + 1] = color[1];
+      pixels[offset + 2] = color[2];
+      pixels[offset + 3] = 255;
+    }
+  }
+  terrainTextureContext.putImageData(terrainTextureImage, 0, 0);
+  terrainTextureDirty = false;
+}
+
+function drawTerrainMass() {
+  refreshTerrainParticleTexture();
+  ctx.save();
+  ctx.translate(-camera.x * camera.zoom, -camera.y * camera.zoom);
+  ctx.scale(camera.zoom, camera.zoom);
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(terrainTextureCanvas, 0, 0, WORLD_WIDTH, WORLD_HEIGHT);
   ctx.restore();
 }
 
@@ -752,12 +884,13 @@ function drawSurfaceDetails() {
   for (const detail of surfaceDetails) {
     if (detail.x < left || detail.x > right) continue;
     const ground = surfaceYAt(detail.x);
+    const vitality = cellValueAtLifeGrid(detail.x, detail.lifeRow * WORLD_HEIGHT / lifeGrid.length);
     if (detail.type === 'tree') {
-      ctx.fillStyle = '#31583e';
+      ctx.fillStyle = vitality > 0.55 ? '#31583e' : '#3c4935';
       ctx.fillRect(detail.x - 1, ground - detail.size * 1.8, 2, detail.size * 1.8);
-      ctx.fillStyle = '#4d8552';
+      ctx.fillStyle = vitality > 0.55 ? '#4d8552' : '#465743';
       ctx.fillRect(detail.x - detail.size, ground - detail.size * 2.7, detail.size * 2, detail.size * 1.5);
-      ctx.fillStyle = '#77a866';
+      ctx.fillStyle = vitality > 0.55 ? '#77a866' : '#58694a';
       ctx.fillRect(detail.x - detail.size * 0.5, ground - detail.size * 2.5, detail.size, detail.size * 0.6);
     } else if (detail.type === 'rock') {
       ctx.fillStyle = '#727468';
@@ -765,7 +898,8 @@ function drawSurfaceDetails() {
       ctx.fillStyle = '#9b9a85';
       ctx.fillRect(detail.x - detail.size * 0.4, ground - detail.size, detail.size, Math.max(1, detail.size * 0.3));
     } else {
-      ctx.strokeStyle = '#6d9660';
+      if (vitality < 0.18) continue;
+      ctx.strokeStyle = vitality > 0.55 ? '#6d9660' : '#526949';
       ctx.lineWidth = 0.8;
       for (let blade = 0; blade < 3; blade += 1) {
         const offset = blade - 1;
@@ -780,16 +914,27 @@ function drawSurfaceDetails() {
 }
 
 function drawSurfaceProfile() {
-  ctx.strokeStyle = '#399a50';
-  ctx.lineWidth = Math.max(1, 2.2 * camera.zoom);
+  const left = Math.max(0, Math.floor(camera.x / PARTICLE_TERRAIN_CELL_SIZE) * PARTICLE_TERRAIN_CELL_SIZE);
+  const right = Math.min(world.width, camera.x + viewport.width / camera.zoom + PARTICLE_TERRAIN_CELL_SIZE);
+  ctx.save();
+  ctx.translate(-camera.x * camera.zoom, -camera.y * camera.zoom);
+  ctx.scale(camera.zoom, camera.zoom);
+  const firstY = surfaceYAt(left);
   ctx.beginPath();
-  const first = worldToScreen(0, surfaceYAt(0));
-  ctx.moveTo(first.x, first.y);
-  for (let x = 4; x <= world.width; x += 4) {
-    const point = worldToScreen(x, surfaceYAt(x));
-    ctx.lineTo(point.x, point.y);
+  ctx.moveTo(left, firstY + PARTICLE_TERRAIN_CELL_SIZE / 2);
+  let previousY = firstY + PARTICLE_TERRAIN_CELL_SIZE / 2;
+  for (let x = left; x < right; x += PARTICLE_TERRAIN_CELL_SIZE) {
+    const nextY = surfaceYAt(Math.min(right, x + PARTICLE_TERRAIN_CELL_SIZE)) + PARTICLE_TERRAIN_CELL_SIZE / 2;
+    ctx.lineTo(x + PARTICLE_TERRAIN_CELL_SIZE, previousY);
+    ctx.lineTo(x + PARTICLE_TERRAIN_CELL_SIZE, nextY);
+    previousY = nextY;
   }
+  ctx.strokeStyle = '#789552';
+  ctx.lineWidth = PARTICLE_TERRAIN_CELL_SIZE;
+  ctx.lineCap = 'square';
+  ctx.lineJoin = 'miter';
   ctx.stroke();
+  ctx.restore();
 }
 
 function drawUnderground() {
@@ -797,7 +942,7 @@ function drawUnderground() {
   ctx.translate(-camera.x * camera.zoom, -camera.y * camera.zoom);
   ctx.scale(camera.zoom, camera.zoom);
   for (const farm of buildingBlueprints.filter((building) => building.kind === 'farm')) {
-    const farmX = farm.x + FARM_BUILDING_WIDTH / 2;
+    const farmX = farm.x + farm.width / 2;
     for (const source of farm.waterSources) {
       const direction = Math.sign(source.intakeX - farmX);
       ctx.strokeStyle = source.repairRemaining > 0 ? '#e15a40' : '#438f9b';
@@ -852,9 +997,8 @@ function drawUnderground() {
 function drawBattlefield() {
   ctx.setTransform(viewport.pixelRatio, 0, 0, viewport.pixelRatio, 0, 0);
   ctx.clearRect(0, 0, viewport.width, viewport.height);
-  ctx.fillStyle = '#020202';
-  ctx.fillRect(0, 0, viewport.width, viewport.height);
-
+  drawWorldBackdrop();
+  drawTerrainMass();
   drawUnderground();
   drawWaterPools();
   drawIrrigationIntakes();
@@ -873,10 +1017,11 @@ function drawBuildingDebris() {
   ctx.translate(-camera.x * camera.zoom, -camera.y * camera.zoom);
   ctx.scale(camera.zoom, camera.zoom);
   for (const piece of buildingDebris) {
+    if (piece.deposited) continue;
     ctx.save();
     ctx.translate(piece.x, piece.y);
     ctx.rotate(piece.rotation);
-    ctx.globalAlpha = Math.max(0, 1 - piece.age / 6);
+    ctx.globalAlpha = Math.max(0, 1 - piece.age / 18);
     ctx.fillStyle = piece.color;
     ctx.fillRect(-piece.width / 2, -piece.height / 2, piece.width, piece.height);
     ctx.restore();
@@ -894,30 +1039,104 @@ function updateDebrisAndWaterDrops(deltaSeconds) {
   }
   for (let i = buildingDebris.length - 1; i >= 0; i -= 1) {
     const piece = buildingDebris[i];
-    const previousY = piece.y;
     piece.age += deltaSeconds;
-    piece.x += piece.vx * deltaSeconds;
-    piece.y += piece.vy * deltaSeconds;
-    piece.vy += 270 * deltaSeconds;
-    piece.vx *= Math.pow(0.994, deltaSeconds * 60);
-    piece.rotation += piece.spin * deltaSeconds;
-    let hit = false;
-    if (piece.vy > 0 && piece.age > 0.04) {
-      for (const building of buildingBlueprints) {
+    if (piece.resting) {
+      if (!piece.deposited && particleTerrain && waterLevelAt(piece.x) === null) {
+        const column = clamp(Math.floor(piece.x / PARTICLE_TERRAIN_CELL_SIZE), 0, particleTerrain.width - 1);
+        const row = Math.max(0, particleTerrain.surfaceRow(column) - 1);
+        let deposited = false;
+        for (const offset of [0, -1, 1]) {
+          const x = column + offset;
+          if (x < 0 || x >= particleTerrain.width) continue;
+          if (particleTerrain.emitDebris(x, row).ok) deposited = true;
+        }
+        piece.deposited = deposited;
+        terrainTextureDirty ||= deposited;
+      }
+      if (piece.age > 18) buildingDebris.splice(i, 1);
+      continue;
+    }
+    let removed = false;
+    const maxMove = Math.max(Math.abs(piece.vx), Math.abs(piece.vy)) * deltaSeconds;
+    const steps = Math.max(1, Math.min(12, Math.ceil(maxMove / 2)));
+    const step = deltaSeconds / steps;
+    const halfWidth = piece.width / 2, halfHeight = piece.height / 2;
+    for (let sample = 0; sample < steps && !removed; sample += 1) {
+      const previousX = piece.x, previousY = piece.y;
+      piece.vx = clamp(piece.vx * Math.pow(0.998, step * 60), -340, 340);
+      piece.vy = clamp(piece.vy + 270 * step, -340, 340);
+      piece.x += piece.vx * step;
+      piece.y += piece.vy * step;
+      piece.rotation += piece.spin * step;
+      piece.collisionCooldown = Math.max(0, (piece.collisionCooldown || 0) - step);
+
+      let collided = false;
+      if (piece.vy >= 0 && piece.age > 0.04) for (const building of buildingBlueprints) {
         if (building === piece.source || building.health <= 0) continue;
-        const width = building.kind === 'farm' ? FARM_BUILDING_WIDTH : building.width;
-        const ground = Math.min(surfaceYAt(building.x), surfaceYAt(building.x + width));
+        const left = building.x, right = building.x + building.width;
+        const ground = Math.min(surfaceYAt(left), surfaceYAt(right));
         const top = ground - building.height;
-        if (piece.x < building.x || piece.x > building.x + width || piece.y < top || previousY > ground) continue;
-        const damage = Math.min(14, 2 + Math.hypot(piece.vx, piece.vy) * 0.045);
-        building.health = Math.max(0, building.health - damage);
-        if (!building.damageMarks) building.damageMarks = [];
-        building.damageMarks.push({ x: piece.x - building.x, y: piece.y - top, damage: Math.min(100, damage * 5) });
-        hit = true;
+        const overlaps = piece.x + halfWidth > left && piece.x - halfWidth < right &&
+          piece.y + halfHeight > top && piece.y - halfHeight < ground;
+        if (!overlaps) continue;
+
+        const landedOnRoof = previousY + halfHeight <= top + 1 && piece.vy > 0;
+        if (landedOnRoof) {
+          piece.y = top - halfHeight;
+          if (piece.collisionCooldown <= 0) {
+            const impact = Math.abs(piece.vy) + Math.abs(piece.vx) * 0.35;
+            const damage = Math.min(16, 1.5 + impact * 0.035);
+            building.health = Math.max(0, building.health - damage);
+            if (!building.damageMarks) building.damageMarks = [];
+            let mark = building.damageMarks.find((item) => Math.abs(item.x - (piece.x - building.x)) < 4);
+            if (!mark) { mark = { x: piece.x - building.x, y: 2, damage: 0 }; building.damageMarks.push(mark); }
+            mark.damage = Math.min(100, mark.damage + damage * 4);
+            piece.collisionCooldown = 0.18;
+          }
+          piece.vy = -Math.abs(piece.vy) * 0.28;
+          piece.vx *= 0.68;
+        } else {
+          const impact = Math.abs(piece.vy) + Math.abs(piece.vx) * 0.5;
+          if (piece.collisionCooldown <= 0) {
+            const damage = Math.min(16, 1.5 + impact * 0.04);
+            building.health = Math.max(0, building.health - damage);
+            if (!building.damageMarks) building.damageMarks = [];
+            const localX = clamp(piece.x - building.x, 0, building.width);
+            let mark = building.damageMarks.find((item) => Math.abs(item.x - localX) < 4);
+            if (!mark) { mark = { x: localX, y: clamp(piece.y - top, 0, building.height), damage: 0 }; building.damageMarks.push(mark); }
+            mark.damage = Math.min(100, mark.damage + damage * 4);
+            piece.collisionCooldown = 0.22;
+          }
+          piece.x = previousX - Math.sign(piece.vx || 1) * halfWidth;
+          piece.vx *= -0.32;
+          piece.vy *= 0.72;
+        }
+        collided = true;
+        break;
+      }
+      if (collided) continue;
+
+      const ground = surfaceYAt(piece.x);
+      const water = waterLevelAt(piece.x);
+      const contactY = water === null ? ground : Math.min(ground, water);
+      if (piece.y + halfHeight >= contactY) {
+        piece.y = contactY - halfHeight;
+        if (water !== null) splashWater(piece.x);
+        piece.vy = -Math.abs(piece.vy) * (water === null ? 0.2 : 0.12);
+        piece.vx *= water === null ? 0.72 : 0.42;
+        if (Math.abs(piece.vy) < 22 && Math.abs(piece.vx) < 12) {
+          piece.vy = 0;
+          piece.vx = 0;
+          piece.spin = 0;
+          piece.resting = true;
+        }
+      }
+      if (piece.x < 0 || piece.x > WORLD_WIDTH || piece.age > 18) {
+        removed = true;
         break;
       }
     }
-    if (hit || piece.age > 6 || piece.x < 0 || piece.x > WORLD_WIDTH || piece.y >= surfaceYAt(piece.x)) {
+    if (removed) {
       buildingDebris.splice(i, 1);
     }
   }
@@ -943,7 +1162,7 @@ function updateIrrigationRepairs(deltaSeconds) {
 function updateBuildings(deltaSeconds) {
   for (let i = buildingBlueprints.length - 1; i >= 0; i -= 1) {
     const building = buildingBlueprints[i];
-    const buildingWidth = building.kind === 'farm' ? FARM_BUILDING_WIDTH : building.width;
+    const buildingWidth = building.width;
     if (isWaterAtFootprint(building.x, buildingWidth)) {
       building.health = Math.max(0, building.health - WATER_DAMAGE_PER_SECOND * deltaSeconds);
     } else {
@@ -963,6 +1182,17 @@ function updateBuildings(deltaSeconds) {
 }
 
 function updateWorldState(deltaSeconds) {
+  advanceLifeGrid(deltaSeconds);
+  particleTerrainClock += deltaSeconds;
+  while (particleTerrainClock >= 0.18) {
+    particleTerrainClock -= 0.18;
+    particleTerrain.step();
+    terrainTextureClock += 0.18;
+    if (terrainTextureClock >= 0.36) {
+      terrainTextureClock -= 0.36;
+      terrainTextureDirty = true;
+    }
+  }
   updateDebrisAndWaterDrops(deltaSeconds);
   updateIrrigationRepairs(deltaSeconds);
   missileControl.update(deltaSeconds);
