@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Urban Defence - pixel world</title>
+    <style>
+      html, body { margin: 0; height: 100%; background: #05080a; color: #9fc28a; overflow: hidden; }
+      #world-canvas { display: block; width: 100vw; height: 100vh; image-rendering: pixelated; cursor: grab; }
+      #world-status { position: fixed; left: 8px; bottom: 6px; font: 12px Consolas, monospace; pointer-events: none;
+        background: #05080acc; padding: 2px 6px; }
+    </style>
+  </head>
+  <body>
+    <canvas id="world-canvas"></canvas>
+    <div id="world-status">generating…</div>
+    <script src="scripts/pw/pw-core.js"></script>
+    <script src="scripts/pw/pw-gen-terrain.js"></script>
+    <script src="scripts/pw/pw-gen-vegetation.js"></script>
+    <script src="scripts/pw/pw-building-kit.js"></script>
+    <script src="scripts/pw/pw-building-ornaments.js"></script>
+    <script src="scripts/pw/pw-building-population.js"></script>
+    <script src="scripts/pw/pw-building-military.js"></script>
+    <script src="scripts/pw/pw-building-farm.js"></script>
+    <script src="scripts/pw/pw-stamp.js"></script>
+    <script src="scripts/pw/pw-render.js"></script>
+    <script src="scripts/pw/pw-app.js"></script>
+  </body>
+</html>
