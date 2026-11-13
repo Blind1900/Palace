@@ -44,6 +44,7 @@
             const paint = PW.getLayer(world, 'paint', x, y) || palettes[id][(m >> 6) * 2];
             const c = PW.unpack(paint), k = 0.55 + (s - 1) * 1.2;
             PW.setLayer(world, 'paint', x, y, PW.abgr(c[0] * k, c[1] * k, c[2] * k));
+            PW.setFlag(world, x, y, PW.FLAG.SCORCH);   // fades over time (life lane)
           }
           continue;
         }
@@ -63,23 +64,29 @@
             const [vx, vy] = fling(x, y, 330 * power, 200 * power);
             particles.spawn(x + 0.5, y + 0.5, vx, vy, breaksTo[id] || M.DEBRIS, paint || 0, F.LAND | F.DAMAGE, 7, ownerId);
           }
-        } else if (phase[id] !== 0 && random() < 0.25) {
+        } else if (phase[id] >= PW.PHASE.POWDER && random() < 0.25) {
           const [vx, vy] = fling(x, y, 260 * power, 170 * power);
           particles.spawn(x + 0.5, y + 0.5, vx, vy, breaksTo[id] || M.LOOSE_SOIL, 0, F.LAND, 6);
         }
+        // Pulverised earth hangs in the air as a dust cloud.
+        if (PW.mat.terrain[id] && random() < 0.3) PW.set(world, x, y, M.DUST | (1 + (random() < 0.5 ? 1 : 0)) << 6, { quiet: true });
       }
     }
-    // Fireball, sparks and smoke (cosmetic).
+    // Sparks (light), then the fireball's heat and the smoke it leaves: real cells, so the heat
+    // can scorch and ignite, and the smoke rises, drifts with the wind and thins out.
     for (let k = 0; k < 40 + r * 2; k += 1) {
       const a = random() * Math.PI * 2, sp = (120 + random() * 260) * power;
       const hot = [[255, 240, 180], [255, 196, 90], [240, 120, 40]][k % 3];
       particles.spawn(cx, cy, Math.cos(a) * sp, Math.sin(a) * sp - 60, 0, PW.abgr(hot[0], hot[1], hot[2]), F.GLOW, 0.25 + random() * 0.5);
     }
-    for (let k = 0; k < 12 + r; k += 1) {
-      const a = random() * Math.PI * 2, sp = 20 + random() * 50;
-      const grey = 70 + random() * 50 | 0;
-      particles.spawn(cx + Math.cos(a) * r * 0.4, cy - random() * r * 0.4, Math.cos(a) * sp, -20 - random() * 40, 0,
-        PW.abgr(grey, grey, grey + 6, 150), F.SMOKE, 2 + random() * 3);
+    if (world.heatSystem) world.heatSystem.heatDisc(cx, cy, r * 1.15, 380 + 420 * power);
+    for (let y = Math.floor(cy - r * 0.9); y <= cy + r * 0.3; y += 1) {
+      for (let x = Math.floor(cx - r * 0.8); x <= cx + r * 0.8; x += 1) {
+        if (x < 1 || y < 1 || x >= W - 1 || y >= H - 1) continue;
+        const dx = (x - cx) / (r * 0.8), dy = (y - cy) / (r * 0.9);
+        if (dx * dx + dy * dy > 1 || (mat[y * W + x] & ID_MASK) !== M.AIR || random() > 0.4) continue;
+        PW.set(world, x, y, M.SMOKE | (2 + (random() < 0.5 ? 1 : 0)) << 6, { quiet: true });
+      }
     }
     if (world.effects) world.effects.push({ kind: 'flash', x: cx, y: cy, radius: r * 2.2, age: 0, life: 0.35 });
     // Plants that lost their footing or trunk fall; cover that lost its support or most of

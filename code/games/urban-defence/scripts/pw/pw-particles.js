@@ -52,7 +52,7 @@
       let cx = Math.max(1, Math.min(W - 2, Math.floor(x))), cy = Math.min(H - 1, Math.floor(y));
       for (let k = 0; k < 24 && cy >= 0; k += 1, cy -= 1) {
         const id = mat[cy * W + cx] & ID_MASK;
-        if (id === M.AIR || ((fl & F.WATER) === 0 && id === M.WATER && k > 0)) {
+        if (OPEN[id] || ((fl & F.WATER) === 0 && id === M.WATER && k > 0)) {
           PW.set(world, cx, cy, byte);
           stats.landed += 1;
           return true;
@@ -60,7 +60,8 @@
       }
       return false;
     }
-    const open = (id, fl) => id === M.AIR || (id === M.WATER && (fl & F.WATER) === 0);
+    const OPEN = PW.mat.open;
+    const open = (id, fl) => OPEN[id] === 1 || (id === M.WATER && (fl & F.WATER) === 0);
 
     function step(dt) {
       for (let i = count - 1; i >= 0; i -= 1) {
@@ -100,7 +101,12 @@
         vy[i] += GRAVITY * dt * (fl & F.LEAF ? 0.25 : 1);
         const drag = inWater ? 3.5 : fl & F.LEAF ? 1.6 : 0.12;
         vx[i] *= Math.max(0, 1 - drag * dt); vy[i] *= Math.max(0, 1 - drag * dt);
-        if (fl & F.LEAF) vx[i] += Math.sin(age[i] * 5 + i) * 30 * dt;
+        if (fl & F.LEAF) {
+          vx[i] += Math.sin(age[i] * 5 + i) * 30 * dt;
+          // Light things ride the wind above ground.
+          const gx = Math.max(0, Math.min(W - 1, px[i] | 0));
+          if (py[i] < world.groundTop[gx]) vx[i] += ((world.wind || 0) * 1.5 - vx[i]) * Math.min(1, 1.5 * dt);
+        }
         let x = px[i], y = py[i];
         const nx = x + vx[i] * dt, ny = y + vy[i] * dt;
         const steps = Math.max(1, Math.ceil(Math.max(Math.abs(nx - x), Math.abs(ny - y))));

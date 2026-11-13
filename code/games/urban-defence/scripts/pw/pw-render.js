@@ -91,6 +91,13 @@
       return toned(base, k * grainTone(grainOf(h)) >> 8);
     }
 
+    // Gas opacity by density (variant 0-3).
+    const gasAlpha = new Array(64).fill(null);
+    gasAlpha[M.SMOKE] = [0.28, 0.46, 0.62, 0.76];
+    gasAlpha[M.STEAM] = [0.18, 0.3, 0.42, 0.55];
+    gasAlpha[M.DUST] = [0.24, 0.4, 0.55, 0.68];
+    const OPEN = PW.mat.open;
+
     // Colour of one cell for the base layer (0 = transparent sky). waterDepth counts the water
     // cells from the surface down to this one (1 = the surface cell).
     function baseColor(x, y, paintChunk, backChunk, waterDepth) {
@@ -105,6 +112,20 @@
         }
         if (y < groundTop[x]) return 0;
         return toned(voidColor, grainOf(PW.hash2(x, y)) < 4 ? 218 : 256);
+      }
+      if (gasAlpha[id]) {
+        // Gas is translucent: blend it over whatever is behind it (back wall, cave, or the sky,
+        // which shows through the raster's alpha). Thicker gas (higher variant) is more opaque.
+        let under = backChunk ? backChunk[local] : 0;
+        if (!under && y >= groundTop[x]) under = toned(voidColor, 256);
+        const h = PW.hash2(x, y);
+        const a = Math.min(0.92, gasAlpha[id][m >> 6] * ((h & 7) === 0 ? 0.8 : 1));
+        const gc = palettes[id][(m >> 6) * 2 + (h & 1)];
+        if (!under) return (gc & 0x00ffffff | Math.round(a * 255) << 24) >>> 0;
+        const u = under, t = a;
+        const r = (u & 255) + ((gc & 255) - (u & 255)) * t, g = (u >>> 8 & 255) + ((gc >>> 8 & 255) - (u >>> 8 & 255)) * t;
+        const b = (u >>> 16 & 255) + ((gc >>> 16 & 255) - (u >>> 16 & 255)) * t;
+        return (0xff000000 | Math.round(b) << 16 | Math.round(g) << 8 | Math.round(r)) >>> 0;
       }
       if (paintChunk) {
         const paint = paintChunk[local];
@@ -317,7 +338,7 @@
           let run = waterRun[tx];
           if (isWater && depth) {
             // The bright surface line only where open air is directly above.
-            run = y > 0 && (mat[(y - 1) * W + x] & ID_MASK) === M.AIR ? 1
+            run = y > 0 && OPEN[mat[(y - 1) * W + x] & ID_MASK] ? 1
               : Math.max(2, Math.round(depth[(y - depthY0) * depthW + (x - depthX0)] / 3));
           }
           const color = baseColor(x, y, paintChunk, backChunk, run);
@@ -348,8 +369,8 @@
         const row = y * W;
         for (let x = px0; x <= px1; x += 1, k += 1) {
           const id = mat[row + x] & ID_MASK;
-          d[k] = id === M.AIR ? 0 : WATER_FAR;
-          block[k] = id !== M.AIR && id !== M.WATER ? 1 : 0;
+          d[k] = OPEN[id] ? 0 : WATER_FAR;
+          block[k] = !OPEN[id] && id !== M.WATER ? 1 : 0;
         }
       }
       for (let y = 0; y < h; y += 1) for (let x = 0; x < w; x += 1) {

@@ -56,8 +56,11 @@
       PW.wake(world, nx, ny);
       stats.moves += 1;
     }
-    const isAir = (m) => (m & ID_MASK) === M.AIR;
+    // Gases are open space to water and powders: they fall through smoke as through air.
+    const OPEN = PW.mat.open;
+    const isAir = (m) => OPEN[m & ID_MASK] === 1;
     const isWater = (m) => (m & ID_MASK) === M.WATER;
+    const isEmpty = (m) => (m & ID_MASK) === M.AIR;
 
     // The water column standing on a cell that just fell `d` rows follows it in the same tick:
     // its top min(h, d) cells move into the gap (a few swaps instead of shifting every cell), so a
@@ -298,6 +301,67 @@
       return false;
     }
 
+    // ---- Gases --------------------------------------------------------------------------------------
+    // Smoke and steam rise (steam faster: it is hotter), dust sinks slowly; all drift with the
+    // wind above ground and spread under ceilings below it. Density lives in the variant bits.
+    // Smoke and dust thin out over time; steam condenses back into water once it has cooled.
+    const RISE = new Float32Array(64), FADE = new Float32Array(64);
+    RISE[M.SMOKE] = 0.55; RISE[M.STEAM] = 0.8; RISE[M.DUST] = -0.12;
+    FADE[M.SMOKE] = 1 / 150; FADE[M.DUST] = 1 / 100;
+    const CONDENSE_BELOW = 70;       // °C
+    world.wind = world.wind || 0;
+    const windNoise = PW.createNoise1D((world.windSeed || 1) * 31 + 7, 1);
+    const gustNoise = PW.createNoise1D((world.windSeed || 1) * 17 + 3, 1);
+    // Wind (cells/s, + to the right) at a cell: none underground, stronger with height above ground.
+    function windAt(x, y) {
+      const top = world.groundTop[x];
+      if (y >= top) return 0;
+      return world.wind * Math.min(2.2, 1 + (top - y) / 300);
+    }
+    function stepGas(i, x, y, id) {
+      const m = mat[i];
+      let density = m >> 6;
+      const r = rnd(x, y);
+      if (id === M.STEAM) {
+        if (PW.heatAt(world, x, y) < CONDENSE_BELOW && r < 1 / 90) {
+          PW.set(world, x, y, M.WATER, { quiet: true });    // condenses: the water is back
+          PW.wake(world, x, y);
+          return true;
+        }
+      } else if (r < FADE[id]) {
+        if (density === 0) { PW.set(world, x, y, M.AIR, { quiet: true }); return true; }
+        density -= 1;
+        mat[i] = id | density << 6;
+        PW.markDirty(world, x, y);
+      }
+      const wind = windAt(x, y);
+      const r2 = (PW.hash3(x + 1, y, world.tick) & 1023) / 1023;
+      const r3 = (PW.hash3(x, y + 1, world.tick) & 1023) / 1023;
+      const side = r3 < Math.min(0.9, Math.abs(wind) / 40) ? Math.sign(wind) : (r3 & 1 ? 1 : -1) * ((x + world.tick) & 1 ? 1 : -1);
+      const rise = RISE[id];
+      const vert = rise > 0 ? -W : W;
+      // Up (or down for dust), through air; rising gas also bubbles up through water.
+      if (r2 < Math.abs(rise) && y > 0 && y < H - 1) {
+        const above = mat[i + vert];
+        if (isEmpty(above) || (rise > 0 && isWater(above))) { move(i, x, y, i + vert, x, y + (rise > 0 ? -1 : 1), 'gas'); return true; }
+        // Blocked: slip diagonally.
+        const diag = i + vert + side;
+        if (x + side > 0 && x + side < W - 1 && isEmpty(mat[diag])) { move(i, x, y, diag, x + side, y + (rise > 0 ? -1 : 1), 'gas'); return true; }
+      }
+      // Sideways: drift with the wind, or spread.
+      if (x + side > 0 && x + side < W - 1 && isEmpty(mat[i + side]) && (wind !== 0 || r2 > 0.6)) {
+        // Thick smoke spreads into the cell it leaves behind as it drifts.
+        move(i, x, y, i + side, x + side, y, 'gas');
+        if (id !== M.STEAM && density >= 2 && r < 0.25 && isEmpty(mat[i])) {
+          mat[i + side] = id | (density - 1) << 6;
+          PW.set(world, x, y, id | (density - 2) << 6, { quiet: true });
+        }
+        return true;
+      }
+      PW.wakeCell(world, x, y);   // keep fading and drifting even when nothing moved
+      return false;
+    }
+
     function processChunk(c) {
       const r = world.simRect, o = c * 4;
       const x0 = r[o], y0 = r[o + 1], x1 = r[o + 2], y1 = r[o + 3];
@@ -314,9 +378,10 @@
           const x = baseX + lx, i = row + x;
           const id = mat[i] & ID_MASK;
           const p = phase[id];
-          if (p !== PHASE.LIQUID && p !== PHASE.POWDER) continue;
+          if (p !== PHASE.LIQUID && p !== PHASE.POWDER && p !== PHASE.GAS) continue;
           if (own && own[ly << CHUNK_SHIFT | lx] === stamp) continue;
           if (p === PHASE.LIQUID) { if (stepWater(i, x, y)) moved += 1; }
+          else if (p === PHASE.GAS) { if (stepGas(i, x, y, id)) moved += 1; }
           else { powder += 1; if (stepPowder(i, x, y, id)) moved += 1; }
         }
       }
@@ -353,6 +418,9 @@
       stats.kinds = {};
       stamp = (stamp % 255) + 1;
       bubbleBudget = 60;
+      // Wind: a slow swing of up to 14 cells/s (1 m/s) either way, with gusts on top.
+      const t = world.tick / 60;
+      world.wind = 14 * windNoise(t / 45) + 6 * gustNoise(t / 4);
       const list = world.activeList;
       // Bottom chunk rows first so falling cells are not processed twice.
       list.sort((a, b) => b - a);
@@ -394,12 +462,13 @@
       stats.pending = compactQueue.length;
       return stats;
     }
+    // Water cells, counting steam (water that boiled and will condense back).
     function countWater() {
       let n = 0;
-      for (let i = 0; i < mat.length; i += 1) if ((mat[i] & ID_MASK) === M.WATER) n += 1;
+      for (let i = 0; i < mat.length; i += 1) { const id = mat[i] & ID_MASK; if (id === M.WATER || id === M.STEAM) n += 1; }
       return n;
     }
-    return { step, stats, countWater, compact };
+    return { step, stats, countWater, compact, windAt };
   }
 
   PW.createSim = createSim;

@@ -28,8 +28,11 @@
     COVER_ROCK: 32, COVER_WOOD: 33, COVER_METAL: 34, COVER_SAND: 35,
     // Reinforced concrete lining of a developed tunnel: another side cannot dig through it.
     REINFORCED: 36,
+    // Gases (variant bits = density 0-3) and the ash left by fire.
+    SMOKE: 40, STEAM: 41, DUST: 42, ASH: 43,
   });
-  const PHASE = Object.freeze({ AIR: 0, LIQUID: 1, POWDER: 2, SOLID: 3 });
+  // Gases sit between air and liquids: anything heavier moves through them as through air.
+  const PHASE = Object.freeze({ AIR: 0, GAS: 1, LIQUID: 2, POWDER: 3, SOLID: 4 });
   // Debris variants (bits 6-7 of a DEBRIS cell) pick the rubble palette.
   const DEBRIS_KIND = Object.freeze({ CONCRETE: 0, BRICK: 1, WOOD: 2, METAL: 3 });
 
@@ -42,6 +45,12 @@
   const passable = new Uint8Array(64);     // units move through it (air, water, cover)
   const stopsShots = new Uint8Array(64);   // bullets and shells stop in it (glass lets them through)
   const terrain = new Uint8Array(64);      // natural ground and loose heaps: nothing is drawn over it
+  const open = new Uint8Array(64);         // air or gas: free space other cells move into
+  // Thermal properties. conduct: share of a temperature difference exchanged with a neighbour per
+  // heat tick (15 Hz); ignite: °C at which it catches fire (0 = never); burn: seconds of fuel;
+  // burnsTo: what is left (0 = keep, scorched); boil: °C at which it turns to steam.
+  const conduct = new Float32Array(64).fill(0.06);
+  const ignite = new Uint16Array(64), burnTime = new Float32Array(64), burnsTo = new Uint8Array(64);
   const palettes = new Array(64);
   const names = new Array(64).fill('');
 
@@ -146,7 +155,30 @@
   for (const id of [M.GRASS, M.TOPSOIL, M.SOIL, M.CLAY, M.GRAVEL, M.STONE, M.BEDROCK, M.SAND, M.ORE, M.WATER,
     M.LOOSE_SOIL, M.LOOSE_STONE, M.RUBBLE, M.ASPHALT, M.ROADBED, M.LINING, M.PIPE, M.REINFORCED]) skyline[id] = 1;
   for (const id of [M.AIR, M.WATER, M.COVER_ROCK, M.COVER_WOOD, M.COVER_METAL, M.COVER_SAND]) passable[id] = 1;
+  // Gases: smoke from fires and blasts, steam from boiling water (it condenses back into water,
+  // so water is never lost), dust thrown up by blasts and collapses. Ash is what fire leaves.
+  define(M.SMOKE, 'smoke', { phase: PHASE.GAS, hardness: 0 }, [[54, 54, 58], [62, 62, 66], [48, 48, 52], [58, 58, 62]]);
+  define(M.STEAM, 'steam', { phase: PHASE.GAS, hardness: 0 }, [[220, 228, 234], [210, 220, 228], [228, 234, 238], [214, 222, 230]]);
+  define(M.DUST, 'dust', { phase: PHASE.GAS, hardness: 0 }, [[150, 132, 104], [138, 122, 96], [158, 140, 110], [144, 126, 100]]);
+  define(M.ASH, 'ash', { phase: PHASE.POWDER, ground: true, hardness: 0.03 },
+    [[96, 94, 90], [82, 80, 77], [108, 106, 101], [74, 72, 70], [100, 98, 93], [88, 86, 82], [70, 68, 66], [92, 90, 86]]);
+  skyline[M.ASH] = 1; terrain[M.ASH] = 1;
+  for (const id of [M.SMOKE, M.STEAM, M.DUST]) passable[id] = 1;
+  open[M.AIR] = 1; open[M.SMOKE] = 1; open[M.STEAM] = 1; open[M.DUST] = 1;
   for (let id = 1; id < 64; id += 1) if (names[id] && phase[id] >= PHASE.POWDER && id !== M.GLASS) stopsShots[id] = 1;
+  // Thermal table (temperatures in °C, ambient 20).
+  const thermal = (ids, props) => { for (const id of ids) {
+    if (props.conduct !== undefined) conduct[id] = props.conduct;
+    if (props.ignite) { ignite[id] = props.ignite; burnTime[id] = props.burn; burnsTo[id] = props.to ?? 0; }
+  } };
+  thermal([M.AIR, M.SMOKE, M.STEAM, M.DUST], { conduct: 0.22 });
+  thermal([M.WATER], { conduct: 0.14 });
+  thermal([M.STEEL, M.BRIDGE, M.PIPE, M.COVER_METAL, M.CORE], { conduct: 0.24 });
+  thermal([M.CONCRETE, M.MASONRY, M.FOUNDATION, M.PILLAR, M.REINFORCED, M.LINING, M.BRICK, M.TILE, M.PLATFORM, M.GLASS], { conduct: 0.08 });
+  thermal([M.GRASS], { conduct: 0.05, ignite: 260, burn: 3, to: M.TOPSOIL });
+  thermal([M.WOOD], { conduct: 0.04, ignite: 380, burn: 40, to: M.ASH });
+  thermal([M.COVER_WOOD], { conduct: 0.04, ignite: 320, burn: 25, to: M.ASH });
+  thermal([M.COVER_SAND], { conduct: 0.04 });
   for (const id of [M.GRASS, M.TOPSOIL, M.SOIL, M.CLAY, M.GRAVEL, M.STONE, M.BEDROCK, M.SAND, M.ORE,
     M.LOOSE_SOIL, M.LOOSE_STONE, M.DEBRIS, M.RUBBLE]) terrain[id] = 1;
 
@@ -241,6 +273,10 @@
       simRect: new Int32Array(chunkCount * 4),
       simIdle: new Uint16Array(chunkCount),
       activeList: [],
+      // Temperature (see heatAt): sparse chunks, and the list of chunks holding heat.
+      heat: new Array(chunkCount).fill(null),
+      heatActive: new Uint8Array(chunkCount),
+      heatList: [],
       tick: 0,
     };
     for (let c = 0; c < chunkCount; c += 1) clearSimRect(world, c);
@@ -336,10 +372,11 @@
     if (before === M.WATER || after === M.WATER) markWaterDirty(world, x, y);
     else markDirty(world, x, y);
     if (!options || !options.quiet) wake(world, x, y);
-    else if (before !== after && phase[after] >= PHASE.LIQUID && phase[after] <= PHASE.POWDER) wake(world, x, y);
+    else if (before !== after && phase[after] >= PHASE.GAS && phase[after] <= PHASE.POWDER) wake(world, x, y);
   }
   // Swap two cells by flat index (the cell automaton's move). Paint stays put: moving cells
-  // (water, powders) are coloured from their material palette.
+  // (water, powders, gases) are coloured from their material palette. Temperature moves with the
+  // material, so hot steam carries its heat as it rises.
   function swapCells(world, i, j) {
     const mat = world.mat, W = world.width;
     const a = mat[i], b = mat[j];
@@ -350,7 +387,35 @@
     touchGroundTop(world, xj, yj, ai);
     if (ai === M.WATER || bi === M.WATER) { markWaterDirty(world, xi, yi); markWaterDirty(world, xj, yj); }
     else { markDirty(world, xi, yi); markDirty(world, xj, yj); }
+    const ci = chunkIndex(world, xi, yi), cj = chunkIndex(world, xj, yj);
+    if (world.heat[ci] || world.heat[cj]) {
+      const ta = heatAt(world, xi, yi), tb = heatAt(world, xj, yj);
+      if (ta !== tb) { setHeat(world, xi, yi, tb); setHeat(world, xj, yj, ta); }
+    }
   }
+
+  // ---- Temperature ------------------------------------------------------------------------------------
+  // Sparse per-chunk Float32 temperatures (°C). Chunks without an array are at ambient. Chunks that
+  // hold heat are listed in heatList for the heat module to diffuse, cool and drop when cold.
+  const AMBIENT = 20;
+  function heatAt(world, x, y) {
+    if (x < 0 || y < 0 || x >= world.width || y >= world.height) return AMBIENT;
+    const chunk = world.heat[chunkIndex(world, x, y)];
+    return chunk ? chunk[(y & CHUNK_MASK) << CHUNK_SHIFT | x & CHUNK_MASK] : AMBIENT;
+  }
+  function heatChunk(world, c) {
+    let chunk = world.heat[c];
+    if (!chunk) { chunk = world.heat[c] = new Float32Array(CHUNK_CELLS).fill(AMBIENT); }
+    if (!world.heatActive[c]) { world.heatActive[c] = 1; world.heatList.push(c); }
+    return chunk;
+  }
+  function setHeat(world, x, y, t) {
+    if (x < 0 || y < 0 || x >= world.width || y >= world.height) return;
+    const c = chunkIndex(world, x, y);
+    if (!world.heat[c] && Math.abs(t - AMBIENT) < 0.5) return;
+    heatChunk(world, c)[(y & CHUNK_MASK) << CHUNK_SHIFT | x & CHUNK_MASK] = t;
+  }
+  function addHeat(world, x, y, dt) { setHeat(world, x, y, heatAt(world, x, y) + dt); }
   function refreshGroundTop(world, x, from = 0) {
     const { mat, width, height } = world;
     let y = Math.max(0, from);
@@ -367,7 +432,9 @@
   // OVERBREAK marks rock that broke away beyond a raw tunnel's planned profile (filled with concrete
   // when the stretch is developed).
   const FLAG = Object.freeze({ LADDER: 1, ROAD: 2, TUNNEL: 4, NOBUILD: 8, SCORCH: 16, CARVED: 32, BRIDGE: 64, HATCH: 128,
-    RAW: 256, FIXTURE: 512, DEVELOPED: 1024, OVERBREAK: 2048 });
+    RAW: 256, FIXTURE: 512, DEVELOPED: 1024, OVERBREAK: 2048,
+    // FLORA: a deco cell that is part of a plant (it can burn); CHARRED: burnt, no fuel left.
+    FLORA: 4096, CHARRED: 8192 });
   function getOwner(world, x, y) {
     if (x < 0 || y < 0 || x >= world.width || y >= world.height) return 0;
     const chunk = world.owner[chunkIndex(world, x, y)];
@@ -471,7 +538,8 @@
   PW.PHASE = PHASE;
   PW.DEBRIS_KIND = DEBRIS_KIND;
   PW.ID_MASK = ID_MASK;
-  PW.mat = { phase, structural, ground, skyline, hardness, breaksTo, passable, stopsShots, terrain, palettes, names };
+  PW.mat = { phase, structural, ground, skyline, hardness, breaksTo, passable, stopsShots, terrain, open,
+    conduct, ignite, burnTime, burnsTo, palettes, names };
   PW.CHUNK = CHUNK;
   PW.CHUNK_SHIFT = CHUNK_SHIFT;
   PW.CHUNK_MASK = CHUNK_MASK;
@@ -485,6 +553,6 @@
     createWorld, chunkIndex, inside, markDirty, markWaterDirty, wake, wakeCell, wakeArea, clearSimRect,
     get, id, set, swapCells, touchGroundTop, refreshGroundTop, rebuildGroundTop,
     getLayer, setLayer, layerCell, clearPaintAt, isSolid, isOpen, groundBelow, supportBelow, traceShot,
-    getOwner, setOwner, getFlags, setFlag,
+    getOwner, setOwner, getFlags, setFlag, AMBIENT, heatAt, setHeat, addHeat, heatChunk,
   });
 })();

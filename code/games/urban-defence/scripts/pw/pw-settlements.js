@@ -133,7 +133,6 @@
 
   // ---- Farms: wheat field and shore pump ----------------------------------------------------------------
   function sowField(world, x0, x1, padY, random) {
-    const stems = [[170, 150, 70], [150, 132, 60]], heads = [[236, 200, 90], [214, 176, 92], [246, 214, 110]];
     const field = { x0, x1, y: padY, growth: 0.55 + random() * 0.4, stalks: [] };
     for (let x = x0; x <= x1; x += 1) {
       for (let row = 0; row < 3; row += 1) {
@@ -143,18 +142,37 @@
         const furrow = (x % 10) < 5;
         PW.setLayer(world, 'paint', x, y, rgb(tone(row === 0 ? (furrow ? [92, 66, 42] : [110, 82, 54]) : [96, 72, 48], 1)));
       }
-      if (x % 3 !== 0 || (PW.get(world, x, padY) & 63) !== M.TOPSOIL) continue;
-      const h = Math.round((10 + (PW.hash2(x, 41) % 8)) * field.growth);
+    }
+    drawCrop(world, field);
+    return field;
+  }
+  // Draw (or redraw) a field's wheat at its current growth: green shoots when young, golden ears
+  // when ripe. Stalks only grow from tilled soil that is still there, into open air.
+  const STEMS = [[170, 150, 70], [150, 132, 60]], EARS = [[236, 200, 90], [214, 176, 92], [246, 214, 110]];
+  const SHOOTS = [[96, 140, 60], [80, 122, 52]];
+  function drawCrop(world, field) {
+    const { x0, x1, y: padY, growth } = field;
+    for (let x = x0; x <= x1 + 1; x += 1) {
+      for (let i = 1; i <= 20; i += 1) {
+        if (PW.getFlags(world, x, padY - i) & FLAG.FLORA) { PW.setLayer(world, 'deco', x, padY - i, 0); PW.setFlag(world, x, padY - i, FLAG.FLORA, false); }
+      }
+    }
+    field.stalks = [];
+    const ripe = growth >= 0.6;
+    for (let x = x0; x <= x1; x += 3) {
+      if ((PW.get(world, x, padY) & 63) !== M.TOPSOIL) continue;
+      const h = Math.round((10 + (PW.hash2(x, 41) % 8)) * growth);
+      if (h < 1) continue;
       field.stalks.push({ x, h });
       const lean = (PW.hash2(x, 43) & 3) === 0 ? 1 : 0;
       for (let i = 1; i <= h; i += 1) {
-        const color = i > h - 4 ? heads[PW.hash2(x, i) % heads.length] : stems[(i + x) & 1];
+        const color = !ripe ? SHOOTS[(i + x) & 1] : i > h - 4 ? EARS[PW.hash2(x, i) % EARS.length] : STEMS[(i + x) & 1];
         const sx = x + (lean && i > h - 3 ? 1 : 0);
-        if ((PW.get(world, sx, padY - i) & 63) !== M.AIR) break;
+        if ((PW.get(world, sx, padY - i) & 63) !== M.AIR || (PW.getFlags(world, sx, padY - i) & FLAG.CHARRED)) break;
         PW.setLayer(world, 'deco', sx, padY - i, rgb(color));
+        PW.setFlag(world, sx, padY - i, FLAG.FLORA);
       }
     }
-    return field;
   }
   // Pump house on the flattest dry spot near the shore. It stands level on a concrete plinth that
   // goes down to the ground under every column, and its intake pipe leaves the lake-side wall,
@@ -586,5 +604,5 @@
   }
 
   PW.generateSettlements = generateSettlements;
-  PW.settlementTools = { terracePad, paveStreet, carveBox, ladder, tunnelLamps, TUNNEL, PAVING };
+  PW.settlementTools = { terracePad, paveStreet, carveBox, ladder, tunnelLamps, drawCrop, TUNNEL, PAVING };
 })();

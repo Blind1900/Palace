@@ -462,6 +462,7 @@
         if (id !== M.AIR && !(options.water && id === M.WATER)) continue;
         if (id === M.AIR && PW.getLayer(world, 'back', wx, wy)) continue;
         PW.setLayer(world, 'deco', wx, wy, color);
+        PW.setFlag(world, wx, wy, PW.FLAG.FLORA);   // plant matter: it can burn
         if (foot) {
           const k = wx - footX0;
           if (k >= 0 && k < foot.length && wy > foot[k]) foot[k] = wy;
@@ -558,8 +559,6 @@
   function grassTufts(world, random, blocked) {
     const meadow = PW.createNoise1D(random.int(1, 1e9), 260);
     const clumping = PW.createNoise1D(random.int(1, 1e9), 9);
-    const blades = [[88, 124, 54], [64, 96, 42], [100, 136, 62], [76, 110, 48], [110, 140, 66]];
-    const flowers = [[226, 220, 206], [236, 200, 70], [180, 120, 210], [220, 96, 110], [150, 190, 240]];
     for (let x = 2; x < world.width - 2; x += 1) {
       if (blocked[x]) continue;
       const y = world.groundTop[x];
@@ -568,23 +567,39 @@
       const clump = clumping(x) + ((PW.hash2(x, 3) & 15) - 7.5) / 20;
       if (clump < -0.25) continue;
       const h = Math.round(2 + clump * 4 + tall * (0.6 + (PW.hash2(x, 5) & 7) / 14));
-      const color = blades[PW.hash2(x, 9) % blades.length];
-      const lean = (PW.hash2(x, 11) & 3) === 0 ? ((PW.hash2(x, 13) & 1) ? 1 : -1) : 0;
-      for (let i = 1; i <= h; i += 1) {
-        const bx = x + (lean && i > h * 0.6 ? lean : 0);
-        if ((PW.get(world, bx, y - i) & ID_MASK) !== M.AIR || PW.getLayer(world, 'deco', bx, y - i)) break;
-        const k = i === h ? 1.15 : i < 2 ? 0.85 : 1;
-        PW.setLayer(world, 'deco', bx, y - i, shadeColor(color, k));
-      }
-      if ((PW.hash2(x, 17) % 97) === 0 && h >= 3) {
-        const f = flowers[PW.hash2(x, 19) % flowers.length];
-        const top = y - h - 1;
-        PW.setLayer(world, 'deco', x, top, rgb(f[0], f[1], f[2]));
-        PW.setLayer(world, 'deco', x + 1, top, rgb(f[0], f[1], f[2]));
-        PW.setLayer(world, 'deco', x, top - 1, shadeColor(f, 1.12));
-        PW.setLayer(world, 'deco', x + 1, top + 1, rgb(236, 210, 80));
-      }
+      tuft(world, x, y, h);
     }
+  }
+  // One tuft of grass blades (and now and then a flower) on the grass cell at (x, y). Every cell
+  // is marked as plant matter, so it can burn.
+  const BLADES = [[88, 124, 54], [64, 96, 42], [100, 136, 62], [76, 110, 48], [110, 140, 66]];
+  const FLOWERS = [[226, 220, 206], [236, 200, 70], [180, 120, 210], [220, 96, 110], [150, 190, 240]];
+  function tuft(world, x, y, h) {
+    const plantCell = (cx, cy, color) => {
+      if ((PW.get(world, cx, cy) & ID_MASK) !== M.AIR || PW.getLayer(world, 'deco', cx, cy)) return false;
+      PW.setLayer(world, 'deco', cx, cy, color);
+      PW.setFlag(world, cx, cy, PW.FLAG.FLORA);
+      PW.setFlag(world, cx, cy, PW.FLAG.CHARRED, false);
+      return true;
+    };
+    const color = BLADES[PW.hash2(x, 9) % BLADES.length];
+    const lean = (PW.hash2(x, 11) & 3) === 0 ? ((PW.hash2(x, 13) & 1) ? 1 : -1) : 0;
+    let drawn = 0;
+    for (let i = 1; i <= h; i += 1) {
+      const bx = x + (lean && i > h * 0.6 ? lean : 0);
+      const k = i === h ? 1.15 : i < 2 ? 0.85 : 1;
+      if (!plantCell(bx, y - i, shadeColor(color, k))) break;
+      drawn += 1;
+    }
+    if (drawn === h && (PW.hash2(x, 17) % 97) === 0 && h >= 3) {
+      const f = FLOWERS[PW.hash2(x, 19) % FLOWERS.length];
+      const top = y - h - 1;
+      plantCell(x, top, rgb(f[0], f[1], f[2]));
+      plantCell(x + 1, top, rgb(f[0], f[1], f[2]));
+      plantCell(x, top - 1, shadeColor(f, 1.12));
+      plantCell(x + 1, top + 1, rgb(236, 210, 80));
+    }
+    return drawn;
   }
 
   // Columns taken by settlements (streets, runways, fields, pumps, defences) plus a margin.
@@ -711,6 +726,6 @@
   }
 
   PW.generateVegetation = generateVegetation;
-  PW.flora = { plant, fell, regenerate, afterBlast, makeGround, frozenGround, FLAT };
+  PW.flora = { plant, fell, regenerate, afterBlast, makeGround, frozenGround, FLAT, tuft };
   PW.vegetation = { broadleaf, conifer, birch, bush, deadTree, boulder, reeds, stamp, createSprite, foliage, limb, trim, spanDrop, spanRise };
 })();

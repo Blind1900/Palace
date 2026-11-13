@@ -40,8 +40,11 @@
   const renderer = PW.createRenderer(canvas, world, { seed });
   renderer.refreshOverview(Infinity);
   timings.overview = performance.now() - t;
+  world.windSeed = seed;
   const sim = PW.createSim(world);
   const particles = PW.createParticles(world);
+  const heat = world.heatSystem = PW.createHeat(world);
+  const life = PW.createLife(world);
   // Bubbles the water simulation releases: one or two cells of pale air, rising to pop.
   const BUBBLE_COLORS = [PW.abgr(206, 232, 248, 230), PW.abgr(168, 210, 238, 210), PW.abgr(232, 244, 252, 240)];
   world.emitBubble = (x, y) => {
@@ -56,7 +59,10 @@
     water: () => M.WATER, sand: () => M.SAND, soil: () => M.LOOSE_SOIL,
     debris: () => M.DEBRIS | (world.random.int(0, 3) << 6), concrete: () => M.CONCRETE, erase: () => M.AIR,
     blastS: { radius: 22, power: 0.9 }, blastM: { radius: 48, power: 1.1 }, blastL: { radius: 90, power: 1.35 },
+    smoke: () => M.SMOKE | 3 << 6,
   };
+  // Torch: heat the brush disc to flame temperature (ignites grass, plants and wood; boils water).
+  const torch = (x, y) => heat.heatDisc(x, y, Math.max(3, brush), 900);
   let tool = 'pan', brush = 10, paused = false;
   function paint(x, y, radius, make) {
     for (let dy = -radius; dy <= radius; dy += 1) for (let dx = -radius; dx <= radius; dx += 1) {
@@ -110,7 +116,8 @@
   function useTool(event) {
     const p = toWorld(event);
     const spec = tools[tool];
-    if (typeof spec === 'function') paint(p.x, p.y, brush, spec);
+    if (tool === 'torch') torch(p.x, p.y);
+    else if (typeof spec === 'function') paint(p.x, p.y, brush, spec);
   }
   canvas.addEventListener('contextmenu', (event) => event.preventDefault());
   canvas.addEventListener('pointerdown', (event) => {
@@ -128,7 +135,7 @@
   canvas.addEventListener('pointermove', (event) => {
     if (!drag.active) return;
     if (drag.pan) renderer.panByDevice((event.clientX - drag.x) * renderer.view.dpr, (event.clientY - drag.y) * renderer.view.dpr);
-    else if (typeof tools[tool] === 'function') useTool(event);
+    else if (typeof tools[tool] === 'function' || tool === 'torch') useTool(event);
     drag.x = event.clientX; drag.y = event.clientY;
   });
   const release = () => { drag.active = false; };
@@ -151,6 +158,8 @@
       sim.step(3);
       particles.step(DT);
       if (PW.tunnels) PW.tunnels.step(world, DT * devSpeed);
+      heat.step(1);
+      life.step();
       simTimes.push(performance.now() - s);
       if (simTimes.length > 240) simTimes.shift();
     }
@@ -165,6 +174,7 @@
     renderer.drawBase();
     if (PW.drawUnitsHook) PW.drawUnitsHook(renderer);
     renderer.drawDeco();
+    heat.draw(renderer, now / 1000);
     particles.draw(renderer);
     PW.drawEffects(world, renderer, (now - (frame.prev || now)) / 1000);
     frame.prev = now;
@@ -178,6 +188,7 @@
       status.textContent = `seed ${seed} | ${fps.toFixed(0)} fps | zoom ${s.zoom.toFixed(3)} | sim ${sim.stats.ms.toFixed(1)}ms ` +
         `(p95 ${p95.toFixed(1)}) active ${sim.stats.active} moves ${sim.stats.moves} | particles ${particles.count} | ` +
         `tunnels ${tunnelSummary()}${lastDig ? ` (${lastDig})` : ''} | ` +
+        `wind ${(world.wind / 14).toFixed(1)} m/s fire ${heat.stats.burning} heat ${heat.stats.chunks}ch ${heat.stats.ms.toFixed(1)}ms | ` +
         `gen ${Object.entries(timings).map(([k, v]) => `${k} ${v.toFixed(0)}`).join(' ')}`;
     }
     requestAnimationFrame(frame);
@@ -192,7 +203,7 @@
   }
 
   window.pwApp = { world, layout, renderer, sim, particles, seed, timings, ready: true,
-    explode, dig, setDevelopSpeed: (k) => { devSpeed = k; },
+    explode, dig, setDevelopSpeed: (k) => { devSpeed = k; }, heat, life,
     paint: (x, y, radius, material) => paint(x, y, radius, () => material),
     stepWorld, countWater: () => sim.countWater(), simTimes,
     setPaused: (value) => { paused = value; },
