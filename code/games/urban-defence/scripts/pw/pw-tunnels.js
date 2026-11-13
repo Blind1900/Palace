@@ -24,10 +24,19 @@
 
   const RAW = { rock: [44, 37, 31], dark: [33, 28, 23], light: [58, 49, 40], post: [122, 88, 54], postDark: [86, 60, 37],
     postLight: [152, 114, 72], plank: [108, 79, 50], mud: [60, 48, 37], bulb: [255, 196, 112], cable: [26, 24, 22] };
+  // Developed: a bunker bore of cast concrete segments. Back wall from the floor up: a kerb, the
+  // painted lower band with a stripe, stencilled sector numbers, a water main, cable trays, a big
+  // ventilation duct on hangers, and linear lights along the crown of the vault.
   const DEV = { face: [142, 144, 140], lining: [126, 128, 124], deep: [110, 112, 108], joint: [100, 102, 98],
-    back: [72, 76, 76], panel: [62, 66, 66], dado: [84, 92, 62], dadoEdge: [62, 68, 46], cable: [30, 30, 34],
-    tray: [98, 102, 108], rib: [70, 76, 84], ribLight: [106, 112, 122], lamp: [228, 242, 248], cage: [52, 56, 60],
-    stripe: [191, 123, 25], stripeDark: [38, 36, 32], line: [218, 180, 56], glow: [210, 232, 240] };
+    back: [88, 92, 92], ring: [66, 70, 70], ringLight: [112, 116, 116], dado: [84, 92, 62], dadoEdge: [56, 62, 42],
+    kerb: [118, 120, 116], cable: [30, 30, 34], cableRed: [96, 34, 30], cableBlue: [34, 48, 84], tray: [98, 102, 108],
+    pipe: [62, 112, 112], pipeDark: [42, 82, 84], duct: [112, 118, 122], ductLight: [140, 146, 150], ductDark: [78, 82, 86],
+    hanger: [60, 64, 68], housing: [48, 50, 54], tube: [236, 246, 250], stencil: [214, 214, 200],
+    rib: [70, 76, 84], ribLight: [106, 112, 122], lamp: [228, 242, 248], cage: [52, 56, 60],
+    stripe: [191, 123, 25], stripeDark: [38, 36, 32], line: [218, 180, 56], glow: [214, 234, 242] };
+  // 3x5 stencil digits for the sector numbers.
+  const DIGITS = ['111101101101111', '010110010010111', '111001111100111', '111001111001111', '101101111001001',
+    '111100111001111', '111100111101111', '111001001001001', '111101111101111', '111101111001111'];
 
   // ---- State and sparse per-cell layers ---------------------------------------------------------------
   function state(world) {
@@ -107,6 +116,8 @@
     const patch = PW.hash2(x >> 2, y >> 2) & 7;
     if (patch < 2) c = RAW.dark; else if (patch === 7) c = RAW.light;
     if ((PW.hash2(x, y) & 63) === 0) c = tone(RAW.light, 1.12);   // pick marks
+    // Overbreak beyond the planned profile: broken rock in shadow behind the timber and lagging.
+    if (x < seg.x0 || x > seg.x1 || y < seg.y0 || y > seg.y1) return tone(c, 0.72);
     let glow = 0;
     if (seg.kind === 'shaft') {
       const along = mod(y - net.root.y, SET_PITCH);
@@ -135,37 +146,63 @@
     }
     return glow > 0 ? mix(c, RAW.bulb, glow * glow * 0.32) : c;
   }
+  const RING = 20;          // concrete segment rings, 1.4 m
+  const BULKHEAD = 160;     // steel bulkhead frames between sectors
   function devBack(net, seg, x, y) {
     let glow = 0, c;
     if (seg.kind === 'shaft') {
-      const along = mod(y - net.root.y, RIB_PITCH);
-      if (along < 3) return along === 0 ? DEV.ribLight : DEV.rib;                    // steel ring
-      c = mod(y - net.root.y, 24) === 12 ? DEV.panel : DEV.back;
-      if (x - seg.x0 === 2 || x - seg.x0 === 4) c = DEV.cable;                        // cable run down the wall
-      const ly = net.root.y + Math.round((y - net.root.y - RIB_PITCH / 2) / LAMP_PITCH) * LAMP_PITCH + RIB_PITCH / 2;
-      const lx = seg.x1 - 4;
-      if (Math.abs(x - lx) <= 1 && Math.abs(y - ly) <= 1) return Math.abs(x - lx) === 1 && y !== ly ? DEV.cage : DEV.lamp;
-      glow = Math.max(0, 1 - Math.hypot(x - lx, y - ly) / 30);
-    } else {
-      const top = seg.y0, bottom = seg.y1, height = bottom - top + 1;
-      const u = mod(x - net.root.x, RIB_PITCH);
-      if (u < 3) return u === 0 ? DEV.ribLight : DEV.rib;                             // steel arch rib
-      const rise = bottom - y;
-      c = mod(x - net.root.x, 24) === 12 ? DEV.panel : DEV.back;                     // formwork panel joints
-      if (rise < 12) c = rise === 11 ? DEV.dadoEdge : DEV.dado;                       // olive dado band
-      const tray = Math.round(height * 0.62);
-      if (rise === tray || rise === tray + 2) c = DEV.cable;                          // two cable runs
-      else if (rise === tray + 1 && mod(x, 12) === 0) c = DEV.tray;                   // tray brackets
-      // Caged lamps under the roof between ribs.
-      const lx = net.root.x + Math.round((x - net.root.x - RIB_PITCH / 2) / LAMP_PITCH) * LAMP_PITCH + RIB_PITCH / 2;
-      const ly = top + 2;
-      if (Math.abs(x - lx) <= 2 && y >= top && y <= top + 3) {
-        if (y === top || Math.abs(x - lx) === 2) return DEV.cage;
-        return DEV.lamp;
-      }
-      glow = Math.max(0, 1 - Math.hypot(x - lx, (y - ly) * 0.75) / 34);
+      const along = mod(y - net.root.y, RING);
+      c = along === 0 ? DEV.ring : along === 1 ? DEV.ringLight : DEV.back;          // segment rings
+      const fromLeft = x - seg.x0, fromRight = seg.x1 - x;
+      if (fromLeft >= 2 && fromLeft <= 4) c = fromLeft === 3 ? DEV.cableRed : DEV.cable;   // cable run down the wall
+      if (fromRight >= 2 && fromRight <= 3) c = fromRight === 2 ? DEV.pipeDark : DEV.pipe;  // water riser
+      const ly = net.root.y + Math.round((y - net.root.y - RING / 2) / LAMP_PITCH) * LAMP_PITCH + RING / 2;
+      const lx = seg.x1 - 7;
+      if (Math.abs(x - lx) <= 1 && Math.abs(y - ly) <= 3) return Math.abs(x - lx) === 1 ? DEV.housing : DEV.tube;   // wall light
+      glow = Math.max(0, 1 - Math.hypot(x - lx, (y - ly) * 0.7) / 30);
+      return glow > 0 ? mix(c, DEV.glow, glow * glow * 0.4) : c;
     }
-    return glow > 0 ? mix(c, DEV.glow, glow * glow * 0.4) : c;
+    const top = seg.y0, bottom = seg.y1, height = bottom - top + 1;
+    const rise = bottom - y, fromTop = y - top;
+    const along = x - net.root.x;
+    // Steel bulkhead frame with hazard stripes on its foot.
+    const b = mod(along, BULKHEAD);
+    if (b < 4) {
+      if (rise < 10) return mod(x + y, 6) < 3 ? DEV.stripe : DEV.stripeDark;
+      return b === 0 ? DEV.ribLight : DEV.rib;
+    }
+    // Linear lights along the crown.
+    const lx = net.root.x + Math.round((along - LAMP_PITCH / 2) / LAMP_PITCH) * LAMP_PITCH + LAMP_PITCH / 2;
+    if (Math.abs(x - lx) <= 5 && fromTop >= 1 && fromTop <= 2) return fromTop === 1 ? DEV.housing : DEV.tube;
+    glow = Math.max(0, 1 - Math.hypot((x - lx) * 0.8, fromTop - 3) / 36);
+    const ring = mod(along, RING);
+    c = ring === 0 ? DEV.ring : ring === 1 ? DEV.ringLight : DEV.back;
+    if (rise <= 1) c = DEV.kerb;                                                        // kerb
+    else if (rise < 15) c = rise === 14 ? DEV.dadoEdge : rise === 13 ? DEV.line : DEV.dado;   // painted band
+    // Ventilation duct on hangers just under the vault.
+    const ductTop = 5, ductBottom = 10;
+    if (fromTop >= ductTop && fromTop <= ductBottom) {
+      c = fromTop === ductTop ? DEV.ductLight : fromTop === ductBottom ? DEV.ductDark : DEV.duct;
+      if (mod(along, 30) <= 1) c = DEV.ductDark;                                        // flange joints
+    } else if (fromTop > 2 && fromTop < ductTop && mod(along, 30) === 15) c = DEV.hanger;
+    // Cable trays and the water main on the wall.
+    const tray = Math.round(height * 0.6);
+    if (rise === tray + 3) c = DEV.tray;
+    else if (rise >= tray && rise <= tray + 2) c = [DEV.cable, DEV.cableBlue, DEV.cableRed][rise - tray];
+    else if (rise === tray - 1 && mod(along, 12) === 0) c = DEV.tray;
+    const pipe = Math.round(height * 0.4);
+    if (rise === pipe || rise === pipe + 1) c = mod(along, 16) === 0 ? DEV.ductDark : rise === pipe ? DEV.pipeDark : DEV.pipe;
+    // Stencilled sector number on the painted band every bulkhead.
+    const sx = mod(along, BULKHEAD) - 12, sy = rise - 5;
+    if (sx >= 0 && sx < 7 && sy >= 0 && sy < 5 && sx !== 3) {
+      const sector = 10 + mod(Math.floor(along / BULKHEAD) + net.id * 7, 89);
+      const digit = sx < 3 ? Math.floor(sector / 10) % 10 : sector % 10;
+      const col = sx < 3 ? sx : sx - 4;
+      if (DIGITS[digit][(4 - sy) * 3 + col] === '1') c = DEV.stencil;
+    }
+    // The vault curves away overhead: the top rows fall into shadow.
+    if (fromTop < 8 && c === DEV.back) c = tone(c, 0.72 + fromTop * 0.035);
+    return glow > 0 ? mix(c, DEV.glow, glow * glow * 0.42) : c;
   }
   // facing: where the tunnel is from this lining cell ('floor': tunnel above it, 'ceiling': below,
   // 'wall': beside). rise: rows above the tunnel floor (for wall faces).
@@ -222,6 +259,37 @@
         fresh.push(i);
       }
     }
+    // Overbreak: a raw tunnel's rock face is rough. Rock breaks away a few cells past the planned
+    // profile, mostly in the roof (floors stay walkable); developing the stretch fills it back in
+    // with concrete to the clean profile.
+    const rough = PW.createNoise1D(PW.hash2(x0, y0) + seg.id * 131, 5);
+    const breakOut = (x, y) => {
+      if (x < 1 || y < 1 || x >= W - 1 || y >= H - 1 || netAt(world, x, y)) return;
+      if (!liningTarget(mat[y * W + x] & ID_MASK)) return;
+      PW.set(world, x, y, M.AIR, { quiet: true });
+      PW.setLayer(world, 'deco', x, y, 0);
+      setL(world, 'tunnelNet', Uint16Array, x, y, net.id);
+      setL(world, 'tunnelSeg', Uint16Array, x, y, seg.id);
+      PW.setFlag(world, x, y, FLAG.TUNNEL | FLAG.CARVED | FLAG.RAW | FLAG.OVERBREAK);
+      PW.setOwner(world, x, y, net.owner);
+      PW.setLayer(world, 'back', x, y, rgb(rawBack(net, seg, x, y)));
+      fresh.push(y * W + x);
+    };
+    if (seg.kind === 'shaft') {
+      for (let y = y0 + 8; y <= y1; y += 1) {
+        for (let k = 1; k <= Math.round((rough(y) + 1) * 1.1); k += 1) breakOut(x0 - k, y);
+        for (let k = 1; k <= Math.round((rough(y + 997) + 1) * 1.1); k += 1) breakOut(x1 + k, y);
+      }
+    } else {
+      for (let x = x0; x <= x1; x += 1) {
+        const roof = Math.round((rough(x) + 1) * 1.5) + (PW.hash2(x >> 3, seg.id) % 9 === 0 ? 2 : 0);
+        for (let k = 1; k <= roof; k += 1) breakOut(x, y0 - k);
+      }
+      for (let y = y0; y <= y1 - 3; y += 1) {
+        for (let k = 1; k <= Math.round((rough(y + 500) + 1) * 1.2); k += 1) breakOut(x0 - k, y);
+        for (let k = 1; k <= Math.round((rough(y + 1500) + 1) * 1.2); k += 1) breakOut(x1 + k, y);
+      }
+    }
     net.cells += fresh.length;
     schedule(world, net, fresh);
     return { ok: true, blocked: false, cells: fresh.length, segment: seg, breached: [...breached] };
@@ -265,6 +333,12 @@
 
   // ---- Development -----------------------------------------------------------------------------------------
   const isInterior = (world, x, y) => netAt(world, x, y) !== 0;
+  function insideAnyBox(world, net, x, y) {
+    for (const seg of state(world).segments) {
+      if (seg.net === net.id && x >= seg.x0 && x <= seg.x1 && y >= seg.y0 && y <= seg.y1) return true;
+    }
+    return false;
+  }
   function liningTarget(id) {
     return (PW.mat.terrain[id] && id !== M.ORE && id !== M.BEDROCK) || id === M.LINING;
   }
@@ -277,6 +351,21 @@
     const net = T.networks[netAt(world, x, y) - 1];
     const seg = T.segments[segAt(world, x, y) - 1];
     if (!net || !seg) return false;
+    if ((flags & FLAG.OVERBREAK) && !insideAnyBox(world, net, x, y)) {
+      // Rock that broke away past the profile is filled with concrete: the lining's face.
+      setL(world, 'tunnelNet', Uint16Array, x, y, 0);
+      setL(world, 'tunnelSeg', Uint16Array, x, y, 0);
+      PW.setFlag(world, x, y, FLAG.TUNNEL | FLAG.CARVED | FLAG.RAW | FLAG.OVERBREAK, false);
+      PW.setLayer(world, 'back', x, y, 0);
+      if ((mat[i] & ID_MASK) === M.AIR) {
+        const facing = y < seg.y0 ? 'ceiling' : y > seg.y1 ? 'floor' : 'wall';
+        PW.set(world, x, y, M.REINFORCED, { quiet: true });
+        PW.setLayer(world, 'paint', x, y, rgb(liningColor(net, x, y, 1, facing, seg.y1 - y)));
+        PW.setOwner(world, x, y, net.owner);
+      }
+      net.developed += 1;
+      return true;
+    }
     PW.setFlag(world, x, y, FLAG.RAW, false);
     PW.setFlag(world, x, y, FLAG.DEVELOPED);
     if (!(flags & FLAG.FIXTURE)) PW.setLayer(world, 'back', x, y, rgb(devBack(net, seg, x, y)));

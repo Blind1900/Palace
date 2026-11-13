@@ -247,6 +247,8 @@
         return oreAt(x - 1, y) && oreAt(x + 1, y) && oreAt(x, y - 1) && oreAt(x, y + 1) ? color : shade(color, 200);
       }
       if (!natural[id]) return color;
+      // Painted rock (flowstone, scorch marks) keeps its own colour.
+      if (PW.getLayer(world, 'paint', x, y)) return color;
       let c = color;
       if (prox.ore) {
         const d = prox.toOre[k];

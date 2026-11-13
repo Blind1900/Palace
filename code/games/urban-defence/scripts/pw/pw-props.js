@@ -301,7 +301,8 @@
   function place(world, prop, x, row, info = {}) {
     const { mat, width: W, height: H } = world;
     const left = Math.round(x - prop.anchorX), top = Math.round(row - prop.anchorY);
-    const cells = [];
+    const cells = [];   // flat triples: world index, material, colour
+    const isSolid = (index) => phase[mat[index] & ID_MASK] >= PW.PHASE.POWDER;
     for (let py = 0; py < prop.height; py += 1) {
       const wy = top + py;
       for (let px = 0; px < prop.width; px += 1) {
@@ -310,23 +311,48 @@
         const wx = left + px;
         if (wx < 1 || wy < 1 || wx >= W - 1 || wy >= H - 1) return null;
         const id = mat[wy * W + wx] & ID_MASK;
-        if (id === M.AIR) { cells.push(wy * W + wx, i); continue; }
+        if (id === M.AIR) { cells.push(wy * W + wx, prop.mats[i], prop.colors[i]); continue; }
         if (prop.conform && phase[id] >= PW.PHASE.POWDER && !COVER[id] && !PW.mat.structural[id]) continue;
         return null;
       }
     }
     if (!cells.length) return null;
-    const flat = new Int32Array(cells.length / 2);
+    // A shaped prop standing on a floor reaches it in every column: where a column ends above
+    // air (the floor drops away under an edge), its shadowed foot continues down to the floor.
+    // A gap deeper than 24 cells means it does not belong here.
+    if (prop.conform && !prop.hangs) {
+      const foot = new Map(), crown = new Map();
+      for (let k = 0; k < cells.length; k += 3) {
+        const wx = cells[k] % W, wy = (cells[k] / W) | 0;
+        if (!foot.has(wx) || wy > foot.get(wx).y) foot.set(wx, { y: wy, k });
+        if (!crown.has(wx) || wy < crown.get(wx)) crown.set(wx, wy);
+      }
+      for (const [wx, { y, k }] of foot) {
+        let below = (y + 1) * W + wx;
+        if (isSolid(below)) continue;
+        // A column held at both ends may hang from the roof in a column that misses the floor.
+        if (prop.bothEnds && isSolid((crown.get(wx) - 1) * W + wx)) continue;
+        const shade = PW.unpack(cells[k + 2]);
+        const color = PW.abgr(shade[0] * 0.7, shade[1] * 0.7, shade[2] * 0.7);
+        let n = 0;
+        while (!isSolid(below)) {
+          if ((mat[below] & ID_MASK) !== M.AIR || n >= 24) return null;
+          cells.push(below, cells[k + 1], color);
+          below += W; n += 1;
+        }
+      }
+    }
+    const flat = new Int32Array(cells.length / 3);
     let x0 = W, y0 = H, x1 = -1, y1 = -1;
     const lowest = new Map(), highest = new Map();
-    for (let k = 0; k < cells.length; k += 2) {
-      const index = cells[k], i = cells[k + 1];
+    for (let k = 0; k < cells.length; k += 3) {
+      const index = cells[k];
       const wx = index % W, wy = (index / W) | 0;
-      PW.set(world, wx, wy, prop.mats[i], { quiet: true });
-      PW.setLayer(world, 'paint', wx, wy, prop.colors[i]);
+      PW.set(world, wx, wy, cells[k + 1], { quiet: true });
+      PW.setLayer(world, 'paint', wx, wy, cells[k + 2]);
       PW.setLayer(world, 'deco', wx, wy, 0);   // nothing drawn over the prop
       PW.setOwner(world, wx, wy, 0);
-      flat[k / 2] = index;
+      flat[k / 3] = index;
       if (wx < x0) x0 = wx; if (wx > x1) x1 = wx; if (wy < y0) y0 = wy; if (wy > y1) y1 = wy;
       if (!lowest.has(wx) || wy > lowest.get(wx)) lowest.set(wx, wy);
       if (!highest.has(wx) || wy < highest.get(wx)) highest.set(wx, wy);
@@ -334,10 +360,13 @@
     // What it rests on: the cell under each column's lowest cell (or above the highest, hanging).
     // A shaped prop reaches the ground in every column; a rigid one stands on its bottom row
     // (a keg's bulge or a mine car's tub overhang belong to the object's own shape).
+    // A column is held at both ends: each of its columns rests on the floor or hangs from the roof.
     const support = [];
+    const solid = (index) => PW.mat.phase[mat[index] & ID_MASK] >= PW.PHASE.POWDER;
     for (const [wx, wy] of prop.hangs ? highest : lowest) {
       if (!prop.conform && !prop.hangs && wy !== y1) continue;
-      const sy = prop.hangs ? wy - 1 : wy + 1;
+      let sy = prop.hangs ? wy - 1 : wy + 1;
+      if (prop.bothEnds && !solid(sy * W + wx)) sy = highest.get(wx) - 1;
       const id = mat[sy * W + wx] & ID_MASK;
       if (!COVER[id]) support.push(sy * W + wx);
     }
@@ -350,9 +379,17 @@
   // Ground or ceiling profile around (x, row) for shaped props: scans from `from` down (or up).
   function floorProfile(world, x, row, from) {
     const cache = new Map();
+    const solid = (cx, cy) => PW.mat.phase[PW.get(world, cx, cy) & ID_MASK] >= PW.PHASE.POWDER;
     return (dx) => {
       dx = Math.round(dx);
-      if (!cache.has(dx)) cache.set(dx, PW.supportBelow(world, x + dx, from) - row);
+      if (!cache.has(dx)) {
+        const cx = x + dx;
+        // Starting inside rock: pass under a thin overhang to the air beneath it; a thick wall
+        // stays a wall (the prop is clipped against it).
+        let y = from, through = 0;
+        while (solid(cx, y) && through < 10) { y += 1; through += 1; }
+        cache.set(dx, (solid(cx, y) ? from : PW.supportBelow(world, cx, y)) - row);
+      }
       return cache.get(dx);
     };
   }
@@ -438,40 +475,120 @@
     return placed;
   }
 
-  // Stalagmites, stalactites and fallen boulders along natural caves.
+  // Column: a stalactite and stalagmite grown together, waisted in the middle, its ends spreading
+  // over the roof and floor. ground(dx) / roof(dx): floor and roof rows relative to the anchor
+  // (the floor cell under the centre).
+  function column(random, ground, roof) {
+    const half = random.int(3, 6);
+    let drop = 0, up = 0;
+    for (let dx = -half - 6; dx <= half + 6; dx += 1) { drop = Math.max(drop, ground(dx)); up = Math.max(up, -roof(dx)); }
+    const p = createProp(half * 2 + 15, drop + up + 4);
+    p.anchorX = half + 7; p.anchorY = up + 2; p.conform = true; p.bothEnds = true;
+    const seed = random.int(1, 1e9);
+    const k = random.range(0.62, 0.76);
+    const span = Math.max(1, -roof(0));
+    const lumps = PW.createNoise1D(seed, 5);       // irregular, dripping silhouette
+    const flow = PW.createNoise2D(seed + 1, 3);     // flowing calcite texture
+    for (let dx = -half - 6; dx <= half + 6; dx += 1) {
+      const top = p.anchorY + roof(dx), bottom = p.anchorY + ground(dx);
+      for (let y = top; y <= bottom; y += 1) {
+        const t = (p.anchorY - y) / span;                       // 0 at the floor, 1 at the roof
+        const end = Math.min(t, 1 - t);
+        // Waisted in the middle, flaring into a broad foot and a broad root.
+        const waist = half * (0.6 + 0.4 * Math.abs(t - 0.5) * 2) * (1 + lumps(y) * 0.22) + (end < 0.15 ? 6 * Math.pow(1 - end / 0.15, 2) : 0);
+        if (Math.abs(dx) > waist) continue;
+        const f = flow(dx * 3, y * 0.6);
+        const band = CALCITE[f > 0.35 ? 0 : f < -0.3 ? 2 : 1];
+        let c = tone(band, dx < -waist * 0.3 ? 1.12 : dx > waist * 0.45 ? 0.76 : 1);
+        if (Math.abs(dx - Math.round(lumps(y + 50) * 2)) === 1 && (PW.hash2(dx, y) & 1)) c = mix(c, [196, 186, 164], 0.4);   // wet streak
+        cell(p, p.anchorX + dx, y, M.COVER_ROCK, tone(c, k));
+      }
+    }
+    return p;
+  }
+  // Flowstone: a pale calcite drapery running down a side wall of the cave from (x, y): across
+  // the air to the wall on one side, then down its face, a few cells deep with a wavy edge.
+  function flowstone(world, x, y, random) {
+    const { mat, width: W } = world;
+    const air = (cx, cy) => (mat[cy * W + cx] & ID_MASK) === M.AIR && !PW.getLayer(world, 'back', cx, cy);
+    const rock = (cx, cy) => { const id = mat[cy * W + cx] & ID_MASK; return PW.mat.terrain[id] && id !== M.ORE; };
+    const side = random() < 0.5 ? -1 : 1;
+    let wall = x;
+    while (Math.abs(wall - x) < 160 && air(wall + side, y)) wall += side;
+    if (!rock(wall + side, y)) return 0;
+    const k = random.range(0.62, 0.76);
+    const edge = PW.createNoise1D(random.int(1, 1e9), 4);
+    let painted = 0;
+    const top = y - random.int(10, 26), bottom = y + random.int(6, 20);
+    for (let cy = top; cy <= bottom; cy += 1) {
+      // Find this row's wall face near the column we reached.
+      let fx = wall;
+      while (Math.abs(fx - wall) < 12 && air(fx + side, cy)) fx += side;
+      while (Math.abs(fx - wall) < 12 && !air(fx, cy)) fx -= side;
+      if (!rock(fx + side, cy)) continue;
+      const depth = Math.max(1, Math.round(2.5 + edge(cy) * 1.8 - Math.max(0, cy - (bottom - 6)) * 0.4));
+      for (let d = 1; d <= depth; d += 1) {
+        const cx = fx + side * d;
+        if (!rock(cx, cy)) break;
+        const band = CALCITE[((cy + d * 2) >> 2) % 3];
+        PW.setLayer(world, 'paint', cx, cy, rgb(tone(mix(band, [204, 194, 172], d === 1 ? 0.3 : 0), k * (d === 1 ? 1.08 : 1))));
+        painted += 1;
+      }
+    }
+    return painted;
+  }
+  // Formations along natural caves: curtains of stalactites with stalagmites under their drips,
+  // columns where roof and floor are close, fallen boulders, and flowstone on the walls. Chambers
+  // get several groups.
   function decorateCaves(world, layout, random) {
     const placed = [];
     const { mat, width: W } = world;
+    const put = (record) => { if (record) placed.push(record); };
     for (const cave of layout.caves || []) {
+      const sites = [];
       let travelled = 0, nextAt = random.int(20, 60);
       for (let n = 1; n < cave.points.length; n += 1) {
         const a = cave.points[n - 1], p = cave.points[n];
         travelled += Math.hypot(p.x - a.x, p.y - a.y);
         if (travelled < nextAt) continue;
-        const x = Math.round(p.x), y = Math.round(p.y);
+        sites.push({ x: Math.round(p.x), y: Math.round(p.y) });
+        nextAt = travelled + random.int(35, 85);
+      }
+      for (const ch of cave.chambers || []) {
+        for (let k = 0; k < Math.max(2, Math.round(ch.halfW / 22)); k += 1) sites.push({ x: Math.round(ch.x + random.range(-0.8, 0.8) * ch.halfW), y: ch.y });
+      }
+      for (const { x, y } of sites) {
         if ((mat[y * W + x] & ID_MASK) !== M.AIR) continue;
         const floor = PW.supportBelow(world, x, y);
         const roof = ceilingAbove(world, x, y);
-        const clearance = floor - roof - 1;
-        if (clearance < 22) continue;
-        nextAt = travelled + random.int(35, 85);
-        const roll = random();
-        if (roll < 0.5) {
-          const height = Math.round(random.range(10, Math.min(34, clearance * 0.6)));
-          const record = place(world, stalagmite(random, height, floorProfile(world, x, floor, y)), x, floor, { kind: 'stalagmite', setting: 'cave' });
-          if (record) placed.push(record);
-        } else if (roll < 0.8) {
-          const size = random.range(10, Math.min(22, clearance * 0.5));
-          const record = place(world, caveBoulder(random, size, floorProfile(world, x, floor, y)), x, floor, { kind: 'boulder', setting: 'cave' });
-          if (record) placed.push(record);
+        if (floor - roof - 1 < 22) continue;
+        if (random() < 0.45) flowstone(world, x, y, random);
+        if (random() < 0.22) {
+          const size = random.range(10, Math.min(22, (floor - roof) * 0.45));
+          // Floors are read from just above floor level, so overhangs don't hide the floor under them.
+          put(place(world, caveBoulder(random, size, floorProfile(world, x, floor, floor - Math.round(size) - 4)), x, floor, { kind: 'boulder', setting: 'cave' }));
+          continue;
         }
-        if (random() < 0.55) {
-          const sx = x + random.int(-14, 14);
+        // A curtain of formations around this spot (at most one column per curtain).
+        let columns = 0;
+        for (let n = random.int(2, 5); n > 0; n -= 1) {
+          const sx = x + random.int(-16, 16);
           if ((mat[y * W + sx] & ID_MASK) !== M.AIR) continue;
-          const sroof = ceilingAbove(world, sx, y);
-          const length = Math.round(random.range(6, Math.min(26, clearance * 0.32)));
-          const record = place(world, stalactite(random, length, ceilingProfile(world, sx, sroof, y)), sx, sroof, { kind: 'stalactite', setting: 'cave' });
-          if (record) placed.push(record);
+          const sroof = ceilingAbove(world, sx, y), sfloor = PW.supportBelow(world, sx, y);
+          const clear = sfloor - sroof - 1;
+          if (clear < 18 || (mat[sfloor * W + sx] & ID_MASK) === M.WATER) continue;
+          if (clear < 48 && columns === 0 && random() < 0.22) {
+            columns += 1;
+            put(place(world, column(random, floorProfile(world, sx, sfloor, y), ceilingProfile(world, sx, sfloor, y)), sx, sfloor, { kind: 'column', setting: 'cave' }));
+            continue;
+          }
+          const length = Math.round(random.range(5, Math.min(26, clear * 0.34)));
+          put(place(world, stalactite(random, length, ceilingProfile(world, sx, sroof, y)), sx, sroof, { kind: 'stalactite', setting: 'cave' }));
+          // Drips build a stalagmite straight below.
+          if (random() < 0.6) {
+            const height = Math.round(Math.min(clear * 0.5, length * random.range(0.6, 1.4) + 4));
+            put(place(world, stalagmite(random, height, floorProfile(world, sx, sfloor, sfloor - height - 4)), sx, sfloor, { kind: 'stalagmite', setting: 'cave' }));
+          }
         }
       }
     }

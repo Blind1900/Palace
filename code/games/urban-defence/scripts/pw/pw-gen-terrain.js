@@ -386,12 +386,17 @@
   function carveCaves(world, layout, top, random) {
     const { mat, width: W } = world;
     const caves = [];
-    const avoid = (x) => layout.sites.some((site) => x > site.x0 - 200 && x < site.x1 + 200)
-      || layout.lakes.some((lake) => Math.abs(x - lake.x) < lake.half + 260);
-    for (let i = 0; i < 9; i += 1) {
+    // Caves run anywhere deep enough: well below lake beds, and below the depth of the base
+    // workings under settlements (so a starter mine never opens into one).
+    const avoid = (x, y) => {
+      const depth = y - top[Math.round(x)];
+      return layout.sites.some((site) => x > site.x0 - 200 && x < site.x1 + 200 && depth < (site.kind === 'base' ? 760 : 560))
+        || layout.lakes.some((lake) => Math.abs(x - lake.x) < lake.half + 100 && depth < 520);
+    };
+    for (let i = 0; i < 16; i += 1) {
       let x = random.range(400, W - 400);
-      if (avoid(x)) continue;
       let y = top[Math.round(x)] + random.range(420, 1500);
+      if (avoid(x, y)) continue;
       let angle = random.range(-0.4, 0.4) + (random() < 0.5 ? 0 : Math.PI);
       const length = random.int(400, 1300);
       const cave = { points: [] };
@@ -400,7 +405,7 @@
         angle = Math.max(-0.7, Math.min(0.7, ((angle + Math.PI) % (2 * Math.PI)) - Math.PI));
         x += Math.cos(angle) * 6 * (random() < 0.5 ? 1 : 1);
         y += Math.sin(angle) * 3;
-        if (x < 200 || x > W - 200 || avoid(x)) break;
+        if (x < 200 || x > W - 200 || avoid(x, y)) break;
         y = Math.max(top[Math.round(x)] + 320, Math.min(world.height - 140, y));
         const radius = 11 + 8 * Math.sin(step * 0.021) + random.range(0, 5);
         cave.points.push({ x, y, r: radius });
@@ -413,9 +418,73 @@
           }
         }
       }
-      if (cave.points.length) caves.push(cave);
+      if (!cave.points.length) continue;
+      cave.chambers = carveChambers(world, cave, top, random);
+      caves.push(cave);
     }
     return caves;
+  }
+  // Breakdown chambers along a cave: a domed hall whose floor sits a little below the passage
+  // floor, strewn with fallen rock, and sometimes a pool in the bottom of the bowl (kept below
+  // the passage so it cannot drain out).
+  function carveChambers(world, cave, top, random) {
+    const { mat, width: W, height: H } = world;
+    const chambers = [];
+    const count = cave.points.length > 120 ? random.int(1, 2) : cave.points.length > 60 ? 1 : 0;
+    for (let n = 0; n < count; n += 1) {
+      const p = cave.points[random.int(Math.floor(cave.points.length * 0.2), Math.floor(cave.points.length * 0.8))];
+      const halfW = random.range(55, 130), halfH = random.range(30, 66);
+      const passageFloor = p.y + p.r;
+      // The hall's floor bowl sits a little below the passage floor (bottom = cy + 0.8 halfH).
+      const cx = p.x, cy = passageFloor - halfH * 0.64;
+      if (cy - halfH < top[Math.round(cx)] + 220 || cy + halfH > H - 120) continue;
+      if (chambers.some((c) => Math.abs(c.x - cx) < c.halfW + halfW)) continue;
+      const outline = PW.createNoise1D(random.int(1, 1e9), 0.6);
+      const x0 = Math.floor(cx - halfW * 1.15), x1 = Math.ceil(cx + halfW * 1.15);
+      const y0 = Math.floor(cy - halfH * 1.15), y1 = Math.ceil(cy + halfH * 1.15);
+      for (let y = y0; y <= y1; y += 1) {
+        for (let x = x0; x <= x1; x += 1) {
+          const dx = (x - cx) / halfW, dy = (y - cy) / halfH;
+          const angle = Math.atan2(dy, dx);
+          // Domed roof, flatter floor, ragged outline.
+          const squash = dy > 0 ? 1.25 : 1;
+          if (Math.hypot(dx, dy * squash) > 1 + outline(angle * 6) * 0.1) continue;
+          const index = y * W + x;
+          if ((mat[index] & 63) !== M.BEDROCK) mat[index] = M.AIR;
+        }
+      }
+      const bottom = Math.round(cy + halfH / 1.25);
+      // A pool in the bottom of the bowl, its surface below the passage floor.
+      let pool = null;
+      if (random() < 0.55) {
+        const level = Math.max(Math.round(passageFloor) + 2, bottom - random.int(5, 12));
+        let cells = 0;
+        for (let y = level; y <= bottom + 2; y += 1) for (let x = x0; x <= x1; x += 1) {
+          const index = y * W + x;
+          if ((mat[index] & 63) !== M.AIR) continue;
+          // Only fill air that has rock (or water) under it all the way down: the bowl.
+          let below = y + 1;
+          while (below <= bottom + 4 && (mat[below * W + x] & 63) === M.AIR) below += 1;
+          if (below > bottom + 4) continue;
+          mat[index] = M.WATER;
+          cells += 1;
+        }
+        if (cells) pool = { level, cells };
+      }
+      // Breakdown: fallen rock heaped on the floor in mounds (loose stone settles like scree).
+      for (let k = 0; k < random.int(2, 5); k += 1) {
+        const mx = cx + random.range(-0.7, 0.7) * halfW, mr = random.range(6, 18);
+        for (let x = Math.floor(mx - mr * 1.6); x <= mx + mr * 1.6; x += 1) {
+          let y = Math.round(cy);
+          while (y < H - 2 && (mat[(y + 1) * W + x] & 63) === M.AIR) y += 1;
+          if ((mat[(y + 1) * W + x] & 63) === M.WATER) continue;
+          const h = Math.round(mr * 0.5 * Math.max(0, 1 - Math.abs(x - mx) / (mr * 1.6)) * (0.8 + (PW.hash2(x, k) & 7) / 20));
+          for (let t = 0; t < h; t += 1) if ((mat[(y - t) * W + x] & 63) === M.AIR) mat[(y - t) * W + x] = M.LOOSE_STONE | (PW.hash2(x, y - t) & 3) << 6;
+        }
+      }
+      chambers.push({ x: Math.round(cx), y: Math.round(cy), halfW: Math.round(halfW), halfH: Math.round(halfH), pool });
+    }
+    return chambers;
   }
 
   function fillLakes(world, layout, surface) {

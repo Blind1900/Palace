@@ -354,8 +354,10 @@
   // ---- Sparse typed data layers (owner ids, flags) ------------------------------------------------
   // RAW marks the inside of a tunnel that is still timbered (undeveloped), DEVELOPED one that has
   // been lined, and FIXTURE back-wall fittings (rails, signs) that development must keep.
+  // OVERBREAK marks rock that broke away beyond a raw tunnel's planned profile (filled with concrete
+  // when the stretch is developed).
   const FLAG = Object.freeze({ LADDER: 1, ROAD: 2, TUNNEL: 4, NOBUILD: 8, SCORCH: 16, CARVED: 32, BRIDGE: 64, HATCH: 128,
-    RAW: 256, FIXTURE: 512, DEVELOPED: 1024 });
+    RAW: 256, FIXTURE: 512, DEVELOPED: 1024, OVERBREAK: 2048 });
   function getOwner(world, x, y) {
     if (x < 0 || y < 0 || x >= world.width || y >= world.height) return 0;
     const chunk = world.owner[chunkIndex(world, x, y)];

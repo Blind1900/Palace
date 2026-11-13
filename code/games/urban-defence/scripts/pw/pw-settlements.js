@@ -209,7 +209,7 @@
     const SHADE = [[96, 150, 160], [67, 115, 128], [67, 115, 128], [40, 70, 80]];
     const lay = (x, y, k) => {
       const id = PW.get(world, x, y) & 63;
-      if (id !== M.AIR && id !== M.WATER && id !== M.FOUNDATION) return;
+      if (id !== M.AIR && id !== M.WATER) return;   // never through another structure's base
       PW.set(world, x, y, M.PIPE, { quiet: true });
       PW.setLayer(world, 'paint', x, y, rgb(SHADE[Math.max(0, Math.min(3, k))]));
       PW.setOwner(world, x, y, owner);
