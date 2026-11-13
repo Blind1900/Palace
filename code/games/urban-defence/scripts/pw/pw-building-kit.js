@@ -278,7 +278,9 @@
         const dx = gx - x, dy = floor - gy;
         back(c, gx, gy, dy === 14 ? [190, 190, 186] : dy > 12 ? [150, 150, 146] : dx % 10 === 0 ? [92, 92, 96] : [124, 124, 128]);
       });
-      rect(c, x, floor - 34, x + 31, floor - 24, (gx, gy) => back(c, gx, gy, (gx - x) % 10 === 0 ? [92, 92, 96] : [130, 130, 134]));
+      // Kettle and a pot on the counter (no wall cabinets, so windows stay clear).
+      rect(c, x + 6, floor - 19, x + 11, floor - 15, (gx, gy) => back(c, gx, gy, gy === floor - 19 ? [70, 70, 74] : [176, 60, 50]));
+      rect(c, x + 20, floor - 18, x + 27, floor - 15, (gx, gy) => back(c, gx, gy, [150, 152, 156]));
     },
     crate(c, x, floor) {
       rect(c, x, floor - 18, x + 17, floor - 1, (gx, gy) => {

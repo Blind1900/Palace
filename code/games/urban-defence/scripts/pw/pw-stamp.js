@@ -5,11 +5,13 @@
   const { M } = PW;
 
   // Write a building canvas into the world with its ground row on world row `groundY`.
-  // Interior air above the ground replaces any terrain; cells below the ground keep the soil
-  // except where the building has structure (buried cores).
+  // Cells with a back colour are open space (interiors above ground, the bunker pit below it), so
+  // any terrain there is carved out; other cells below the ground keep their soil unless the
+  // building has structure there (buried cores). Every written cell gets the owner id.
   function stampBuilding(world, canvas, worldX, groundY, options = {}) {
     const ox = Math.round(worldX), oy = Math.round(groundY - canvas.ground);
     const { width, height } = canvas;
+    const owner = options.owner || 0;
     const quiet = { quiet: true, keepPaint: true };
     for (let y = 0; y < height; y += 1) {
       const wy = oy + y;
@@ -19,18 +21,48 @@
         if (wx < 0 || wx >= world.width) continue;
         const i = y * width + x;
         const mat = canvas.mat[i];
+        const any = mat || canvas.back[i] || canvas.deco[i];
+        if (!any) continue;
         if (mat) {
           PW.set(world, wx, wy, mat, quiet);
           PW.setLayer(world, 'paint', wx, wy, canvas.paint[i]);
-        } else if (canvas.back[i] && y < canvas.ground) {
+        } else if (canvas.back[i]) {
           const current = world.mat[wy * world.width + wx] & 63;
           if (current !== M.AIR && current !== M.WATER) PW.set(world, wx, wy, M.AIR, quiet);
         }
         if (canvas.back[i]) PW.setLayer(world, 'back', wx, wy, canvas.back[i]);
-        if (canvas.deco[i]) PW.setLayer(world, 'deco', wx, wy, canvas.deco[i]);
+        // Building deco replaces wild deco (grass) in the same cell.
+        if (canvas.deco[i] || mat) PW.setLayer(world, 'deco', wx, wy, canvas.deco[i]);
+        if (owner) PW.setOwner(world, wx, wy, owner);
       }
     }
     return { x: ox, y: oy, width, height, canvas };
+  }
+
+  // World-space copy of a stamped canvas's metadata (floors, stairs, doors, slots, panels...).
+  function buildingRecord(world, stamp, info) {
+    const { canvas, x: ox, y: oy } = stamp;
+    const pt = (p) => ({ ...p, x: p.x + ox, y: p.y + oy });
+    const box = (b) => b && { left: b.left + ox, right: b.right + ox, top: b.top + oy, bottom: b.bottom + oy };
+    const record = {
+      ...info,
+      canvas, ox, oy,
+      ground: canvas.ground + oy,
+      body: box(canvas.body),
+      floors: canvas.floors.map((f) => ({ ...f, y: f.y + oy, left: f.left + ox, right: f.right + ox })),
+      stairs: canvas.stairs.map((s) => ({ ...s, from: s.from + ox, to: s.to + ox, floorRow: s.floorRow + oy, upperRow: s.upperRow + oy })),
+      doors: canvas.doors.map((d) => ({ ...d, x: d.x + ox, top: d.top + oy, bottom: d.bottom + oy })),
+      slots: canvas.slots.map(pt), panels: canvas.panels.map(pt), cores: canvas.cores.map(pt),
+      devices: canvas.devices.map(pt), windows: canvas.windows.map(pt), storage: (canvas.storage || []).map(pt),
+      hangar: canvas.hangar && { ...box(canvas.hangar), door: { x: canvas.hangar.door.x + ox, top: canvas.hangar.door.top + oy, bottom: canvas.hangar.door.bottom + oy },
+        spawn: pt(canvas.hangar.spawn) },
+      runway: canvas.runway && { ...canvas.runway, from: canvas.runway.from + ox, y: canvas.runway.y + oy },
+      shaft: canvas.shaft && { x: canvas.shaft.x + ox, top: canvas.shaft.top + oy },
+      pit: canvas.pit && { left: canvas.pit.left + ox, right: canvas.pit.right + ox, depth: canvas.pit.depth },
+      floating: box(canvas.floating),
+      health: 1,
+    };
+    return record;
   }
 
   // Flat world strip for the building gallery.
@@ -88,6 +120,7 @@
   }
 
   PW.stampBuilding = stampBuilding;
+  PW.buildingRecord = buildingRecord;
   PW.flattenStrip = flattenStrip;
   PW.generateGallery = generateGallery;
 })();

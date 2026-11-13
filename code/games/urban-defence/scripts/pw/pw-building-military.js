@@ -168,8 +168,11 @@
     K.core(c, X(hangarLeft + 34), ground - 8);
     c.hangar = { left: Math.min(X(hx0), X(hx1)), right: Math.max(X(hx0), X(hx1)), top: wallTop, bottom: ground - 1,
       door: { x: X(hangarRight), top: ground - HANGAR.door, bottom: ground - 1 }, spawn: { x: X(hangarLeft + 80), y: ground } };
-    c.panels.push({ x: X(hangarLeft + 60), y: ground, storey: 0 });
-    PW.buildingPanel(c, style, Math.min(X(hangarLeft + 52), X(hangarLeft + 69)), ground);
+    // The hackable control panel is on the top floor of the rear block.
+    const topFloor = rearFloors[rearStoreys - 1];
+    const panelLocal = topFloor.left + S.WALL + 8;
+    PW.buildingPanel(c, style, Math.min(X(panelLocal), X(panelLocal + 17)), floorRow(rearStoreys - 1));
+    c.panels.push({ x: X(panelLocal + 9), y: floorRow(rearStoreys - 1), storey: rearStoreys - 1 });
 
     // ---- Variant extras ----
     const roofTop = floorRow(rearStoreys);
@@ -215,9 +218,12 @@
       const hangarRoof = { left: Math.min(X(hx0 + 16), X(hx1 - 16)), right: Math.max(X(hx0 + 16), X(hx1 - 16)),
         y: vault ? wallTop - HANGAR.vaultRise + 1 : wallTop - 7, top: false };
       const plan = level >= 4 ? ['launcher', 'interceptor', 'turret'] : level >= 3 ? ['launcher', 'turret'] : ['turret'];
-      ornament.devices(c, style, [rearRoof], plan.slice(0, 2), facing, random);
-      if (!vault) ornament.devices(c, style, [hangarRoof], ['turret'], facing, random);
-      else { const tx = Math.round(hcx) + 10 * facing; ornament.DEVICE_DRAW.turret(c, P, X(tx) - 15, wallTop - HANGAR.vaultRise, facing); }
+      // Neutral compounds (deviceFacing 0) cover both directions until captured.
+      const deviceFacing = options.deviceFacing ?? facing;
+      ornament.devices(c, style, [rearRoof], plan.slice(0, 2), deviceFacing, random);
+      // Neutral: the rear-roof device faces +1 first, so the hangar turret covers the other way.
+      if (!vault) ornament.devices(c, style, [hangarRoof], ['turret'], deviceFacing || -1, random);
+      else { const tx = Math.round(hcx) + 10 * facing; ornament.DEVICE_DRAW.turret(c, P, X(tx) - 15, wallTop - HANGAR.vaultRise, deviceFacing || -1); }
     }
     // Buried extra cores.
     const extraCores = level >= 4 ? 3 : 2;

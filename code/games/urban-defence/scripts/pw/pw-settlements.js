@@ -1,0 +1,401 @@
+'use strict';
+// Settlements: the two bases and three neutral clusters, placed on terraced pads that blend into
+// the terrain, with streets through the ground floors, runways, farm fields, pumps, starter mine
+// tunnels down to the ore nodes and ground defences facing the enemy.
+(function () {
+  const PW = window.PW;
+  const { M, FLAG } = PW;
+  const K = PW.buildingKit;
+  const { tone, mix } = K;
+  const rgb = (c) => PW.abgr(c[0], c[1], c[2]);
+
+  // ---- Plans ---------------------------------------------------------------------------------------
+  function shuffleStyles(random) {
+    const styles = ['asian', 'gothic', 'modern'];
+    for (let i = styles.length - 1; i > 0; i -= 1) {
+      const j = Math.floor(random() * (i + 1));
+      [styles[i], styles[j]] = [styles[j], styles[i]];
+    }
+    return { left: styles[0], right: styles[1], neutral: styles[2] };
+  }
+  // Rear (map edge, pond side) to front (towards the enemy).
+  function basePlan(random) {
+    const pick = (list) => list[Math.floor(random() * list.length)];
+    return [
+      { type: 'farm', variant: pick(['silos', 'barn', 'homestead']), level: 2, rear: true, field: true },
+      { type: 'core' },
+      { type: 'population', variant: pick(PW.POPULATION_VARIANTS), level: 3 },
+      { type: 'farm', variant: 'greenhouse', level: 2 },
+      { type: 'population', variant: pick(PW.POPULATION_VARIANTS), level: 2 },
+      { type: 'population', variant: pick(PW.POPULATION_VARIANTS), level: 4, optional: true },
+      { type: 'military', variant: pick(PW.MILITARY_VARIANTS), level: 3, front: true },
+    ];
+  }
+  // Tight neutral cluster with every building type (they start out under construction).
+  function neutralPlan(random) {
+    const pick = (list) => list[Math.floor(random() * list.length)];
+    return [
+      { type: 'farm', variant: pick(['silos', 'barn', 'homestead']), level: 1, field: true },
+      { type: 'population', variant: pick(PW.POPULATION_VARIANTS), level: 1 },
+      { type: 'military', variant: pick(PW.MILITARY_VARIANTS), level: 1 },
+      { type: 'population', variant: pick(PW.POPULATION_VARIANTS), level: 1 },
+      { type: 'mine' },
+    ];
+  }
+
+  // ---- Terrain shaping -------------------------------------------------------------------------------
+  // Level the ground to padY over [x0, x1], ramping back to the natural surface no steeper than 1:1.
+  function terracePad(world, x0, x1, padY, ramp = 1) {
+    const { mat, width: W } = world;
+    const reach = 260;
+    for (let x = Math.max(1, x0 - reach); x <= Math.min(W - 2, x1 + reach); x += 1) {
+      const natural = world.groundTop[x];
+      const dist = x < x0 ? x0 - x : x > x1 ? x - x1 : 0;
+      // Rows grow downward: higher ground is cut down, lower ground filled up, within the ramp.
+      const goal = dist === 0 ? padY : (natural < padY ? Math.max(natural, padY - dist * ramp) : Math.min(natural, padY + dist * ramp));
+      if (goal === natural) continue;
+      if (goal > natural) {
+        // Cut: remove ground above the goal, then re-grass the new surface.
+        for (let y = natural; y < goal; y += 1) {
+          const id = mat[y * W + x] & 63;
+          if (id !== M.AIR && id !== M.WATER) PW.set(world, x, y, M.AIR, { quiet: true });
+        }
+        for (let y = goal; y < goal + 3; y += 1) {
+          if ((mat[y * W + x] & 63) === M.WATER) continue;
+          PW.set(world, x, y, (dist === 0 ? M.TOPSOIL : M.GRASS) | (PW.hash2(x, y) & 3) << 6, { quiet: true });
+        }
+        for (let y = goal - 200; y < goal; y += 1) PW.setLayer(world, 'deco', x, y, 0);
+      } else {
+        // Fill: soil up to the goal, grass on top outside the pads.
+        for (let y = goal; y < natural; y += 1) {
+          const id = y < goal + 3 && dist > 0 ? M.GRASS : y < goal + 14 ? M.TOPSOIL : M.SOIL;
+          PW.set(world, x, y, id | (PW.hash2(x, y) & 3) << 6, { quiet: true });
+        }
+      }
+      // Wild deco above the new ground in the pad is cleared (grass regrows on the shoulders).
+      if (dist === 0) for (let y = goal - 60; y < goal + 4; y += 1) PW.setLayer(world, 'deco', x, y, 0);
+    }
+  }
+
+  // ---- Street paving (district paving palettes from the style lab, scaled) ----------------------------
+  const PAVING = {
+    gothic: { paving: [128, 122, 118], joint: [80, 74, 72], base: [70, 62, 58] },
+    asian: { paving: [176, 156, 120], joint: [120, 70, 50], base: [96, 80, 60] },
+    modern: { paving: [64, 66, 72], joint: [226, 190, 60], base: [44, 44, 48] },
+  };
+  function paveStreet(world, x0, x1, padY, styleAt) {
+    for (let x = x0; x <= x1; x += 1) {
+      const style = styleAt(x);
+      const P = PAVING[style];
+      for (let row = 0; row < 4; row += 1) {
+        const y = padY + row;
+        const id = PW.get(world, x, y) & 63;
+        if (!PW.mat.ground[id] || id === M.WATER) continue;
+        let color;
+        if (row === 3) color = P.base;
+        else if (style === 'modern') color = row === 0 && x % 48 < 24 ? (x % 48 < 2 ? P.joint : P.paving) : row === 1 && x % 24 < 12 ? tone(P.paving, 0.86) : P.paving;
+        else if (style === 'gothic') color = (x + row * 6) % 9 === 0 || row === 2 ? P.joint : tone(P.paving, (PW.hash2(x >> 3, row) & 1) ? 1.06 : 0.95);
+        else color = (x + row * 9) % 18 === 0 || row === 2 ? P.joint : tone(P.paving, (PW.hash2(x / 18 | 0, row) & 1) ? 1.04 : 0.96);
+        if (row === 0 && (PW.hash2(x, y) & 15) === 0) color = tone(color, 0.9);
+        PW.set(world, x, y, row === 0 ? M.ASPHALT : M.ROADBED, { quiet: true });
+        PW.setLayer(world, 'paint', x, y, rgb(color));
+        PW.setFlag(world, x, y, FLAG.ROAD);
+      }
+    }
+  }
+  function paveRunway(world, from, direction, length, padY) {
+    for (let i = 0; i < length; i += 1) {
+      const x = from + direction * i;
+      for (let row = 0; row < 4; row += 1) {
+        const y = padY + row;
+        let color = row === 3 ? [36, 36, 40] : [52, 54, 58];
+        if (row === 0 && i % 60 < 30 && i > 20 && i < length - 40) color = [235, 235, 235];       // centre line
+        if (row === 0 && i > length - 30 && i % 6 < 3) color = [235, 235, 235];                      // threshold bars
+        if (row === 1 && (PW.hash2(x, y) & 7) === 0) color = [62, 64, 68];
+        PW.set(world, x, y, row === 0 ? M.ASPHALT : M.ROADBED, { quiet: true });
+        PW.setLayer(world, 'paint', x, y, rgb(color));
+        PW.setFlag(world, x, y, FLAG.ROAD);
+      }
+      for (let y = padY - 60; y < padY; y += 1) PW.setLayer(world, 'deco', x, y, 0);
+    }
+  }
+
+  // ---- Farms: wheat field and shore pump ----------------------------------------------------------------
+  function sowField(world, x0, x1, padY, random) {
+    const stems = [[170, 150, 70], [150, 132, 60]], heads = [[236, 200, 90], [214, 176, 92], [246, 214, 110]];
+    const field = { x0, x1, y: padY, growth: 0.55 + random() * 0.4, stalks: [] };
+    for (let x = x0; x <= x1; x += 1) {
+      for (let row = 0; row < 3; row += 1) {
+        const y = padY + row;
+        if (!PW.mat.ground[PW.get(world, x, y) & 63]) continue;
+        PW.set(world, x, y, M.TOPSOIL | (row << 6), { quiet: true });
+        const furrow = (x % 10) < 5;
+        PW.setLayer(world, 'paint', x, y, rgb(tone(row === 0 ? (furrow ? [92, 66, 42] : [110, 82, 54]) : [96, 72, 48], 1)));
+      }
+      if (x % 3 !== 0) continue;
+      const h = Math.round((10 + (PW.hash2(x, 41) % 8)) * field.growth);
+      field.stalks.push({ x, h });
+      const lean = (PW.hash2(x, 43) & 3) === 0 ? 1 : 0;
+      for (let i = 1; i <= h; i += 1) {
+        const color = i > h - 4 ? heads[PW.hash2(x, i) % heads.length] : stems[(i + x) & 1];
+        PW.setLayer(world, 'deco', x + (lean && i > h - 3 ? 1 : 0), padY - i, rgb(color));
+      }
+    }
+    return field;
+  }
+  function pumpHouse(world, lake, towardX, style, owner) {
+    const shore = towardX < lake.x ? lake.left : lake.right;
+    const dir = towardX < lake.x ? -1 : 1;   // land side
+    const P = K.STYLES[style];
+    const x0 = shore + dir * 6;
+    const ground = world.groundTop[x0];
+    const left = dir > 0 ? x0 : x0 - 30;
+    for (let x = left; x < left + 30; x += 1) {
+      for (let y = ground - 22; y < ground; y += 1) {
+        const edge = x === left || x === left + 29 || y === ground - 22;
+        PW.set(world, x, y, edge ? P.wallMat : M.CONCRETE, { quiet: true, keepPaint: true });
+        PW.setLayer(world, 'paint', x, y, rgb(edge ? tone(P.frame, 0.9) : y % 6 === 0 ? [86, 92, 100] : [120, 128, 136]));
+        PW.setOwner(world, x, y, owner);
+      }
+      for (let r = 0; r < 4; r += 1) { PW.set(world, x, ground - 23 - r, M.TILE, { quiet: true }); PW.setLayer(world, 'paint', x, ground - 23 - r, rgb(tone(P.roof, r === 3 ? 1.3 : 1))); }
+    }
+    // Intake pipe down the bank into the water.
+    const px = shore - dir * 4;
+    for (let y = ground - 14; y < lake.level + 30; y += 1) {
+      for (let k = 0; k < 4; k += 1) {
+        const x = px + k * -dir;
+        PW.set(world, x, y, M.PIPE, { quiet: true });
+        PW.setLayer(world, 'paint', x, y, rgb(k === 0 || k === 3 ? [67, 115, 128] : [10, 26, 34]));
+        PW.setOwner(world, x, y, owner);
+      }
+    }
+    return { x: left + 15, y: ground, intakeX: px, lake };
+  }
+
+  // ---- Tunnels: lined shafts, drifts and rooms (tunnel network lab look) ---------------------------------
+  const TUNNEL = { back: [24, 23, 22], floor: [44, 36, 28], prop: [76, 54, 32], lamp: [255, 220, 140], rail: [150, 112, 62], rung: [214, 178, 112] };
+  // Carve an axis-aligned interior box; line its rim with orange LINING where it meets ground.
+  function carveBox(world, x0, y0, x1, y1, owner, lining = 4) {
+    const { mat, width: W } = world;
+    for (let y = y0 - lining; y <= y1 + lining; y += 1) {
+      for (let x = x0 - lining; x <= x1 + lining; x += 1) {
+        if (!PW.inside(world, x, y)) continue;
+        const interior = x >= x0 && x <= x1 && y >= y0 && y <= y1;
+        const id = mat[y * W + x] & 63;
+        if (interior) {
+          if (id !== M.AIR) PW.set(world, x, y, M.AIR, { quiet: true });
+          const fromTop = y - y0, fromBottom = y1 - y;
+          const color = fromBottom < 3 ? TUNNEL.floor : tone(TUNNEL.back, fromTop < 4 ? 0.8 : (PW.hash2(x, y) & 15) === 0 ? 1.25 : 1);
+          PW.setLayer(world, 'back', x, y, rgb(color));
+          PW.setFlag(world, x, y, FLAG.TUNNEL | FLAG.CARVED);
+          PW.setLayer(world, 'deco', x, y, 0);
+        } else if (PW.getFlags(world, x, y) & FLAG.CARVED) {
+          continue;
+        } else if (id !== M.AIR && id !== M.WATER && id !== M.ORE && id !== M.BEDROCK && !PW.mat.structural[id]) {
+          PW.set(world, x, y, M.LINING, { quiet: true });
+        }
+        if (owner) PW.setOwner(world, x, y, owner);
+      }
+    }
+  }
+  function tunnelLamps(world, x0, x1, ceilingY, step = 64) {
+    for (let x = x0 + 20; x <= x1 - 10; x += step) {
+      for (let dx = -2; dx <= 2; dx += 1) PW.setLayer(world, 'back', x + dx, ceilingY, rgb(TUNNEL.lamp));
+      for (let y = ceilingY + 1; y < ceilingY + 26; y += 1) {
+        for (let dx = -16; dx <= 16; dx += 1) {
+          const d = Math.hypot(dx, (y - ceilingY) * 0.8) / 18;
+          if (d >= 1) continue;
+          const current = PW.getLayer(world, 'back', x + dx, y);
+          if (!current) continue;
+          PW.setLayer(world, 'back', x + dx, y, rgb(mix(PW.unpack(current), TUNNEL.lamp, (1 - d) * (1 - d) * 0.35)));
+        }
+      }
+    }
+  }
+  function ladder(world, x, y0, y1) {
+    for (let y = y0; y <= y1; y += 1) {
+      for (let dx = 0; dx < 12; dx += 1) {
+        const rail = dx < 2 || dx > 9;
+        const rung = (y % 6) === 0;
+        if (rail || rung) PW.setLayer(world, 'back', x + dx, y, rgb(rail ? TUNNEL.rail : TUNNEL.rung));
+        PW.setFlag(world, x + dx, y, FLAG.LADDER);
+      }
+    }
+  }
+  // Starter workings from the core pit down to the ore node: shaft, drift and storage room.
+  function starterMine(world, core, node, dir, owner) {
+    // The shaft drops from the side of the pit nearest the node; the drift runs to the node's face.
+    const toward = Math.sign(node.x - (core.pit.left + core.pit.right) / 2) || dir;
+    const sx = toward > 0 ? Math.round(core.pit.right - 60) : Math.round(core.pit.left + 60);
+    const pitFloor = core.ground + core.pit.depth;
+    const driftBottom = node.y + 20, driftTop = driftBottom - 44;
+    carveBox(world, sx - 15, pitFloor - 2, sx + 15, driftBottom, owner);
+    ladder(world, toward > 0 ? sx - 14 : sx + 3, pitFloor - 2, driftBottom - 1);
+    const face = Math.sign(node.x - sx) || toward;
+    const reach = node.x - face * (node.radius + 6);
+    const d0 = Math.min(sx, reach), d1 = Math.max(sx, reach);
+    carveBox(world, d0, driftTop, d1, driftBottom, owner);
+    tunnelLamps(world, d0, d1, driftTop);
+    // Storage room on the far side of the shaft from the node.
+    const r0 = face > 0 ? sx - 190 : sx + 40, r1 = r0 + 150;
+    carveBox(world, Math.min(r0, sx), driftTop - 8, Math.max(r1, sx), driftBottom, owner);
+    tunnelLamps(world, Math.min(r0, sx), Math.max(r1, sx), driftTop - 8, 50);
+    // Timber props along the drift walls.
+    for (let x = d0 + 30; x < d1 - 10; x += 48) for (let y = driftTop; y <= driftBottom - 3; y += 1) {
+      PW.setLayer(world, 'back', x, y, rgb(TUNNEL.prop)); PW.setLayer(world, 'back', x + 1, y, rgb(tone(TUNNEL.prop, 0.8)));
+    }
+    return { shaft: { x: sx, top: pitFloor, bottom: driftBottom }, drift: { x0: d0, x1: d1, top: driftTop, bottom: driftBottom },
+      storage: { x0: Math.min(r0, sx), x1: Math.max(r1, sx), top: driftTop - 8, bottom: driftBottom }, node };
+  }
+  // A mine headframe's own shaft: straight down to a nearby node, or a short sump if none is near.
+  function headframeShaft(world, mine, nodes, owner) {
+    const x = mine.shaft.x, top = mine.shaft.top;
+    const node = nodes.filter((n) => n.y > top + 200 && n.y < top + 1300 && Math.abs(n.x - x) < 420)
+      .sort((a, b) => Math.abs(a.x - x) - Math.abs(b.x - x))[0];
+    const bottom = node ? node.y + 20 : top + 220;
+    carveBox(world, x - 15, top, x + 15, bottom, owner);
+    ladder(world, x - 14, top, bottom - 1);
+    if (node) {
+      const dir = Math.sign(node.x - x) || 1;
+      const reach = node.x - dir * (node.radius + 6);
+      carveBox(world, Math.min(x, reach), bottom - 44, Math.max(x, reach), bottom, owner);
+      tunnelLamps(world, Math.min(x, reach), Math.max(x, reach), bottom - 44);
+    }
+    return { x, top, bottom, node };
+  }
+
+  // ---- Ground defences (deco: vehicles pass behind them) --------------------------------------------------
+  function groundDefences(world, x, padY, dir, random) {
+    const sand = [[176, 158, 112], [150, 134, 94], [196, 178, 130]];
+    // Sandbag wall.
+    for (let course = 0; course < 4; course += 1) {
+      for (let b = 0; b < 5 - (course > 1 ? 1 : 0); b += 1) {
+        const bx = x + b * 10 + (course % 2) * 5, by = padY - 1 - course * 5;
+        for (let dy = -2; dy <= 2; dy += 1) for (let dx = -5; dx <= 5; dx += 1) {
+          if (dx * dx / 25 + dy * dy / 6 > 1) continue;
+          PW.setLayer(world, 'deco', bx + dx, by + dy, rgb(sand[dy < 0 ? 2 : dy > 0 ? 1 : 0]));
+        }
+      }
+    }
+    // Czech hedgehogs and wire in front.
+    for (let k = 0; k < 3; k += 1) {
+      const hx = x + dir * (80 + k * 46) + (dir < 0 ? 40 : 0);
+      for (let t = 0; t < 16; t += 1) {
+        for (const [ax, ay] of [[t - 8, -t], [8 - t, -t], [t - 8 + (t > 8 ? 0 : 0), -8]]) PW.setLayer(world, 'deco', hx + ax, padY - 1 + ay, rgb([82, 86, 92]));
+      }
+      for (let w = 0; w < 30; w += 1) {
+        const wy = padY - 4 - Math.round(Math.abs(Math.sin(w * 0.7)) * 5);
+        PW.setLayer(world, 'deco', hx + 20 * dir + w * dir, wy, rgb((w % 3 === 0) ? [150, 152, 156] : [110, 112, 118]));
+      }
+    }
+  }
+
+  // ---- Generation ------------------------------------------------------------------------------------------
+  function generateSettlements(world, layout, seed) {
+    const random = PW.createRandom(seed + 4242);
+    const styles = shuffleStyles(random);
+    world.styles = styles;
+    world.buildings = [];
+    world.settlements = [];
+    const T = PW.buildingTypes;
+    const make = (lot, style, facing, deviceFacing, index) => {
+      const seedFor = seed + index * 977 + world.buildings.length * 31;
+      if (lot.type === 'population') return T.population({ style, level: lot.level, variant: lot.variant, seed: seedFor, facing, deviceFacing });
+      if (lot.type === 'military') return T.military({ style, level: lot.level, variant: lot.variant, seed: seedFor, facing, deviceFacing });
+      if (lot.type === 'farm') return T.farm({ style, level: lot.level, variant: lot.variant, seed: seedFor, facing });
+      if (lot.type === 'mine') return T.mine({ style, facing, seed: seedFor });
+      return T.core({ style, facing });
+    };
+    for (const site of layout.sites) {
+      const side = site.side;
+      const style = styles[side];
+      const padY = Math.round(site.level);
+      const neutral = side === 'neutral';
+      const dir = side === 'left' ? 1 : side === 'right' ? -1 : 0;
+      const plan = neutral ? neutralPlan(random) : basePlan(random);
+      // Build canvases and measure the cluster.
+      const lots = plan.map((lot, index) => {
+        const facing = lot.field ? -(dir || (index === 0 ? -1 : 1)) : (dir || (index < plan.length / 2 ? -1 : 1));
+        const canvas = make(lot, style, facing, neutral ? 0 : dir, index);
+        return { ...lot, facing, canvas, bodyWidth: canvas.body.right - canvas.body.left + 1 };
+      });
+      const gapFor = () => neutral ? random.int(8, 44) : random.int(24, 120);
+      // Place from the rear (bases) or centred (neutrals), dropping optional lots that don't fit.
+      const runwayLength = 380;
+      let total = lots.reduce((sum, lot) => sum + lot.bodyWidth, 0) + 60 * (lots.length - 1);
+      const room = site.x1 - site.x0 - (neutral ? 40 : runwayLength * 0.6);
+      while (total > room && lots.some((lot) => lot.optional)) {
+        const index = lots.findIndex((lot) => lot.optional);
+        total -= lots[index].bodyWidth + 60;
+        lots.splice(index, 1);
+      }
+      let cursor = neutral ? Math.round((site.x0 + site.x1) / 2 - total / 2) : dir > 0 ? site.x0 + 30 : site.x1 - 30;
+      const step = neutral ? 1 : dir;
+      const placed = [];
+      for (const lot of lots) {
+        const { canvas } = lot;
+        const canvasX = step > 0 ? cursor - canvas.body.left : cursor - canvas.body.right;
+        lot.canvasX = canvasX;
+        lot.left = canvasX + canvas.body.left;
+        lot.right = canvasX + canvas.body.right;
+        cursor = step > 0 ? lot.right + gapFor() : lot.left - gapFor();
+        placed.push(lot);
+      }
+      placed.sort((a, b) => a.left - b.left);
+      // Terrace pads, then stamp.
+      const streetLeft = placed[0].left - 50, streetRight = placed[placed.length - 1].right + 50;
+      terracePad(world, streetLeft, streetRight, padY);
+      const settlement = { side, style, padY, buildings: [], streetLeft, streetRight, site };
+      for (const lot of placed) {
+        const id = world.buildings.length + 1;
+        const stamp = PW.stampBuilding(world, lot.canvas, lot.canvasX, padY, { owner: id });
+        const record = PW.buildingRecord(world, stamp, { id, side, style, type: lot.type, variant: lot.variant,
+          level: lot.level || 1, facing: lot.facing, neutral, underConstruction: neutral });
+        world.buildings.push(record);
+        settlement.buildings.push(record);
+      }
+      // Streets through the ground floors (style paving) and the runway.
+      paveStreet(world, streetLeft, streetRight, padY, () => style);
+      for (const b of settlement.buildings) {
+        if (b.type !== 'military' || !b.runway || neutral) continue;
+        const end = b.runway.from + b.runway.direction * runwayLength;
+        terracePad(world, Math.min(b.runway.from, end), Math.max(b.runway.from, end), padY);
+        paveRunway(world, b.runway.from, b.runway.direction, runwayLength, padY);
+        settlement.runway = { from: b.runway.from, to: end, y: padY };
+      }
+      // Farm fields on the farm's outward side, and a pump at the nearest lake.
+      for (const b of settlement.buildings.filter((item) => item.type === 'farm')) {
+        const lot = placed.find((item) => item.canvas === b.canvas);
+        if (!lot || !lot.field) continue;
+        const outward = b.facing;
+        const start = outward > 0 ? b.body.right + 14 : b.body.left - 14;
+        const length = neutral ? 150 : 240;
+        const x0 = Math.min(start, start + outward * length), x1 = Math.max(start, start + outward * length);
+        terracePad(world, x0, x1, padY);
+        b.field = sowField(world, x0, x1, padY, random);
+        const lake = layout.lakes.filter((item) => item.left !== undefined)
+          .sort((p, q) => Math.abs(p.x - b.body.left) - Math.abs(q.x - b.body.left))[0];
+        if (lake && Math.abs(lake.x - b.body.left) < 2200) b.pump = pumpHouse(world, lake, b.body.left, style, b.id);
+      }
+      // Base workings: starter shaft from the core pit to the starter node; neutral mine shafts.
+      const core = settlement.buildings.find((item) => item.type === 'core');
+      if (core) {
+        const node = layout.nodes.find((n) => n.starter === side) || layout.nodes.slice().sort((p, q) => Math.abs(p.x - core.body.left) - Math.abs(q.x - core.body.left))[0];
+        core.mine = starterMine(world, core, node, dir || 1, core.id);
+        settlement.core = core;
+      }
+      for (const mine of settlement.buildings.filter((item) => item.type === 'mine')) {
+        mine.workings = headframeShaft(world, mine, layout.nodes, mine.id);
+      }
+      // Ground defences at the front of each base; neutrals guard both ends.
+      if (!neutral) groundDefences(world, dir > 0 ? streetRight + (settlement.runway ? 0 : 20) : streetLeft - 60 - (settlement.runway ? 0 : 20), padY, dir, random);
+      else { groundDefences(world, streetLeft - 70, padY, -1, random); groundDefences(world, streetRight + 20, padY, 1, random); }
+      world.settlements.push(settlement);
+    }
+    if (PW.generateDistricts) PW.generateDistricts(world, seed);
+    return world.settlements;
+  }
+
+  PW.generateSettlements = generateSettlements;
+  PW.settlementTools = { terracePad, paveStreet, carveBox, ladder, tunnelLamps, TUNNEL, PAVING };
+})();

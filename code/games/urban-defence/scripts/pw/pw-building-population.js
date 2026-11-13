@@ -224,7 +224,7 @@
       const top = roofs.find((roof) => roof.top);
       const crown = options.crown ?? PW.buildingOrnaments.crownFor(style, `population|${variant}|${seed}`);
       PW.buildingOrnaments.crown(c, style, crown, Math.round((top.left + top.right) / 2), top.y - 1, crownLength, random);
-      if (level >= 3) PW.buildingOrnaments.devices(c, style, roofs, ['interceptor', 'turret'], options.facing || 1, random);
+      if (level >= 3) PW.buildingOrnaments.devices(c, style, roofs, ['interceptor', 'turret'], options.deviceFacing ?? (options.facing || 1), random);
     }
 
     // Buried cores under the ground floor (no foundation slab: the cores sit in the soil).

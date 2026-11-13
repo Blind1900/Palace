@@ -106,8 +106,8 @@
       for (let x = g0; x < g0 + w; x += 1) for (let y = ground - wallH; y < ground; y += 1) {
         const d = Math.min(x - g0, g0 + w - 1 - x);
         if (d < 3) K.solid(c, x, y, M.STEEL, tone(P.frame, 0.9), ROLE.WALL);
-        else if (d < 5) K.solid(c, x, y, M.GLASS, mix(K.GLASS_SIDE, [200, 230, 200], 0.25), ROLE.GLASS);
-        else K.back(c, x, y, (x + y) % 9 === 0 ? [44, 60, 52] : [32, 44, 40]);
+        else if (d < 5) K.solid(c, x, y, M.GLASS, mix(K.GLASS_SIDE, [200, 230, 200], 0.35), ROLE.GLASS);
+        else K.back(c, x, y, (x + y) % 9 === 0 ? [92, 124, 100] : (x % 20 === 0 ? [70, 96, 80] : [78, 108, 88]));
       }
       // Sawtooth roof: vertical glazed faces and sloped panels.
       for (let t = 0; t < teeth; t += 1) {
@@ -115,17 +115,18 @@
           const x = Math.round(g0 + t * toothW + k);
           const rise = Math.round(k / toothW * 26);
           for (let r = 0; r < 4; r += 1) K.solid(c, x, ground - wallH - rise + r, M.STEEL, tone(P.roof, r === 0 ? 1.3 : 1), ROLE.ROOF);
-          for (let y = ground - wallH - rise + 4; y < ground - wallH; y += 1) K.back(c, x, y, [32, 44, 40]);
-          if (k === Math.round(toothW) - 1) for (let y = ground - wallH - 26; y < ground - wallH; y += 1) K.solid(c, x, y, M.GLASS, mix(K.GLASS_SIDE, [220, 240, 210], 0.35), ROLE.GLASS);
+          for (let y = ground - wallH - rise + 4; y < ground - wallH; y += 1) K.back(c, x, y, [86, 116, 96]);
+          if (k === Math.round(toothW) - 1) for (let y = ground - wallH - 26; y < ground - wallH; y += 1) K.solid(c, x, y, M.GLASS, mix(K.GLASS_SIDE, [220, 240, 210], 0.45), ROLE.GLASS);
         }
       }
+      // Grow lights along the roof line.
+      for (let x = g0 + 20; x < g0 + w - 10; x += 40) c.lamps.push({ x, y: ground - wallH + 2, radius: 30, strength: 0.3 });
       // Rows of plants on benches.
       for (let x = g0 + 10; x < g0 + w - 14; x += 24) {
         K.rect(c, x, ground - 10, x + 18, ground - 9, (gx, gy) => K.back(c, gx, gy, [96, 72, 48]));
         for (let i = 0; i < 18; i += 2) for (let h = 0; h < 6 + (PW.hash2(x, i) % 6); h += 1) K.back(c, x + i, ground - 11 - h, h > 4 ? [120, 176, 80] : [70, 130, 60]);
       }
-      for (let d = 0; d < 5; d += 1) for (let y = ground - S.DOOR_H; y < ground; y += 1) { K.clear(c, X(w - 1 - d), y); K.back(c, X(w - 1 - d), y, [32, 44, 40]); }
-      c.lamps.push({ x: g0 + w / 2, y: ground - 30, radius: 60, strength: 0.18 });
+      for (let d = 0; d < 5; d += 1) for (let y = ground - S.DOOR_H; y < ground; y += 1) { K.clear(c, X(w - 1 - d), y); K.back(c, X(w - 1 - d), y, [70, 96, 80]); }
       bodyRight = w;
       c.storage.push({ x: g0 + w / 2, y: ground - 20, capacity: 80 });
     } else {

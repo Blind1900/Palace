@@ -355,11 +355,13 @@
   const DEVICE_DRAW = { turret, launcher, interceptor };
   const DEVICE_WIDTH = { turret: 30, launcher: 28, interceptor: 22 };
   // Place devices on the highest, widest roofs, from the front edge, clear of crowns and each other.
-  function devices(c, style, roofs, plan, facing, random) {
+  // facing 0 (neutral buildings) alternates the devices to cover both directions.
+  function devices(c, style, roofs, plan, facingOption, random) {
     const P = STYLES[style];
     const candidates = roofs.slice().sort((a, b) => a.y - b.y || (b.right - b.left) - (a.right - a.left));
     const used = [];
-    for (const kind of plan) {
+    for (const [deviceIndex, kind] of plan.entries()) {
+      const facing = facingOption || (deviceIndex % 2 ? -1 : 1);
       const w = DEVICE_WIDTH[kind];
       let placed = false;
       for (const roof of candidates) {
