@@ -50,8 +50,7 @@
     const voidColor = [30, 24, 19];
     const waterTop = PW.abgr(128, 186, 236);
     const waterBase = [52, 120, 200];
-    const oreBase = [163, 91, 214], oreSpark = PW.abgr(240, 210, 255), pebble = [114, 96, 74];
-    const ORE_FACETS = [302, 243, 200];
+    const oreSpark = PW.abgr(240, 210, 255), pebble = [114, 96, 74];
     const liningBase = [191, 123, 25];
 
     function toned(rgb, k) {
@@ -68,6 +67,28 @@
     function openAt(x, y) {
       if (x < 0 || y < 0 || x >= W || y >= world.height) return false;
       return (mat[y * W + x] & ID_MASK) === M.AIR;
+    }
+
+    // Ore is a mass of crystals: a jittered 5-cell grid of crystals, each with a facet lit from the
+    // upper left and a darker one in shade, dark seams between crystals, colour zoned like
+    // amethyst from a pale quartz selvage at the vein wall to lavender crystal and a deep purple
+    // core (variants 0-2), with sparkling crystal points (variant 3).
+    const ORE_ZONES = [[212, 198, 230], [176, 118, 228], [130, 64, 190], [186, 108, 244]];
+    function oreColor(x, y, variant, h) {
+      if (variant === 3 && (h & 3) === 0) return oreSpark;
+      const gx = Math.floor(x / 5), gy = Math.floor(y / 5);
+      let best = 1e9, second = 1e9, sx = 0, sy = 0;
+      for (let oy = -1; oy <= 1; oy += 1) for (let ox = -1; ox <= 1; ox += 1) {
+        const hh = PW.hash2((gx + ox) * 7 + 3, (gy + oy) * 13 + 5);
+        const px = (gx + ox) * 5 + (hh & 15) / 15 * 5, py = (gy + oy) * 5 + (hh >>> 4 & 15) / 15 * 5;
+        const d = (x + 0.5 - px) * (x + 0.5 - px) + (y + 0.5 - py) * (y + 0.5 - py);
+        if (d < best) { second = best; best = d; sx = px; sy = py; } else if (d < second) second = d;
+      }
+      const base = ORE_ZONES[variant];
+      if (Math.sqrt(second) - Math.sqrt(best) < 0.7) return toned(base, variant === 0 ? 206 : 170);
+      const facing = (x + 0.5 - sx) + (y + 0.5 - sy);
+      const k = facing < -0.6 ? 296 : facing > 0.9 ? 206 : 248;
+      return toned(base, k * grainTone(grainOf(h)) >> 8);
     }
 
     // Colour of one cell for the base layer (0 = transparent sky). waterDepth counts the water
@@ -106,10 +127,7 @@
         }
         return shade(palettes[id][(m >> 6) * 2 + (h & 1)], (id === M.GRASS ? 256 : dk) * grainTone(g) >> 8);
       }
-      if (id === M.ORE) {
-        if ((m >> 6) === 3 && (h & 3) === 0) return oreSpark;
-        return toned(oreBase, ORE_FACETS[(x + y) % 3]);
-      }
+      if (id === M.ORE) return oreColor(x, y, m >> 6, h);
       if (id === M.LINING) {
         const course = (y / 6) | 0;
         const joint = y % 6 === 0 || (x + (course & 1) * 6) % 12 === 0;
@@ -134,6 +152,127 @@
     }
     const waterRun = new Int32Array(CHUNK);
 
+    // ---- Cave and ore outlines ---------------------------------------------------------------
+    // Rock beside open underground air (caves and blasted cavities, not tunnels or rooms, which
+    // have a back wall) darkens towards the opening: dusty floors, shadowed ceilings and wet
+    // walls, fading out over four cells; the cave's back wall catches a little light along its
+    // edges. Ore nodes get a dark facet on their own edge, a dark contact rim in the rock and a
+    // halo of mineral specks that thins out over five cells. Distances are 3-4 chamfer steps
+    // (3 per straight cell), worked out per raster from the cells themselves, so a blasted cavity
+    // or a mined-out node outlines itself.
+    const PROX_PAD = 5, FAR = 250;
+    const prox = { x0: 0, y0: 0, w: 0, h: 0, air: false, ore: false, toAir: null, toRock: null, toOre: null };
+    const POWDER = PW.PHASE.POWDER;
+    const DUST = [134, 118, 98], ORE_DARK = [58, 30, 78], ORE_TINT = [150, 90, 200];
+    const ORE_SPECK = PW.abgr(150, 84, 198), ORE_SPECK_DIM = PW.abgr(112, 66, 142);
+    function caveAirAt(x, y) {
+      if ((mat[y * W + x] & ID_MASK) !== M.AIR || y <= groundTop[x]) return false;
+      const backs = world.back[(y >> CHUNK_SHIFT) * world.chunksX + (x >> CHUNK_SHIFT)];
+      return !backs || !backs[(y & CHUNK_MASK) << CHUNK_SHIFT | x & CHUNK_MASK];
+    }
+    function chamfer(d, w, h) {
+      for (let y = 0; y < h; y += 1) for (let x = 0; x < w; x += 1) {
+        const i = y * w + x;
+        let v = d[i];
+        if (v === 0) continue;
+        if (x > 0 && d[i - 1] + 3 < v) v = d[i - 1] + 3;
+        if (y > 0) {
+          if (d[i - w] + 3 < v) v = d[i - w] + 3;
+          if (x > 0 && d[i - w - 1] + 4 < v) v = d[i - w - 1] + 4;
+          if (x < w - 1 && d[i - w + 1] + 4 < v) v = d[i - w + 1] + 4;
+        }
+        d[i] = v;
+      }
+      for (let y = h - 1; y >= 0; y -= 1) for (let x = w - 1; x >= 0; x -= 1) {
+        const i = y * w + x;
+        let v = d[i];
+        if (v === 0) continue;
+        if (x < w - 1 && d[i + 1] + 3 < v) v = d[i + 1] + 3;
+        if (y < h - 1) {
+          if (d[i + w] + 3 < v) v = d[i + w] + 3;
+          if (x < w - 1 && d[i + w + 1] + 4 < v) v = d[i + w + 1] + 4;
+          if (x > 0 && d[i + w - 1] + 4 < v) v = d[i + w - 1] + 4;
+        }
+        d[i] = v;
+      }
+    }
+    // Distance maps for the cells [x0..x1] x [y0..y1] plus a margin. False when there is neither
+    // cave air nor ore nearby (nothing to outline).
+    function buildProximity(x0, y0, x1, y1) {
+      const rx0 = Math.max(0, x0 - PROX_PAD), ry0 = Math.max(0, y0 - PROX_PAD);
+      const rx1 = Math.min(W - 1, x1 + PROX_PAD), ry1 = Math.min(world.height - 1, y1 + PROX_PAD);
+      const w = rx1 - rx0 + 1, h = ry1 - ry0 + 1, n = w * h;
+      if (!prox.toAir || prox.toAir.length < n) {
+        prox.toAir = new Uint8Array(n); prox.toRock = new Uint8Array(n); prox.toOre = new Uint8Array(n);
+      }
+      const { toAir, toRock, toOre } = prox;
+      let air = false, ore = false;
+      for (let y = ry0, k = 0; y <= ry1; y += 1) {
+        const row = y * W;
+        for (let x = rx0; x <= rx1; x += 1, k += 1) {
+          const id = mat[row + x] & ID_MASK;
+          const cave = id === M.AIR && caveAirAt(x, y);
+          toAir[k] = cave ? 0 : FAR;
+          toRock[k] = phase[id] >= POWDER ? 0 : FAR;
+          toOre[k] = id === M.ORE ? 0 : FAR;
+          if (cave) air = true;
+          else if (id === M.ORE) ore = true;
+        }
+      }
+      prox.x0 = rx0; prox.y0 = ry0; prox.w = w; prox.h = h; prox.air = air; prox.ore = ore;
+      if (air) { chamfer(toAir, w, h); chamfer(toRock, w, h); }
+      if (ore) chamfer(toOre, w, h);
+      return air || ore;
+    }
+    function mixPacked(color, rgb, t) {
+      const r = color & 255, g = color >>> 8 & 255, b = color >>> 16 & 255;
+      return (0xff000000 | Math.round(b + (rgb[2] - b) * t) << 16 | Math.round(g + (rgb[1] - g) * t) << 8 | Math.round(r + (rgb[0] - r) * t)) >>> 0;
+    }
+    const oreAt = (x, y) => (PW.get(world, x, y) & ID_MASK) === M.ORE;
+    function outlineShade(color, x, y) {
+      const { w } = prox;
+      const k = (y - prox.y0) * w + (x - prox.x0);
+      const id = mat[y * W + x] & ID_MASK;
+      if (id === M.AIR) {
+        if (!prox.air || prox.toAir[k] !== 0) return color;
+        const d = prox.toRock[k];
+        if (d === 0 || d > 9) return color;
+        return shade(color, d <= 3 ? 372 : d <= 6 ? 316 : 282);
+      }
+      if (id === M.ORE) {
+        return oreAt(x - 1, y) && oreAt(x + 1, y) && oreAt(x, y - 1) && oreAt(x, y + 1) ? color : shade(color, 200);
+      }
+      if (!natural[id]) return color;
+      let c = color;
+      if (prox.ore) {
+        const d = prox.toOre[k];
+        if (d > 0 && d <= 15) {
+          const hh = PW.hash2(x * 3 + 1, y * 5 + 7);
+          if (d <= 3) c = mixPacked(shade(c, 150), ORE_DARK, 0.35);
+          else if (d <= 6) c = hh % 3 === 0 ? ORE_SPECK : mixPacked(c, ORE_TINT, 0.14);
+          else if (d <= 9) c = hh % 6 === 0 ? ORE_SPECK : mixPacked(c, ORE_TINT, 0.06);
+          else if (hh % 14 === 0) c = ORE_SPECK_DIM;
+        }
+      }
+      if (prox.air) {
+        const d = prox.toAir[k];
+        if (d > 0 && d <= 12) {
+          const above = k >= w ? prox.toAir[k - w] : FAR;
+          if (d <= 3) {
+            // The rock face itself: a dusty floor, a dark wall or ceiling edge.
+            const floor = above === 0;
+            const ceiling = k + w < prox.toAir.length && prox.toAir[k + w] === 0;
+            c = floor ? mixPacked(shade(c, 240), DUST, 0.5) : ceiling ? shade(c, 108) : shade(c, 120);
+          } else if (d <= 4 && above <= 3 && above > 0 && k >= 2 * w && prox.toAir[k - 2 * w] === 0) {
+            c = mixPacked(shade(c, 220), DUST, 0.22);   // second dusty row under the floor surface
+          } else if (d <= 6) c = shade(c, 172);
+          else if (d <= 9) c = shade(c, (PW.hash2(x, y) & 1) ? 204 : 218);
+          else c = shade(c, (PW.hash2(x + 5, y) % 3) === 0 ? 222 : 240);
+        }
+      }
+      return c;
+    }
+
     // Raster a chunk at a level of detail; at full resolution an optional local cell rectangle
     // [lx0..lx1] x [ly0..ly1] limits the work to the part that changed.
     function rasterBase(c, lod, lx0 = 0, ly0 = 0, lx1 = CHUNK - 1, ly1 = CHUNK - 1) {
@@ -144,6 +283,8 @@
       const { image, pixels } = scratchImage(w, h);
       const paintChunk = world.paint[c], backChunk = world.back[c];
       const x0 = cx << CHUNK_SHIFT, y0 = cy << CHUNK_SHIFT;
+      // Outlines are only drawn where cells are big enough to see them (1/2 scale and closer).
+      const outline = lod <= 1 && buildProximity(x0 + lx0 * step, y0 + ly0 * step, x0 + lx1 * step + step - 1, y0 + ly1 * step + step - 1);
       // Water depth above the first sampled row of each column (scan up to 40 cells).
       for (let tx = 0; tx < w; tx += 1) {
         const x = x0 + (lx0 + tx) * step + half;
@@ -162,7 +303,8 @@
           const isWater = (mat[y * W + x] & ID_MASK) === M.WATER;
           // Rows skipped between samples at coarser levels count as water when this sample is.
           waterRun[tx] = isWater ? waterRun[tx] + (ty === 0 ? 1 : step) : 0;
-          pixels[i++] = baseColor(x, y, paintChunk, backChunk, waterRun[tx]);
+          const color = baseColor(x, y, paintChunk, backChunk, waterRun[tx]);
+          pixels[i++] = outline && color ? outlineShade(color, x, y) : color;
         }
       }
       return image;

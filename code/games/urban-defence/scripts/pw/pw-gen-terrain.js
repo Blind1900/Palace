@@ -238,35 +238,147 @@
     }
   }
 
+  // ---- HM ore veins ---------------------------------------------------------------------------------
+  // Ore forms veins, not blobs: a jagged seam that runs at a slant for tens to hundreds of cells,
+  // kinking along its strike, pinching and swelling, tapering to points, with thinner veinlets
+  // splitting off it and a pale quartz selvage along its walls (amethyst-style colour zoning: pale
+  // walls, lavender crystal, a deep purple core). Deposits sit in depth bands and grow with depth:
+  // thin stringers under the surface, veins below them, wide lodes deeper still, and mother lodes
+  // near the bedrock whose swells open into crystal-lined geodes. Ore cell variants: 0 selvage,
+  // 1 crystal, 2 rich core, 3 sparkling crystal points.
+  const ORE_TIERS = [
+    { tier: 'stringer', depth: [300, 620], count: 12, spacing: 240, length: [50, 90], thick: [3, 6], generations: 1, stockwork: 0, geodes: 0 },
+    { tier: 'vein', depth: [620, 1100], count: 10, spacing: 300, length: [90, 160], thick: [5, 10], generations: 2, stockwork: 3, geodes: 0.25 },
+    { tier: 'lode', depth: [1100, 1650], count: 7, spacing: 380, length: [150, 250], thick: [9, 15], generations: 2, stockwork: 6, geodes: 0.6 },
+    { tier: 'mother lode', depth: [1650, 2000], count: 3, spacing: 600, length: [220, 340], thick: [14, 22], generations: 3, stockwork: 10, geodes: 1 },
+  ];
+  // A seam from (x, y) heading `angle` (radians, y down): its centre points with half-widths.
+  function seam(random, x, y, angle, length, half0, generations, out) {
+    const swell = PW.createNoise1D(random.int(1, 1e9), Math.max(5, length / 6));
+    const rough = PW.createNoise1D(random.int(1, 1e9), 2.5);
+    let a = angle, kink = random.int(5, 16);
+    const splits = generations > 0 ? random.int(1, 2) + (length > 90 ? 1 : 0) : 0;
+    const splitAt = Array.from({ length: splits }, () => random.int(Math.round(length * 0.15), Math.round(length * 0.8)));
+    for (let s = 0; s < length; s += 1) {
+      if ((kink -= 1) <= 0) { a = angle + random.range(-0.5, 0.5); kink = random.int(5, 16); }
+      x += Math.cos(a); y += Math.sin(a);
+      const t = s / length;
+      const half = half0 * Math.pow(1 - t, 0.6) * (0.55 + 0.6 * (swell(s) * 0.5 + 0.5)) * (1 + rough(s) * 0.12);
+      out.push({ x, y, half: Math.max(0.5, half) });
+      if (splitAt.includes(s)) {
+        const side = random() < 0.5 ? 1 : -1;
+        seam(random, x, y, a + side * random.range(0.35, 1.1), length * random.range(0.3, 0.6), Math.max(0.7, half * random.range(0.35, 0.6)), generations - 1, out);
+      }
+    }
+  }
+  function oreVein(world, cx, cy, spec, random) {
+    const { mat, width: W, height: H } = world;
+    const length = random.range(spec.length[0], spec.length[1]);
+    const thick = random.range(spec.thick[0], spec.thick[1]);
+    // Strike: 15-65 degrees from horizontal, falling either way.
+    const angle = random.range(0.26, 1.13) * (random() < 0.5 ? 1 : -1);
+    const points = [];
+    seam(random, cx, cy, angle, length / 2, thick / 2, spec.generations, points);
+    seam(random, cx, cy, angle + Math.PI, length / 2, thick / 2, spec.generations, points);
+    // Stockwork: short veinlets criss-crossing the rock beside the main seam.
+    for (let k = 0; k < spec.stockwork; k += 1) {
+      const along = random.range(-0.4, 0.4) * length;
+      const off = random.range(-1, 1) * thick * 2.2;
+      seam(random, cx + Math.cos(angle) * along - Math.sin(angle) * off, cy + Math.sin(angle) * along + Math.cos(angle) * off,
+        random.range(0, Math.PI * 2), random.range(8, 26), random.range(0.6, 1.3), 0, points);
+    }
+    // Depth into the vein for every cell (half-width minus distance to the nearest centre point).
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const p of points) { x0 = Math.min(x0, p.x - p.half); x1 = Math.max(x1, p.x + p.half); y0 = Math.min(y0, p.y - p.half); y1 = Math.max(y1, p.y + p.half); }
+    const pad = 4;
+    x0 = Math.max(1, Math.floor(x0) - pad); y0 = Math.max(1, Math.floor(y0) - pad);
+    x1 = Math.min(W - 2, Math.ceil(x1) + pad); y1 = Math.min(H - 2, Math.ceil(y1) + pad);
+    const w = x1 - x0 + 1, h = y1 - y0 + 1;
+    const depth = new Float32Array(w * h).fill(-9);
+    const width = new Float32Array(w * h);   // half-width of the seam each cell belongs to
+    for (const p of points) {
+      const r = Math.ceil(p.half + 3);
+      for (let y = Math.max(y0, Math.floor(p.y - r)); y <= Math.min(y1, p.y + r); y += 1) {
+        for (let x = Math.max(x0, Math.floor(p.x - r)); x <= Math.min(x1, p.x + r); x += 1) {
+          const d = p.half - Math.hypot(x + 0.5 - p.x, y + 0.5 - p.y);
+          const k = (y - y0) * w + (x - x0);
+          if (d > depth[k]) { depth[k] = d; width[k] = p.half; }
+        }
+      }
+    }
+    // Geodes: hollows in the widest swells, lined with crystal points.
+    const geodes = [];
+    if (spec.geodes > 0) {
+      const wide = points.filter((p) => p.half >= 4.5).sort((a, b) => b.half - a.half);
+      for (const p of wide) {
+        if (geodes.length >= Math.ceil(spec.geodes * 3) || random() > spec.geodes) continue;
+        if (geodes.some((g) => Math.hypot(g.x - p.x, g.y - p.y) < 30)) continue;
+        geodes.push({ x: p.x, y: p.y, r: Math.min(p.half - 1.8, random.range(2.6, 6.5)) });
+      }
+    }
+    let cells = 0;
+    for (let y = y0; y <= y1; y += 1) {
+      for (let x = x0; x <= x1; x += 1) {
+        const k = (y - y0) * w + (x - x0), d = depth[k];
+        if (d < -2.5) continue;
+        const index = y * W + x;
+        const id = mat[index] & 63;
+        if (id === M.BEDROCK || id === M.AIR || id === M.WATER) continue;
+        if (d < 0) {
+          // Altered host rock: the vein sits in a hard seam even inside soft layers.
+          if (id === M.SOIL || id === M.CLAY || id === M.GRAVEL || id === M.TOPSOIL) mat[index] = M.STONE | (mat[index] & 0xc0);
+          continue;
+        }
+        // Selvage along the walls (thinner on thin seams, so stringers still show their colour),
+        // lavender crystal inside, the deep purple core in the middle of wide veins.
+        const half = width[k];
+        let variant;
+        if (d < Math.min(1.1, half * 0.32)) variant = 0;
+        else if (d > 2.4 && PW.hash2(x, y) % 11 === 0) variant = 3;
+        else variant = d > Math.max(1.4, Math.min(3.2, half * 0.55)) ? 2 : 1;
+        mat[index] = M.ORE | variant << 6;
+        cells += 1;
+      }
+    }
+    for (const g of geodes) {
+      for (let y = Math.floor(g.y - g.r - 3); y <= g.y + g.r + 3; y += 1) {
+        for (let x = Math.floor(g.x - g.r - 3); x <= g.x + g.r + 3; x += 1) {
+          const dx = x + 0.5 - g.x, dy = y + 0.5 - g.y, d = Math.hypot(dx, dy);
+          const index = y * W + x;
+          if ((mat[index] & 63) !== M.ORE) continue;
+          // Crystal points grow in from the wall: the hollow's edge is ragged with teeth.
+          const teeth = 1.6 * Math.abs(Math.sin(Math.atan2(dy, dx) * 5 + g.x));
+          if (d < g.r - teeth) { mat[index] = M.AIR; cells -= 1; } else if (d < g.r + 1.5) mat[index] = M.ORE | 3 << 6;
+        }
+      }
+    }
+    return { x: Math.round(cx), y: Math.round(cy), radius: Math.round(thick / 2), length: Math.round(length), angle,
+      tier: spec.tier, amount: cells, geodes: geodes.length, box: { x0, y0, x1, y1 } };
+  }
+
   function placeOreNodes(world, layout, top, random) {
-    const { mat, width: W } = world;
+    const W = world.width;
     const nodes = [];
     const tooClose = (x, y, gap) => nodes.some((n) => Math.hypot(n.x - x, n.y - y) < gap);
-    const addNode = (x, y, radius, starter) => {
-      const node = { x: Math.round(x), y: Math.round(y), radius, amount: Math.round(radius * radius * 1.4), starter };
-      nodes.push(node);
-      blob(world, x, y, radius + 7, random, (px, py, inside) => {
-        const index = py * W + px;
-        const id = mat[index] & 63;
-        if (id === M.BEDROCK || id === M.AIR || id === M.WATER) return;
-        const core = inside > 0.22;
-        const spark = PW.hash2(px, py) % 9 === 0 ? 3 : (PW.hash2(px >> 1, py >> 1) & 1) + 1;
-        mat[index] = core ? M.ORE | (PW.hash2(px, py) & 7 ? spark : 0) << 6 : M.STONE | (mat[index] & 0xc0);
-      }, 0.75);
-      return node;
-    };
-    // Starter nodes below each base core.
+    // Starter veins below each base core: a solid vein the starter workings reach.
     for (const site of [layout.sites[0], layout.sites[4]]) {
       const coreX = site.side === 'left' ? site.x0 + 260 : site.x1 - 260;
       const nodeX = coreX + (site.side === 'left' ? 220 : -220);
-      addNode(nodeX, top[Math.round(coreX)] + random.range(480, 560), 26, site.side);
+      const node = oreVein(world, nodeX, top[Math.round(coreX)] + random.range(480, 560),
+        { tier: 'starter', length: [110, 150], thick: [12, 16], generations: 2, stockwork: 4, geodes: 0 }, random);
+      node.starter = site.side;
+      nodes.push(node);
     }
-    for (let attempt = 0; nodes.length < 30 && attempt < 4000; attempt += 1) {
-      const x = random.range(160, W - 160);
-      const depth = random.range(320, 2050);
-      const y = top[Math.round(x)] + depth;
-      if (y > world.height - 120 || tooClose(x, y, 300)) continue;
-      addNode(x, y, random.range(16, 34) + depth * 0.006, null);
+    // Depth bands, deepest (largest) first so they get their room.
+    for (const spec of ORE_TIERS.slice().reverse()) {
+      let placed = 0;
+      for (let attempt = 0; placed < spec.count && attempt < 2000; attempt += 1) {
+        const x = random.range(200, W - 200);
+        const y = top[Math.round(x)] + random.range(spec.depth[0], spec.depth[1]);
+        if (y > world.height - 90 || tooClose(x, y, spec.spacing)) continue;
+        nodes.push(oreVein(world, x, y, spec, random));
+        placed += 1;
+      }
     }
     return nodes;
   }
@@ -349,8 +461,9 @@
     const surface = surfaceProfile(world, layout, seed);
     const top = fillStrata(world, layout, surface, seed);
     addLenses(world, layout, top, random);
-    layout.nodes = placeOreNodes(world, layout, top, random);
+    // Caves first: veins then run through the rock around them and show in the cave walls.
     layout.caves = carveCaves(world, layout, top, random);
+    layout.nodes = placeOreNodes(world, layout, top, random);
     fillLakes(world, layout, surface);
     layout.surface = surface;
     // Depth shading is measured from a broadly smoothed ground line, so mountains keep the bright

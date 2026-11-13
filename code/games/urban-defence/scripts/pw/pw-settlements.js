@@ -290,9 +290,20 @@
       }
     }
   }
+  // Where a drift running from x towards `dir` first meets ore within rows [top, bottom]: the
+  // column just short of the vein, so the ore forms the working face. Falls back to the node's
+  // centre minus its half-width when the vein misses the drift's level.
+  function oreFace(world, node, x, dir, top, bottom) {
+    for (let k = 0; k < 700; k += 1) {
+      const cx = x + dir * k;
+      for (let y = top; y <= bottom; y += 1) if ((PW.get(world, cx, y) & 63) === M.ORE) return cx - dir;
+      if ((cx - node.x) * dir > node.radius + 40) break;
+    }
+    return node.x - dir * (node.radius + 6);
+  }
   // Starter workings from the core pit down to the ore node: shaft, drift and storage room.
   function starterMine(world, core, node, dir, owner) {
-    // The shaft drops from the side of the pit nearest the node; the drift runs to the node's face.
+    // The shaft drops from the side of the pit nearest the node; the drift runs to the vein's face.
     const toward = Math.sign(node.x - (core.pit.left + core.pit.right) / 2) || dir;
     const sx = toward > 0 ? Math.round(core.pit.right - 60) : Math.round(core.pit.left + 60);
     const pitFloor = core.ground + core.pit.depth;
@@ -300,7 +311,7 @@
     carveBox(world, sx - 15, pitFloor - 2, sx + 15, driftBottom, owner);
     ladder(world, toward > 0 ? sx - 14 : sx + 3, pitFloor - 2, driftBottom - 1);
     const face = Math.sign(node.x - sx) || toward;
-    const reach = node.x - face * (node.radius + 6);
+    const reach = oreFace(world, node, sx + face * 16, face, driftTop, driftBottom);
     const d0 = Math.min(sx, reach), d1 = Math.max(sx, reach);
     carveBox(world, d0, driftTop, d1, driftBottom, owner);
     tunnelLamps(world, d0, d1, driftTop);
@@ -326,7 +337,7 @@
     let drift = null;
     if (node) {
       const dir = Math.sign(node.x - x) || 1;
-      const reach = node.x - dir * (node.radius + 6);
+      const reach = oreFace(world, node, x + dir * 16, dir, bottom - 44, bottom);
       carveBox(world, Math.min(x, reach), bottom - 44, Math.max(x, reach), bottom, owner);
       tunnelLamps(world, Math.min(x, reach), Math.max(x, reach), bottom - 44);
       drift = { x0: Math.min(x, reach), x1: Math.max(x, reach), top: bottom - 44, bottom };

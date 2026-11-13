@@ -26,6 +26,8 @@
     // Cover: boulders, stalagmites, barrels, crates, mine cars and sandbags. Units walk past them
     // (they stand at another depth) but they stop bullets, so troops duck behind them.
     COVER_ROCK: 32, COVER_WOOD: 33, COVER_METAL: 34, COVER_SAND: 35,
+    // Reinforced concrete lining of a developed tunnel: another side cannot dig through it.
+    REINFORCED: 36,
   });
   const PHASE = Object.freeze({ AIR: 0, LIQUID: 1, POWDER: 2, SOLID: 3 });
   // Debris variants (bits 6-7 of a DEBRIS cell) pick the rubble palette.
@@ -139,8 +141,10 @@
     [[96, 84, 72], [80, 70, 60], [110, 98, 84], [72, 64, 56]]);
   define(M.COVER_SAND, 'sandbags', { hardness: 0.5, breaksTo: M.SAND },
     [[176, 158, 112], [150, 134, 94], [196, 178, 130], [140, 124, 88]]);
+  define(M.REINFORCED, 'reinforced lining', { ground: true, hardness: 0.85, breaksTo: debris(DEBRIS_KIND.CONCRETE) },
+    [[132, 134, 130], [124, 126, 122], [140, 142, 138], [118, 120, 116]]);
   for (const id of [M.GRASS, M.TOPSOIL, M.SOIL, M.CLAY, M.GRAVEL, M.STONE, M.BEDROCK, M.SAND, M.ORE, M.WATER,
-    M.LOOSE_SOIL, M.LOOSE_STONE, M.RUBBLE, M.ASPHALT, M.ROADBED, M.LINING, M.PIPE]) skyline[id] = 1;
+    M.LOOSE_SOIL, M.LOOSE_STONE, M.RUBBLE, M.ASPHALT, M.ROADBED, M.LINING, M.PIPE, M.REINFORCED]) skyline[id] = 1;
   for (const id of [M.AIR, M.WATER, M.COVER_ROCK, M.COVER_WOOD, M.COVER_METAL, M.COVER_SAND]) passable[id] = 1;
   for (let id = 1; id < 64; id += 1) if (names[id] && phase[id] >= PHASE.POWDER && id !== M.GLASS) stopsShots[id] = 1;
   for (const id of [M.GRASS, M.TOPSOIL, M.SOIL, M.CLAY, M.GRAVEL, M.STONE, M.BEDROCK, M.SAND, M.ORE,
@@ -348,7 +352,10 @@
   }
 
   // ---- Sparse typed data layers (owner ids, flags) ------------------------------------------------
-  const FLAG = Object.freeze({ LADDER: 1, ROAD: 2, TUNNEL: 4, NOBUILD: 8, SCORCH: 16, CARVED: 32, BRIDGE: 64, HATCH: 128 });
+  // RAW marks the inside of a tunnel that is still timbered (undeveloped), DEVELOPED one that has
+  // been lined, and FIXTURE back-wall fittings (rails, signs) that development must keep.
+  const FLAG = Object.freeze({ LADDER: 1, ROAD: 2, TUNNEL: 4, NOBUILD: 8, SCORCH: 16, CARVED: 32, BRIDGE: 64, HATCH: 128,
+    RAW: 256, FIXTURE: 512, DEVELOPED: 1024 });
   function getOwner(world, x, y) {
     if (x < 0 || y < 0 || x >= world.width || y >= world.height) return 0;
     const chunk = world.owner[chunkIndex(world, x, y)];
