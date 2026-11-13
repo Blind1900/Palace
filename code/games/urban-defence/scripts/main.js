@@ -34,7 +34,6 @@ const FARM_BUILDING_WIDTH = getUrbanPixelBuildingFootprintForVariant('farm', 'si
 const FARM_MAX_SOURCE_DISTANCE = 1200;
 const FARM_ADDITIONAL_SOURCE_GROWTH = 12;
 const FARM_GROWTH_PER_SECOND = 2;
-const IRRIGATION_REPAIR_SECONDS = 8;
 const LIFE_GRID_COLUMNS = 160;
 const LIFE_GRID_ROWS = 96;
 const PARTICLE_TERRAIN_CELL_SIZE = 4;
@@ -172,6 +171,8 @@ const { buildingColor, drawSettlements, drawCollapsedBuildings } = createBuildin
   farmBuildingWidth: FARM_BUILDING_WIDTH, buildingBlueprints, cores, collapsedBuildings, factionArchitectureStyles,
 });
 const worldObjectRenderer = createWorldObjectRenderer();
+const pipeline = createUrbanPipeline({ surfaceYAt, worldWidth: WORLD_WIDTH, worldHeight: WORLD_HEIGHT, waterLevelAt,
+  terrainRevision: () => particleTerrain.terrainRevision });
 const missileControl = createMissileControl({
   canvas, ctx, camera, buildings: buildingBlueprints, cores, surfaceYAt, worldToScreen, screenToWorld,
   getSide: () => baseSide, worldWidth: WORLD_WIDTH, craterSurface, waterLevelAt, splashWater, breakBuilding,
@@ -183,7 +184,7 @@ const commandControl = createCommandControl({
   getSide: () => baseSide, worldWidth: WORLD_WIDTH, worldHeight: WORLD_HEIGHT,
   canBuild: canBuildOnTerrain, farmWaterSources, tunnelWidth: TUNNEL_INTERIOR_WIDTH,
   startingResources: STARTING_RESOURCES, renderer: worldObjectRenderer, craterSurface,
-  architectureStyles: factionArchitectureStyles,
+  architectureStyles: factionArchitectureStyles, pipeline,
 });
 for (const building of buildingBlueprints) {
   if (building.kind === 'farm') building.availableWaterSources = farmWaterSources(building);
@@ -242,6 +243,7 @@ function updateHud() {
     `CORE ${Math.max(0, Math.ceil(core ? core.health : 0))} / 1000`,
     `CENTER HOLD ${hold} / 60S`,
     ...(stats.floodedConstruction ? [`CONSTRUCTION PAUSED / FLOODED ${stats.floodedConstruction}`] : []),
+    ...(stats.brokenLines ? [`PIPELINE BREAKS ${stats.brokenLines} / RE-LAYING FOR HM`] : []),
   ].map((line) => `<div>${line}</div>`).join('');
 }
 
@@ -398,17 +400,8 @@ function surfaceYAt(x) {
 
 function craterSurface(center, radius = 30, depth = 14) {
   commandControl.damageRoads(center, radius);
-  for (const farm of buildingBlueprints) {
-    if (farm.kind !== 'farm') continue;
-    const farmX = farm.x + farm.width / 2;
-    for (const source of farm.waterSources) {
-      const left = Math.min(farmX, source.intakeX);
-      const right = Math.max(farmX, source.intakeX);
-      if (center + radius >= left && center - radius <= right) {
-        source.repairRemaining = IRRIGATION_REPAIR_SECONDS;
-      }
-    }
-  }
+  // Measure the blast against the ground before it is dug out, so a line breaks only where the crater reaches it.
+  pipeline.damage(center, radius, depth);
   terrainSurface.crater(center, radius, depth);
   if (particleTerrain) {
     const first = Math.max(0, Math.floor((center - radius) / PARTICLE_TERRAIN_CELL_SIZE));
@@ -717,7 +710,7 @@ function farmWaterSources(farm) {
       const step = Math.min(4, pool.right - x);
       area += Math.max(0, surfaceYAt(x + step / 2) - pool.level) * step;
     }
-    return { pool, intakeX, distance, area, repairRemaining: 0 };
+    return { pool, intakeX, distance, area };
   }).filter((source) => source.distance <= FARM_MAX_SOURCE_DISTANCE && source.area > 0)
     .sort((a, b) => a.distance - b.distance);
 }
@@ -728,7 +721,7 @@ function updateFarmGrowth(farm, deltaSeconds) {
   const sourceCount = Math.min(sources.length, 1 + Math.floor(totalGrowth / FARM_ADDITIONAL_SOURCE_GROWTH));
   farm.waterSources = sources.slice(0, sourceCount);
   const capacity = farm.waterSources.reduce((sum, source) =>
-    sum + (source.repairRemaining > 0 ? 0
+    sum + (!commandControl.farmWatered(farm, source) ? 0
       : Math.sqrt(source.area) * 1.5 * (1 - 0.6 * source.distance / FARM_MAX_SOURCE_DISTANCE)), 0);
   let remaining = Math.min(FARM_GROWTH_PER_SECOND * deltaSeconds, Math.max(0, capacity - totalGrowth));
   const farmBounds = farmBuildingBounds(farm);
@@ -866,17 +859,6 @@ function drawTerrainMass() {
   ctx.restore();
 }
 
-function drawIrrigationIntakes() {
-  for (const farm of buildingBlueprints) {
-    if (farm.kind !== 'farm') continue;
-    for (const source of farm.waterSources) {
-      const bottom = surfaceYAt(source.intakeX);
-      drawPixelLine(source.intakeX, bottom, source.intakeX, (bottom + source.pool.level) / 2,
-        source.repairRemaining > 0 ? '#e15a40' : '#438f9b', 1.2);
-    }
-  }
-}
-
 function drawSurfaceDetails() {
   const left = camera.x - 40;
   const right = camera.x + viewport.width / camera.zoom + 40;
@@ -943,39 +925,6 @@ function drawUnderground() {
   ctx.save();
   ctx.translate(-camera.x * camera.zoom, -camera.y * camera.zoom);
   ctx.scale(camera.zoom, camera.zoom);
-  for (const farm of buildingBlueprints.filter((building) => building.kind === 'farm')) {
-    const farmX = farm.x + farm.width / 2;
-    for (const source of farm.waterSources) {
-      const direction = Math.sign(source.intakeX - farmX);
-      ctx.strokeStyle = source.repairRemaining > 0 ? '#e15a40' : '#438f9b';
-      ctx.lineWidth = 1.2;
-      ctx.beginPath();
-      ctx.moveTo(farmX, surfaceYAt(farmX));
-      ctx.lineTo(farmX, surfaceYAt(farmX) + 10);
-      for (let x = farmX + direction * 4; direction * (source.intakeX - x) > 0; x += direction * 4) {
-        ctx.lineTo(x, surfaceYAt(x) + 10);
-      }
-      ctx.lineTo(source.intakeX, surfaceYAt(source.intakeX) + 10);
-      ctx.lineTo(source.intakeX, (surfaceYAt(source.intakeX) + source.pool.level) / 2);
-      ctx.stroke();
-      ctx.strokeStyle = '#a8c5bc';
-      ctx.lineWidth = 0.55;
-      ctx.beginPath();
-      ctx.moveTo(farmX + direction, surfaceYAt(farmX) + 11);
-      for (let x = farmX + direction * 6; direction * (source.intakeX - x) > 0; x += direction * 64) {
-        ctx.lineTo(x, surfaceYAt(x) + 11);
-        ctx.stroke();
-        ctx.fillStyle = '#76b8b2';
-        ctx.fillRect(x - 1, surfaceYAt(x) + 9, 3, 3);
-        ctx.beginPath();
-        ctx.moveTo(x, surfaceYAt(x) + 11);
-      }
-      ctx.lineTo(source.intakeX, surfaceYAt(source.intakeX) + 11);
-      ctx.stroke();
-      ctx.fillStyle = '#d7c783';
-      ctx.fillRect(farmX - 2, surfaceYAt(farmX) + 7, 4, 5);
-    }
-  }
   for (const military of buildingBlueprints.filter((building) => building.kind === 'military' && building.level >= 2)) {
     for (let i = 0; i < military.level - 1; i += 1) {
       const mineX = clamp(military.x + military.width / 2 + military.direction * (35 + i * 14), 4, WORLD_WIDTH - 4);
@@ -984,6 +933,8 @@ function drawUnderground() {
     }
   }
   commandControl.drawTunnels();
+  // Supply lines draw after the tunnels so a tube crossing a bore reads as a bridge over it.
+  pipeline.draw(ctx, { left: camera.x - 40, right: camera.x + viewport.width / camera.zoom + 40 });
   ctx.shadowBlur = 0;
   for (const node of resourceNodes) {
     ctx.fillStyle = '#9babb0';
@@ -1003,7 +954,6 @@ function drawBattlefield() {
   drawTerrainMass();
   drawUnderground();
   drawWaterPools();
-  drawIrrigationIntakes();
   drawSurfaceProfile();
   drawSettlements();
   drawCollapsedBuildings();
@@ -1152,15 +1102,6 @@ function updateDebrisAndWaterDrops(deltaSeconds) {
   }
 }
 
-function updateIrrigationRepairs(deltaSeconds) {
-  for (const farm of buildingBlueprints) {
-    if (farm.kind !== 'farm') continue;
-    for (const source of farm.availableWaterSources) {
-      commandControl.repairIrrigation(farm, source, deltaSeconds);
-    }
-  }
-}
-
 function updateBuildings(deltaSeconds) {
   for (let i = buildingBlueprints.length - 1; i >= 0; i -= 1) {
     const building = buildingBlueprints[i];
@@ -1196,7 +1137,6 @@ function updateWorldState(deltaSeconds) {
     }
   }
   updateDebrisAndWaterDrops(deltaSeconds);
-  updateIrrigationRepairs(deltaSeconds);
   missileControl.update(deltaSeconds);
   commandControl.update(deltaSeconds);
   world.explosionPhase = 0;

@@ -47,7 +47,7 @@ function advanceNeutralConstruction(building, delta) {
 function createCommandControl(options) {
   const { canvas, ctx, buildings, nodes, tunnels, cores, pools, territories, surfaceYAt,
     worldToScreen, screenToWorld, getSide, worldWidth, worldHeight, canBuild,
-    farmWaterSources, tunnelWidth, startingResources, renderer, craterSurface, architectureStyles } = options;
+    farmWaterSources, tunnelWidth, startingResources, renderer, craterSurface, architectureStyles, pipeline } = options;
   const seedBuildRadius = 240;
   const vehicleTunnelWidth = Math.max(tunnelWidth, 24);
   const tunnelRoofClearance = 28;
@@ -125,6 +125,74 @@ function createCommandControl(options) {
   syncAutomaticRoads();
 
   function sideIndex(side) { return side === 'left' ? 0 : 1; }
+  function coreOf(side) { return cores.find((core) => core.owner === side && core.health > 0); }
+  function centerOf(building) { return building.x + building.width / 2; }
+  // A farm's pump stands on the shore nearest the farm, with its intake below the basin's surface.
+  function pumpSite(farm, source) {
+    const farmX = centerOf(farm), pool = source.pool;
+    const fromLeft = farmX < (pool.left + pool.right) / 2;
+    return { pumpX: fromLeft ? pool.left - 10 : pool.right + 10, intakeX: fromLeft ? pool.left + 6 : pool.right - 6,
+      intakeY: pool.level + 6 };
+  }
+  function farmWatered(farm, source) {
+    if (!pipeline || !economies[farm.owner]) return true;
+    return pipeline.connected(farm.owner, 'water', pumpSite(farm, source).pumpX, centerOf(farm));
+  }
+  function farmIncome(farm) {
+    if (!economies[farm.owner] || !farm.waterSources.some((source) => farmWatered(farm, source))) return 0;
+    const core = coreOf(farm.owner);
+    if (pipeline && (!core || !pipeline.connected(farm.owner, 'sm', centerOf(farm), core.x))) return 0;
+    return (farm.cropLeft + farm.cropRight) * 0.0005;
+  }
+  function mineDelivers(operation) {
+    const core = coreOf(operation.side);
+    return !pipeline || Boolean(core && pipeline.connected(operation.side, 'hm', operation.node.x, core.x));
+  }
+  // Every structure a side owns taps its supply lines; the anchors decide how far each line runs.
+  function pipelineAnchors() {
+    const sides = { left: [], right: [] };
+    for (const core of cores) if (core.health > 0) sides[core.owner].push({ id: `core-${core.owner}`, x: core.x, resources: ['sm', 'hm'] });
+    for (const building of buildings) {
+      if (building.health <= 0 || !sides[building.owner]) continue;
+      const id = `${building.kind}-${Math.round(building.x)}`;
+      if (building.kind !== 'farm') { sides[building.owner].push({ id, x: centerOf(building), resources: ['sm', 'hm'] }); continue; }
+      sides[building.owner].push({ id, x: centerOf(building), resources: ['sm', 'water'] });
+      for (const source of building.waterSources) {
+        const site = pumpSite(building, source);
+        sides[building.owner].push({ id: `pump-${Math.round(site.pumpX)}`, kind: 'pump', x: site.pumpX, ...site, resources: ['water'] });
+      }
+    }
+    for (const operation of operations) {
+      if (operation.node.amount <= 0) continue;
+      sides[operation.side].push({ id: `node-${Math.round(operation.node.x)}`, x: operation.node.x, y: operation.node.y, resources: ['hm'] });
+    }
+    return sides;
+  }
+  function pipelineFlows() {
+    const flows = [];
+    for (const building of buildings) {
+      if (building.kind !== 'farm' || building.health <= 0 || !economies[building.owner]) continue;
+      const core = coreOf(building.owner);
+      const income = farmIncome(building);
+      if (core && income > 0) flows.push({ side: building.owner, resource: 'sm', fromX: centerOf(building), toX: core.x, rate: income });
+      for (const source of building.waterSources) {
+        flows.push({ side: building.owner, resource: 'water', fromX: pumpSite(building, source).pumpX, toX: centerOf(building), rate: 0.4 });
+      }
+    }
+    for (const operation of operations) {
+      const core = coreOf(operation.side);
+      if (core && operation.node.amount > 0 && economies[operation.side].sm > 0 && connected(operation.node, operation.side)) {
+        flows.push({ side: operation.side, resource: 'hm', fromX: operation.node.x, toX: core.x, rate: 0.5 });
+      }
+    }
+    return flows;
+  }
+  function payRepair(side, amount) {
+    const funds = economies[side];
+    if (!funds || funds.hm < amount) return false;
+    funds.hm -= amount;
+    return true;
+  }
   function economy() { return economies[getSide()]; }
   function availablePop(side) { return economies[side].pop - economies[side].assigned; }
   function friendly(building) {
@@ -759,15 +827,15 @@ function createCommandControl(options) {
         return;
       }
     }
+    if (pipeline) pipeline.update(delta, pipelineAnchors(), pipelineFlows(), payRepair);
     for (const building of buildings) {
       if (building.kind !== 'farm' || building.neutral || building.health <= 0) continue;
-      const side = building.owner;
-      const activeWater = building.waterSources.some((source) => source.repairRemaining <= 0);
-      if (activeWater) economies[side].sm += (building.cropLeft + building.cropRight) * 0.0005 * delta;
+      economies[building.owner].sm += farmIncome(building) * delta;
     }
     for (const operation of operations) {
       const funds = economies[operation.side];
-      if (operation.node.amount <= 0 || funds.sm <= 0 || !connected(operation.node, operation.side)) continue;
+      if (operation.node.amount <= 0 || funds.sm <= 0 || !connected(operation.node, operation.side)
+        || !mineDelivers(operation)) continue;
       const time = Math.min(delta, funds.sm / 0.1, operation.node.amount / 0.5);
       funds.sm -= time * 0.1;
       funds.hm += time * 0.5;
@@ -1078,29 +1146,22 @@ function createCommandControl(options) {
     networkSnapshot: () => ({ roads: roads.length, automaticRoads: automaticRoads.length,
       tunnels: tunnels.map((tunnel) => ({ side: tunnel.side,
       width: tunnel.interiorWidth, points: tunnel.points.map((point) => ({ ...point })) })) }),
-    repairIrrigation: (farm, source, delta) => {
-      if (source.repairRemaining <= 0) return;
-      if (farm.owner === 'neutral') { source.repairRemaining = Math.max(0, source.repairRemaining - delta); return; }
-      const funds = economies[farm.owner];
-      if (!funds) return;
-      const work = Math.min(delta, source.repairRemaining, funds.hm / 0.5);
-      funds.hm = Math.max(0, funds.hm - work * 0.5);
-      source.repairRemaining = Math.max(0, source.repairRemaining - work);
-    },
+    farmWatered,
     objective: () => ({ outcome, centerHold: { ...centerHold } }),
     resources: () => ({ ...economy(), available: availablePop(getSide()) }),
     production: () => {
       const owned = buildings.filter((building) => building.owner === getSide() && building.health > 0);
       const farms = owned.filter((building) => building.kind === 'farm');
       const activeMines = operations.filter((operation) => operation.side === getSide() && operation.node.amount > 0
-        && economies[operation.side].sm > 0 && connected(operation.node, operation.side));
+        && economies[operation.side].sm > 0 && connected(operation.node, operation.side) && mineDelivers(operation));
       const housing = owned.filter((building) => !['farm', 'military', 'mine'].includes(building.kind));
       return {
         housing: housing.length,
         population: housing.reduce((sum, building) => sum + (building.population || 0), 0),
         farms: farms.length,
-        sm: farms.reduce((sum, farm) => sum + (farm.waterSources.some((source) => source.repairRemaining <= 0)
-          ? (farm.cropLeft + farm.cropRight) * 0.0005 : 0), 0),
+        sm: farms.reduce((sum, farm) => sum + farmIncome(farm), 0),
+        brokenLines: pipeline ? Object.values(pipeline.snapshot()[getSide()] || {})
+          .reduce((sum, line) => sum + line.spans.filter((span) => !span.done).length, 0) : 0,
         mines: operations.filter((operation) => operation.side === getSide()).length,
         hm: activeMines.length * 0.5,
         military: owned.filter((building) => building.kind === 'military').length,
