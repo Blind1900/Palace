@@ -262,10 +262,20 @@
     if (lx < r[o]) r[o] = lx; if (ly < r[o + 1]) r[o + 1] = ly;
     if (lx > r[o + 2]) r[o + 2] = lx; if (ly > r[o + 3]) r[o + 3] = ly;
   }
-  // Water depth tint reads up to 40 cells above, so water changes also dirty the rows below.
+  // Water is shaded by its distance to open air (up to WATER_REACH cells in any direction), so a
+  // water change dirties that whole neighbourhood, clipped into each chunk it overlaps.
+  const WATER_REACH = 24;
   function markWaterDirty(world, x, y) {
-    markDirty(world, x, Math.min(world.height - 1, y + 40));
-    markDirty(world, x, y);
+    const x0 = Math.max(0, x - WATER_REACH), x1 = Math.min(world.width - 1, x + WATER_REACH);
+    const y0 = Math.max(0, y - WATER_REACH), y1 = Math.min(world.height - 1, y + WATER_REACH);
+    for (let cy = y0 >> CHUNK_SHIFT; cy <= y1 >> CHUNK_SHIFT; cy += 1) {
+      for (let cx = x0 >> CHUNK_SHIFT; cx <= x1 >> CHUNK_SHIFT; cx += 1) {
+        const left = Math.max(x0, cx << CHUNK_SHIFT), right = Math.min(x1, (cx << CHUNK_SHIFT) + CHUNK_MASK);
+        const top = Math.max(y0, cy << CHUNK_SHIFT), bottom = Math.min(y1, (cy << CHUNK_SHIFT) + CHUNK_MASK);
+        markDirty(world, left, top);
+        markDirty(world, right, bottom);
+      }
+    }
   }
   // Wake the simulation around a cell (its chunk, plus neighbours when on a chunk edge).
   function wake(world, x, y) {
@@ -466,6 +476,7 @@
   PW.CHUNK_SHIFT = CHUNK_SHIFT;
   PW.CHUNK_MASK = CHUNK_MASK;
   PW.CHUNK_CELLS = CHUNK_CELLS;
+  PW.WATER_REACH = WATER_REACH;
   PW.DIRTY_BASE = DIRTY_BASE;
   PW.DIRTY_DECO = DIRTY_DECO;
   PW.FLAG = FLAG;

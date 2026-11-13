@@ -8,7 +8,10 @@
   const { phase, structural, hardness, breaksTo, palettes } = PW.mat;
 
   const GRAVITY = 260;      // cells/s^2 (about 1.9 g at 7 cm per cell: snappy but readable)
-  const F = Object.freeze({ LAND: 1, DAMAGE: 2, WATER: 4, GLOW: 8, SMOKE: 16, LEAF: 32 });
+  // BUBBLE: air in water. It rises (buoyancy against drag gives ~0.5 m/s), wobbles, slides along
+  // anything solid above it and pops when it reaches open air. It never leaves the water.
+  const F = Object.freeze({ LAND: 1, DAMAGE: 2, WATER: 4, GLOW: 8, SMOKE: 16, LEAF: 32, BUBBLE: 64 });
+  const BUBBLE_RISE = 7;    // cells/s terminal rise speed
 
   function createParticles(world, capacity = 32768) {
     const { mat, width: W, height: H } = world;
@@ -68,6 +71,26 @@
           vy[i] -= 30 * dt; vx[i] *= 1 - 0.8 * dt;
           px[i] += vx[i] * dt; py[i] += vy[i] * dt;
           if (life[i] <= 0) kill(i);
+          continue;
+        }
+        if (fl & F.BUBBLE) {
+          // Rise towards terminal speed, wobbling; water currents are not modelled per cell.
+          vy[i] += (-BUBBLE_RISE - vy[i]) * Math.min(1, 4 * dt);
+          vx[i] += (Math.sin(age[i] * 6 + i * 1.7) * 3 - vx[i]) * Math.min(1, 3 * dt);
+          const ox = px[i], oy = py[i];
+          let nx = ox + vx[i] * dt, ny = oy + vy[i] * dt;
+          const at = (x, y) => (y < 0 || y >= H || x < 0 || x >= W) ? M.BEDROCK : mat[(y | 0) * W + (x | 0)] & ID_MASK;
+          let here = at(nx, ny);
+          if (here !== M.WATER && here !== M.AIR) {
+            // Blocked above: slip sideways along the ceiling towards a way up.
+            ny = oy;
+            const side = Math.sin(i * 12.9898) > 0 ? 1 : -1;
+            nx = ox + side * BUBBLE_RISE * dt;
+            here = at(nx, ny);
+            if (here !== M.WATER) { nx = ox; here = at(nx, ny); }
+          }
+          px[i] = nx; py[i] = ny;
+          if (here !== M.WATER || life[i] <= 0) kill(i);   // reached air: pop
           continue;
         }
         const inWater = (() => {

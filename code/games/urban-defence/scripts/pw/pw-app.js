@@ -42,6 +42,12 @@
   timings.overview = performance.now() - t;
   const sim = PW.createSim(world);
   const particles = PW.createParticles(world);
+  // Bubbles the water simulation releases: one or two cells of pale air, rising to pop.
+  const BUBBLE_COLORS = [PW.abgr(206, 232, 248, 230), PW.abgr(168, 210, 238, 210), PW.abgr(232, 244, 252, 240)];
+  world.emitBubble = (x, y) => {
+    const h = PW.hash3(x, y, world.tick);
+    particles.spawn(x + 0.5, y + 0.5, ((h & 15) - 7.5) * 0.6, -2, 0, BUBBLE_COLORS[h % 3], PW.PARTICLE.BUBBLE, 25);
+  };
 
   // ---- Sandbox tools -----------------------------------------------------------------------------
   const { M } = PW;

@@ -15,6 +15,7 @@
   const SPREAD = 4;              // cells a pushed water front advances along a floor per tick
   const MOMENTUM = 6;            // cells sliding water travels per tick
   const DISPERSE = 8;            // cells pressurised water squirts sideways per tick
+  const PUSH_REACH = 48;         // how far a surge carries through standing water
   const COMPACT_TICKS = 600;     // 10 s at 60 Hz
   // Chance a resting powder slides off a slope each tick (debris rarely: irregular heaps).
   const SLIDE = new Float32Array(64);
@@ -76,6 +77,90 @@
       stats.moves += n;
     }
 
+    // Cells a pressurised opening discharges per tick: v = sqrt(2 g h) with g = 9.8 m/s^2
+    // (140 cells/s^2) and h the water standing above (measured up to 400 cells).
+    // The head is followed through flooded passages: where the water column ends at a ceiling,
+    // the scan runs along the water layer under the ceiling to the nearest opening upward (a
+    // shaft, a breach) and carries on up it, so a whole flooded section feels the lake above it.
+    const OUTFLOW_MAX = 6, HEAD_SCAN = 400, SURFACE_REACH = 64, CEILING_REACH = 320, CEILING_HOPS = 3;
+    let lastHead = 0, lastTopX = 0, lastTopY = 0;
+    function opening(cx, row) {
+      // Walk both ways along `row` (all water) for a column whose cell above is water too.
+      for (let k = 1; k <= CEILING_REACH; k += 1) {
+        let open = false;
+        for (let s = -1; s <= 1; s += 2) {
+          const nx = cx + s * k;
+          if (nx < 1 || nx >= W - 1) continue;
+          if (!isWater(mat[row * W + nx])) continue;
+          open = true;
+          if (isWater(mat[(row - 1) * W + nx])) return nx;
+        }
+        if (!open) return -1;   // the water layer under the ceiling ended both ways
+      }
+      return -1;
+    }
+    function outflow(x, y) {
+      let h = 0, cx = x, cy = y - 1, hops = 0;
+      while (h < HEAD_SCAN && cy >= 1) {
+        const m = mat[cy * W + cx];
+        if (isWater(m)) { h += 1; cy -= 1; continue; }
+        if (isAir(m) || hops >= CEILING_HOPS) break;
+        const nx = opening(cx, cy + 1);
+        if (nx < 0) break;
+        cx = nx; hops += 1;
+      }
+      lastHead = h; lastTopX = cx; lastTopY = cy + 1;
+      return Math.max(1, Math.min(OUTFLOW_MAX, Math.round(Math.sqrt(280 * h) / 60)));
+    }
+    // Water is incompressible: water leaving at the bottom lowers the surface where it stands
+    // highest. From the top of the column at (x, top), follow the connected surface sideways and
+    // return the highest surface cell within reach (flat index).
+    function highestSurface(x, top) {
+      let best = top * W + x, bestY = top;
+      for (let s = -1; s <= 1; s += 2) {
+        let cy = top;
+        for (let k = 1; k <= SURFACE_REACH; k += 1) {
+          const cx = x + s * k;
+          if (cx < 1 || cx >= W - 1) break;
+          let j = cy * W + cx;
+          if (isWater(mat[j])) {
+            while (cy > 0 && isWater(mat[j - W])) { cy -= 1; j -= W; }
+          } else if (isAir(mat[j])) {
+            let n = 0;
+            while (n < 8 && cy < H - 1 && isAir(mat[j])) { cy += 1; j += W; n += 1; }
+            if (!isWater(mat[j])) break;
+          } else break;   // the shore or a wall
+          if (cy < bestY) { bestY = cy; best = j; }
+        }
+      }
+      return best;
+    }
+    // Refill an opening at (x, y) that just discharged a cell, from the surface above it. The
+    // air the outflow displaces from below rises back through the water as bubbles.
+    function refill(i, x, y) {
+      if (!isAir(mat[i])) return;
+      if (lastHead >= HEAD_SCAN) shiftColumn(x, y, 1);
+      else {
+        const src = highestSurface(lastTopX, lastTopY);
+        const sy = (src / W) | 0;
+        if (sy >= y || !isWater(mat[src])) shiftColumn(x, y, 1);
+        else {
+          move(src, src % W, sy, i, x, y, 'level');
+          // The lowered surface must keep levelling outward, also into sleeping chunks: wake the
+          // surface around the source and the faces of any steps below it.
+          PW.wakeArea(world, src % W - SURFACE_REACH, sy - 3, src % W + SURFACE_REACH, sy + SURFACE_REACH);
+        }
+      }
+      if (isWater(mat[i]) && (PW.hash3(x, y, world.tick) & 3) === 0) bubble(x, y - 1);
+    }
+    // Bubbles are handed to the particle system (a budget per tick keeps a torrent affordable).
+    let bubbleBudget = 0;
+    function bubble(x, y) {
+      if (!world.emitBubble || bubbleBudget <= 0 || !isWater(mat[y * W + x])) return;
+      bubbleBudget -= 1;
+      world.emitBubble(x, y);
+    }
+
     // Water momentum lives in the cell's two variant bits: bit 7 = sliding, bit 6 = direction (+x).
     // Falling water lands sliding; it keeps going until something blocks it, then stops for good.
     const MOVING = 0x80, RIGHT = 0x40;
@@ -91,7 +176,20 @@
         go += 1;
         if (isAir(mat[ahead + W])) break;            // ran off an edge: fall from here next tick
       }
-      if (go === 0) { mat[i] = M.WATER; return false; }   // blocked: momentum spent
+      if (go === 0) {
+        // Running into standing water, the push carries through it (like a surge): the cell
+        // passes to the far end of the water along its row, if that end is open and within
+        // reach, and the front advances there. A wall or a long run spends the momentum.
+        let k = 1;
+        while (k <= PUSH_REACH && isWater(mat[i + d * k])) k += 1;
+        const end = i + d * k, ex = x + d * k;
+        if (k > 1 && k <= PUSH_REACH && ex > 0 && ex < W - 1 && isAir(mat[end]) && !isAir(mat[end + W])) {
+          move(i, x, y, end, ex, y, 'surge');
+          return true;
+        }
+        mat[i] = M.WATER;   // blocked: momentum spent
+        return false;
+      }
       move(i, x, y, i + d * go, x + d * go, y, 'slide');
       return true;
     }
@@ -106,6 +204,10 @@
         if (!(m & MOVING)) mat[i] = M.WATER | MOVING | (((x + y + world.tick) & 1) ? RIGHT : 0);
         move(i, x, y, j, x, ny, 'fall');
         shiftColumn(x, y, ny - y);
+        // A falling jet plunging into a pool drags air down with it.
+        if (ny - y >= 3 && ny + 3 < H && isWater(mat[j + W]) && (PW.hash3(x, ny, world.tick) % 3) === 0) {
+          bubble(x, ny + 2 + (PW.hash2(x, world.tick) & 3));
+        }
         return true;
       }
       const dir = ((x + y + world.tick) & 1) ? 1 : -1;
@@ -120,10 +222,18 @@
           const d = k ? -dir : dir;
           if (x + d < 1 || x + d >= W - 1 || !isAir(mat[i + d])) continue;
           if (ceiling && !isWater(mat[i - d])) continue;
-          let go = 1;
-          while (go < DISPERSE && x + d * (go + 1) > 0 && x + d * (go + 1) < W - 1 && isAir(mat[i + d * (go + 1)])) go += 1;
-          mat[i] = M.WATER | MOVING | (d > 0 ? RIGHT : 0);
-          move(i, x, y, i + d * go, x + d * go, y, 'squirt');
+          // Outflow under pressure (Torricelli, v = sqrt(2 g h)): with h cells of water standing
+          // above the opening, up to v / 60 cells leave it per tick, each replaced at once from
+          // the highest point of the surface above. Shallow water trickles out; a deep lake gushes.
+          const bursts = outflow(x, y);
+          for (let b = 0; b < bursts; b += 1) {
+            if (!isWater(mat[i]) || !isAir(mat[i + d])) break;
+            let go = 1;
+            while (go < DISPERSE && x + d * (go + 1) > 0 && x + d * (go + 1) < W - 1 && isAir(mat[i + d * (go + 1)])) go += 1;
+            mat[i] = M.WATER | MOVING | (d > 0 ? RIGHT : 0);
+            move(i, x, y, i + d * go, x + d * go, y, 'squirt');
+            if (lastHead > 0) refill(i, x, y);
+          }
           return true;
         }
       }
@@ -242,6 +352,7 @@
       stats.moves = 0;
       stats.kinds = {};
       stamp = (stamp % 255) + 1;
+      bubbleBudget = 60;
       const list = world.activeList;
       // Bottom chunk rows first so falling cells are not processed twice.
       list.sort((a, b) => b - a);

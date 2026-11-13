@@ -82,6 +82,10 @@
       // Wild deco above the new ground in the pad is cleared (grass regrows on the shoulders).
       if (dist === 0) for (let y = goal - 60; y < goal + 4; y += 1) PW.setLayer(world, 'deco', x, y, 0);
     }
+    // Plants and rocks that lost the ground under them (a hilltop cut away) fall, as after a blast.
+    const box = { x0: x0 - reach, y0: padY - 1200, x1: x1 + reach, y1: padY + 300 };
+    if (PW.flora) PW.flora.afterBlast(world, null, box);
+    if (PW.props) PW.props.afterBlast(world, null, box);
   }
 
   // ---- Street paving (district paving palettes from the style lab, scaled) ----------------------------

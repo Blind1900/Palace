@@ -57,16 +57,19 @@ pwApp.explode(lake.x, lake.level + 6, 40, 1.1);
 run(600);
 check(totalWater() === beforeBlast, `water conserved through a blast in the lake (${beforeBlast} -> ${totalWater()})`);
 
-// 3. Crater on flat open ground: flat floor and steep walls.
-let flatX = null;
-for (let x = 600; x < world.width - 600 && flatX === null; x += 37) {
+// 3. Crater on flat open ground: flat floor and steep walls. The flattest wild stretch is levelled
+// first, the way the game terraces a building pad, so the test always has flat ground to blast.
+let flatX = null, bestSpread = Infinity;
+for (let x = 600; x < world.width - 600; x += 37) {
   if (layout.sites.some((s) => x > s.x0 - 300 && x < s.x1 + 300)) continue;
   if (layout.lakes.some((l) => Math.abs(x - l.x) < l.half + 300)) continue;
-  let ok = true;
-  for (let d = -90; d <= 90; d += 10) if (Math.abs(world.groundTop[x + d] - world.groundTop[x]) > 3) ok = false;
-  if (ok) flatX = x;
+  let lo = Infinity, hi = -Infinity;
+  for (let d = -120; d <= 120; d += 10) { lo = Math.min(lo, world.groundTop[x + d]); hi = Math.max(hi, world.groundTop[x + d]); }
+  if (hi - lo < bestSpread) { bestSpread = hi - lo; flatX = x; }
 }
 if (flatX !== null) {
+  PW.settlementTools.terracePad(world, flatX - 120, flatX + 120, world.groundTop[flatX]);
+  run(30);
   const surface = world.groundTop[flatX];
   const r = 48;
   const original = Array.from({ length: 2 * r + 1 }, (_, i) => world.groundTop[flatX - r + i]);

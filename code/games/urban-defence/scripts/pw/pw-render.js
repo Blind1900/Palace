@@ -114,7 +114,8 @@
       const g = grainOf(h);
       if (id === M.WATER) {
         if (waterDepth <= 1) return waterTop;
-        const k = Math.round(256 * (1.05 - Math.min(waterDepth, 36) * 0.01167)) * (g === 0 ? 287 : 256) >> 8;
+        // Full darkening (-42%) is reached WATER_REACH cells from open air.
+        const k = Math.round(256 * (1.05 - Math.min(waterDepth, PW.WATER_REACH) * (0.42 / PW.WATER_REACH))) * (g === 0 ? 287 : 256) >> 8;
         return toned(waterBase, k);
       }
       if (natural[id]) {
@@ -301,6 +302,10 @@
         }
         waterRun[tx] = run;
       }
+      // Close up, water is shaded by its distance to open air in any direction (one body of water
+      // reads as one: a flooded shaft and the tunnel it fills blend seamlessly).
+      const rx0 = x0 + lx0 * step, ry0 = y0 + ly0 * step;
+      const depth = lod <= 1 ? buildWaterDepth(rx0, ry0, x0 + lx1 * step + step - 1, y0 + ly1 * step + step - 1) : null;
       let i = 0;
       for (let ty = 0; ty < h; ty += 1) {
         const y = y0 + (ly0 + ty) * step + half;
@@ -309,11 +314,69 @@
           const isWater = (mat[y * W + x] & ID_MASK) === M.WATER;
           // Rows skipped between samples at coarser levels count as water when this sample is.
           waterRun[tx] = isWater ? waterRun[tx] + (ty === 0 ? 1 : step) : 0;
-          const color = baseColor(x, y, paintChunk, backChunk, waterRun[tx]);
+          let run = waterRun[tx];
+          if (isWater && depth) {
+            // The bright surface line only where open air is directly above.
+            run = y > 0 && (mat[(y - 1) * W + x] & ID_MASK) === M.AIR ? 1
+              : Math.max(2, Math.round(depth[(y - depthY0) * depthW + (x - depthX0)] / 3));
+          }
+          const color = baseColor(x, y, paintChunk, backChunk, run);
           pixels[i++] = outline && color ? outlineShade(color, x, y) : color;
         }
       }
       return image;
+    }
+    // Distance from each water cell to open air through water (3-4 chamfer units, 3 per cell),
+    // over [rx0..rx1] x [ry0..ry1] plus a WATER_REACH margin. Rock and structures block it, so it
+    // measures how deep inside the body of water a cell is, smoothly in every direction.
+    const WATER_CAP = PW.WATER_REACH, WATER_FAR = 255;
+    let depthBuffer = null, depthBlock = null, depthW = 0, depthX0 = 0, depthY0 = 0;
+    function buildWaterDepth(rx0, ry0, rx1, ry1) {
+      let any = false;
+      for (let y = ry0; y <= ry1 && !any; y += 1) {
+        const row = y * W;
+        for (let x = rx0; x <= rx1; x += 1) if ((mat[row + x] & ID_MASK) === M.WATER) { any = true; break; }
+      }
+      if (!any) return null;
+      const px0 = Math.max(0, rx0 - WATER_CAP), py0 = Math.max(0, ry0 - WATER_CAP);
+      const px1 = Math.min(W - 1, rx1 + WATER_CAP), py1 = Math.min(world.height - 1, ry1 + WATER_CAP);
+      const w = px1 - px0 + 1, h = py1 - py0 + 1, n = w * h;
+      if (!depthBuffer || depthBuffer.length < n) { depthBuffer = new Uint8Array(n); depthBlock = new Uint8Array(n); }
+      const d = depthBuffer, block = depthBlock;
+      depthW = w; depthX0 = px0; depthY0 = py0;
+      for (let y = py0, k = 0; y <= py1; y += 1) {
+        const row = y * W;
+        for (let x = px0; x <= px1; x += 1, k += 1) {
+          const id = mat[row + x] & ID_MASK;
+          d[k] = id === M.AIR ? 0 : WATER_FAR;
+          block[k] = id !== M.AIR && id !== M.WATER ? 1 : 0;
+        }
+      }
+      for (let y = 0; y < h; y += 1) for (let x = 0; x < w; x += 1) {
+        const k = y * w + x;
+        if (block[k] || d[k] === 0) continue;
+        let v = d[k];
+        if (x > 0 && !block[k - 1] && d[k - 1] + 3 < v) v = d[k - 1] + 3;
+        if (y > 0) {
+          if (!block[k - w] && d[k - w] + 3 < v) v = d[k - w] + 3;
+          if (x > 0 && !block[k - w - 1] && d[k - w - 1] + 4 < v) v = d[k - w - 1] + 4;
+          if (x < w - 1 && !block[k - w + 1] && d[k - w + 1] + 4 < v) v = d[k - w + 1] + 4;
+        }
+        d[k] = v;
+      }
+      for (let y = h - 1; y >= 0; y -= 1) for (let x = w - 1; x >= 0; x -= 1) {
+        const k = y * w + x;
+        if (block[k] || d[k] === 0) continue;
+        let v = d[k];
+        if (x < w - 1 && !block[k + 1] && d[k + 1] + 3 < v) v = d[k + 1] + 3;
+        if (y < h - 1) {
+          if (!block[k + w] && d[k + w] + 3 < v) v = d[k + w] + 3;
+          if (x < w - 1 && !block[k + w + 1] && d[k + w + 1] + 4 < v) v = d[k + w + 1] + 4;
+          if (x > 0 && !block[k + w - 1] && d[k + w - 1] + 4 < v) v = d[k + w - 1] + 4;
+        }
+        d[k] = v;
+      }
+      return d;
     }
     // Deco never covers terrain: plants and props buried by a debris heap or a sand slide are
     // hidden where the ground now is, and show again if it is dug away.
