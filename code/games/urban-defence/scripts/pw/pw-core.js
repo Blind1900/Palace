@@ -17,6 +17,8 @@
   const M = Object.freeze({
     AIR: 0, GRASS: 1, TOPSOIL: 2, SOIL: 3, CLAY: 4, GRAVEL: 5, STONE: 6, BEDROCK: 7, SAND: 8, ORE: 9,
     WATER: 10, LOOSE_SOIL: 11, LOOSE_STONE: 12, DEBRIS: 13,
+    // Debris that came to rest on the ground and compacted into it (keeps its rubble colours).
+    RUBBLE: 14,
     CONCRETE: 16, BRICK: 17, STEEL: 18, GLASS: 19, WOOD: 20, TILE: 21, MASONRY: 22, FOUNDATION: 23,
     ASPHALT: 24, ROADBED: 25, LINING: 26, BRIDGE: 27, PILLAR: 28, PIPE: 29, CORE: 30,
     // Stairs and stairwell floors: units stand on them from above but climb up through them.
@@ -28,7 +30,8 @@
 
   const phase = new Uint8Array(64);
   const structural = new Uint8Array(64);   // part of a building's load path
-  const ground = new Uint8Array(64);       // counts as the ground surface (footing, sky line)
+  const ground = new Uint8Array(64);       // counts as ground for footing
+  const skyline = new Uint8Array(64);      // natural ground that ends the open sky (bridges and roof debris don't)
   const hardness = new Float32Array(64);   // 0 = no resistance to blasts, 1 = indestructible
   const breaksTo = new Uint8Array(64);     // cell byte left behind (or flung) when shattered
   const palettes = new Array(64);
@@ -119,6 +122,10 @@
     [[255, 164, 20], [236, 148, 16], [255, 186, 60], [222, 136, 14]]);
   define(M.PLATFORM, 'platform', { structural: true, hardness: 0.4, breaksTo: debris(DEBRIS_KIND.CONCRETE) },
     [[120, 116, 108], [112, 108, 101], [128, 124, 115], [106, 102, 96]]);
+  define(M.RUBBLE, 'rubble', { ground: true, hardness: 0.15, breaksTo: M.DEBRIS },
+    [[124, 122, 115], [104, 102, 97], [135, 83, 63], [115, 70, 54], [108, 79, 52], [88, 65, 43], [108, 120, 130], [85, 94, 101]]);
+  for (const id of [M.GRASS, M.TOPSOIL, M.SOIL, M.CLAY, M.GRAVEL, M.STONE, M.BEDROCK, M.SAND, M.ORE, M.WATER,
+    M.LOOSE_SOIL, M.LOOSE_STONE, M.RUBBLE, M.ASPHALT, M.ROADBED, M.LINING, M.PIPE]) skyline[id] = 1;
 
   // ---- Hashing and random numbers ------------------------------------------------------------
   function hash2(x, y) {
@@ -197,10 +204,15 @@
       paint: new Array(chunkCount).fill(null),
       back: new Array(chunkCount).fill(null),
       deco: new Array(chunkCount).fill(null),
-      // Top-most ground cell per column; air above it is open sky.
+      // Sparse per-cell data: owning building/infrastructure id, and FLAG bits.
+      owner: new Array(chunkCount).fill(null),
+      flags: new Array(chunkCount).fill(null),
+      // Top-most natural ground cell per column; air above it is open sky.
       groundTop: new Int32Array(width).fill(height),
       chunkDirty: new Uint8Array(chunkCount),
       chunkVersion: new Uint32Array(chunkCount),
+      // Changed cell rectangle per chunk since the last full-resolution redraw (local coords).
+      dirtyRect: new Int16Array(chunkCount * 4).fill(-1),
       // Simulation: chunks with moving cells, and the cell rectangle that may still move.
       simActive: new Uint8Array(chunkCount),
       simRect: new Int32Array(chunkCount * 4),
@@ -221,6 +233,15 @@
     const c = chunkIndex(world, x, y);
     world.chunkDirty[c] |= bits;
     world.chunkVersion[c] += 1;
+    const r = world.dirtyRect, o = c * 4, lx = x & CHUNK_MASK, ly = y & CHUNK_MASK;
+    if (r[o] < 0) { r[o] = lx; r[o + 1] = ly; r[o + 2] = lx; r[o + 3] = ly; return; }
+    if (lx < r[o]) r[o] = lx; if (ly < r[o + 1]) r[o + 1] = ly;
+    if (lx > r[o + 2]) r[o + 2] = lx; if (ly > r[o + 3]) r[o + 3] = ly;
+  }
+  // Water depth tint reads up to 40 cells above, so water changes also dirty the rows below.
+  function markWaterDirty(world, x, y) {
+    markDirty(world, x, Math.min(world.height - 1, y + 40));
+    markDirty(world, x, y);
   }
   // Wake the simulation around a cell (its chunk, plus neighbours when on a chunk edge).
   function wake(world, x, y) {
@@ -262,6 +283,12 @@
   }
   function id(world, x, y) { return get(world, x, y) & ID_MASK; }
 
+  // Keep the sky line of column x right after cell (x, y) became material `id`.
+  function touchGroundTop(world, x, y, id) {
+    const top = world.groundTop[x];
+    if (skyline[id]) { if (y < top) world.groundTop[x] = y; }
+    else if (top === y) refreshGroundTop(world, x, y + 1);
+  }
   // Set a cell's material. Keeps groundTop, render dirtiness and simulation activity in step.
   function set(world, x, y, value, options) {
     if (x < 0 || y < 0 || x >= world.width || y >= world.height) return;
@@ -270,27 +297,62 @@
     if (previous === value) return;
     world.mat[index] = value;
     const before = previous & ID_MASK, after = value & ID_MASK;
-    if (ground[after] || after === M.WATER) {
-      if (y < world.groundTop[x]) world.groundTop[x] = y;
-    } else if (world.groundTop[x] === y) {
-      refreshGroundTop(world, x);
-    }
+    if (before !== after) touchGroundTop(world, x, y, after);
     if (!options || !options.keepPaint) clearPaintAt(world, x, y);
-    markDirty(world, x, y);
+    if (before === M.WATER || after === M.WATER) markWaterDirty(world, x, y);
+    else markDirty(world, x, y);
     if (!options || !options.quiet) wake(world, x, y);
     else if (before !== after && phase[after] >= PHASE.LIQUID && phase[after] <= PHASE.POWDER) wake(world, x, y);
   }
-  function refreshGroundTop(world, x) {
+  // Swap two cells by flat index (the cell automaton's move). Paint stays put: moving cells
+  // (water, powders) are coloured from their material palette.
+  function swapCells(world, i, j) {
+    const mat = world.mat, W = world.width;
+    const a = mat[i], b = mat[j];
+    mat[i] = b; mat[j] = a;
+    const xi = i % W, yi = (i / W) | 0, xj = j % W, yj = (j / W) | 0;
+    const ai = a & ID_MASK, bi = b & ID_MASK;
+    touchGroundTop(world, xi, yi, bi);
+    touchGroundTop(world, xj, yj, ai);
+    if (ai === M.WATER || bi === M.WATER) { markWaterDirty(world, xi, yi); markWaterDirty(world, xj, yj); }
+    else { markDirty(world, xi, yi); markDirty(world, xj, yj); }
+  }
+  function refreshGroundTop(world, x, from = 0) {
     const { mat, width, height } = world;
-    let y = 0;
-    for (; y < height; y += 1) {
-      const m = mat[y * width + x] & ID_MASK;
-      if (ground[m] || m === M.WATER) break;
-    }
+    let y = Math.max(0, from);
+    for (; y < height; y += 1) if (skyline[mat[y * width + x] & ID_MASK]) break;
     world.groundTop[x] = y;
   }
   function rebuildGroundTop(world) {
     for (let x = 0; x < world.width; x += 1) refreshGroundTop(world, x);
+  }
+
+  // ---- Sparse typed data layers (owner ids, flags) ------------------------------------------------
+  const FLAG = Object.freeze({ LADDER: 1, ROAD: 2, TUNNEL: 4, NOBUILD: 8, SCORCH: 16, CARVED: 32, BRIDGE: 64, HATCH: 128 });
+  function getOwner(world, x, y) {
+    if (x < 0 || y < 0 || x >= world.width || y >= world.height) return 0;
+    const chunk = world.owner[chunkIndex(world, x, y)];
+    return chunk ? chunk[(y & CHUNK_MASK) << CHUNK_SHIFT | x & CHUNK_MASK] : 0;
+  }
+  function setOwner(world, x, y, id) {
+    if (x < 0 || y < 0 || x >= world.width || y >= world.height) return;
+    const c = chunkIndex(world, x, y);
+    let chunk = world.owner[c];
+    if (!chunk) { if (!id) return; chunk = world.owner[c] = new Uint16Array(CHUNK_CELLS); }
+    chunk[(y & CHUNK_MASK) << CHUNK_SHIFT | x & CHUNK_MASK] = id;
+  }
+  function getFlags(world, x, y) {
+    if (x < 0 || y < 0 || x >= world.width || y >= world.height) return 0;
+    const chunk = world.flags[chunkIndex(world, x, y)];
+    return chunk ? chunk[(y & CHUNK_MASK) << CHUNK_SHIFT | x & CHUNK_MASK] : 0;
+  }
+  function setFlag(world, x, y, bit, on = true) {
+    if (x < 0 || y < 0 || x >= world.width || y >= world.height) return;
+    const c = chunkIndex(world, x, y);
+    let chunk = world.flags[c];
+    if (!chunk) { if (!on) return; chunk = world.flags[c] = new Uint8Array(CHUNK_CELLS); }
+    const i = (y & CHUNK_MASK) << CHUNK_SHIFT | x & CHUNK_MASK;
+    chunk[i] = on ? chunk[i] | bit : chunk[i] & ~bit;
   }
 
   // ---- Sparse colour layers -------------------------------------------------------------------
@@ -340,16 +402,19 @@
   PW.PHASE = PHASE;
   PW.DEBRIS_KIND = DEBRIS_KIND;
   PW.ID_MASK = ID_MASK;
-  PW.mat = { phase, structural, ground, hardness, breaksTo, palettes, names };
+  PW.mat = { phase, structural, ground, skyline, hardness, breaksTo, palettes, names };
   PW.CHUNK = CHUNK;
   PW.CHUNK_SHIFT = CHUNK_SHIFT;
   PW.CHUNK_MASK = CHUNK_MASK;
+  PW.CHUNK_CELLS = CHUNK_CELLS;
   PW.DIRTY_BASE = DIRTY_BASE;
   PW.DIRTY_DECO = DIRTY_DECO;
+  PW.FLAG = FLAG;
   Object.assign(PW, {
     abgr, unpack, hash2, hash3, createRandom, createNoise1D, createNoise2D,
-    createWorld, chunkIndex, inside, markDirty, wake, wakeArea, clearSimRect,
-    get, id, set, refreshGroundTop, rebuildGroundTop,
+    createWorld, chunkIndex, inside, markDirty, markWaterDirty, wake, wakeCell, wakeArea, clearSimRect,
+    get, id, set, swapCells, touchGroundTop, refreshGroundTop, rebuildGroundTop,
     getLayer, setLayer, layerCell, clearPaintAt, isSolid, isOpen, groundBelow,
+    getOwner, setOwner, getFlags, setFlag,
   });
 })();

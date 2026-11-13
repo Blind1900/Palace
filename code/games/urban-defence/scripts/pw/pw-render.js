@@ -121,39 +121,44 @@
     }
 
     // ---- Chunk rasters -----------------------------------------------------------------------
-    const scratch = new Map();  // size -> { image, pixels }
-    function scratchImage(size) {
-      let entry = scratch.get(size);
+    const scratch = new Map();  // "w,h" -> { image, pixels }
+    function scratchImage(width, height = width) {
+      const key = width * 1024 + height;
+      let entry = scratch.get(key);
       if (!entry) {
-        const image = new ImageData(size, size);
+        const image = new ImageData(width, height);
         entry = { image, pixels: new Uint32Array(image.data.buffer) };
-        scratch.set(size, entry);
+        scratch.set(key, entry);
       }
       return entry;
     }
     const waterRun = new Int32Array(CHUNK);
 
-    function rasterBase(c, lod) {
+    // Raster a chunk at a level of detail; at full resolution an optional local cell rectangle
+    // [lx0..lx1] x [ly0..ly1] limits the work to the part that changed.
+    function rasterBase(c, lod, lx0 = 0, ly0 = 0, lx1 = CHUNK - 1, ly1 = CHUNK - 1) {
       const cx = c % world.chunksX, cy = (c / world.chunksX) | 0;
       const size = CHUNK >> lod, step = 1 << lod, half = step >> 1;
-      const { image, pixels } = scratchImage(size);
+      if (lod > 0) { lx0 = 0; ly0 = 0; lx1 = size - 1; ly1 = size - 1; }
+      const w = lx1 - lx0 + 1, h = ly1 - ly0 + 1;
+      const { image, pixels } = scratchImage(w, h);
       const paintChunk = world.paint[c], backChunk = world.back[c];
       const x0 = cx << CHUNK_SHIFT, y0 = cy << CHUNK_SHIFT;
       // Water depth above the first sampled row of each column (scan up to 40 cells).
-      for (let tx = 0; tx < size; tx += 1) {
-        const x = x0 + tx * step + half;
+      for (let tx = 0; tx < w; tx += 1) {
+        const x = x0 + (lx0 + tx) * step + half;
         let run = 0;
-        for (let y = y0 + half - 1; y >= 0 && run < 40; y -= 1) {
+        for (let y = y0 + ly0 * step + half - 1; y >= 0 && run < 40; y -= 1) {
           if ((mat[y * W + x] & ID_MASK) !== M.WATER) break;
           run += 1;
         }
         waterRun[tx] = run;
       }
       let i = 0;
-      for (let ty = 0; ty < size; ty += 1) {
-        const y = y0 + ty * step + half;
-        for (let tx = 0; tx < size; tx += 1) {
-          const x = x0 + tx * step + half;
+      for (let ty = 0; ty < h; ty += 1) {
+        const y = y0 + (ly0 + ty) * step + half;
+        for (let tx = 0; tx < w; tx += 1) {
+          const x = x0 + (lx0 + tx) * step + half;
           const isWater = (mat[y * W + x] & ID_MASK) === M.WATER;
           // Rows skipped between samples at coarser levels count as water when this sample is.
           waterRun[tx] = isWater ? waterRun[tx] + (ty === 0 ? 1 : step) : 0;
@@ -185,7 +190,22 @@
       const version = world.chunkVersion[c];
       if (entry && entry.version === version) { entry.used = frame; return entry; }
       if (!allowNew || rastersThisFrame >= RASTER_BUDGET) return entry && entry.canvas ? entry : null;
+      const rect = world.dirtyRect, o = c * 4;
+      if (layer === 'base' && lod === 0 && entry && entry.canvas && rect[o] >= 0) {
+        // Only part of the chunk changed: redraw that rectangle (snapped to 16-cell tiles so the
+        // scratch image sizes stay few) into the cached canvas.
+        const rx0 = rect[o] & ~15, ry0 = rect[o + 1] & ~15, rx1 = rect[o + 2] | 15, ry1 = rect[o + 3] | 15;
+        const area = (rx1 - rx0 + 1) * (ry1 - ry0 + 1);
+        rastersThisFrame += Math.max(0.05, area / (CHUNK * CHUNK));
+        const image = rasterBase(c, 0, rx0, ry0, rx1, ry1);
+        entry.canvas.getContext('2d').putImageData(image, rx0, ry0);
+        rect[o] = -1;
+        entry.version = version;
+        entry.used = frame;
+        return entry;
+      }
       rastersThisFrame += 1;
+      if (layer === 'base' && lod === 0) rect[o] = -1;
       const image = layer === 'deco' ? rasterDeco(c, lod) : rasterBase(c, lod);
       if (!entry) { entry = { canvas: null, version, used: frame }; cache.set(key, entry); }
       entry.version = version;

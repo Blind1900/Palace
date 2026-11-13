@@ -27,8 +27,10 @@
 //   sleep(ms)
 //   toClient(worldX, worldY)    -> {x, y} viewport coordinates of a world point (uses worldToScreen)
 //   worldClick(worldX, worldY)  real click on a world point
-//   focusWorld(worldX, worldY, zoomFactor)  centre the camera on a world point (zoomFactor x fit zoom)
+//   focusWorld(worldX, worldY, zoomFactor)  centre the camera on a world point (zoomFactor x fit zoom;
+//                           on pixel-world.html it is a zoom step index instead)
 // Page globals from scripts/main.js (commandControl, missileControl, buildingBlueprints, cores, camera, ...) are in scope.
+// On pixel-world.html the pixel world is window.pwApp (world, layout, renderer, focus, toClient, ...).
 // Exit code: 1 when the page throws, logs console errors, fails to load a file, or a scenario check FAILs.
 const fs = require('node:fs'), path = require('node:path'), http = require('node:http'), os = require('node:os');
 const { spawn } = require('node:child_process');
@@ -73,6 +75,7 @@ const PAGE_HELPERS = `(() => {
   window.wheel = (x, y, deltaY) => cdp('wheel', { x, y, deltaY });
   window.sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   window.toClient = (worldX, worldY) => {
+    if (window.pwApp) return window.pwApp.toClient(worldX, worldY);
     const canvasElement = document.getElementById('game-canvas');
     const rect = canvasElement.getBoundingClientRect();
     const screen = worldToScreen(worldX, worldY);
@@ -80,6 +83,8 @@ const PAGE_HELPERS = `(() => {
   };
   window.worldClick = (worldX, worldY) => { const point = toClient(worldX, worldY); return click(point.x, point.y); };
   window.focusWorld = (worldX, worldY, zoomFactor = 4) => {
+    // Pixel world: zoomFactor is a zoom step index (-1 fit, 4 = 1 px per cell, 7 = 4 px per cell).
+    if (window.pwApp) { window.pwApp.focusWorld(worldX, worldY, zoomFactor); return new Promise(requestAnimationFrame); }
     camera.zoom = getFitZoom() * zoomFactor;
     camera.x = worldX - viewport.width / (2 * camera.zoom);
     camera.y = worldY - viewport.height / (2 * camera.zoom);
@@ -216,7 +221,7 @@ async function main() {
     report.url = `http://127.0.0.1:${port}/${page}${args.params ? `?${args.params}` : ''}`;
     await send('Page.navigate', { url: report.url });
 
-    const readyExpression = String(args.ready || "document.readyState === 'complete' && typeof commandControl !== 'undefined' && typeof missileControl !== 'undefined'");
+    const readyExpression = String(args.ready || "document.readyState === 'complete' && ((typeof commandControl !== 'undefined' && typeof missileControl !== 'undefined') || (window.pwApp && window.pwApp.ready))");
     const readyDeadline = Date.now() + 30000;
     let ready = false;
     while (Date.now() < readyDeadline) {

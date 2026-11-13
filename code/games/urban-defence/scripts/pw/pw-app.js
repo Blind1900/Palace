@@ -71,5 +71,12 @@
   requestAnimationFrame(frame);
 
   window.pwApp = { world, layout, renderer, seed, timings, ready: true,
-    focus: (x, y, zoomIndex) => renderer.focus(x, y, zoomIndex) };
+    focus: (x, y, zoomIndex) => renderer.focus(x, y, zoomIndex),
+    focusWorld: (x, y, zoomIndex) => renderer.focus(x, y, zoomIndex),
+    // Viewport (client) coordinates of a world cell, for real mouse input in harness scenarios.
+    toClient: (x, y) => {
+      const rect = canvas.getBoundingClientRect();
+      const screen = renderer.worldToScreen(x + 0.5, y + 0.5);
+      return { x: rect.left + screen.x, y: rect.top + screen.y };
+    } };
 })();
