@@ -10,12 +10,14 @@ const W = world.width;
 const top = (x) => PW.get(world, x, world.groundTop[x]) & 63;
 const count = (x0, y0, x1, y1, ids) => { let n = 0; for (let y = y0; y <= y1; y += 1) for (let x = x0; x <= x1; x += 1) if (ids.includes(PW.get(world, x, y) & 63)) n += 1; return n; };
 
-// 1. A meadow fire. Find the longest gentle run of grass away from settlements and water.
+// 1. A meadow fire. Find the longest gentle run of grass away from settlements (and their
+// fields, pumps and defence lines) and water.
+const worked = (x) => (world.settlements || []).some((s) => (s.footprints || []).some(([a, b]) => x > a - 60 && x < b + 60));
 let best = null;
 for (let x = 400; x < W - 400; x += 1) {
-  if (layout.sites.some((s) => x > s.x0 - 200 && x < s.x1 + 200) || layout.lakes.some((l) => x > (l.left ?? l.x - l.half) - 100 && x < (l.right ?? l.x + l.half) + 100)) continue;
+  if (layout.sites.some((s) => x > s.x0 - 200 && x < s.x1 + 200) || worked(x) || layout.lakes.some((l) => x > (l.left ?? l.x - l.half) - 100 && x < (l.right ?? l.x + l.half) + 100)) continue;
   let n = 0;
-  while (x + n < W - 400 && top(x + n) === M.GRASS && Math.abs(world.groundTop[x + n] - world.groundTop[x]) < 60) n += 1;
+  while (x + n < W - 400 && top(x + n) === M.GRASS && !worked(x + n) && Math.abs(world.groundTop[x + n] - world.groundTop[x]) < 60) n += 1;
   if (!best || n > best.n) best = { x, n };
   x += n;
 }

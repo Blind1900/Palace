@@ -137,7 +137,8 @@
       const worldX = Math.round(lot.x - canvas.body.left - width / 2);
       const result = PW.foundations.place(world, canvas, worldX, { style: lot.style, owner: placed.length + 1 });
       if (!result) continue;
-      placed.push({ ...result.stamp, style: lot.style, kind: lot.kind, plan: result.plan, walls: result.walls, under: result.under, cores: result.cores, owner: placed.length + 1 });
+      placed.push({ ...result.stamp, style: lot.style, kind: lot.kind, plan: result.plan, walls: result.walls, under: result.under, cores: result.cores,
+        works: result.works, owner: placed.length + 1 });
     }
     return placed;
   }

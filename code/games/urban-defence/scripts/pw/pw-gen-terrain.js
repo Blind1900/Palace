@@ -6,6 +6,16 @@
   const { M } = PW;
 
   const smooth = (t) => { t = Math.min(1, Math.max(0, t)); return t * t * (3 - 2 * t); };
+  // A neutral site's relief over its level: a tilt of up to 80 cells across it and a swell of
+  // 10-26 cells every 600-1000 (slopes up to about 1:3). Drawn from the site's position, so the
+  // rest of the layout's random sequence is unchanged.
+  function siteRelief(site, x) {
+    if (site.kind !== 'neutral') return 0;
+    const h = (k) => (PW.hash2(site.x0, k) & 1023) / 1023;
+    const tilt = (h(1) * 2 - 1) * 80, amp = 10 + h(2) * 16, period = 600 + h(3) * 400, phase = h(4) * Math.PI * 2;
+    const u = (x - site.x0) / (site.x1 - site.x0);
+    return tilt * (smooth(u) - 0.5) + amp * Math.sin((x - site.x0) / period * Math.PI * 2 + phase);
+  }
 
   function planLayout(world, random) {
     const W = world.width;
@@ -96,11 +106,12 @@
       // Edges of the map rise into hills.
       const edge = Math.min(x, W - 1 - x);
       if (edge < 380) y -= Math.pow(1 - edge / 380, 2) * 260;
-      // Settlement sites are flattened to their pad level with smooth shoulders.
+      // Settlement sites are eased towards their level with smooth shoulders: bases flat, neutral
+      // towns keeping a rolling relief their buildings are set into.
       for (const site of layout.sites) {
         const inside = Math.min(x - site.x0, site.x1 - x);
         const blend = smooth((inside + 260) / 260);
-        if (blend > 0) y = y + (site.level + hills[4](x) * 0.6 - y) * blend;
+        if (blend > 0) y = y + (site.level + hills[4](x) * 0.6 + siteRelief(site, x) - y) * blend;
       }
       for (const lake of layout.lakes) {
         const t = Math.abs(x - lake.x) / lake.half;

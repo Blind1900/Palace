@@ -20,20 +20,20 @@
     return {
       cells,
       put(x, y, color) { cells.push(x | 0, y | 0, rgb(color)); },
-      commit(groundY) {
+      commit() {
         for (let i = 0; i < cells.length; i += 3) {
           if ((PW.get(world, cells[i], cells[i + 1]) & 63) !== M.AIR) continue;   // props stand in open air only
           PW.setLayer(world, 'deco', cells[i], cells[i + 1], cells[i + 2]);
           if (owner) PW.setOwner(world, cells[i], cells[i + 1], owner);
         }
-        // Lamp light pools tint the street surface below each lamp head.
+        // Lamp light pools tint the street surface below each lamp head (following the ground).
         for (const pool of this.pool || []) {
           for (let dx = -pool.radius * 2; dx <= pool.radius * 2; dx += 1) {
             const t = 1 - Math.abs(dx) / (pool.radius * 2);
-            const x = pool.x + dx;
-            const current = PW.getLayer(world, 'paint', x, groundY);
+            const x = pool.x + dx, y = world.groundTop[x];
+            const current = PW.getLayer(world, 'paint', x, y);
             if (!current) continue;
-            PW.setLayer(world, 'paint', x, groundY, rgb(mix(PW.unpack(current), pool.color, 0.45 * t * t)));
+            PW.setLayer(world, 'paint', x, y, rgb(mix(PW.unpack(current), pool.color, 0.45 * t * t)));
           }
         }
       },
@@ -174,9 +174,11 @@
     }
   }
 
-  function railing(p, style, x0, x1, g) {
+  // g is the ground row, or g(x) where the railing follows sloping ground.
+  function railing(p, style, x0, x1, ground) {
     const C = COLORS[style];
     for (let x = x0; x <= x1; x += 1) {
+      const g = typeof ground === 'function' ? ground(x) : ground;
       if (style === 'gothic') { p.put(x, g - 10, C.rail); if (x % 6 === 0) for (let dy = 1; dy < 10; dy += 1) p.put(x, g - dy, C.rail); if (x % 12 === 0) p.put(x, g - 12, C.ornament); }
       else if (style === 'asian') { p.put(x, g - 8, C.stone); p.put(x, g - 9, [58, 56, 56]); if (x % 12 === 0) for (let dy = 1; dy < 8; dy += 1) p.put(x, g - dy, C.stone); }
       else { p.put(x, g - 9, C.rail); if (x % 12 === 0) { for (let dy = 1; dy < 9; dy += 1) p.put(x, g - dy, C.post); p.put(x, g - 10, C.light); } }
@@ -233,10 +235,18 @@
     world.districts = [];
     for (const settlement of world.settlements || []) {
       const list = settlement.buildings.slice().sort((p, q) => p.body.left - q.body.left);
+      // Props stand on the street between the buildings' bases (walls, stages and steps on
+      // sloping ground), each on a stretch level enough for it; the ground row is the lowest
+      // under it, so nothing hangs in the air.
+      const gAt = (x) => world.groundTop[x];
+      const standAt = (x0, w, tolerance = 1) => {
+        let top = Infinity, bottom = -Infinity;
+        for (let x = x0; x < x0 + w; x += 1) { top = Math.min(top, gAt(x)); bottom = Math.max(bottom, gAt(x)); }
+        return bottom - top <= tolerance ? bottom : null;
+      };
       for (let i = 0; i + 1 < list.length; i += 1) {
         const a = list[i], b = list[i + 1];
         const gap = b.body.left - a.body.right - 1;
-        const g = settlement.padY;
         const owner = a.id;
         const p = prop(world, owner);
         const report = { between: [a.id, b.id], gap, props: [] };
@@ -245,40 +255,44 @@
           const bridge = skybridge(world, a, b, owner);
           report.props.push(bridge ? `skybridge@storey${bridge.storey}` : 'no bridge (no shared floor)');
         }
-        const left = a.body.right + 1, right = b.body.left - 1;
+        const left = (a.works ? a.works[1] : a.body.right) + 1, right = (b.works ? b.works[0] : b.body.left) - 1;
+        const room = right - left + 1;
         const used = [];
-        if (gap >= 28) {
-          lamp(p, a.style, left + 6, g, 1); lamp(p, b.style, right - 6, g, -1);
-          used.push([left, left + 14], [right - 14, right]);
-          report.props.push(`${a.style} lamp`, `${b.style} lamp`);
+        if (room >= 28) {
+          const gl = standAt(left + 3, 7), gr = standAt(right - 9, 7);
+          if (gl !== null) { lamp(p, a.style, left + 6, gl, 1); used.push([left, left + 14]); report.props.push(`${a.style} lamp`); }
+          if (gr !== null) { lamp(p, b.style, right - 6, gr, -1); used.push([right - 14, right]); report.props.push(`${b.style} lamp`); }
         }
         const mid = Math.round((left + right) / 2);
-        if (gap >= 80) {
-          if (mixed) { parkTree(world, p, mid, g, random); report.props.push('park tree (style boundary)'); used.push([mid - 30, mid + 30]); }
-          else { landmark(p, a.style, mid, g); report.props.push(`${a.style} landmark`); used.push([mid - 38, mid + 38]); }
+        if (room >= 80) {
+          const gm = mixed ? standAt(mid - 26, 53, 3) : standAt(mid - 38, 77, 2);
+          if (gm !== null && mixed) { parkTree(world, p, mid, gm, random); report.props.push('park tree (style boundary)'); used.push([mid - 30, mid + 30]); }
+          else if (gm !== null) { landmark(p, a.style, mid, gm); report.props.push(`${a.style} landmark`); used.push([mid - 38, mid + 38]); }
         }
-        if (gap >= 56) {
+        if (room >= 56) {
           const style = mixed ? (random() < 0.5 ? a.style : b.style) : a.style;
           const list2 = FURNITURE[style];
-          let count = Math.floor(gap / 32), k = 0;
+          let count = Math.floor(room / 32), k = 0;
           for (let x = left + 18; x < right - 18 && count > 0; x += 6) {
             const name = list2[(k + i) % list2.length];
             const w = FURNITURE_WIDTH[name];
             if (x + w > right - 16 || used.some(([u0, u1]) => x < u1 + 3 && x + w > u0 - 3)) continue;
-            furniture(p, style, name, x, g);
+            const gf = standAt(x, w);
+            if (gf === null) continue;
+            furniture(p, style, name, x, gf);
             used.push([x, x + w]);
             report.props.push(name);
             x += w + 4; count -= 1; k += 1;
           }
         }
-        if (gap >= 20) {
+        if (room >= 20) {
           // Railings on the stretches nothing else uses.
           let x = left + 2;
           const sorted = used.slice().sort((u, v) => u[0] - v[0]);
-          for (const [u0, u1] of sorted) { if (u0 - 4 > x + 10) railing(p, a.style, x, u0 - 4, g); x = Math.max(x, u1 + 4); }
-          if (right - 2 > x + 10) railing(p, b.style, x, right - 2, g);
+          for (const [u0, u1] of sorted) { if (u0 - 4 > x + 10) railing(p, a.style, x, u0 - 4, gAt); x = Math.max(x, u1 + 4); }
+          if (right - 2 > x + 10) railing(p, b.style, x, right - 2, gAt);
         }
-        p.commit(g);
+        p.commit();
         world.districts.push(report);
       }
     }

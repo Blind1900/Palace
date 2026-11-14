@@ -95,11 +95,11 @@
   }
 
   // ---- Uphill: cut, forecourt, retaining wall, steps -------------------------------------------------
-  function retainingWall(world, p, side, owner) {
+  // Where the wall on `side` goes and how it is climbed (no cells written). null if no wall is needed.
+  function wallLayout(p, side) {
     const { style, G, natural } = p;
     const edge = side < 0 ? p.x0 : p.x1;
     const at = (k) => edge + side * k;
-    const P = STYLES[style];
     const H0 = G - natural(at(1));
     if (H0 <= 0) return null;
     const T = style === 'asian' ? 8 : 6;
@@ -127,8 +127,16 @@
       L = layout(Math.min(COURT_MAX, L.court + (L.Hw + 4 - L.room) + 2));
     }
     if (L.Hw + 4 > L.room) L = layout(COURT_MIN);
-    const { court, wallX, H, faceAt, wallTop, Hw, startX, room } = L;
-    const thick = (h) => T + (style === 'asian' ? Math.round((H - Math.max(0, h)) * 0.08) : 0);
+    const thick = (h) => T + (style === 'asian' ? Math.round((L.H - Math.max(0, h)) * 0.08) : 0);
+    // (the far side of the wall top includes an ishigaki wall's tiled cap, one cell past the stones)
+    return { ...L, side, edge, at, T, thick, access: L.Hw + 4 <= L.room ? 'steps' : 'ladder', far: L.faceAt(L.Hw) + side * (Math.max(thick(L.Hw), T) + 1) };
+  }
+  function retainingWall(world, p, side, owner) {
+    const L = wallLayout(p, side);
+    if (!L) return null;
+    const { style, G, natural } = p;
+    const P = STYLES[style];
+    const { edge, at, T, thick, court, wallX, H, faceAt, wallTop, Hw, startX, access } = L;
     // Cut the forecourt down to the floor: every column in front of the wall's face is opened to
     // the sky (the face leans back into the hill as it rises when battered).
     for (let h = 1; h <= Hw + 2; h += 1) {
@@ -174,8 +182,7 @@
     }
     // Steps from the top of the wall down the forecourt towards the door (45°, 4-cell steps), or a
     // ladder up the face where the court is too narrow for the flight.
-    let access = 'steps';
-    if (Hw + 4 <= room) {
+    if (access === 'steps') {
       for (let i = 0; wallTop + i * 4 < G; i += 1) {
         const surface = wallTop + i * 4;
         for (let j = 0; j < 4; j += 1) {
@@ -184,7 +191,6 @@
         }
       }
     } else {
-      access = 'ladder';
       const rail = style === 'asian' ? C.asian.post : style === 'gothic' ? C.gothic.stoneDark : C.modern.steelDark;
       const rung = style === 'asian' ? C.asian.beamLit : style === 'gothic' ? [96, 92, 100] : C.modern.steel;
       // It leans on the face of a battered ishigaki wall; elsewhere it stands clear of the base course.
@@ -197,7 +203,7 @@
         if (owner) PW.setOwner(world, x, y, owner);
       }
     }
-    return { side, edge, wallX, court, height: Hw, top: wallTop, access, far: faceAt(Hw) + side * thick(Hw),
+    return { side, edge, wallX, court, height: Hw, top: wallTop, access, far: L.far,
       ladderAt: access === 'ladder' ? (y) => (style === 'asian' ? faceAt(G - y) : faceAt(0)) - side * 4 : null };
   }
   function wallCell(style, x, y, t, h, H, P) {
@@ -225,6 +231,25 @@
   }
 
   // ---- Downhill: deck, stage and the structure under them ----------------------------------------------
+  // How the stage on `side` is left (no cells written): down a 1:2 vehicle ramp from a hangar, a
+  // 45° flight of steps where it meets the slope within a short run, a ladder where the hill falls
+  // away about as fast as the steps would, or level with the ground.
+  const RUN = 96;
+  const treadRow = (G, k) => G + 4 * (((k - 1) >> 2) + 1);
+  function stagePlan(p, side) {
+    const { G, natural } = p;
+    const end = (side < 0 ? p.x0 : p.x1) + side * STYLE[p.style].stage;
+    const out = (k) => end + side * k;
+    if (side === p.hangarSide) {
+      let k = 1;
+      while (k <= RUN * 2 && G + (k >> 1) < natural(out(k))) k += 1;
+      return { side, end, out, access: 'ramp', run: k - 1 };
+    }
+    if (natural(out(2)) - G < 6) return { side, end, out, access: 'level', run: 0 };
+    let n = 1;
+    while (n <= RUN && treadRow(G, n) < natural(out(n))) n += 1;
+    return n > RUN ? { side, end, out, access: 'ladder', run: 8, ladderX: out(5) } : { side, end, out, access: 'steps', run: n - 1 };
+  }
   function underStructure(world, p, owner) {
     const { style, G } = p;
     const S = STYLE[style];
@@ -239,13 +264,13 @@
     for (const side of p.downhill) {
       const edge = side < 0 ? p.x0 : p.x1;
       for (let k = 1; k <= S.stage; k += 1) cols.push(edge + side * k);
-      stages.push({ side, end: edge + side * S.stage });
+      stages.push(stagePlan(p, side));
     }
     if (!cols.length) return null;
     cols.sort((a, b) => a - b);
     const D = S.deck;
-    // Plinth where the ground is only a little lower than the floor (under the stage as well).
-    for (let x = Math.min(p.x0, ...cols); x <= Math.max(p.x1, ...cols); x += 1) {
+    // The plinth carries on under the stage where the ground there is only a little lower.
+    for (const x of cols) {
       const g = ground(world, x);
       if (g > G && g <= G + PLINTH) for (let y = G; y < g + (g > G + FLAT ? EMBED : 0); y += 1) put(world, x, y, M.FOUNDATION, [118, 116, 110], owner);
     }
@@ -388,36 +413,26 @@
     // Down from the end of the stage: a 45° flight of steps where it meets the slope within a
     // short run (timber treads on posts, a solid stone perron, concrete treads on columns), or a
     // ladder where the hill falls away about as fast as the steps would.
-    const RUN = 96;
     const stepMat = style === 'asian' ? M.WOOD : style === 'gothic' ? M.MASONRY : M.CONCRETE;
     for (const st of stages) {
-      const out = (k) => st.end + st.side * k;
-      const treadAt = (k) => G + 4 * (((k - 1) >> 2) + 1);
-      if (p.natural(out(2)) - G < 6 && st.side !== p.hangarSide) { st.access = 'level'; continue; }
-      if (st.side === p.hangarSide) {
+      const { out } = st;
+      if (st.access === 'level') continue;
+      if (st.access === 'ramp') {
         // Vehicles leave a hangar down a 1:2 ramp (the road grade), paved on a solid embankment
         // faced like the style's retaining walls.
         const pave = PW.settlementTools ? PW.settlementTools.PAVING[style] : null;
-        let k = 1;
-        for (; k <= RUN * 2; k += 1) {
+        for (let k = 1; k <= st.run; k += 1) {
           const x = out(k), s = G + (k >> 1), g = p.natural(x);
-          if (s >= g) break;
           for (let y = k === 1 ? Math.min(s, G + D - 1) : s; y < g + EMBED; y += 1) {
             const c = y === s ? (pave ? pave.paving : [96, 96, 92]) : y === s + 1 ? (pave ? pave.base : [80, 76, 70]) : wallCell(style, x, y, 1, y - s, 99, P);
             put(world, x, y, style === 'modern' ? M.CONCRETE : M.MASONRY, c, owner);
           }
         }
-        st.access = 'ramp';
-        st.run = k - 1;
         continue;
       }
-      let n = 1;
-      while (n <= RUN && treadAt(n) < p.natural(out(n))) n += 1;
-      if (n > RUN) {
-        st.access = 'ladder';
+      if (st.access === 'ladder') {
         const rail = style === 'asian' ? C.asian.post : style === 'gothic' ? C.gothic.stoneDark : C.modern.steelDark;
         const rung = style === 'asian' ? C.asian.beamLit : style === 'gothic' ? [96, 92, 100] : C.modern.steel;
-        st.ladderX = out(5);
         for (let d = 1; d <= 8; d += 1) {
           const x = out(d);
           for (let y = G - 6; y < p.natural(x); y += 1) {
@@ -429,11 +444,9 @@
         }
         continue;
       }
-      st.access = 'steps';
-      st.run = n - 1;
       const postEvery = style === 'asian' ? 8 : 12;
-      for (let k = 1; k < n; k += 1) {
-        const x = out(k), s = treadAt(k), g = p.natural(x);
+      for (let k = 1; k <= st.run; k += 1) {
+        const x = out(k), s = treadRow(G, k), g = p.natural(x);
         // The first tread is tied into the deck; posts (and the last steps) go down to the ground.
         const top = k === 1 ? Math.min(s, G + D - 1) : s;
         const toGround = style === 'gothic' || k % postEvery < 2 || g - s <= 9;
@@ -459,19 +472,47 @@
     }
   }
 
+  // ---- Measure ----------------------------------------------------------------------------------------
+  // The columns [left, right] that place() would build on for this canvas at worldX (walls,
+  // forecourts, stages, steps, ramps and buttresses), without writing anything. null if the lot
+  // can't take the building.
+  function measure(world, canvas, worldX, style) {
+    const p = plan(world, canvas, worldX, style);
+    if (!p) return null;
+    let left = p.x0 - 2, right = p.x1 + 2;
+    const reach = (side, x) => { if (side < 0) left = Math.min(left, x); else right = Math.max(right, x); };
+    for (const side of p.uphill) {
+      const L = wallLayout(p, side);
+      if (L) reach(side, L.far + side * 2);
+    }
+    for (const side of p.downhill) {
+      const st = stagePlan(p, side);
+      // A gothic stage ends in a buttress stepping out 3 cells for every 16 it falls.
+      const buttress = p.style === 'gothic' ? 3 + Math.floor((p.natural(st.end) + EMBED - p.G) / 16) * 3 : 0;
+      reach(side, st.end + side * (Math.max(st.run, buttress) + 2));
+    }
+    return { plan: p, left, right };
+  }
+
   // ---- Place a building with its base ------------------------------------------------------------------
   // Plans the floor, cuts and builds the base, stamps the canvas at the floor (its buried cores are
   // set into the real ground under it) and returns { stamp, plan }. null if the lot can't take it.
   function place(world, canvas, worldX, options = {}) {
     const style = options.style || (canvas.meta && canvas.meta.style) || 'modern';
-    const p = plan(world, canvas, worldX, style);
-    if (!p) return null;
+    const extent = measure(world, canvas, worldX, style);
+    if (!extent) return null;
+    const p = extent.plan;
     const owner = options.owner || 0;
     const { G } = p;
     // Clear plants over the lot, then cut the building's own footprint down to the floor.
     for (let x = p.x0 - 2; x <= p.x1 + 2; x += 1) {
       for (let y = Math.min(ground(world, x), G) - 240; y < Math.min(ground(world, x), G); y += 1) PW.setLayer(world, 'deco', x, y, 0);
       for (let y = Math.min(ground(world, x), G); y < G; y += 1) dig(world, x, y);
+    }
+    // A plinth under the floor wherever the ground is only a little lower (on a level lot too).
+    for (let x = p.x0; x <= p.x1; x += 1) {
+      const g = p.natural(x);
+      if (g > G && g <= G + PLINTH) for (let y = G; y < g + (g > G + FLAT ? EMBED : 0); y += 1) put(world, x, y, M.FOUNDATION, [118, 116, 110], owner);
     }
     const walls = p.uphill.map((side) => retainingWall(world, p, side, owner)).filter(Boolean);
     const under = underStructure(world, p, owner);
@@ -485,8 +526,8 @@
       core(world, wx, g + depth, owner);
       cores.push({ x: wx, y: g + depth });
     }
-    return { stamp, plan: p, walls, under, cores };
+    return { stamp, plan: p, walls, under, cores, works: [extent.left, extent.right] };
   }
 
-  PW.foundations = { plan, place, core, STYLE, CUT_MAX };
+  PW.foundations = { plan, measure, place, core, STYLE, CUT_MAX };
 })();

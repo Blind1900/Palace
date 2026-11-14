@@ -117,6 +117,8 @@ for (const lot of placed) {
   const buried = lot.cores.filter((c) => c.y > G);
   const ok = buried.filter((c) => id(c.x, c.y) === M.CORE && world.groundTop[c.x] < c.y - 3);
   check(ok.length === buried.length && buried.length > 0, `${name}: cores buried (${ok.length}/${buried.length})`);
+  // measure() foresaw every column the works took.
+  check(lot.works && lot.works[0] <= ox0 && lot.works[1] >= ox1, `${name}: measured extent ${lot.works} covers the works ${ox0}..${ox1}`);
   // The ground beyond the works is as it was.
   let changed = 0;
   for (const x of [...Array(60).keys()].flatMap((k) => [ox0 - 1 - k, ox1 + 1 + k])) if (world.groundTop[x] !== world.surface0[x]) changed += 1;

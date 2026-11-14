@@ -82,9 +82,17 @@ check(opened && opened.mined > 0, `the new crew starts mining (${opened ? opened
 await view('mn-new-op', opened ? (opened.room.x0 + opened.room.x1) / 2 : at.x, at.y, 5);
 
 // 4. Developed enemy lining shows as blocked while planning.
+// The plan is aimed at the developed lining around the right side's mining room.
 PW.tunnels.advanceTo(world, PW.tunnels.state(world).time + 600);
 const rightOp = ops.find((o) => o.side === 'right');
-pwApp.planDig('left', { x: rightOp.room.x0 + 10, y: rightOp.floor - 20 });
-check(/Blocked/.test(pwApp.preview.note), `planning into the other side's developed tunnels says it is blocked ("${pwApp.preview.note}")`);
+let lining = null;
+for (let y = rightOp.floor - 60; y <= rightOp.floor + 10 && !lining; y += 1) {
+  for (let x = rightOp.room.x0 - 20; x <= rightOp.room.x1 + 20; x += 1) {
+    const net = PW.tunnels.networkAt(world, x, y);
+    if (net && net.side === 'right' && (PW.get(world, x, y) & 63) === M.REINFORCED) { lining = { x, y }; break; }
+  }
+}
+if (lining) pwApp.planDig('left', lining);
+check(lining && /Blocked/.test(pwApp.preview.note), `planning into the other side's developed tunnels says it is blocked ("${lining ? pwApp.preview.note : 'no developed lining found'}")`);
 pwApp.setPaused(false);
 return { checks, shots: shots.length, ops: ops.map((o) => `${o.side} ${o.node.tier}: mined ${o.mined}, delivered ${o.delivered}, stored ${o.stored}`), pipes: pipes.stats };

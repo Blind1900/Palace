@@ -22,6 +22,7 @@
 
   // ---- Ground under a plant ------------------------------------------------------------------------
   const FLAT = Object.assign(() => 0, { surface: () => 0 });
+  const MIN_COVER_ROCKS = 4;   // trooper-sized rocks the wild land always holds
   // Reads the terrain around column x relative to the anchor row and remembers every value it was
   // asked for, so the exact same plant can be regenerated later (to fell it after a blast).
   function makeGround(world, x, row, wet) {
@@ -643,7 +644,7 @@
     const stats = world.vegetationStats = { candidates: 0, water: 0, ground: 0, crowded: 0, rocks: 0, planted: 0, tops: {} };
     for (let x = 80; x < W - 80;) {
       const density = forest(x);
-      const gap = density > 0.25 ? random.int(18, 40) : density > -0.2 ? random.int(40, 90) : random.int(90, 180);
+      const gap = density > 0.25 ? random.int(18, 40) : density > -0.2 ? random.int(36, 80) : random.int(70, 140);
       x += gap;
       // Skip straight over streets, runways and fields: only wild land is sampled.
       while (x < W - 80 && blocked[x]) x += 1;
@@ -678,6 +679,14 @@
     }
     // Boulders (more on high and steep ground, scree), settled into the slope and kept off the
     // roots. Rocks big enough to hide a crouched trooper are solid cover; pebbles stay scenery.
+    const coverRock = (x, size) => {
+      const row = world.groundTop[x];
+      const rock = PW.props.surfaceBoulder(PW.createRandom(next()), size, PW.props.floorProfile(world, x, row, row - Math.round(size * 2) - 40));
+      const record = PW.props.place(world, rock, x, row, { kind: 'boulder', setting: 'surface' });
+      if (record) markFeet(record.x0, record.x1, 4);
+      return !!record;
+    };
+    let cover = 0;
     for (let i = 0; i < 480; i += 1) {
       const x = random.int(60, W - 60);
       if (blocked[x] || !rocky(x) || nearWater(x, 8)) continue;
@@ -689,13 +698,18 @@
       const lie = Math.abs(world.groundTop[Math.min(W - 1, x + Math.round(size))] - world.groundTop[Math.max(0, x - Math.round(size))]) / (2 * size);
       if (lie > 1.2) size = random.range(5, 9);
       if (size >= 11 && PW.props) {
-        const row = world.groundTop[x];
-        const rock = PW.props.surfaceBoulder(PW.createRandom(next()), size, PW.props.floorProfile(world, x, row, row - Math.round(size * 2) - 40));
-        const record = PW.props.place(world, rock, x, row, { kind: 'boulder', setting: 'surface' });
-        if (record) markFeet(record.x0, record.x1, 4);
+        if (coverRock(x, size)) cover += 1;
       } else {
         grow('boulder', x, size);
       }
+    }
+    // The wild land always holds a few rocks big enough to shelter a crouched trooper: more tries
+    // on gentle ground if chance left too few.
+    for (let i = 0; i < 400 && cover < MIN_COVER_ROCKS; i += 1) {
+      const x = random.int(60, W - 60), size = random.range(12, 17);
+      if (blocked[x] || !rocky(x) || nearWater(x, 8) || slopeAt(x) > 0.5) continue;
+      if (!clearOf(x, size + 6) || !footClear(x, size + 4)) continue;
+      if (coverRock(x, size)) cover += 1;
     }
     // Reeds in the shallows and on the banks of lakes, rising from the bed.
     for (const lake of layout.lakes) {

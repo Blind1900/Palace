@@ -94,12 +94,15 @@
     asian: { paving: [176, 156, 120], joint: [120, 70, 50], base: [96, 80, 60] },
     modern: { paving: [64, 66, 72], joint: [226, 190, 60], base: [44, 44, 48] },
   };
+  // The street's top row is padY, or padY(x) where it follows the ground (null: no street there).
   function paveStreet(world, x0, x1, padY, styleAt) {
     for (let x = x0; x <= x1; x += 1) {
+      const top = typeof padY === 'function' ? padY(x) : padY;
+      if (top === null || top === undefined) continue;
       const style = styleAt(x);
       const P = PAVING[style];
       for (let row = 0; row < 4; row += 1) {
-        const y = padY + row;
+        const y = top + row;
         const id = PW.get(world, x, y) & 63;
         if (!PW.mat.ground[id] || id === M.WATER) continue;
         let color;
@@ -488,7 +491,8 @@
       }
       // Build canvases and measure the cluster.
       const lots = plan.map((lot, index) => {
-        const facing = lot.field ? -(dir || (index === 0 ? -1 : 1)) : (dir || mixed[index]);
+        // (a neutral farm leads the cluster, so its field grows out to the left)
+        const facing = lot.field ? (dir ? -dir : index === 0 ? -1 : 1) : (dir || mixed[index]);
         const canvas = make(lot, style, facing, neutral ? 0 : dir, index);
         return { ...lot, facing, canvas, bodyWidth: canvas.body.right - canvas.body.left + 1 };
       });
@@ -502,33 +506,99 @@
         total -= lots[index].bodyWidth + 60;
         lots.splice(index, 1);
       }
-      let cursor = neutral ? Math.round((site.x0 + site.x1) / 2 - total / 2) : dir > 0 ? site.x0 + 30 : site.x1 - 30;
-      const step = neutral ? 1 : dir;
       const placed = [];
-      for (const lot of lots) {
-        const { canvas } = lot;
-        const canvasX = step > 0 ? cursor - canvas.body.left : cursor - canvas.body.right;
-        lot.canvasX = canvasX;
-        lot.left = canvasX + canvas.body.left;
-        lot.right = canvasX + canvas.body.right;
-        cursor = step > 0 ? lot.right + gapFor() : lot.left - gapFor();
-        placed.push(lot);
+      const relief = neutral && PW.foundations;
+      if (relief) {
+        // Neutral towns are set into the land's relief: each building on its own base (cut and
+        // walled uphill, on a stage downhill) and spaced so neighbours' works never meet. The row is
+        // laid out once to measure it, then again centred on the site.
+        const gaps = lots.map(() => random.int(4, 16));
+        const lay = (start) => {
+          const row = [];
+          let cursor = start;
+          lots.forEach((lot, index) => {
+            let x = cursor - lot.canvas.body.left + 4, m = PW.foundations.measure(world, lot.canvas, x, style);
+            for (let n = 0; n < 4 && m && m.left < cursor; n += 1) { x += cursor - m.left; m = PW.foundations.measure(world, lot.canvas, x, style); }
+            if (!m) { cursor += lot.bodyWidth + gaps[index]; return; }   // standing water: the lot is left out
+            row.push({ lot, x, m });
+            cursor = m.right + 1 + gaps[index];
+          });
+          return row;
+        };
+        const centre = Math.round((site.x0 + site.x1) / 2);
+        const trial = lay(centre - Math.round(total / 2));
+        const span = trial.length ? [trial[0].m.left, trial[trial.length - 1].m.right] : [centre, centre];
+        let shift = centre - Math.round((span[0] + span[1]) / 2);
+        // Keep dry land at both ends of the town for the defence lines (200 cells), and beyond the
+        // farm for its field, a pump house and its intake on the shore and the line (420): the town
+        // moves away from a lake that crowds one end, as far as the other end can spare.
+        const wet = (x) => layout.lakes.some((lake) => lake.left !== undefined && x > lake.left - 30 && x < lake.right + 30);
+        const dry = (from, out, limit) => { let d = 0; while (d < limit && !wet(from + out * d)) d += 1; return d; };
+        const farm = trial.find((row) => row.lot.field);
+        const need = (out) => (farm && farm.lot.facing === out ? 420 : 200);
+        const roomL = dry(span[0] + shift, -1, 800) - need(-1), roomR = dry(span[1] + shift, 1, 800) - need(1);
+        if (roomL < 0 && roomR > 0) shift += Math.min(-roomL, roomR);
+        else if (roomR < 0 && roomL > 0) shift -= Math.min(-roomR, roomL);
+        for (const { lot, x } of lay(centre - Math.round(total / 2) + shift)) {
+          lot.canvasX = x;
+          lot.left = x + lot.canvas.body.left;
+          lot.right = x + lot.canvas.body.right;
+          placed.push(lot);
+        }
+      } else {
+        let cursor = neutral ? Math.round((site.x0 + site.x1) / 2 - total / 2) : dir > 0 ? site.x0 + 30 : site.x1 - 30;
+        const step = neutral ? 1 : dir;
+        for (const lot of lots) {
+          const { canvas } = lot;
+          const canvasX = step > 0 ? cursor - canvas.body.left : cursor - canvas.body.right;
+          lot.canvasX = canvasX;
+          lot.left = canvasX + canvas.body.left;
+          lot.right = canvasX + canvas.body.right;
+          cursor = step > 0 ? lot.right + gapFor() : lot.left - gapFor();
+          placed.push(lot);
+        }
       }
       placed.sort((a, b) => a.left - b.left);
-      // Terrace pads, then stamp.
-      const streetLeft = placed[0].left - 50, streetRight = placed[placed.length - 1].right + 50;
-      terracePad(world, streetLeft, streetRight, padY);
-      const settlement = { side, style, padY, buildings: [], streetLeft, streetRight, site };
+      // Bases: one terraced pad for the whole street, then stamp. Neutral towns: each building
+      // placed with its own base.
+      const settlement = { side, style, padY, buildings: [], site };
+      if (!relief) terracePad(world, placed[0].left - 50, placed[placed.length - 1].right + 50, padY);
       for (const lot of placed) {
         const id = world.buildings.length + 1;
-        const stamp = PW.stampBuilding(world, lot.canvas, lot.canvasX, padY, { owner: id });
+        let stamp, base = null;
+        if (relief) {
+          const result = PW.foundations.place(world, lot.canvas, lot.canvasX, { style, owner: id });
+          if (!result) continue;
+          stamp = result.stamp;
+          base = { G: result.plan.G, walls: result.walls, under: result.under, cores: result.cores };
+          lot.works = result.works;
+        } else {
+          stamp = PW.stampBuilding(world, lot.canvas, lot.canvasX, padY, { owner: id });
+          lot.works = [lot.left, lot.right];
+        }
         const record = PW.buildingRecord(world, stamp, { id, side, style, type: lot.type, variant: lot.variant,
-          level: lot.level || 1, facing: lot.facing, neutral, underConstruction: neutral });
+          level: lot.level || 1, facing: lot.facing, neutral, underConstruction: neutral, works: lot.works, base });
         world.buildings.push(record);
         settlement.buildings.push(record);
       }
-      // Streets through the ground floors (style paving) and the runway.
-      paveStreet(world, streetLeft, streetRight, padY, () => style);
+      // The street runs 50 cells past the end buildings (in a neutral town it stops at a farm's
+      // field instead, as that is terraced at its own level).
+      const ends = settlement.buildings, first = ends[0], last = ends[ends.length - 1];
+      const fieldOut = (b) => (relief && placed.some((lot) => lot.canvas === b.canvas && lot.field) ? b.facing : 0);
+      const streetLeft = settlement.streetLeft = first.works[0] - (fieldOut(first) < 0 ? 13 : 50);
+      const streetRight = settlement.streetRight = last.works[1] + (fieldOut(last) > 0 ? 13 : 50);
+      // Streets through the ground floors (style paving) and the runway. In a neutral town the
+      // street follows the ground between the buildings' bases (which have their own paving,
+      // stages and steps) and runs through each ground floor.
+      const streetAt = !relief ? padY : (x) => {
+        for (const b of settlement.buildings) {
+          if (x >= b.body.left && x <= b.body.right) return b.ground;
+          if (x >= b.works[0] && x <= b.works[1]) return null;
+        }
+        return world.groundTop[x];
+      };
+      settlement.streetAt = typeof streetAt === 'function' ? streetAt : () => padY;
+      paveStreet(world, streetLeft, streetRight, streetAt, () => style);
       for (const b of settlement.buildings) {
         if (b.type !== 'military' || !b.runway || neutral) continue;
         const end = b.runway.from + b.runway.direction * runwayLength;
@@ -546,16 +616,20 @@
         const lot = placed.find((item) => item.canvas === b.canvas);
         if (!lot || !lot.field) continue;
         const outward = b.facing;
-        const start = outward > 0 ? b.body.right + 14 : b.body.left - 14;
+        const start = outward > 0 ? b.works[1] + 14 : b.works[0] - 14;
         let length = neutral ? 150 : 240;
         for (let d = 0; d <= length; d += 1) {
           const x = start + outward * d;
-          if (x < 40 || x > world.width - 40 || wetAt(x)) { length = d - 1; break; }
+          // (a neutral field leaves room before the shore for the town's defence line on that side)
+          if (x < 40 || x > world.width - 40 || wetAt(x + (neutral ? outward * 80 : 0))) { length = d - 1; break; }
         }
         if (length >= 60) {
           const x0 = Math.min(start, start + outward * length), x1 = Math.max(start, start + outward * length);
-          terracePad(world, x0, x1, padY);
-          b.field = sowField(world, x0, x1, padY, random);
+          // On a neutral town's rolling ground the field is its own terrace at the median ground.
+          const rows = relief ? Array.from({ length: x1 - x0 + 1 }, (_, k) => world.groundTop[x0 + k]).sort((p, q) => p - q) : null;
+          const fieldY = relief ? rows[rows.length >> 1] : padY;
+          terracePad(world, x0, x1, fieldY);
+          b.field = sowField(world, x0, x1, fieldY, random);
           footprints.push([x0, x1]);
         }
         const lake = layout.lakes.filter((item) => item.left !== undefined)
