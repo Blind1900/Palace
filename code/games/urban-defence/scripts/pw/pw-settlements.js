@@ -117,22 +117,37 @@
       }
     }
   }
-  function paveRunway(world, from, direction, length, padY) {
+  // Runways by faction: modern - pale concrete slabs with white markings and blue edge lights;
+  // asian - dark asphalt with a yellow dashed centre line and white edges, amber lights; gothic -
+  // worn asphalt patched with darker repairs, faded markings, warm white lights.
+  const RUNWAY = {
+    modern: { top: [146, 144, 136], seam: [112, 110, 104], base: [96, 94, 90], mark: [236, 236, 230], centre: [236, 236, 230], light: [110, 180, 255], slab: 20 },
+    asian: { top: [52, 54, 58], seam: [44, 46, 50], base: [36, 36, 40], mark: [232, 232, 226], centre: [232, 196, 52], light: [255, 176, 70], slab: 0 },
+    gothic: { top: [72, 72, 74], seam: [56, 56, 58], base: [44, 44, 46], mark: [198, 196, 188], centre: [198, 196, 188], light: [255, 228, 170], slab: 0, patched: true },
+  };
+  function paveRunway(world, from, direction, length, padY, style = 'modern') {
+    const R = RUNWAY[style] || RUNWAY.modern;
     for (let i = 0; i < length; i += 1) {
       const x = from + direction * i;
       for (let row = 0; row < 4; row += 1) {
         const y = padY + row;
-        let color = row === 3 ? [36, 36, 40] : [52, 54, 58];
-        if (row === 0 && i % 60 < 30 && i > 20 && i < length - 40) color = [235, 235, 235];       // centre line
-        if (row === 0 && i > length - 30 && i % 6 < 3) color = [235, 235, 235];                      // threshold bars
-        if (row === 1 && (PW.hash2(x, y) & 7) === 0) color = [62, 64, 68];
+        let color = row === 3 ? R.base : R.top;
+        if (R.slab && row < 3 && mod(x, R.slab) === 0) color = R.seam;                             // slab joints
+        if (R.patched && row < 2 && (PW.hash2(Math.floor(x / 14), 3) % 4) === 0) color = tone(R.top, 0.82);   // repairs
+        if (row === 0 && i % 60 < 30 && i > 20 && i < length - 40) color = R.centre;               // centre line
+        if (row === 0 && i > length - 30 && i % 6 < 3) color = R.mark;                              // threshold bars
+        if (R.patched && row === 0 && color === R.mark && (PW.hash2(x, 9) & 3) === 0) color = tone(R.mark, 0.7);   // worn paint
+        if (row === 1 && (PW.hash2(x, y) & 7) === 0) color = tone(color, 1.12);
         PW.set(world, x, y, row === 0 ? M.ASPHALT : M.ROADBED, { quiet: true });
         PW.setLayer(world, 'paint', x, y, rgb(color));
         PW.setFlag(world, x, y, FLAG.ROAD);
       }
       for (let y = padY - 60; y < padY; y += 1) PW.setLayer(world, 'deco', x, y, 0);
+      // Edge lights on short posts.
+      if (i % 30 === 6) { PW.setLayer(world, 'deco', x, padY - 1, rgb([40, 40, 44])); PW.setLayer(world, 'deco', x, padY - 2, rgb(R.light)); }
     }
   }
+  const mod = (a, n) => ((a % n) + n) % n;
 
   // ---- Farms: wheat field and shore pump ----------------------------------------------------------------
   function sowField(world, x0, x1, padY, random) {
@@ -603,7 +618,7 @@
         if (b.type !== 'military' || !b.runway || neutral) continue;
         const end = b.runway.from + b.runway.direction * runwayLength;
         terracePad(world, Math.min(b.runway.from, end), Math.max(b.runway.from, end), padY);
-        paveRunway(world, b.runway.from, b.runway.direction, runwayLength, padY);
+        paveRunway(world, b.runway.from, b.runway.direction, runwayLength, padY, style);
         settlement.runway = { from: b.runway.from, to: end, y: padY };
       }
       // Everything laid on the surface, so wild growth keeps clear of it.

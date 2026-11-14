@@ -378,7 +378,7 @@
         const moving = m.state.startsWith('to') || m.state === 'idle';
         if (moving) frame = Math.floor(m.walked / 5);
         if (m.state === 'load' || m.state === 'pickup') { clip = 'crouch'; frame = Math.min(3, Math.floor((m.timer < 0.4 ? m.timer : 0.8 - m.timer) / 0.1)); }
-        const s = PW.unitArt.sprite('miner', clip, frame);
+        const s = PW.unitArt.sprite('miner', clip, frame, world.styles ? world.styles[op.side] : '');
         if (!s) continue;
         const jitter = m.state === 'drill' && ((time * 30) | 0) & 1 ? 1 : 0;
         PW.unitArt.lampCone(renderer, s, m.x + jitter, op.floor, m.facing);

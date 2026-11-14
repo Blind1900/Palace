@@ -3,9 +3,17 @@
 // and knee braces), plank lagging under the roof, a muddy floor and dim bulbs. Each network then
 // develops outward from its root (the original branch) along every branch at a slow, steady
 // pace: the rock around each stretch is lined with reinforced concrete, steel ribs replace the
-// timber, and the walls get the military fit-out (olive dado, cable trays, caged lamps, a painted
-// floor line, hazard stripes at the ends). Another side can only dig into a raw stretch:
+// timber, and the walls get their faction's fit-out. Another side can only dig into a raw stretch:
 // developed lining stops their diggers. A side may cut through its own lining to branch off.
+// Each faction develops its tunnels its own way:
+//   modern - a bunker bore of cast concrete segments: olive dado, cable trays, a ventilation duct,
+//            linear lights, stencilled sector numbers, steel bulkheads with hazard stripes.
+//   asian  - grey brick lining and stone-flagged floors; lime-plastered walls over a red lacquer
+//            dado with gold sector numbers, a timber-beamed ceiling, red paper lanterns, and
+//            lacquered gate frames between sectors.
+//   gothic - an ashlar crypt with sett floors: pointed ribs carrying the vault, blind lancet
+//            niches between them, hanging iron lanterns, an iron water main, and heavy piers with
+//            carved sector plaques between sectors.
 (function () {
   const PW = window.PW;
   const { M, FLAG, ID_MASK, CHUNK_SHIFT, CHUNK_MASK, CHUNK_CELLS } = PW;
@@ -34,6 +42,18 @@
     hanger: [60, 64, 68], housing: [48, 50, 54], tube: [236, 246, 250], stencil: [214, 214, 200],
     rib: [70, 76, 84], ribLight: [106, 112, 122], lamp: [228, 242, 248], cage: [52, 56, 60],
     stripe: [191, 123, 25], stripeDark: [38, 36, 32], line: [218, 180, 56], glow: [214, 234, 242] };
+  const ASIAN = { brick: [92, 96, 102], brickDark: [78, 82, 88], brickLight: [108, 112, 118], mortar: [128, 124, 114],
+    plaster: [150, 140, 120], plasterShade: [136, 126, 108], lacquer: [140, 42, 34], lacquerDark: [104, 30, 26], lacquerLight: [176, 62, 46],
+    gold: [214, 168, 60], goldDark: [160, 118, 38], beam: [70, 50, 36], beamDark: [52, 36, 26], beamLight: [96, 70, 48],
+    flag: [164, 146, 112], flagLight: [180, 162, 126], flagJoint: [112, 98, 76], stone: [118, 114, 106],
+    lantern: [206, 58, 40], lanternLight: [236, 96, 60], lanternDark: [150, 36, 28], lanternCore: [255, 150, 96],
+    cord: [40, 30, 24], bronze: [126, 96, 56], bronzeDark: [88, 66, 38], cable: [30, 28, 26], glow: [255, 176, 96],
+    dado: [74, 92, 60], dadoDark: [56, 70, 46], stencil: [222, 216, 196] };
+  const GOTHIC = { stone: [110, 106, 120], stoneLit: [128, 124, 138], stoneDark: [92, 88, 102], joint: [66, 62, 76],
+    rib: [146, 142, 156], ribMid: [120, 116, 130], ribDark: [86, 82, 96], niche: [40, 38, 48], nicheEdge: [84, 80, 94],
+    iron: [38, 36, 42], ironLight: [80, 78, 86], flame: [255, 206, 110], flameCore: [255, 244, 204], glow: [255, 190, 108],
+    sett: [106, 100, 104], settLit: [124, 118, 122], settJoint: [62, 58, 66], plaque: [150, 144, 156], carve: [78, 74, 88],
+    moss: [66, 80, 56], plinth: [74, 70, 84], plinthLit: [100, 96, 110] };
   // 3x5 stencil digits for the sector numbers.
   const DIGITS = ['111101101101111', '010110010010111', '111001111100111', '111001111001111', '101101111001001',
     '111100111001111', '111100111101111', '111001001001001', '111101111101111', '111101111001111'];
@@ -90,11 +110,13 @@
   }
 
   // ---- Networks ----------------------------------------------------------------------------------------
-  // info: { side: 'left' | 'right' | 'neutral', x, y (root cell), building (owner building id), rate }
+  // info: { side: 'left' | 'right' | 'neutral', x, y (root cell), building (owner building id), rate,
+  // style (defaults to the side's faction style) }
   function createNetwork(world, info) {
     const T = state(world);
     const id = T.networks.length + 1;
-    const net = { id, side: info.side, building: info.building || 0, root: { x: Math.round(info.x), y: Math.round(info.y) },
+    const style = info.style || (world.styles && world.styles[info.side]) || 'modern';
+    const net = { id, side: info.side, style, building: info.building || 0, root: { x: Math.round(info.x), y: Math.round(info.y) },
       rate: info.rate || RATE, owner: OWNER_BASE + id, cells: 0, developed: 0, lined: 0 };
     T.networks.push(net);
     return net;
@@ -148,7 +170,201 @@
   }
   const RING = 20;          // concrete segment rings, 1.4 m
   const BULKHEAD = 160;     // steel bulkhead frames between sectors
+  // Is cell (sx, sy) of a two-digit sector number (7 x 5 cells, digits 3 wide) lit?
+  function sectorDigit(net, along, sx, sy) {
+    if (sx < 0 || sx >= 7 || sy < 0 || sy >= 5 || sx === 3) return false;
+    const sector = 10 + mod(Math.floor(along / BULKHEAD) + net.id * 7, 89);
+    const digit = sx < 3 ? Math.floor(sector / 10) % 10 : sector % 10;
+    return DIGITS[digit][(4 - sy) * 3 + (sx < 3 ? sx : sx - 4)] === '1';
+  }
   function devBack(net, seg, x, y) {
+    return (net.style === 'asian' ? asianBack : net.style === 'gothic' ? gothicBack : modernBack)(net, seg, x, y);
+  }
+  function liningColor(net, x, y, depth, facing, rise) {
+    return (net.style === 'asian' ? asianLining : net.style === 'gothic' ? gothicLining : modernLining)(net, x, y, depth, facing, rise);
+  }
+
+  // ---- Asian: brick, lime plaster and timber, lacquered gates and paper lanterns ----------------------
+  const A = ASIAN;
+  // Grey brick: courses two cells high with a mortar row, joints staggered course by course.
+  function brickAt(x, y) {
+    const course = Math.floor(y / 3), shift = (course & 1) * 4;
+    if (mod(y, 3) === 2 || mod(x + shift, 8) === 0) return A.mortar;
+    const h = PW.hash2(Math.floor((x + shift) / 8), course) % 5;
+    return h === 0 ? A.brickDark : h === 4 ? A.brickLight : A.brick;
+  }
+  // A red paper lantern centred on (0, 0): gold caps, a glowing middle, a tassel below.
+  function lanternCell(dx, dy) {
+    if (dy === -4 || dy === 4) return Math.abs(dx) <= 1 ? (dx < 0 ? A.gold : A.goldDark) : null;
+    if (dy >= -3 && dy <= 3) {
+      const half = Math.abs(dy) === 3 ? 1 : 2;
+      if (Math.abs(dx) > half) return null;
+      if (dy === 0 || Math.abs(dy) === 2) return dx === -half ? A.lanternLight : dx === half ? A.lanternDark : A.lantern;   // ribs
+      return dx === -half ? A.lanternLight : dx === half ? A.lanternDark : A.lanternCore;
+    }
+    return (dy === 5 || dy === 6) && dx === 0 ? A.lacquerDark : null;
+  }
+  function asianBack(net, seg, x, y) {
+    let c, glow = 0;
+    if (seg.kind === 'shaft') {
+      const along = mod(y - net.root.y, 2 * RING);
+      c = brickAt(x, y);
+      if (along < 2) c = along === 0 ? A.lacquerLight : A.lacquer;                       // lacquered bands
+      else if (along === 2) c = A.gold;
+      const fromLeft = x - seg.x0, fromRight = seg.x1 - x;
+      if (fromLeft >= 2 && fromLeft <= 3) c = fromLeft === 2 ? A.cable : tone(A.cable, 1.4);
+      if (fromRight >= 2 && fromRight <= 3) c = mod(y, 16) === 0 ? A.goldDark : fromRight === 2 ? A.bronzeDark : A.bronze;
+      const ly = net.root.y + Math.round((y - net.root.y - RING / 2) / LAMP_PITCH) * LAMP_PITCH + RING / 2, lx = seg.x1 - 8;
+      const lantern = lanternCell(x - lx, y - ly);
+      if (lantern) return lantern;
+      glow = Math.max(0, 1 - Math.hypot(x - lx, (y - ly) * 0.7) / 28);
+      return glow > 0 ? mix(c, A.glow, glow * glow * 0.4) : c;
+    }
+    const top = seg.y0, bottom = seg.y1, height = bottom - top + 1;
+    const rise = bottom - y, fromTop = y - top, along = x - net.root.x;
+    // Lacquered gate frame between sectors: posts on stone footings, gold bands, a lintel.
+    const b = mod(along, BULKHEAD);
+    if (b < 4) {
+      if (rise < 3) return rise === 2 ? tone(A.stone, 1.12) : A.stone;
+      if (rise === 16 || rise === height - 12) return b < 2 ? A.gold : A.goldDark;
+      return b === 0 ? A.lacquerLight : b === 3 ? A.lacquerDark : A.lacquer;
+    }
+    if ((b < 14 || b >= BULKHEAD - 10) && fromTop >= 6 && fromTop <= 9) {
+      return fromTop === 6 ? A.gold : fromTop === 9 ? A.lacquerDark : (mod(along, 6) === 0 ? A.lacquerDark : A.lacquer);
+    }
+    // Red paper lanterns hanging from the ridge beam midway between gates and rafters.
+    const lx = net.root.x + Math.round((along - LAMP_PITCH / 2) / LAMP_PITCH) * LAMP_PITCH + LAMP_PITCH / 2, ly = top + 15;
+    const lantern = height > 30 ? lanternCell(x - lx, y - ly) : null;
+    if (lantern) return lantern;
+    if (x === lx && fromTop >= 3 && y < ly - 4) return A.cord;
+    glow = Math.max(0, 1 - Math.hypot(x - lx, (y - ly) * 0.8) / 32);
+    // Ridge beam and rafter ends overhead, a brick plinth, an olive dado with a red line, and
+    // lime-plastered walls above.
+    if (fromTop < 3) c = [A.beamDark, A.beam, A.beamLight][Math.max(0, fromTop)];   // (overbreak above the profile: beam shadow)
+    else if (fromTop < 6 && mod(along, RING) < 3) c = fromTop === 5 && mod(along, RING) === 1 ? A.gold : A.beam;
+    else if (rise <= 2) c = brickAt(x, y);
+    else if (rise <= 14) c = rise === 14 ? A.lacquer : rise === 13 ? A.gold : rise === 3 ? A.dadoDark : A.dado;
+    else {
+      c = (PW.hash2(x >> 2, y >> 2) & 7) === 0 ? A.plasterShade : A.plaster;
+      if (fromTop < 10) c = tone(c, 0.78 + fromTop * 0.022);                             // shadow under the beams
+    }
+    // A bronze water pipe on the wall and a cable under the beams.
+    const pipe = Math.round(height * 0.45);
+    if (rise === pipe || rise === pipe + 1) c = mod(along, 16) === 0 ? A.goldDark : rise === pipe ? A.bronzeDark : A.bronze;
+    if (fromTop === 10 && c !== A.beam) c = A.cable;
+    // A red slogan banner after each gate (gold characters), and the sector number stencilled in
+    // white on the dado.
+    const bx = b - 24, by = rise - 18;
+    if (bx >= 0 && bx < 9 && by >= 0 && by < Math.min(22, height - 30)) {
+      const glyph = bx >= 2 && bx <= 6 && mod(by, 5) < 4 && (PW.hash2(bx + net.id * 9, Math.floor(by / 5) * 7 + Math.floor(along / BULKHEAD)) & 3) !== 0;
+      c = bx === 0 || bx === 8 ? A.lacquerDark : glyph ? A.gold : A.lacquer;
+    }
+    if (sectorDigit(net, along, b - 10, rise - 6)) c = A.stencil;
+    return glow > 0 ? mix(c, A.glow, glow * glow * 0.38) : c;
+  }
+  function asianLining(net, x, y, depth, facing, rise) {
+    let c;
+    if (facing === 'floor' && depth <= 2) {
+      // Stone flags, 12 cells long, laid in staggered rows.
+      const row = Math.floor(y / 4);
+      c = depth === 2 ? A.flagJoint : mod(x + (row & 1) * 6, 12) === 0 ? A.flagJoint : (PW.hash2(Math.floor(x / 12), row) & 3) === 0 ? A.flagLight : A.flag;
+    } else c = tone(brickAt(x, y), depth <= 1 ? 1.16 : depth === 2 ? 1.06 : 0.92);
+    if (facing === 'wall' && depth <= 2 && rise >= 0 && rise < 6) c = rise === 5 ? A.gold : depth === 1 ? A.lacquerLight : A.lacquer;   // lacquered skirting
+    return c;
+  }
+
+  // ---- Gothic: an ashlar crypt -------------------------------------------------------------------------
+  const G = GOTHIC;
+  const RIB = 32;           // vault ribs 2.2 m apart
+  // Ashlar: blocks 12 cells long and 6 high (with their joints), staggered course by course.
+  function ashlarAt(x, y) {
+    const course = Math.floor(y / 6), shift = (course & 1) * 6;
+    if (mod(y, 6) === 5 || mod(x + shift, 12) === 0) return G.joint;
+    const h = PW.hash2(Math.floor((x + shift) / 12), course) % 6;
+    return h === 0 ? G.stoneDark : h === 5 ? G.stoneLit : G.stone;
+  }
+  // An iron lantern centred on (0, 0): a pointed cap, a cage of bars round a flame, a drip pan.
+  function ironLantern(dx, dy) {
+    if (dy === -5) return dx === 0 ? G.iron : null;
+    if (dy === -4) return Math.abs(dx) <= 1 ? G.iron : null;
+    if (dy === -3 || dy === 3) return Math.abs(dx) <= 2 ? (dx < 0 ? G.ironLight : G.iron) : null;
+    if (dy > -3 && dy < 3) {
+      if (Math.abs(dx) === 2) return dx < 0 ? G.ironLight : G.iron;
+      if (Math.abs(dx) > 2) return null;
+      return dx === 0 && dy >= -1 && dy <= 1 ? G.flameCore : G.flame;
+    }
+    return dy === 4 && Math.abs(dx) <= 1 ? G.iron : null;
+  }
+  function gothicBack(net, seg, x, y) {
+    let c, glow = 0;
+    if (seg.kind === 'shaft') {
+      const along = mod(y - net.root.y, 2 * RING);
+      c = ashlarAt(x, y);
+      if (along < 3) c = along === 0 ? G.rib : along === 1 ? G.ribMid : G.ribDark;          // string courses
+      const fromRight = seg.x1 - x;
+      if (fromRight >= 2 && fromRight <= 3) c = mod(y, 18) < 2 ? G.ironLight : fromRight === 2 ? G.iron : tone(G.iron, 1.3);   // iron main
+      const ly = net.root.y + Math.round((y - net.root.y - RING / 2) / LAMP_PITCH) * LAMP_PITCH + RING / 2, lx = seg.x1 - 9;
+      const lamp = ironLantern(x - lx, y - ly);
+      if (lamp) return lamp;
+      glow = Math.max(0, 1 - Math.hypot(x - lx, (y - ly) * 0.7) / 28);
+      return glow > 0 ? mix(c, G.glow, glow * glow * 0.42) : c;
+    }
+    const top = seg.y0, bottom = seg.y1, height = bottom - top + 1;
+    const rise = bottom - y, fromTop = y - top, along = x - net.root.x;
+    const capital = Math.round(height * 0.55);
+    // A heavy pier between sectors, banded with iron, and a carved plaque with the sector number.
+    const b = mod(along, BULKHEAD);
+    if (b < 6) {
+      if (mod(rise - 8, 14) === 0 || rise < 2) return rise < 2 ? G.plinth : G.iron;
+      return b === 0 ? G.rib : b === 5 ? G.ribDark : ashlarAt(x, y) === G.joint ? G.ribDark : G.ribMid;
+    }
+    if (b >= 9 && b <= 19 && rise >= 17 && rise <= 25) {
+      if (b === 9 || b === 19 || rise === 17 || rise === 25) return rise === 25 || b === 9 ? G.rib : G.ribDark;
+      return sectorDigit(net, along, b - 11, rise - 19) ? G.carve : G.plaque;
+    }
+    // Hanging iron lanterns between the ribs.
+    const lx = net.root.x + Math.round((along - LAMP_PITCH / 2) / LAMP_PITCH) * LAMP_PITCH + LAMP_PITCH / 2 + RIB / 2, ly = top + 14;
+    const lamp = height > 30 ? ironLantern(x - lx, y - ly) : null;
+    if (lamp) return lamp;
+    if (x === lx && fromTop >= 0 && y < ly - 5) return mod(y, 2) ? G.iron : G.ironLight;    // chain
+    glow = Math.max(0, 1 - Math.hypot(x - lx, (y - ly) * 0.75) / 34);
+    // Ribs from the floor to the crown, with a base and a capital that stand out from them.
+    const r = mod(along, RIB);
+    if (r < 3) c = rise >= capital && rise < capital + 2 ? G.rib : [G.rib, G.ribMid, G.ribDark][r];
+    else if ((r === 3 || r === RIB - 1) && (rise < 3 || (rise >= capital && rise < capital + 2))) c = G.ribMid;
+    else {
+      c = rise <= 1 ? (rise === 1 ? G.plinthLit : G.plinth) : ashlarAt(x, y);
+      // A blind lancet niche between the ribs: straight jambs, a pointed head (two arcs).
+      const half = 6, mid = (RIB + 2) / 2, nx = Math.abs(r - mid);
+      const spring = capital - 4 - Math.round(half * Math.sqrt(3)), base = 4;
+      if (height > 26 && spring > base + 2) {
+        let edge = -1;
+        if (rise >= base && rise <= spring) edge = half - nx;
+        else if (rise > spring) { const t = rise - spring; edge = Math.sqrt(Math.max(0, 4 * half * half - t * t)) - half - nx; }
+        if (edge >= 0) c = edge < 1 ? G.nicheEdge : G.niche;
+      }
+    }
+    // The vault falls into shadow towards the crown; damp and moss low on the walls.
+    if (fromTop < 10 && r >= 3) c = tone(c, 0.68 + fromTop * 0.032);
+    if (rise >= 2 && rise < 6 && (PW.hash2(x, y >> 1) % 9) === 0) c = mix(c, G.moss, 0.6);
+    // A cast-iron water main on brackets.
+    const pipe = Math.round(height * 0.38);
+    if (rise === pipe || rise === pipe + 1) c = mod(along, 18) < 2 ? G.ironLight : rise === pipe ? G.iron : tone(G.iron, 1.35);
+    return glow > 0 ? mix(c, G.glow, glow * glow * 0.42) : c;
+  }
+  function gothicLining(net, x, y, depth, facing, rise) {
+    let c;
+    if (facing === 'floor' && depth <= 2) {
+      // Setts: small stone blocks 4 x 3, staggered.
+      const row = Math.floor(y / 3);
+      c = depth === 2 || mod(y, 3) === 2 || mod(x + (row & 1) * 2, 4) === 0 ? G.settJoint : (PW.hash2(x >> 2, row) & 1) ? G.settLit : G.sett;
+    } else c = tone(ashlarAt(x, y), depth <= 1 ? 1.14 : depth === 2 ? 1.04 : 0.92);
+    if (facing === 'wall' && depth <= 2 && rise >= 0 && rise < 6) c = rise === 5 ? G.plinthLit : G.plinth;   // plinth course
+    return c;
+  }
+
+  // ---- Modern: a cast concrete bunker bore --------------------------------------------------------------
+  function modernBack(net, seg, x, y) {
     let glow = 0, c;
     if (seg.kind === 'shaft') {
       const along = mod(y - net.root.y, RING);
@@ -193,20 +409,14 @@
     const pipe = Math.round(height * 0.4);
     if (rise === pipe || rise === pipe + 1) c = mod(along, 16) === 0 ? DEV.ductDark : rise === pipe ? DEV.pipeDark : DEV.pipe;
     // Stencilled sector number on the painted band every bulkhead.
-    const sx = mod(along, BULKHEAD) - 12, sy = rise - 5;
-    if (sx >= 0 && sx < 7 && sy >= 0 && sy < 5 && sx !== 3) {
-      const sector = 10 + mod(Math.floor(along / BULKHEAD) + net.id * 7, 89);
-      const digit = sx < 3 ? Math.floor(sector / 10) % 10 : sector % 10;
-      const col = sx < 3 ? sx : sx - 4;
-      if (DIGITS[digit][(4 - sy) * 3 + col] === '1') c = DEV.stencil;
-    }
+    if (sectorDigit(net, along, mod(along, BULKHEAD) - 12, rise - 5)) c = DEV.stencil;
     // The vault curves away overhead: the top rows fall into shadow.
     if (fromTop < 8 && c === DEV.back) c = tone(c, 0.72 + fromTop * 0.035);
     return glow > 0 ? mix(c, DEV.glow, glow * glow * 0.42) : c;
   }
   // facing: where the tunnel is from this lining cell ('floor': tunnel above it, 'ceiling': below,
   // 'wall': beside). rise: rows above the tunnel floor (for wall faces).
-  function liningColor(net, x, y, depth, facing, rise) {
+  function modernLining(net, x, y, depth, facing, rise) {
     let c = depth <= 1 ? DEV.face : depth === 2 ? DEV.lining : depth === 3 ? tone(DEV.lining, 0.93) : DEV.deep;
     const along = facing === 'wall' ? y - net.root.y : x - net.root.x;
     if (mod(along, 24) === 0) c = DEV.joint;                                          // formwork joints

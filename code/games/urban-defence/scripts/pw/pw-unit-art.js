@@ -5,8 +5,35 @@
 // forward) and shaded with the world's light from the upper left. Faces stay a flat, featureless
 // tone. Looks: trooper, guard (the same art in lavender), miner (hard hat with headlamp, hi-vis
 // jacket with a reflective stripe, a pneumatic drill in place of the rifle).
+// Each faction dresses its troopers like a real army of its region:
+//   asian  - green digital woodland camouflage (single-cell pixels), a green helmet with goggles
+//            pushed up on it, black boots and rifle, a red patch on the chest,
+//   gothic - khaki pixel camouflage in two-cell blocks of olive and brown, a dark charcoal helmet,
+//            a coyote plate carrier over the chest, dark boots, a wooden-stocked rifle,
+//   modern - tan multi-terrain camouflage in soft three-cell blotches, a coyote helmet with a night
+//            sight mount, a ranger-green plate carrier, tan boots, a black rifle.
+// Guards stay lavender whatever the faction; miners keep their hi-vis kit over faction trousers.
 (function () {
   const PW = window.PW;
+
+  const DRESS = {
+    asian: { helmet: [74, 100, 58], boots: [30, 28, 26], tool: [30, 30, 32], goggles: [28, 30, 34], gogglesLit: [110, 124, 132], patch: [200, 42, 34],
+      camo: { base: [92, 118, 70], spots: [[56, 78, 44], [136, 132, 92], [102, 84, 56], [122, 150, 84]], cell: 1, density: 0.55 } },
+    gothic: { helmet: [56, 58, 62], boots: [44, 36, 30], tool: [70, 50, 34], vest: [126, 106, 76], vestDark: [98, 80, 56],
+      camo: { base: [130, 126, 96], spots: [[94, 102, 66], [106, 86, 60], [72, 76, 52]], cell: 2, density: 0.55 } },
+    modern: { helmet: [150, 134, 100], boots: [176, 148, 104], tool: [30, 30, 32], vest: [92, 98, 70], vestDark: [70, 76, 54], mount: [34, 34, 36],
+      camo: { base: [156, 144, 110], spots: [[108, 116, 78], [120, 98, 70], [188, 178, 142]], blob: 3, density: 0.5 } },
+  };
+  // Camouflage colour at GIF cell (x, y): digital pixels, pixel blocks, or soft blotches.
+  function camoAt(camo, x, y) {
+    let h;
+    if (camo.blob) {
+      const jog = PW.hash2(Math.floor(y / camo.blob), 41) % camo.blob;   // blotch edges don't line up
+      h = PW.hash2(Math.floor((x + jog) / camo.blob) * 5 + 1, Math.floor(y / camo.blob) * 7 + 3);
+    } else h = PW.hash2(Math.floor(x / camo.cell) * 3 + 1, Math.floor(y / camo.cell) * 5 + 2);
+    if ((h & 255) / 255 >= camo.density) return camo.base;
+    return camo.spots[(h >>> 8) % camo.spots.length];
+  }
 
   const LOOKS = {
     trooper: { helmet: [70, 80, 56], face: [168, 128, 100], jacket: [88, 100, 68], trousers: [66, 74, 54], boots: [38, 34, 30], tool: [50, 52, 56] },
@@ -25,8 +52,10 @@
   }
   // Colour one silhouette frame. Returns { canvas, footX, footY, top, width, height } in GIF cells
   // (native facing: left).
-  function bake(clip, frame, lookName) {
-    const L = LOOKS[lookName];
+  function bake(clip, frame, lookName, style = '') {
+    const D = lookName === 'trooper' ? DRESS[style] : null;
+    const L = { ...LOOKS[lookName], ...(D ? { helmet: D.helmet, boots: D.boots, tool: D.tool } : {}) };
+    if (lookName === 'miner' && DRESS[style]) L.trousers = DRESS[style].camo.base.map((v) => v * 0.8);
     const w = clip.width, h = clip.height;
     const mask = frameMask(clip, frame);
     const on = (x, y) => x >= 0 && y >= 0 && x < w && y < h && mask[y * w + x] === 1;
@@ -58,6 +87,15 @@
         else if (y < hips) c = L.jacket;
         else c = L.trousers;
         if (L.stripe && c === L.jacket && y === y0 + 9) c = L.stripe;
+        if (D) {
+          const cloth = c === L.jacket || c === L.trousers;
+          if (cloth) c = camoAt(D.camo, x, y);
+          // A plate carrier over the chest, between the hips and the shoulders.
+          if (D.vest && cloth && y >= y0 + 6 && y < hips && x >= bx0 && x <= bx1) c = y === y0 + 6 || x === bx1 ? D.vestDark : D.vest;
+          if (D.goggles && ry === 1 && x <= headFront + 2) c = x === headFront ? D.gogglesLit : D.goggles;   // goggles up on the helmet
+          if (D.mount && ry === 0 && x === headFront + 1) c = D.mount;                                     // night sight mount
+          if (D.patch && cloth && y === y0 + 7 && x === bx0 + 1) c = D.patch;
+        }
         // Light from the upper left, shade on the lower right; thin parts stay mid-tone.
         const lit = !on(x - 1, y) || !on(x, y - 1), dark = !on(x + 1, y) || !on(x, y + 1);
         const k = lit && !dark ? 1.2 : dark && !lit ? 0.72 : 1;
@@ -84,14 +122,15 @@
   // eslint-disable-next-line no-undef
   const reference = () => (typeof PIXEL_UNIT_REFERENCE !== 'undefined' ? PIXEL_UNIT_REFERENCE : null);
   const cache = new Map();
-  function sprite(lookName, clipName, frameIndex) {
+  // style: the faction ('asian' | 'gothic' | 'modern'), or '' for the plain olive trooper.
+  function sprite(lookName, clipName, frameIndex, style = '') {
     const REF = reference();
     if (!REF) return null;
     const clip = REF.clips[clipName] || REF.clips.walk;
     const index = ((frameIndex % clip.frames.length) + clip.frames.length) % clip.frames.length;
-    const key = `${lookName}|${clipName}|${index}`;
+    const key = `${lookName}|${clipName}|${index}|${style}`;
     let s = cache.get(key);
-    if (!s) { s = bake(clip, clip.frames[index], lookName); cache.set(key, s); }
+    if (!s) { s = bake(clip, clip.frames[index], lookName, style); cache.set(key, s); }
     return s;
   }
   function frameCount(clipName) {
@@ -137,5 +176,5 @@
     ctx.fill();
   }
 
-  PW.unitArt = { LOOKS, sprite, frameCount, draw, lampCone, bake };
+  PW.unitArt = { LOOKS, DRESS, sprite, frameCount, draw, lampCone, bake };
 })();
