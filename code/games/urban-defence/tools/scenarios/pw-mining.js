@@ -29,7 +29,9 @@ for (const side of ['left', 'right']) {
   check(exposed === 0, `${side} lines run underground all the way (${exposed} exposed samples)`);
 }
 const water = pwApp.countWater();
-pwApp.stepWorld(60 * 20);
+// Long enough for the first loads to ride the longest belt to its hopper (16 cells a second).
+const longestBelt = Math.max(...ops.map((o) => Math.abs(o.belt.head - o.belt.tail)));
+pwApp.stepWorld(60 * Math.round(Math.max(20, longestBelt / 16 + 14)));
 for (const op of ops) {
   if (op.side === 'neutral') check(op.mined > 0 && op.stored > 0 && op.heap.length > 0, `neutral ${op.node.tier}: miners mine ore into the storage room (${op.mined} cells mined, ${op.stored} HM stored, ${op.heap.length} heap cells)`);
   else check(op.mined > 0 && op.delivered > 0 && op.stored === 0, `${op.side} starter mine: ore goes up the belt into the HM pipeline (${op.mined} mined, ${op.delivered} HM delivered)`);

@@ -17,19 +17,26 @@ for (const s of world.settlements) {
   const lines = pipes.lines.filter((l) => l.settlement === s);
   let columns = 0, soilLeft = 0, divider = 0, dividerOk = 0;
   const paints = new Set();
-  for (let x = s.streetLeft + 70; x <= s.streetRight - 70; x += 23) {
+  // (clear of the town's ends, where the made ground tapers out at 45°)
+  for (let x = s.streetLeft + 110; x <= s.streetRight - 110; x += 9) {
     const g = world.groundTop[x];
     if (!(PW.getFlags(world, x, g) & PW.FLAG.ROAD)) continue;          // street columns only
+    // (judged against whichever lines run under this column)
     const here = lines.filter((l) => x >= l.x0 && x <= l.x1);
-    if (here.length < 3) continue;
-    columns += 1;
+    if (!here.length) continue;
     const top = Math.min(...here.map((l) => l.ys[x - l.x0])), bottom = Math.max(...here.map((l) => l.ys[x - l.x0])) + BORE - 1 + BED;
+    // (where the lines cross a shaft they are fixed to its back wall: no ground there to judge)
+    let crossing = false;
+    for (let y = g; y <= bottom + 3 && !crossing; y += 1) if (PW.getFlags(world, x, y) & PW.FLAG.TUNNEL) crossing = true;
+    if (crossing) continue;
+    columns += 1;
     for (let y = g + 4; y < top - BED; y += 1) {
       if (NATURAL.includes(id(x, y)) && !PW.getOwner(world, x, y)) soilLeft += 1;
       if (MADE.includes(id(x, y))) paints.add(PW.getLayer(world, 'paint', x, y));
     }
     divider += 1;
-    if (MADE.includes(id(x, bottom)) && [1, 2, 3].every((k) => NATURAL.includes(id(x, bottom + k)) || id(x, bottom + k) === M.ORE)) dividerOk += 1;
+    // (the made ground stops at the bed: whatever lies below is the land as it was)
+    if (MADE.includes(id(x, bottom)) && [1, 2, 3].every((k) => !MADE.includes(id(x, bottom + k)))) dividerOk += 1;
   }
   check(columns >= 3 && soilLeft === 0, `${s.side}@${s.site.x0} (${s.style}): made ground fills the street's ground down to the lines (${columns} columns, ${soilLeft} natural cells left)`);
   check(divider > 0 && dividerOk === divider, `${s.side}@${s.site.x0}: the lines' bed is the divider, natural ground right below it (${dividerOk}/${divider} columns)`);

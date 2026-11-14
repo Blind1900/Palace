@@ -61,7 +61,9 @@
       if (id === M.ORE || id === M.CORE || (structural[id] && !isTunnel(x, y))) return true;
       // An underground cavity (a cave, a blast hole) is gone round below, not bridged.
       if (PW.mat.open[id] && y > world.groundTop[x] && !isTunnel(x, y) && !buildingOwned(x, y) && !PW.getLayer(world, 'back', x, y)) return true;
-      return buildingOwned(x, y) && !isTunnel(x, y);   // a building (not a tunnel network)
+      // A building's structure (not a tunnel network, and not plain ground a building owns, such
+      // as the soil lining a mine shaft).
+      return buildingOwned(x, y) && !isTunnel(x, y) && !terrain[id];
     }
     // Pipe top row per column: cover depth under the ground, then below anything in the way.
     function contour(x0, x1, depth) {
@@ -70,20 +72,34 @@
       // shaft or a narrow cut (fixed to its back wall) instead of diving down into it. Under a lake
       // the ground is its bed, not the water surface.
       const BRIDGE = 20;
+      // The land a line follows: ground that belongs to a building (a plinth, a foundation pad, a
+      // headframe's base) is passed over down to the land under it.
       const groundAt = (x) => {
         let g = world.groundTop[x];
+        for (let n = 0; n < 600 && g < H - 1; n += 1) {
+          const id = mat[g * W + x] & ID_MASK;
+          if (PW.mat.ground[id] && (terrain[id] || !buildingOwned(x, g))) break;
+          g += 1;
+        }
         if ((mat[g * W + x] & ID_MASK) === M.WATER) g = PW.supportBelow(world, x, g, true);
         return g;
       };
       for (let x = x0; x <= x1; x += 1) {
         // Bridge only openings that belong to a tunnel or a building (a shaft, the core pit's
-        // edge); open ground lowered by a crater is followed down, so the line goes under it.
+        // edge): they have a back wall. Open ground lowered by a crater (no back wall) is followed
+        // down, so the line goes under it.
+        // Across an opening the line keeps to the lower of its two banks (a shaft between a street
+        // and a hillside is crossed at street level); beside a bank it keeps to the bank's top.
         const own = groundAt(x);
-        let ground = own;
-        for (let dx = -BRIDGE; dx <= BRIDGE; dx += 2) ground = Math.min(ground, groundAt(Math.max(0, Math.min(W - 1, x + dx))));
+        const bank = (dir) => {
+          for (let d = 1; d <= BRIDGE; d += 1) { const g = groundAt(Math.max(0, Math.min(W - 1, x + dir * d))); if (g < own - 4) return g; }
+          return own;
+        };
+        const left = bank(-1), right = bank(1);
+        let ground = left < own && right < own ? Math.max(left, right) : Math.min(left, right);
         for (let y = ground; y < own && ground < own; y += 1) {
           const id = mat[y * W + x] & ID_MASK;
-          if (PW.mat.open[id] && !isTunnel(x, y) && !buildingOwned(x, y)) ground = own;
+          if (PW.mat.open[id] && !isTunnel(x, y) && !buildingOwned(x, y) && !PW.getLayer(world, 'back', x, y)) ground = own;
         }
         let y = ground + depth;
         for (let scan = ground; scan < y + BORE + 3 && scan < H - 40; scan += 1) {

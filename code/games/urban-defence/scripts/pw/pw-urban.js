@@ -94,8 +94,10 @@
         const top = mat[s * W + x] & ID_MASK;
         if (top === M.WATER) continue;
         const paved = (PW.getFlags(world, x, s) & FLAG.ROAD) || top === M.ASPHALT || top === M.ROADBED || top === M.FOUNDATION;
-        let bottom = s + FULL;
+        // Down to the bed of the deepest line here; a full depth where no line runs.
+        let bottom = -1;
         for (const line of lines) if (x >= line.x0 && x <= line.x1) bottom = Math.max(bottom, line.ys[x - line.x0] + bore - 1 + bed);
+        if (bottom < 0) bottom = s + FULL;
         const start = s + (paved ? PAVED : KEEP_SOIL);
         const end = Math.min(bottom, start + edge[k] - 1);
         for (let y = start; y <= end; y += 1) {

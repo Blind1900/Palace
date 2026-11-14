@@ -215,7 +215,10 @@
         [rearRoof], floorRow, random, facing);
       if (variant === 'command' || variant === 'fortress') {
         const crown = ornament.crownFor(style, `military|${variant}|${seed}`);
-        ornament.crown(c, style, crown, Math.round((rearRoof.left + rearRoof.right) / 2) + (variant === 'fortress' ? 14 * facing : 0), roofTop - 1, 60, random, facing);
+        // Centred in the design's own coordinates, so the mirrored building's crown is exactly opposite.
+        const local = (x) => (facing > 0 ? x - margin : margin + bodyWidth - 1 - x);
+        const mid = X(Math.round((local(rearRoof.left) + local(rearRoof.right)) / 2));
+        ornament.crown(c, style, crown, mid + (variant === 'fortress' ? 14 * facing : 0), roofTop - 1, 60, random, facing);
       }
       const hangarRoof = { left: Math.min(X(hx0 + 16), X(hx1 - 16)), right: Math.max(X(hx0 + 16), X(hx1 - 16)),
         y: vault ? wallTop - HANGAR.vaultRise + 1 : wallTop - 7, top: false };

@@ -73,22 +73,13 @@
     // upper left and a darker one in shade, dark seams between crystals, colour zoned like
     // amethyst from a pale quartz selvage at the vein wall to lavender crystal and a deep purple
     // core (variants 0-2), with sparkling crystal points (variant 3).
-    const ORE_ZONES = [[212, 198, 230], [176, 118, 228], [130, 64, 190], [186, 108, 244]];
+    // Ore is crystal: the generator lays out each crystal's faces in the cell variants (0 pale
+    // selvage, 1 a lit face, 2 a shaded face, 3 a bright point), drawn as clean tones with only a
+    // faint grain, so the facets read sharply.
+    const ORE_ZONES = [[214, 204, 234], [188, 132, 240], [112, 58, 172], [238, 212, 255]];
     function oreColor(x, y, variant, h) {
       if (variant === 3 && (h & 3) === 0) return oreSpark;
-      const gx = Math.floor(x / 5), gy = Math.floor(y / 5);
-      let best = 1e9, second = 1e9, sx = 0, sy = 0;
-      for (let oy = -1; oy <= 1; oy += 1) for (let ox = -1; ox <= 1; ox += 1) {
-        const hh = PW.hash2((gx + ox) * 7 + 3, (gy + oy) * 13 + 5);
-        const px = (gx + ox) * 5 + (hh & 15) / 15 * 5, py = (gy + oy) * 5 + (hh >>> 4 & 15) / 15 * 5;
-        const d = (x + 0.5 - px) * (x + 0.5 - px) + (y + 0.5 - py) * (y + 0.5 - py);
-        if (d < best) { second = best; best = d; sx = px; sy = py; } else if (d < second) second = d;
-      }
-      const base = ORE_ZONES[variant];
-      if (Math.sqrt(second) - Math.sqrt(best) < 0.7) return toned(base, variant === 0 ? 206 : 170);
-      const facing = (x + 0.5 - sx) + (y + 0.5 - sy);
-      const k = facing < -0.6 ? 296 : facing > 0.9 ? 206 : 248;
-      return toned(base, k * grainTone(grainOf(h)) >> 8);
+      return toned(ORE_ZONES[variant], (grainTone(grainOf(h)) + 256) >> 1);
     }
 
     // Gas opacity by density (variant 0-3).
@@ -186,7 +177,6 @@
     const prox = { x0: 0, y0: 0, w: 0, h: 0, air: false, ore: false, toAir: null, toRock: null, toOre: null };
     const POWDER = PW.PHASE.POWDER;
     const DUST = [134, 118, 98], ORE_DARK = [58, 30, 78], ORE_TINT = [150, 90, 200];
-    const ORE_SPECK = PW.abgr(150, 84, 198), ORE_SPECK_DIM = PW.abgr(112, 66, 142);
     // Open underground air whose rock edges show: caves and blasted cavities (no back wall), and
     // raw tunnels, whose walls are still freshly cut rock (lined tunnels are not).
     const RAW_TUNNEL = PW.FLAG.RAW;
@@ -274,12 +264,10 @@
       let c = color;
       if (prox.ore) {
         const d = prox.toOre[k];
-        if (d > 0 && d <= 15) {
-          const hh = PW.hash2(x * 3 + 1, y * 5 + 7);
-          if (d <= 3) c = mixPacked(shade(c, 150), ORE_DARK, 0.35);
-          else if (d <= 6) c = hh % 3 === 0 ? ORE_SPECK : mixPacked(c, ORE_TINT, 0.14);
-          else if (d <= 9) c = hh % 6 === 0 ? ORE_SPECK : mixPacked(c, ORE_TINT, 0.06);
-          else if (hh % 14 === 0) c = ORE_SPECK_DIM;
+        // A dark contact line round the ore, then the rock's alteration fading out (no specks).
+        if (d > 0 && d <= 6) {
+          if (d <= 3) c = mixPacked(shade(c, 160), ORE_DARK, 0.3);
+          else c = mixPacked(c, ORE_TINT, d === 4 ? 0.12 : d === 5 ? 0.07 : 0.03);
         }
       }
       if (prox.air) {

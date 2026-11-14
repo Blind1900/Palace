@@ -238,10 +238,12 @@
       orn(c, cx, y - 7 - h, BEACON); orn(c, cx, y - 8 - h, BEACON);
       dragonBody(c, P, cx, y - 6, Math.max(36, h - 6), facing, random, true);
     },
-    twin(c, P, cx, y, L, random) {
+    twin(c, P, cx, y, L, random, facing = 1) {
       for (let dy = 0; dy < 5; dy += 1) for (let dx = -28; dx <= 28; dx += 1) orn(c, cx + dx, y - dy, dy === 4 ? GOLD : lit(P.frame, dx, 28), ROLE.CROWN, M.WOOD);
       sorin(c, P, cx, y - 5, Math.round(L * 0.7));
-      for (const side of [-1, 1]) dragonBody(c, P, cx + side * 22, y - 5, Math.max(24, Math.round(L * 0.6)), side, random);
+      // The dragons are drawn back one first (each from its own share of the random stream), so the
+      // mirrored building gets the mirror images of the same two dragons.
+      for (const side of facing > 0 ? [-1, 1] : [1, -1]) dragonBody(c, P, cx + side * 22, y - 5, Math.max(24, Math.round(L * 0.6)), side, random);
     },
   };
   function lotus(c, P, cx, y, half) {

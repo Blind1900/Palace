@@ -23,6 +23,7 @@
   // ---- Ground under a plant ------------------------------------------------------------------------
   const FLAT = Object.assign(() => 0, { surface: () => 0 });
   const MIN_COVER_ROCKS = 4;   // trooper-sized rocks the wild land always holds
+  const MIN_TREES = 20;        // and trees
   // Reads the terrain around column x relative to the anchor row and remembers every value it was
   // asked for, so the exact same plant can be regenerated later (to fell it after a blast).
   function makeGround(world, x, row, wet) {
@@ -642,6 +643,7 @@
 
     // Trees and bushes, in forests of varying density.
     const stats = world.vegetationStats = { candidates: 0, water: 0, ground: 0, crowded: 0, rocks: 0, planted: 0, tops: {} };
+    let trees = 0;
     for (let x = 80; x < W - 80;) {
       const density = forest(x);
       const gap = density > 0.25 ? random.int(18, 40) : density > -0.2 ? random.int(36, 80) : random.int(70, 140);
@@ -668,6 +670,7 @@
       if (!footClear(x, type === 'bush' ? half : size * 0.08)) { stats.rocks += 1; continue; }
       grow(type, x, size);
       stats.planted += 1;
+      if (type !== 'bush') trees += 1;
       // Undergrowth around trunks.
       if (random() < 0.6) {
         const bx = x + random.int(-60, 60);
@@ -676,6 +679,18 @@
           grow('bush', bx, bushSize);
         }
       }
+    }
+    // The wild land always holds some woodland: more trees on gentle soil if chance left too few.
+    for (let i = 0; i < 2000 && trees < MIN_TREES; i += 1) {
+      const x = random.int(80, W - 80);
+      if (blocked[x] || !soil(x) || nearWater(x, 30) || slopeAt(x) > 1) continue;
+      const type = layout.baseY - world.groundTop[x] > 260 ? 'conifer' : random() < 0.6 ? 'broadleaf' : 'birch';
+      const size = type === 'conifer' ? random.range(140, 240) : random.range(110, 190);
+      const half = type === 'conifer' ? size * 0.3 : size * 0.55;
+      if (!clearOf(x, half * 0.75) || !footClear(x, size * 0.08)) continue;
+      grow(type, x, size);
+      stats.planted += 1;
+      trees += 1;
     }
     // Boulders (more on high and steep ground, scree), settled into the slope and kept off the
     // roots. Rocks big enough to hide a crouched trooper are solid cover; pebbles stay scenery.
@@ -705,9 +720,9 @@
     }
     // The wild land always holds a few rocks big enough to shelter a crouched trooper: more tries
     // on gentle ground if chance left too few.
-    for (let i = 0; i < 400 && cover < MIN_COVER_ROCKS; i += 1) {
-      const x = random.int(60, W - 60), size = random.range(12, 17);
-      if (blocked[x] || !rocky(x) || nearWater(x, 8) || slopeAt(x) > 0.5) continue;
+    for (let i = 0; i < 1500 && cover < MIN_COVER_ROCKS; i += 1) {
+      const x = random.int(60, W - 60), size = random.range(11, 15);
+      if (blocked[x] || !rocky(x) || nearWater(x, 8) || slopeAt(x) > 0.8) continue;
       if (!clearOf(x, size + 6) || !footClear(x, size + 4)) continue;
       if (coverRock(x, size)) cover += 1;
     }
