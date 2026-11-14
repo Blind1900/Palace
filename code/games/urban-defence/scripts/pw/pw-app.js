@@ -39,6 +39,11 @@
     pipes.build();
     timings.pipes = performance.now() - t; t = performance.now();
   }
+  // Made ground under the towns, down to their supply lines.
+  if (PW.urban && !gallery) {
+    world.madeGround = PW.urban.lay(world);
+    timings.urban = performance.now() - t; t = performance.now();
+  }
   // Generation leaves the simulation idle: the world starts settled.
   world.activeList.length = 0;
   world.simActive.fill(0);

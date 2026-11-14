@@ -272,6 +272,8 @@
   function deliver(world, op, value) {
     if (pipelineOpen(world, op)) {
       op.delivered += value;
+      // The ore goes into the riser as real chunks riding the line's conveyor to the core.
+      if (world.pipes.carry) world.pipes.carry(op, value);
       world.hmDelivered = world.hmDelivered || { left: 0, right: 0 };
       world.hmDelivered[op.side] = (world.hmDelivered[op.side] || 0) + value;
     } else {

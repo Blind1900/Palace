@@ -28,6 +28,9 @@
     COVER_ROCK: 32, COVER_WOOD: 33, COVER_METAL: 34, COVER_SAND: 35,
     // Reinforced concrete lining of a developed tunnel: another side cannot dig through it.
     REINFORCED: 36,
+    // Made ground under towns, down to the supply lines: compacted fill (and pipe bedding), buried
+    // concrete slabs, and brick courses. Ground like any other, dug and blasted by its hardness.
+    FILL: 37, SLAB: 38, COURSE: 39,
     // Gases (variant bits = density 0-3) and the ash left by fire.
     SMOKE: 40, STEAM: 41, DUST: 42, ASH: 43,
   });
@@ -152,8 +155,14 @@
     [[176, 158, 112], [150, 134, 94], [196, 178, 130], [140, 124, 88]]);
   define(M.REINFORCED, 'reinforced lining', { ground: true, hardness: 0.85, breaksTo: debris(DEBRIS_KIND.CONCRETE) },
     [[132, 134, 130], [124, 126, 122], [140, 142, 138], [118, 120, 116]]);
+  define(M.FILL, 'made ground', { ground: true, hardness: 0.35, breaksTo: M.LOOSE_STONE },
+    [[112, 104, 92], [104, 96, 85], [118, 110, 97], [98, 91, 81]]);
+  define(M.SLAB, 'buried slab', { ground: true, hardness: 0.55, breaksTo: debris(DEBRIS_KIND.CONCRETE) },
+    [[146, 144, 136], [138, 136, 129], [152, 150, 142], [132, 130, 124]]);
+  define(M.COURSE, 'brick course', { ground: true, hardness: 0.45, breaksTo: debris(DEBRIS_KIND.BRICK) },
+    [[124, 84, 66], [116, 78, 62], [130, 90, 70], [110, 74, 58]]);
   for (const id of [M.GRASS, M.TOPSOIL, M.SOIL, M.CLAY, M.GRAVEL, M.STONE, M.BEDROCK, M.SAND, M.ORE, M.WATER,
-    M.LOOSE_SOIL, M.LOOSE_STONE, M.RUBBLE, M.ASPHALT, M.ROADBED, M.LINING, M.PIPE, M.REINFORCED]) skyline[id] = 1;
+    M.LOOSE_SOIL, M.LOOSE_STONE, M.RUBBLE, M.ASPHALT, M.ROADBED, M.LINING, M.PIPE, M.REINFORCED, M.FILL, M.SLAB, M.COURSE]) skyline[id] = 1;
   for (const id of [M.AIR, M.WATER, M.COVER_ROCK, M.COVER_WOOD, M.COVER_METAL, M.COVER_SAND]) passable[id] = 1;
   // Gases: smoke from fires and blasts, steam from boiling water (it condenses back into water,
   // so water is never lost), dust thrown up by blasts and collapses. Ash is what fire leaves.
@@ -180,7 +189,8 @@
   thermal([M.COVER_WOOD], { conduct: 0.04, ignite: 320, burn: 25, to: M.ASH });
   thermal([M.COVER_SAND], { conduct: 0.04 });
   for (const id of [M.GRASS, M.TOPSOIL, M.SOIL, M.CLAY, M.GRAVEL, M.STONE, M.BEDROCK, M.SAND, M.ORE,
-    M.LOOSE_SOIL, M.LOOSE_STONE, M.DEBRIS, M.RUBBLE]) terrain[id] = 1;
+    M.LOOSE_SOIL, M.LOOSE_STONE, M.DEBRIS, M.RUBBLE, M.FILL, M.SLAB, M.COURSE]) terrain[id] = 1;
+  thermal([M.SLAB, M.COURSE], { conduct: 0.08 });
 
   // ---- Hashing and random numbers ------------------------------------------------------------
   function hash2(x, y) {
