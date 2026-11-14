@@ -761,6 +761,19 @@
   }
 
   PW.generateVegetation = generateVegetation;
-  PW.flora = { plant, fell, regenerate, afterBlast, makeGround, frozenGround, FLAT, tuft };
+  // Something heavy (falling debris, a toppling building) strikes the plant drawn at (x, y): it is
+  // knocked down. Returns true if a plant was felled.
+  function strike(world, particles, x, y) {
+    if (!world.flora || !(PW.getFlags(world, x, y) & PW.FLAG.FLORA)) return false;
+    for (const record of world.flora) {
+      if (record.felled || x < record.x || x >= record.x + record.width || y < record.y || y >= record.y + record.height) continue;
+      fell(world, particles, record);
+      world.flora = world.flora.filter((r) => !r.felled);
+      return true;
+    }
+    return false;
+  }
+
+  PW.flora = { plant, fell, regenerate, afterBlast, strike, makeGround, frozenGround, FLAT, tuft };
   PW.vegetation = { broadleaf, conifer, birch, bush, deadTree, boulder, reeds, stamp, createSprite, foliage, limb, trim, spanDrop, spanRise };
 })();

@@ -33,6 +33,8 @@
         const deco = PW.getLayer(world, 'deco', x, y);
         if (deco && s <= 1.1) {
           PW.setLayer(world, 'deco', x, y, 0);
+          const decoOwner = PW.getOwner(world, x, y);
+          if (decoOwner > 0 && decoOwner < 50000) damaged.set(decoOwner, damaged.get(decoOwner) || 0);
           if (random() < 0.08) {
             const [vx, vy] = fling(x, y, 140 * power, 80);
             particles.spawn(x + 0.5, y + 0.5, vx, vy, 0, deco, F.LEAF, 2 + random() * 2);
@@ -48,8 +50,22 @@
           }
           continue;
         }
-        if (id === M.AIR) continue;
         const strength = power * (1 - s) * 1.4 + (PW.hash2(x, y) & 255) / 255 * 0.2 - 0.1;
+        // A building's back walls break with it (a tunnel's back wall is the rock behind it).
+        const backOwner = PW.getOwner(world, x, y);
+        if (backOwner > 0 && backOwner < 50000 && strength > 0.3) {
+          const back = PW.getLayer(world, 'back', x, y);
+          if (back) {
+            PW.setLayer(world, 'back', x, y, 0);
+            if (id === M.AIR) PW.setOwner(world, x, y, 0);
+            damaged.set(backOwner, (damaged.get(backOwner) || 0) + 1);
+            if (random() < 0.15) {
+              const [vx, vy] = fling(x, y, 280 * power, 160 * power);
+              particles.spawn(x + 0.5, y + 0.5, vx, vy, M.DEBRIS, back, F.LAND | F.DAMAGE, 6, backOwner);
+            }
+          }
+        }
+        if (id === M.AIR) continue;
         if (id !== M.WATER && strength < hardness[id]) continue;
         const paint = PW.getLayer(world, 'paint', x, y);
         const ownerId = PW.getOwner(world, x, y);
@@ -89,6 +105,8 @@
       }
     }
     if (world.effects) world.effects.push({ kind: 'flash', x: cx, y: cy, radius: r * 2.2, age: 0, life: 0.35 });
+    // The crater smoulders, feeding a smoke column for a while after the blast.
+    addSmoulder(world, cx, Math.min(H - 2, cy + below), 30 + r * 1.5 * power, r * 1.1);
     // Plants that lost their footing or trunk fall; cover that lost its support or most of
     // itself breaks apart. Nothing is left floating over the crater.
     const box = { x0: x0 - 4, y0: y0 - 4, x1: x1 + 4, y1: y1 + 4 };
@@ -96,6 +114,34 @@
     if (PW.props) PW.props.afterBlast(world, particles, box);
     if (world.onDamage) for (const [id, cells] of damaged) world.onDamage(id, cells, cx, cy);
     return { removed, damaged };
+  }
+
+  // Smouldering ground or rubble at (x, y): for `seconds` it keeps putting smoke into the air over
+  // a `width` wide patch (the first open cells above it), dying down as it goes, so strikes and
+  // big collapses leave a tall plume that lingers and drifts with the wind.
+  function addSmoulder(world, x, y, seconds, width) {
+    (world.smoulders || (world.smoulders = [])).push({ x, y, width: Math.max(4, width), life: seconds, left: seconds, n: 0 });
+  }
+  function stepSmoulders(world, dt) {
+    const list = world.smoulders;
+    if (!list || !list.length) return;
+    const { mat, width: W, height: H } = world;
+    for (let k = list.length - 1; k >= 0; k -= 1) {
+      const s = list[k];
+      s.left -= dt;
+      if (s.left <= 0) { list.splice(k, 1); continue; }
+      const rate = (s.left / s.life) * (1.5 + s.width / 8);   // smoke cells per tick
+      let n = Math.floor(rate) + ((PW.hash3(s.x | 0, s.n, 11) & 1023) / 1023 < rate % 1 ? 1 : 0);
+      while (n-- > 0) {
+        s.n += 1;
+        const x = Math.round(s.x + ((PW.hash3(s.x | 0, s.n, 3) & 1023) / 1023 - 0.5) * s.width);
+        if (x < 1 || x >= W - 1) continue;
+        let y = Math.min(H - 2, Math.round(s.y));
+        for (let up = 0; up < 80 && y > 1 && PW.mat.phase[mat[y * W + x] & ID_MASK] >= PW.PHASE.LIQUID; up += 1) y -= 1;
+        if ((mat[y * W + x] & ID_MASK) !== M.AIR) continue;
+        PW.set(world, x, y, M.SMOKE | 3 << 6, { quiet: true });
+      }
+    }
   }
 
   // Short, bright light flashes drawn as cell-aligned dithered discs.
@@ -122,4 +168,6 @@
 
   PW.explode = explode;
   PW.drawEffects = drawEffects;
+  PW.addSmoulder = addSmoulder;
+  PW.stepSmoulders = stepSmoulders;
 })();

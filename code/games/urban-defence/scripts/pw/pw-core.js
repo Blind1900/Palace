@@ -166,7 +166,10 @@
   for (const id of [M.AIR, M.WATER, M.COVER_ROCK, M.COVER_WOOD, M.COVER_METAL, M.COVER_SAND]) passable[id] = 1;
   // Gases: smoke from fires and blasts, steam from boiling water (it condenses back into water,
   // so water is never lost), dust thrown up by blasts and collapses. Ash is what fire leaves.
-  define(M.SMOKE, 'smoke', { phase: PHASE.GAS, hardness: 0 }, [[54, 54, 58], [62, 62, 66], [48, 48, 52], [58, 58, 62]]);
+  // (smoke is a warm grey lighter than the night sky, so plumes read against it: thin wisps
+  // pale, thick billows darker, as in the strike references)
+  define(M.SMOKE, 'smoke', { phase: PHASE.GAS, hardness: 0 },
+    [[132, 126, 120], [124, 118, 112], [114, 108, 102], [106, 100, 96], [98, 92, 88], [90, 86, 82], [82, 78, 76], [76, 72, 70]]);
   define(M.STEAM, 'steam', { phase: PHASE.GAS, hardness: 0 }, [[220, 228, 234], [210, 220, 228], [228, 234, 238], [214, 222, 230]]);
   define(M.DUST, 'dust', { phase: PHASE.GAS, hardness: 0 }, [[150, 132, 104], [138, 122, 96], [158, 140, 110], [144, 126, 100]]);
   define(M.ASH, 'ash', { phase: PHASE.POWDER, ground: true, hardness: 0.03 },

@@ -1,0 +1,333 @@
+'use strict';
+// Structural integrity of buildings after damage. A building's frame is its structure cells AND its
+// back walls (in this side view the back walls stand for the facade and party walls that carry the
+// floors: the end walls are mostly door and window). When a building is hit it is analysed (within a
+// time budget, once per few ticks while it keeps being damaged):
+//   - every part no longer joined to the ground (or to a neighbour it leans on) falls as a rigid
+//     piece - straight down, grinding through whatever is left of the building under it - and small
+//     bits crumble;
+//   - each row above the floor compares the load it carries per supporting column with what it
+//     carried as built (so every style is equally sturdy): a row that has lost too much of its
+//     support gives way, and so does one whose load now overhangs its remaining supports;
+//   - everything above the failing row becomes ONE rigid piece that hinges down towards the side
+//     that failed (crushing the stump as it goes) or, when it lost its supports evenly, drops into
+//     its own footprint floor by floor; a jagged band crumbles at the break;
+//   - fittings (lamps, signs, railings) left hanging without what held them come down.
+// A building that has lost three quarters of its frame is ruined.
+(function () {
+  const PW = window.PW;
+  const { M, ID_MASK, CHUNK_SHIFT, CHUNK_MASK } = PW;
+  const { phase, structural, breaksTo } = PW.mat;
+  const groundMat = PW.mat.ground;
+
+  const FAIL_RATIO = 1.8;     // a row gives way when each support carries 1.8 times its built load
+  const TOPPLE_MARGIN = 3;    // cells the centre of the load may overhang its supports
+  const MIN_LOAD = 80;        // rows carrying less than this are not checked (roof ornaments...)
+  const CRUMBLE_ONLY = 40;    // parts smaller than this crumble instead of falling whole
+  const REPEAT = 15;          // ticks between analyses of a building still being damaged
+  const SOLID = 1, BACK = 2, FIT = 4, FRAME = SOLID | BACK;
+
+  function createStructure(world, fragments) {
+    const { mat, width: W, height: H } = world;
+    const due = new Map();
+    const stats = { analysed: 0, collapses: 0, detached: 0, crumbled: 0, orphans: 0, ms: 0, maxMs: 0, last: null };
+    let tick = 0;
+    const isStructure = (id) => phase[id] === PW.PHASE.SOLID && (structural[id] || groundMat[id]);
+    const building = (id) => (world.buildings || [])[id - 1] || null;
+    const size = 1 << CHUNK_SHIFT;
+
+    // ---- What a building is made of, now -----------------------------------------------------------
+    // The area it can occupy (its canvas, its works and the ground under it).
+    function areaOf(b) {
+      if (b.area) return b.area;
+      // (below its floor: its cores, and the stage, piers and walls of a base on a slope)
+      const works = b.works || [b.body.left, b.body.right];
+      b.area = { x0: Math.max(0, Math.min(b.ox, works[0]) - 4), x1: Math.min(W - 1, Math.max(b.ox + b.canvas.width, works[1]) + 4),
+        y0: Math.max(0, b.oy - 4), y1: Math.min(H - 1, b.ground + (b.base ? 190 : 40)) };
+      return b.area;
+    }
+    // Classify every cell the building owns: frame (structure, back wall) and fittings in front.
+    // Reads the sparse layers chunk by chunk (no per-cell lookups).
+    function scan(b) {
+      const { x0, x1, y0, y1 } = areaOf(b);
+      const gw = x1 - x0 + 3, gh = y1 - y0 + 3;
+      const cls = new Uint8Array(gw * gh);
+      const at = (x, y) => (y - y0 + 1) * gw + (x - x0 + 1);
+      let fx0 = Infinity, fy0 = Infinity, fx1 = -Infinity, fy1 = -Infinity, count = 0;
+      for (let cy = y0 >> CHUNK_SHIFT; cy <= y1 >> CHUNK_SHIFT; cy += 1) {
+        for (let cx = x0 >> CHUNK_SHIFT; cx <= x1 >> CHUNK_SHIFT; cx += 1) {
+          const c = cy * world.chunksX + cx;
+          const own = world.owner[c];
+          if (!own) continue;
+          const back = world.back[c], deco = world.deco[c];
+          for (let ly = 0; ly < size; ly += 1) {
+            const y = (cy << CHUNK_SHIFT) + ly;
+            if (y < y0 || y > y1) continue;
+            for (let lx = 0; lx < size; lx += 1) {
+              const l = ly << CHUNK_SHIFT | lx;
+              if (own[l] !== b.id) continue;
+              const x = (cx << CHUNK_SHIFT) + lx;
+              if (x < x0 || x > x1) continue;
+              let k = 0;
+              if (isStructure(mat[y * W + x] & ID_MASK)) k = SOLID;
+              else if (back && back[l]) k = BACK;
+              if (deco && deco[l]) k |= FIT;
+              if (!k) continue;
+              cls[at(x, y)] = k;
+              count += 1;
+              if (k & FRAME) { if (x < fx0) fx0 = x; if (x > fx1) fx1 = x; if (y < fy0) fy0 = y; if (y > fy1) fy1 = y; }
+            }
+          }
+        }
+      }
+      return { x0, y0, x1, y1, gw, gh, cls, at, count, fx0, fx1, fy0, fy1 };
+    }
+    // As built, from its canvas: per row above the floor, the load (frame above the row), the
+    // supporting columns (frame with frame on top) and their span, and whether the load sat over them.
+    function blueprintOf(b) {
+      if (b.blueprint) return b.blueprint;
+      const c = b.canvas, rows = c.ground;
+      const frame = (x, y) => (c.mat[y * c.width + x] && isStructure(c.mat[y * c.width + x] & ID_MASK)) || c.back[y * c.width + x] !== 0;
+      const load = new Float32Array(rows), support = new Int32Array(rows), left = new Int32Array(rows).fill(1e9), right = new Int32Array(rows).fill(-1e9);
+      const balanced = new Uint8Array(rows);
+      let total = 0, above = 0, aboveX = 0;
+      for (let y = 0; y < rows; y += 1) {
+        load[y] = above;
+        let rowX = 0, rowN = 0;
+        for (let x = 0; x < c.width; x += 1) {
+          if (!frame(x, y)) continue;
+          rowN += 1; rowX += x + b.ox + 0.5; total += 1;
+          if (y > 0 && frame(x, y - 1)) { support[y] += 1; left[y] = Math.min(left[y], x + b.ox); right[y] = Math.max(right[y], x + b.ox); }
+        }
+        if (above) { const centre = aboveX / above; balanced[y] = centre >= left[y] - TOPPLE_MARGIN && centre <= right[y] + 1 + TOPPLE_MARGIN ? 1 : 0; }
+        above += rowN; aboveX += rowX;
+      }
+      b.blueprint = { load, support, left, right, balanced, total };
+      return b.blueprint;
+    }
+
+    // ---- Analysis ---------------------------------------------------------------------------------
+    // (a building is analysed at most once every REPEAT ticks however often it is hit)
+    const last = new Map();
+    function notify(id) {
+      if (!building(id) || due.has(id)) return;
+      due.set(id, Math.max(tick + 2, (last.get(id) ?? -1e9) + REPEAT));
+    }
+    function step(budgetMs = 1.5) {
+      tick += 1;
+      const t0 = performance.now();
+      for (const [id, at] of due) {
+        if (at > tick) continue;
+        due.delete(id);
+        last.set(id, tick);
+        analyse(building(id));
+        if (performance.now() - t0 > budgetMs) break;
+      }
+      stats.ms = performance.now() - t0;
+      stats.maxMs = Math.max(stats.maxMs, stats.ms);
+    }
+    function analyse(b) {
+      if (!b) return null;
+      stats.analysed += 1;
+      const S = scan(b);
+      const { cls, at, gw, gh } = S;
+      const report = { id: b.id, frame: 0, anchored: 0, detached: 0, failed: null, orphans: 0 };
+      if (S.fx1 < S.fx0) { b.health = 0; b.ruined = true; return report; }
+      // Anchored frame: joined to ground or to structure the building does not own (8-connected).
+      const state = new Uint8Array(gw * gh);           // 1 anchored frame
+      const queue = [];
+      const support = (x, y) => {
+        if (x < 0 || y < 0 || x >= W || y >= H || (cls[at(x, y)] & FRAME)) return false;
+        const nid = mat[y * W + x] & ID_MASK;
+        return phase[nid] === PW.PHASE.SOLID && (groundMat[nid] === 1 || structural[nid] === 1);
+      };
+      for (let y = S.fy0; y <= S.fy1; y += 1) for (let x = S.fx0; x <= S.fx1; x += 1) {
+        const k = at(x, y);
+        if (!(cls[k] & FRAME)) continue;
+        report.frame += 1;
+        if (support(x, y + 1) || support(x + 1, y) || support(x - 1, y) || support(x, y - 1)) { state[k] = 1; queue.push(x, y); }
+      }
+      for (let q = 0; q < queue.length; q += 2) {
+        const x = queue[q], y = queue[q + 1];
+        for (let dy = -1; dy <= 1; dy += 1) for (let dx = -1; dx <= 1; dx += 1) {
+          const k = at(x + dx, y + dy);
+          if ((cls[k] & FRAME) && !state[k]) { state[k] = 1; queue.push(x + dx, y + dy); }
+        }
+      }
+      report.anchored = queue.length / 2;
+      // Parts no longer joined to anything fall; small bits crumble.
+      if (report.anchored < report.frame) {
+        const seen = new Uint8Array(gw * gh);
+        for (let y = S.fy0; y <= S.fy1; y += 1) for (let x = S.fx0; x <= S.fx1; x += 1) {
+          const k0 = at(x, y);
+          if (!(cls[k0] & FRAME) || state[k0] || seen[k0]) continue;
+          const part = [];
+          const stack = [x, y];
+          seen[k0] = 1;
+          while (stack.length) {
+            const py = stack.pop(), px = stack.pop();
+            part.push(py * W + px);
+            for (let dy = -1; dy <= 1; dy += 1) for (let dx = -1; dx <= 1; dx += 1) {
+              const k = at(px + dx, py + dy);
+              if ((cls[k] & FRAME) && !state[k] && !seen[k]) { seen[k] = 1; stack.push(px + dx, py + dy); }
+            }
+          }
+          report.detached += part.length;
+          if (part.length < CRUMBLE_ONLY) { crumble(part); stats.crumbled += part.length; continue; }
+          // A big part drops into the footprint under it, grinding down; a small one tumbles.
+          const big = part.length >= 300;
+          fragments.spawn({ cells: part.concat(fittingsOn(S, part)), owner: b.id, drop: big, floor: b.ground, base: b.ground,
+            omega: big ? 0 : ((PW.hash2(x, y) % 7) - 3) * 0.05 });
+          if (big) (b.failures || (b.failures = [])).push('drop');
+          stats.detached += 1;
+        }
+      }
+      // Each row above the floor: load per support against the blueprint, and overhang (the
+      // building's own columns only: a skybridge it owns rests on its neighbour, not on it).
+      const bp = blueprintOf(b);
+      const cx0 = Math.max(S.fx0, b.body.left - 2), cx1 = Math.min(S.fx1, b.body.right + 2);
+      let load = 0, loadX = 0, fail = null;
+      for (let y = S.fy0; y <= Math.min(S.fy1, b.ground - 1); y += 1) {
+        const r = y - b.oy;
+        let rowN = 0, rowX = 0, carried = 0, left = Infinity, right = -Infinity;
+        for (let x = cx0; x <= cx1; x += 1) {
+          const k = at(x, y);
+          if (!state[k]) continue;
+          rowN += 1; rowX += x + 0.5;
+          if (state[k - gw]) { carried += 1; if (x < left) left = x; if (x > right) right = x; }
+        }
+        const support = carried;
+        if (r >= 0 && r < bp.load.length && load >= MIN_LOAD && bp.support[r] > 0) {
+          const built = bp.load[r] / bp.support[r];
+          const centreX = loadX / load;
+          if (!support || load / support > FAIL_RATIO * Math.max(1, built)) {
+            // Crushed: the side that lost more of its support drops, pivoting about the far edge;
+            // when it lost them evenly it comes straight down into its footprint.
+            const span = bp.right[r] - bp.left[r] + 1;
+            const lostLeft = (support ? left : bp.right[r]) - bp.left[r], lostRight = bp.right[r] - (support ? right : bp.left[r]);
+            const dir = lostLeft >= lostRight ? -1 : 1;
+            const even = support < bp.support[r] * 0.2 || Math.abs(lostLeft - lostRight) < span * 0.3;
+            fail = { y, dir, pivotX: dir < 0 ? (support ? right + 1 : bp.right[r] + 1) : (support ? left : bp.left[r]),
+              reason: even ? 'pancake' : 'crushed', load, support, built };
+          } else if (bp.balanced[r] && (centreX < left - TOPPLE_MARGIN || centreX > right + 1 + TOPPLE_MARGIN)) {
+            const dir = centreX < left ? -1 : 1;
+            fail = { y, dir, pivotX: dir < 0 ? left : right + 1, reason: 'overhang', load, support, built };
+          }
+          // (keep going down: the lowest failing row brings the most down)
+        }
+        load += rowN; loadX += rowX;
+      }
+      if (fail) {
+        report.failed = fail;
+        collapse(b, fail, S, state);
+      }
+      report.orphans = clearFittings(b, S, state);
+      const standing = report.anchored - (fail ? fail.cells || 0 : 0);
+      b.health = Math.max(0, Math.min(1, standing / Math.max(1, bp.total)));
+      b.ruined = b.health < 0.25;
+      stats.last = report;
+      return report;
+    }
+    // Fittings in front that hang on a falling part (a sign on its wall, a lamp on its corner) go
+    // with it: those joined to it through other fittings.
+    function fittingsOn(S, part) {
+      const { cls, at } = S;
+      const out = [], seen = new Set();
+      const queue = [];
+      for (const i of part) queue.push(i % W, (i / W) | 0);
+      for (let q = 0; q < queue.length; q += 2) {
+        const x = queue[q], y = queue[q + 1];
+        for (let dy = -1; dy <= 1; dy += 1) for (let dx = -1; dx <= 1; dx += 1) {
+          const nx = x + dx, ny = y + dy, k = at(nx, ny);
+          if (cls[k] !== FIT || seen.has(k)) continue;
+          seen.add(k); out.push(ny * W + nx); queue.push(nx, ny);
+        }
+      }
+      return out;
+    }
+    // Fittings (front deco the building owns) left with nothing holding them come down: one stays
+    // while it is joined to standing frame or stands on something solid.
+    function clearFittings(b, S, state) {
+      const { cls, at, gw, gh, x0, y0 } = S;
+      const held = new Uint8Array(gw * gh);
+      const queue = [];
+      // (fittings over the frame travel with it; these are the free-standing ones)
+      for (let k = 0; k < cls.length; k += 1) {
+        if (cls[k] !== FIT) continue;
+        const x = (k % gw) - 1 + x0, y = ((k / gw) | 0) - 1 + y0;
+        // (standing on firm ground or structure: loose debris under it can slide away)
+        if (phase[mat[Math.min(H - 1, y + 1) * W + x] & ID_MASK] === PW.PHASE.SOLID) { held[k] = 1; queue.push(x, y); continue; }
+        for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) if (state[at(x + dx, y + dy)]) { held[k] = 1; queue.push(x, y); break; }
+      }
+      for (let q = 0; q < queue.length; q += 2) {
+        const x = queue[q], y = queue[q + 1];
+        for (let dy = -1; dy <= 1; dy += 1) for (let dx = -1; dx <= 1; dx += 1) {
+          const k = at(x + dx, y + dy);
+          if (cls[k] === FIT && !held[k]) { held[k] = 1; queue.push(x + dx, y + dy); }
+        }
+      }
+      let removed = 0;
+      for (let k = 0; k < cls.length; k += 1) {
+        if (cls[k] !== FIT || held[k]) continue;
+        const x = (k % gw) - 1 + x0, y = ((k / gw) | 0) - 1 + y0;
+        if (PW.getOwner(world, x, y) !== b.id || !PW.getLayer(world, 'deco', x, y)) continue;
+        const color = PW.getLayer(world, 'deco', x, y);
+        PW.setLayer(world, 'deco', x, y, 0);
+        if (!isStructure(mat[y * W + x] & ID_MASK) && !PW.getLayer(world, 'back', x, y)) PW.setOwner(world, x, y, 0);
+        removed += 1;
+        if (world.particles && (PW.hash2(x, y) & 7) === 0) world.particles.spawn(x + 0.5, y + 0.5, ((PW.hash3(x, y, 5) & 255) / 255 - 0.5) * 60, -10, M.DEBRIS, color, PW.PARTICLE.LAND, 6, 0);
+      }
+      stats.orphans += removed;
+      return removed;
+    }
+    // Small bits of frame break up where they are: structure turns to debris that falls, back wall
+    // is thrown off as debris.
+    function crumble(cells) {
+      for (const i of cells) {
+        const x = i % W, y = (i / W) | 0;
+        const id = mat[i] & ID_MASK;
+        if (isStructure(id)) PW.set(world, x, y, breaksTo[id] || M.DEBRIS);
+        else {
+          const back = PW.getLayer(world, 'back', x, y);
+          PW.setLayer(world, 'back', x, y, 0);
+          if (world.particles && (PW.hash2(x, y) & 7) === 0) world.particles.spawn(x + 0.5, y + 0.5, 0, 0, M.DEBRIS, back, PW.PARTICLE.LAND, 6, 0);
+        }
+        PW.setOwner(world, x, y, 0);
+      }
+    }
+    // The building gives way at row fail.y: a jagged band crumbles and everything above it falls as
+    // one piece - hinging towards the failed side, or dropping into its footprint.
+    function collapse(b, fail, S, state) {
+      const { at } = S;
+      const yf = fail.y;
+      const piece = [], band = [];
+      for (let y = S.fy0; y <= S.fy1; y += 1) for (let x = S.fx0; x <= S.fx1; x += 1) {
+        if (!state[at(x, y)]) continue;
+        const jag = (PW.hash2(x >> 1, yf) % 5) - 2;    // the break is ragged
+        if (y < yf + jag - 1) piece.push(y * W + x);
+        else if (y <= yf + jag + 2) band.push(y * W + x);
+      }
+      for (const i of piece) state[at(i % W, (i / W) | 0)] = 0;
+      for (const i of band) state[at(i % W, (i / W) | 0)] = 0;
+      if (piece.length < CRUMBLE_ONLY) { crumble(piece.concat(band)); fail.cells = piece.length + band.length; return; }
+      crumble(band);
+      for (const i of band) if ((PW.hash2(i, 3) & 7) === 0) fragments.puff(i % W, ((i / W) | 0) - 1, 2, 4, 2);
+      if (fail.reason === 'pancake') fragments.spawn({ cells: piece, owner: b.id, drop: true, floor: yf, base: b.ground, dir: fail.dir, omega: fail.dir * 0.01 });
+      else fragments.spawn({ cells: piece, owner: b.id, pivot: { x: fail.pivotX, y: yf }, base: b.ground, dir: fail.dir, omega: fail.dir * 0.05 });
+      fail.cells = piece.length + band.length;
+      b.collapses = (b.collapses || 0) + 1;
+      (b.failures || (b.failures = [])).push(fail.reason);
+      stats.collapses += 1;
+      // The stump is checked again, and so are neighbours that leaned on it.
+      due.set(b.id, tick + REPEAT);
+      for (const other of world.buildings || []) {
+        if (other === b || other.body.right < b.body.left - 60 || other.body.left > b.body.right + 60) continue;
+        notify(other.id);
+      }
+    }
+
+    return { notify, step, analyse, stats, blueprintOf };
+  }
+
+  PW.createStructure = createStructure;
+})();

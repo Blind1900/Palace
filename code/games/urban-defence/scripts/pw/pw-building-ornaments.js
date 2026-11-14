@@ -267,40 +267,106 @@
     orn(c, cx, flame - 7, BEACON); orn(c, cx, flame - 8, BEACON);
   }
   // Coiling dragon: a 5-cell-thick S-curve with spines, claws, a horned head and a red pearl.
+  // A Chinese dragon climbing in an S-coil, its head turned to look out the facing way: a scaled
+  // gold body thickening from a tufted tail, a cream belly, red flame spines along its back, four
+  // clawed legs, a long head with open jaws and fangs, an eye, antler horns, a flowing red mane,
+  // whiskers and a beard, and the flaming pearl it chases. Everything is placed in the dragon's own
+  // terms (u forward along `facing`, rounded before mirroring) so the mirrored dragon is exact; the
+  // light stays on the canvas left.
+  const DRAGON = { gold: [226, 178, 64], goldLit: [250, 210, 104], goldDark: [170, 120, 36], scale: [196, 142, 44],
+    belly: [244, 222, 150], bellyDark: [214, 186, 112], red: [206, 50, 38], redLit: [244, 104, 58], redDark: [150, 32, 26],
+    ivory: [238, 228, 200], ivoryDark: [196, 182, 150], white: [250, 248, 240], black: [24, 20, 18], mouth: [110, 24, 22] };
   function dragonBody(c, P, cx, baseY, length, facing, random, coilAround = false) {
-    const amp = Math.max(6, Math.min(12, Math.round(length / 9)));
+    const D = DRAGON;
+    const f = facing < 0 ? -1 : 1;
+    const put = (u, y, color) => orn(c, cx + f * u, y, color);     // u: cells towards the facing side
+    const amp = Math.max(6, Math.min(14, Math.round(length / 8))) * (coilAround ? 1.2 : 1);
     const periods = length >= 90 ? 1.5 : 1;
-    const body = [226, 178, 64], belly = [242, 214, 120], spine = [200, 52, 40];
-    let headX = cx, headY = baseY - length;
-    for (let i = 0; i <= length; i += 1) {
-      const t = i / length;
-      // The coil, belly and spines mirror with `facing`; the light stays on the canvas left.
-      const x = cx + facing * Math.round(amp * Math.min(1, 4 * t) * Math.sin(2 * Math.PI * periods * t) * (coilAround ? 1.2 : 1));
-      const yy = baseY - i;
-      for (let d = -2; d <= 2; d += 1) {
-        const color = d === -2 ? tone(body, 1.15) : d === 2 ? tone(body, 0.72) : d === facing ? belly : body;
-        orn(c, x + d, yy, color);
+    const neck = Math.max(24, length - 16);                         // the body climbs to here; the head sits above
+    const half = (t) => Math.max(1, Math.min(4, length / 18) * (t < 0.15 ? 0.3 + t / 0.15 * 0.7 : t > 0.85 ? 1 - (t - 0.85) / 0.15 * 0.35 : 1));
+    const along = (t) => Math.round(amp * Math.min(1, 4 * t) * Math.sin(2 * Math.PI * periods * t));
+    const lit = (u, color) => tone(color, (f * u) < 0 ? 1.12 : 1);   // canvas-left side catches the light
+    // Body: a ribbon of discs along the path, belly plates on the front, scales on the back.
+    let headU = 0, headY = baseY - neck;
+    for (let i = 0; i <= neck; i += 1) {
+      const t = i / neck, u0 = along(t), y = baseY - i, h = half(t);
+      const r = Math.round(h);
+      for (let d = -r; d <= r; d += 1) {
+        const front = d > r * 0.25;
+        let color;
+        if (front) color = (i % 3 === 0) ? D.bellyDark : D.belly;                                   // belly plates
+        else if (((i + Math.abs(d)) % 4 === 0) || (i % 4 === 2 && Math.abs(d) === r - 1)) color = D.scale;   // scale rows
+        else color = d === -r ? D.goldDark : D.gold;
+        put(u0 + d, y, lit(u0 + d, color));
       }
-      if (i % 9 === 4 && i < length - 8) { orn(c, x - 3 * facing, yy, spine); orn(c, x - 4 * facing, yy - 1, spine); }
-      if (Math.abs(t - 0.4) < 0.012 || Math.abs(t - 0.75) < 0.012) for (let k = 3; k <= 7; k += 1) orn(c, x + k * facing, yy + (k > 5 ? 1 : 0), tone(body, 0.85));
-      if (i === length) { headX = x; headY = yy; }
+      // Flame spines along the back.
+      if (i % 5 === 2 && t > 0.1 && t < 0.95) {
+        for (let k = 1; k <= Math.max(2, r); k += 1) put(u0 - r - k, y - Math.round(k * 0.6), k === 1 ? D.red : k % 2 ? D.redLit : D.red);
+      }
+      if (i === neck) { headU = u0; headY = y; }
     }
-    // Head: snout pointing the facing way, eye, horns.
-    for (let dy = -4; dy <= 4; dy += 1) for (let dx = -5; dx <= 9; dx += 1) {
-      const sx = headX + dx * facing, sy = headY + dy;
-      const inHead = dx <= 2 ? Math.abs(dy) <= 4 - Math.max(0, -dx - 3) : Math.abs(dy) <= 2 - (dx > 6 ? 1 : 0);
-      if (!inHead) continue;
-      const eye = dx === 0 && dy === -2;
-      orn(c, sx, sy, eye ? BEACON : dy > 1 ? belly : tone(body, dy < -2 ? 1.12 : 1));
+    // Tail tuft at the base.
+    for (let k = 0; k < 5; k += 1) { put(along(0) - 2 - k, baseY + Math.min(0, -k + 2), k % 2 ? D.redLit : D.red); put(along(0) - 1 - k, baseY - 1 - (k >> 1), D.red); }
+    // Four legs: a thigh out of the belly side, a forearm down, three ivory talons.
+    for (const t of [0.3, 0.36, 0.64, 0.7]) {
+      const i = Math.round(t * neck), u0 = along(t), y = baseY - i, r = Math.round(half(t));
+      for (let k = 0; k <= 5; k += 1) { put(u0 + r + k, y + Math.round(k * 0.3), D.gold); put(u0 + r + k, y + 1 + Math.round(k * 0.3), D.goldDark); }
+      for (let k = 0; k <= 3; k += 1) put(u0 + r + 5, y + 2 + k, D.gold);
+      for (const tu of [-1, 0, 1]) { put(u0 + r + 5 + tu, y + 6, D.ivoryDark); put(u0 + r + 5 + tu * 2, y + 7, D.ivory); }
     }
-    for (let k = 0; k < 6; k += 1) { orn(c, headX - (3 + k * 0.5 | 0) * facing, headY - 5 - k, tone(body, 0.8)); orn(c, headX - (1 + k * 0.3 | 0) * facing, headY - 5 - k, body); }
-    // Red pearl in front of the mouth.
-    const px = headX + 13 * facing, py = headY;
-    for (let dy = -4; dy <= 4; dy += 1) for (let dx = -4; dx <= 4; dx += 1) {
-      if (dx * dx + dy * dy > 16) continue;
-      orn(c, px + dx, py + dy, dx + dy < -3 ? [255, 120, 100] : BEACON);
+    // Head, looking out the facing way: (hu, hy) is the back of the skull over the neck.
+    const hu = headU, hy = headY - 3;
+    const H = (du, dy, color) => put(hu + du, hy + dy, color);
+    for (let dy = -4; dy <= 3; dy += 1) for (let du = -3; du <= 5; du += 1) {
+      if ((du - 1) ** 2 / 20 + (dy + 0.5) ** 2 / 14 > 1) continue;
+      H(du, dy, dy < -2 ? D.goldLit : D.gold);                                                      // skull
     }
-    for (let k = 9; k < 13; k += 1) orn(c, headX + k * facing, py, tone(body, 0.8));
+    for (let du = 5; du <= 15; du += 1) {
+      const top = du >= 13 ? -3 : -2;                                                                 // the nose rises at the tip
+      for (let dy = top; dy <= 0; dy += 1) H(du, dy, dy === top ? D.goldLit : D.gold);               // upper jaw
+      H(du, 1, du <= 13 ? D.mouth : D.gold);                                                          // open mouth
+      if (du <= 13) H(du, 2, D.goldDark);                                                             // lower jaw
+      if (du <= 12) H(du, 3, D.bellyDark);
+    }
+    for (let du = 7; du <= 13; du += 2) H(du, 1, D.white);                                            // teeth
+    H(13, 2, D.white); H(14, 1, D.white);                                                             // fang
+    H(14, -2, D.black);                                                                               // nostril
+    H(4, -3, D.white); H(5, -3, D.white); H(5, -2, D.black); H(4, -2, D.white);                       // eye
+    for (let du = 3; du <= 6; du += 1) H(du, -4, D.red);                                              // brow ridge
+    // Antler horns swept back, each with a tine.
+    for (let k = 0; k <= 7; k += 1) { H(-k, -4 - k, k % 3 === 0 ? D.ivoryDark : D.ivory); H(1 - k, -4 - k, D.ivoryDark); }
+    for (let k = 1; k <= 3; k += 1) H(-3 + k, -7 - k, D.ivory);
+    // Mane: red flames streaming back from behind the skull (each strand an unbroken wavy line).
+    for (let s = 0; s < 6; s += 1) {
+      const dy0 = -3 + s * 1.4 | 0, len = 5 + (s % 3) * 2;
+      let prev = null;
+      for (let k = 0; k < len; k += 1) {
+        const v = dy0 + Math.round(Math.sin(k * 0.9 + s) * 1.2);
+        const color = k > len - 3 ? D.redLit : s % 2 ? D.red : D.redDark;
+        if (prev !== null) for (let w = Math.min(prev, v); w <= Math.max(prev, v); w += 1) H(-3 - k, w, color);
+        else H(-3 - k, v, color);
+        prev = v;
+      }
+    }
+    // Whiskers: two long barbels curling from the snout out to the pearl, drawn as unbroken
+    // lines; a beard under the jaw.
+    const line = (points, color) => {
+      for (let n = 0; n + 1 < points.length; n += 1) {
+        const [a0, b0] = points[n], [a1, b1] = points[n + 1];
+        const steps = Math.max(Math.abs(a1 - a0), Math.abs(b1 - b0));
+        for (let s = 0; s <= steps; s += 1) H(Math.round(a0 + (a1 - a0) * s / steps), Math.round(b0 + (b1 - b0) * s / steps), color);
+      }
+    };
+    line([[15, -1], [17, -4], [20, -5], [22, -3]], D.goldDark);
+    line([[12, 3], [14, 6], [17, 7], [20, 5], [21, 3]], D.goldDark);
+    for (let du = 3; du <= 8; du += 1) for (let dy = 4; dy <= 4 + ((du + 1) % 3); dy += 1) H(du, dy, dy > 4 ? D.redDark : D.red);
+    // The flaming pearl just ahead of the mouth, held between the whiskers.
+    const pu = 24, pv = 0;
+    for (let dy = -3; dy <= 3; dy += 1) for (let du = -3; du <= 3; du += 1) {
+      if (du * du + dy * dy > 9) continue;
+      H(pu + du, pv + dy, du + dy < -2 ? [255, 150, 120] : BEACON);
+    }
+    for (let k = 1; k <= 3; k += 1) H(pu + (k % 2 ? 1 : 0), pv - 3 - k, k === 3 ? D.redLit : [255, 170, 80]);   // flame
   }
   function angel(c, P, cx, y) {
     const robe = mix(P.ornament, [240, 236, 250], 0.4), wing = tone(P.ornament, 1.05);

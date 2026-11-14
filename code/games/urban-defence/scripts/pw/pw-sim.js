@@ -307,7 +307,8 @@
     // Smoke and dust thin out over time; steam condenses back into water once it has cooled.
     const RISE = new Float32Array(64), FADE = new Float32Array(64);
     RISE[M.SMOKE] = 0.55; RISE[M.STEAM] = 0.8; RISE[M.DUST] = -0.12;
-    FADE[M.SMOKE] = 1 / 150; FADE[M.DUST] = 1 / 100;
+    // (dust from blasts and collapses hangs in the air a long while, settling slowly)
+    FADE[M.SMOKE] = 1 / 150; FADE[M.DUST] = 1 / 350;
     const CONDENSE_BELOW = 70;       // °C
     world.wind = world.wind || 0;
     const windNoise = PW.createNoise1D((world.windSeed || 1) * 31 + 7, 1);

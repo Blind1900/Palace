@@ -122,10 +122,21 @@
           if (cy < 0) { x = tx; y = ty; continue; }          // above the grid: open sky
           if (cy >= H) { kill(i); removed = true; break; }
           const id = mat[cy * W + cx] & ID_MASK;
-          if (open(id, fl)) { x = tx; y = ty; continue; }
+          if (open(id, fl)) {
+            // Fast heavy debris knocks down plants and smashes lamps and fittings it flies through.
+            if ((fl & F.DAMAGE) && (Math.abs(vx[i]) + Math.abs(vy[i])) > 110 && PW.getLayer(world, 'deco', cx, cy)) {
+              if (!(PW.flora && PW.flora.strike(world, api, cx, cy))) {
+                PW.setLayer(world, 'deco', cx, cy, 0);
+                const owner = PW.getOwner(world, cx, cy);
+                if (owner > 0 && owner < 50000 && world.onDamage) world.onDamage(owner, 0, cx, cy);
+              }
+              vx[i] *= 0.8; vy[i] *= 0.8;
+            }
+            x = tx; y = ty; continue;
+          }
           // Collision with cell (cx, cy).
           const speed = Math.hypot(vx[i], vy[i]);
-          if ((fl & F.DAMAGE) && speed > 90 && structural[id]) chip(cx, cy, id, speed, i);
+          if ((fl & F.DAMAGE) && speed > 90 && structural[id] && id !== M.CORE) chip(cx, cy, id, speed, i);   // (cores break only to blasts)
           if ((fl & F.WATER) || ((fl & F.LAND) && speed < 45)) {
             if (deposit(x, y, cell[i], fl)) { kill(i); removed = true; break; }
           }
@@ -185,7 +196,8 @@
         ctx.fill();
       }
     }
-    return { spawn, step, draw, F, stats, listeners, get count() { return count; }, px, py, vx, vy, flags };
+    const api = { spawn, step, draw, F, stats, listeners, get count() { return count; }, px, py, vx, vy, flags };
+    return api;
   }
 
   PW.createParticles = createParticles;

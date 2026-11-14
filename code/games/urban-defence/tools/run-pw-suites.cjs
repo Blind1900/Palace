@@ -15,7 +15,7 @@ const SUITES = [
   { name: 'pw-grounding' }, { name: 'pw-settlements' }, { name: 'pw-tunnels' }, { name: 'pw-mining' },
   { name: 'pw-pipes' }, { name: 'pw-ore' }, { name: 'pw-styles' }, { name: 'pw-sandbox' }, { name: 'pw-views' },
   { name: 'pw-slopes', params: 'gallery=slopes' }, { name: 'pw-mirror', params: 'gallery=mirror' },
-  { name: 'pw-fire', alone: true },
+  { name: 'pw-fire', alone: true }, { name: 'pw-collapse', alone: true },
 ].filter((s) => !args.only || args.only.split(',').includes(s.name));
 const root = path.resolve(__dirname, '..');
 const out = path.join(os.tmpdir(), 'claude-scratch', 'shots');

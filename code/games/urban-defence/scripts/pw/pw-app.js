@@ -57,6 +57,14 @@
   const heat = world.heatSystem = PW.createHeat(world);
   const life = PW.createLife(world);
   world.particles = particles;
+  // Damage brings buildings down: blasts and flying debris report the cells they break, the
+  // structure is analysed and what fails falls as rigid pieces.
+  const fragments = PW.createFragments ? PW.createFragments(world, particles) : null;
+  const structure = fragments && PW.createStructure ? PW.createStructure(world, fragments) : null;
+  if (structure) {
+    world.onDamage = (id) => structure.notify(id);
+    particles.listeners.chip = (owner) => { if (owner) structure.notify(owner); };
+  }
   // Bubbles the water simulation releases: one or two cells of pale air, rising to pop.
   const BUBBLE_COLORS = [PW.abgr(206, 232, 248, 230), PW.abgr(168, 210, 238, 210), PW.abgr(232, 244, 252, 240)];
   world.emitBubble = (x, y) => {
@@ -220,6 +228,9 @@
       particles.step(DT);
       if (PW.tunnels) PW.tunnels.step(world, DT * devSpeed);
       heat.step(1);
+      if (structure) structure.step(1.5);
+      if (fragments) fragments.step(DT);
+      if (PW.stepSmoulders) PW.stepSmoulders(world, DT);
       if (PW.mining) PW.mining.step(world, DT);
       if (pipes) pipes.step();
       life.step();
@@ -236,6 +247,7 @@
     renderer.drawSky();
     renderer.drawBase();
     if (pipes) pipes.draw(renderer, now / 1000);
+    if (fragments) fragments.draw(renderer);
     if (PW.mining) PW.mining.draw(renderer, world, now / 1000);
     if (PW.drawUnitsHook) PW.drawUnitsHook(renderer);
     renderer.drawDeco();
@@ -269,7 +281,7 @@
   }
 
   window.pwApp = { world, layout, renderer, sim, particles, seed, timings, ready: true,
-    explode, dig, planDig, preview, pipes, setDevelopSpeed: (k) => { devSpeed = k; }, heat, life,
+    explode, dig, planDig, preview, pipes, setDevelopSpeed: (k) => { devSpeed = k; }, heat, life, structure, fragments,
     paint: (x, y, radius, material) => paint(x, y, radius, () => material),
     stepWorld, countWater: () => sim.countWater(), simTimes,
     setPaused: (value) => { paused = value; },
