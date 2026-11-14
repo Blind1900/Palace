@@ -17,14 +17,18 @@ for (const s of world.settlements) {
   const lines = pipes.lines.filter((l) => l.settlement === s);
   let columns = 0, soilLeft = 0, divider = 0, dividerOk = 0;
   const paints = new Set();
-  // (clear of the town's ends, where the made ground tapers out at 45°)
-  for (let x = s.streetLeft + 110; x <= s.streetRight - 110; x += 9) {
+  const ends = (s.madeGround && s.madeGround.ends) || [];
+  for (let x = s.streetLeft + 9; x <= s.streetRight - 9; x += 9) {
     const g = world.groundTop[x];
     if (!(PW.getFlags(world, x, g) & PW.FLAG.ROAD)) continue;          // street columns only
     // (judged against whichever lines run under this column)
     const here = lines.filter((l) => x >= l.x0 && x <= l.x1);
     if (!here.length) continue;
     const top = Math.min(...here.map((l) => l.ys[x - l.x0])), bottom = Math.max(...here.map((l) => l.ys[x - l.x0])) + BORE - 1 + BED;
+    // (clear of the made ground's ends, where its layers fray out into the natural ground, and of
+    // the lines' end machinery, whose pits are the lines' own)
+    if (ends.some((e) => Math.abs(e - x) < PW.urban.faceAt(bottom - g) + 2)) continue;
+    if (pipes.lines.some((l) => l.machines.some((q) => (x - q.x) * q.side >= -3 && (x - q.x) * q.side <= q.w + 4))) continue;
     // (where the lines cross a shaft they are fixed to its back wall: no ground there to judge)
     let crossing = false;
     for (let y = g; y <= bottom + 3 && !crossing; y += 1) if (PW.getFlags(world, x, y) & PW.FLAG.TUNNEL) crossing = true;
@@ -56,8 +60,47 @@ for (const s of world.settlements) {
   }
 }
 const ok = (style, test) => !byStyle[style] || test(byStyle[style]);
-check(ok('modern', (s) => s.slab > 0 && s.cable > 0) && ok('asian', (s) => s.course > 0 && s.fill > 0 && s.slab === 0)
-  && ok('gothic', (s) => s.slab > 0 && s.course > 0), `each faction builds its own made ground (${JSON.stringify(byStyle)})`);
+check(ok('modern', (s) => s.slab > 0 && s.cable > 0) && ok('asian', (s) => s.course > 0 && s.fill > s.slab && s.cable === 0)
+  && ok('gothic', (s) => s.slab > 0 && s.course > 0 && s.cable === 0), `each faction builds its own made ground (${JSON.stringify(byStyle)})`);
+
+// Every line end runs into the machinery that belongs there (or, with no room at all, turns up
+// into its riser), and the lines run in smooth curves, not over every bump and notch.
+const MACHINES = { water: ['pump', 'tank', 'valve'], sm: ['generator', 'transformer', 'joint'], hm: ['crusher', 'mill', 'tail', 'drive'] };
+let ends = 0, machined = 0, elbows = 0, bare = [], wrong = [];
+for (const line of pipes.lines) {
+  for (const side of [-1, 1]) {
+    ends += 1;
+    const m = line.machines.find((q) => q.side === side);
+    const endX = side < 0 ? line.x0 : line.x1;
+    if (m) {
+      machined += 1;
+      if (!MACHINES[line.resource].includes(m.kind)) wrong.push(`${line.resource}:${m.kind}`);
+      // (the machine's inlet sits on the line's end)
+      if (Math.abs(m.x - endX) > 0) bare.push(`${line.side}/${line.resource}${side < 0 ? 'L' : 'R'} machine off the end`);
+    } else if (line.risers.some((r) => Math.abs(endX - r.x) <= 1)) elbows += 1;
+    else bare.push(`${line.side}/${line.resource}${side < 0 ? 'L' : 'R'}@${endX}`);
+  }
+}
+check(bare.length === 0 && wrong.length === 0 && machined >= ends * 0.7,
+  `every line end runs into machinery or turns up into its riser (${machined} machines, ${elbows} elbows of ${ends} ends; bare: ${bare.join(' ') || 'none'}; wrong: ${wrong.join(' ') || 'none'})`);
+let notches = 0, runs = 0;
+for (const line of pipes.lines) {
+  // A notch: the line dips (or bumps) by 2 rows or more and comes back within 16 columns.
+  const ys = line.ys;
+  for (let k = 0; k + 16 < ys.length; k += 4) {
+    runs += 1;
+    let lo = Infinity, hi = -Infinity;
+    for (let j = k; j <= k + 16; j += 1) { lo = Math.min(lo, ys[j]); hi = Math.max(hi, ys[j]); }
+    const ends2 = Math.max(ys[k], ys[k + 16]), ends1 = Math.min(ys[k], ys[k + 16]);
+    if (hi - ends2 >= 2 || ends1 - lo >= 2) notches += 1;
+  }
+}
+check(notches <= runs * 0.01, `the lines run in smooth curves (${notches} notches in ${runs} 16-column runs)`);
+const kinds = [...new Set(pipes.lines.flatMap((l) => l.machines.map((m) => m.kind)))];
+for (const kind of ['generator', 'pump', 'crusher', 'mill', 'transformer', 'tank'].filter((k) => kinds.includes(k))) {
+  const line = pipes.lines.find((l) => l.machines.some((m) => m.kind === kind)), m = line.machines.find((q) => q.kind === kind);
+  await view(`pp-machine-${kind}`, m.x + m.side * (m.w / 2), m.base - m.h / 2 - 4, 7);
+}
 
 // 2. Cargo flows from the sources to the buildings.
 pwApp.stepWorld(60 * 30);

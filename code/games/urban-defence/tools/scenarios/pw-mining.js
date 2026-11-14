@@ -69,9 +69,11 @@ check(left.stored < storedPeak && left.delivered > deliveredBefore, `once the li
 const used = new Set(ops.map((o) => o.node));
 const target = layout.nodes.filter((n) => !used.has(n) && n.tier === 'vein' && n.y - world.groundTop[n.x] > 500)
   .sort((a, b) => Math.abs(a.x - 1500) - Math.abs(b.x - 1500))[0];
+// (aimed at the vein's leftmost ore, so the planned tunnel ends beside the vein's body, not a tip)
 let ore = null;
-for (let y = target.box.y0; y <= target.box.y1 && !ore; y += 1) for (let x = target.box.x0; x <= target.box.x1; x += 1) if ((PW.get(world, x, y) & 63) === M.ORE) { ore = { x, y }; break; }
-const at = { x: ore.x - 30 - 20, y: ore.y + 4 };
+for (let x = target.box.x0; x <= target.box.x1 && !ore; x += 1) for (let y = target.box.y0; y <= target.box.y1; y += 1) if ((PW.get(world, x, y) & 63) === M.ORE) { ore = { x, y }; break; }
+// (the planned tunnel, 60 cells wide, ends 8 cells short of the vein: within its reach)
+const at = { x: ore.x - 30 - 8, y: ore.y + 4 };
 pwApp.planDig('left', at);
 check(pwApp.preview.node === target && /mining operation/.test(pwApp.preview.note), `planning a tunnel next to a vein highlights it ("${pwApp.preview.note}")`);
 await view('mn-preview', at.x + 20, at.y, 5);

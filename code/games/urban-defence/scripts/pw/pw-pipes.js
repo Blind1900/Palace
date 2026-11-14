@@ -35,6 +35,7 @@
   const BORE = 7;
   const CHANNEL = 2;                 // first channel row; lanes 0-2 are rows 2-4
   const BED = 2;                     // sand bed rows above and below the pipe
+  const SMOOTH = 28;                 // a line's bends are eased over this many columns each way
   const OWNER_BASE = 60000;
   const REPAIR_DELAY = 6 * 60, REPAIR_CELLS_PER_TICK = 0.1, REPAIR_HM_PER_CELL = 0.25;
   const BELT = [30, 30, 32], BELT_MARK = [62, 62, 60], ROLLER = [150, 150, 142], SAND = [170, 156, 118];
@@ -50,7 +51,7 @@
   function createPipes(world) {
     const { mat, width: W, height: H } = world;
     const lines = [];
-    const stats = { lines: 0, cells: 0, broken: 0, repaired: 0, repairHM: 0, packets: 0, spawned: 0, delivered: { sm: 0, hm: 0, water: 0 }, spilled: 0 };
+    const stats = { lines: 0, cells: 0, machines: 0, machineMisses: 0, broken: 0, repaired: 0, repairHM: 0, packets: 0, spawned: 0, delivered: { sm: 0, hm: 0, water: 0 }, spilled: 0 };
     let tick = 0;
 
     // ---- Routing ----------------------------------------------------------------------------------
@@ -84,6 +85,12 @@
         if ((mat[g * W + x] & ID_MASK) === M.WATER) g = PW.supportBelow(world, x, g, true);
         return g;
       };
+      const grounds = new Int32Array(ys.length);
+      // Push y below anything in the way between the ground and the pipe's bed.
+      const clear = (x, ground, y) => {
+        for (let scan = ground; scan < y + BORE + 3 && scan < H - 40; scan += 1) if (blocked(x, scan)) y = Math.max(y, scan + 4);
+        return y;
+      };
       for (let x = x0; x <= x1; x += 1) {
         // Bridge only openings that belong to a tunnel or a building (a shaft, the core pit's
         // edge): they have a back wall. Open ground lowered by a crater (no back wall) is followed
@@ -101,16 +108,48 @@
           const id = mat[y * W + x] & ID_MASK;
           if (PW.mat.open[id] && !isTunnel(x, y) && !buildingOwned(x, y) && !PW.getLayer(world, 'back', x, y)) ground = own;
         }
-        let y = ground + depth;
-        for (let scan = ground; scan < y + BORE + 3 && scan < H - 40; scan += 1) {
-          if (blocked(x, scan)) y = Math.max(y, scan + 4);
+        grounds[x - x0] = ground;
+        ys[x - x0] = clear(x, ground, ground + depth);
+      }
+      // A line is laid in long smooth runs, not over every bump and notch of the ground: the
+      // deepest need within SMOOTH columns, averaged over the same reach (so never shallower than
+      // its cover anywhere), then cleared again of anything the deeper run now meets.
+      for (let pass = 0; pass < 3; pass += 1) {
+        smooth(ys, SMOOTH);
+        let moved = false;
+        for (let k = 0; k < ys.length; k += 1) {
+          const y = clear(x0 + k, grounds[k], ys[k]);
+          if (y !== ys[k]) { ys[k] = y; moved = true; }
         }
-        ys[x - x0] = y;
+        if (!moved) break;
       }
       // Bends no steeper than 45°: only ever deepen to clear neighbours.
       for (let k = 1; k < ys.length; k += 1) ys[k] = Math.max(ys[k], ys[k - 1] - 1);
       for (let k = ys.length - 2; k >= 0; k -= 1) ys[k] = Math.max(ys[k], ys[k + 1] - 1);
       return ys;
+    }
+    // In place: each value becomes the mean, over k +/- reach, of the running maximum over the same
+    // reach. Every maximum in a column's mean covers that column, so no value ever rises (gets
+    // shallower) than it was.
+    function smooth(ys, reach) {
+      const n = ys.length, R = Math.min(reach, (n - 1) >> 1);
+      if (R < 1) return;
+      const peak = new Float64Array(n), queue = new Int32Array(n);
+      let head = 0, tail = 0, next = 0;
+      for (let k = 0; k < n; k += 1) {
+        for (; next <= Math.min(n - 1, k + R); next += 1) {
+          while (tail > head && ys[queue[tail - 1]] <= ys[next]) tail -= 1;
+          queue[tail++] = next;
+        }
+        while (queue[head] < k - R) head += 1;
+        peak[k] = ys[queue[head]];
+      }
+      const sum = new Float64Array(n + 1);
+      for (let k = 0; k < n; k += 1) sum[k + 1] = sum[k] + peak[k];
+      for (let k = 0; k < n; k += 1) {
+        const a = Math.max(0, k - R), b = Math.min(n - 1, k + R);
+        ys[k] = Math.ceil((sum[b + 1] - sum[a]) / (b - a + 1) - 1e-9);
+      }
     }
 
     // ---- The pipe itself -----------------------------------------------------------------------------
@@ -138,7 +177,9 @@
       if (x < 1 || y < 1 || x >= W - 1 || y >= H - 1) return false;
       const id = mat[y * W + x] & ID_MASK;
       if (id === M.AIR) {
-        if (!isTunnel(x, y) && y < world.groundTop[x]) return false;   // never in the open sky
+        // Never in the open sky, nor across a cave or a blast hole (only along a tunnel's or a
+        // building room's back wall).
+        if (!isTunnel(x, y) && (y < world.groundTop[x] || !(buildingOwned(x, y) || PW.getLayer(world, 'back', x, y)))) return false;
         PW.setLayer(world, 'back', x, y, rgb(color));
         PW.setFlag(world, x, y, FLAG.FIXTURE);
         return true;
@@ -191,6 +232,284 @@
         occ: new Uint8Array(yB - yA + 1), timer: 0, pending: 0 };
     }
 
+    // ---- End machinery -----------------------------------------------------------------------------
+    // A line never just stops: each end runs into the machine that belongs there. The water main
+    // starts at a pump and ends at a pressure tank, the SM conduit runs from a generator to a
+    // transformer, the HM belt from a crusher to a mill. A machine stands on a concrete plinth in a
+    // sand-backfilled pit at its line's level (sized as the real thing: a genset is 3 m long), its
+    // inlet on the line's bore. Drawn in its own frame: u outward from the line end, v up from the
+    // plinth's bottom row.
+    const STEEL = [120, 128, 134], STEEL_DARK = [72, 78, 84], CONCRETE = [150, 150, 144], BLACK = [34, 34, 36];
+    const MOTOR = [42, 150, 110], MOTOR_LIT = [70, 186, 140], MOTOR_DARK = [26, 104, 76], BRASS = [150, 120, 70];
+    const OCHRE = [176, 140, 40], RED = [176, 40, 32];
+    const ENCLOSURE = { modern: [214, 214, 208], asian: [36, 164, 150], gothic: [104, 112, 72] };
+    function sketch(w, h) {
+      const cells = new Array(w * h).fill(null);
+      const g = { w, h, cells };
+      g.put = (u, v, c, slab = false) => { if (u >= 0 && v >= 0 && u < w && v < h) cells[v * w + u] = { c, slab }; };
+      g.rect = (u0, v0, u1, v1, c) => { for (let v = v0; v <= v1; v += 1) for (let u = u0; u <= u1; u += 1) g.put(u, v, typeof c === 'function' ? c(u, v) : c); };
+      g.disc = (cu, cv, r, c) => {
+        for (let v = Math.floor(cv - r); v <= Math.ceil(cv + r); v += 1) for (let u = Math.floor(cu - r); u <= Math.ceil(cu + r); u += 1) {
+          const d = Math.hypot(u - cu, v - cv);
+          if (d <= r) g.put(u, v, typeof c === 'function' ? c(u, v, d) : c);
+        }
+      };
+      // A horizontal capsule (a vessel or a drum) between u0 and u1, rows v0 to v1, its heads domed.
+      g.capsule = (u0, u1, v0, v1, head, c) => {
+        const mid = (v0 + v1) / 2, half = (v1 - v0) / 2 + 0.5;
+        for (let v = v0; v <= v1; v += 1) {
+          const k = Math.min(1, Math.abs(v - mid) / half), inset = Math.round(head * (1 - Math.sqrt(1 - k * k)));
+          for (let u = u0 + inset; u <= u1 - inset; u += 1) g.put(u, v, typeof c === 'function' ? c(u, v) : c);
+        }
+      };
+      // Every machine stands on a two-row concrete plinth and takes the line in at u = 0, rows 1-9.
+      g.rect(0, 0, w - 1, 1, (u, v) => (v === 1 ? [166, 166, 160] : CONCRETE));
+      for (let u = 0; u < w; u += 1) for (let v = 0; v < 2; v += 1) cells[v * w + u].slab = true;
+      return g;
+    }
+    const flange = (g, c = STEEL) => g.rect(0, 1, 1, 9, (u, v) => (v === 1 || v === 9 ? STEEL_DARK : u === 0 && (v === 3 || v === 7) ? [200, 204, 206] : c));
+    const MACHINES = {
+      // Centrifugal pump: suction into a polished volute, a gate valve on its discharge, the
+      // coupling guard, a finned green motor with its terminal box, and the fan cowl.
+      pump: () => {
+        const g = sketch(34, 18);
+        flange(g);
+        g.rect(2, 3, 3, 7, STEEL);
+        g.disc(9, 8, 6.4, (u, v, d) => (d > 5.5 ? [118, 122, 126] : (u - 9) - (v - 8) < -3 ? [206, 210, 212] : [170, 174, 176]));
+        g.disc(9, 8, 1.6, [96, 100, 104]);
+        g.rect(7, 14, 11, 15, STEEL); g.rect(6, 16, 12, 16, STEEL_DARK); g.rect(5, 17, 13, 17, RED);
+        g.rect(2, 2, 32, 2, [60, 64, 66]);
+        g.rect(15, 5, 17, 11, (u, v) => (v === 11 ? [236, 184, 60] : [214, 160, 40]));
+        g.rect(18, 3, 30, 13, (u, v) => (v === 13 ? MOTOR_LIT : v === 3 ? MOTOR_DARK : (v & 1) ? MOTOR : [34, 128, 94]));
+        g.rect(22, 14, 26, 16, (u, v) => (v === 16 ? MOTOR_LIT : MOTOR));
+        g.rect(31, 4, 33, 12, (u, v) => (v % 2 ? [60, 64, 66] : [150, 154, 156]));
+        g.light = [24, 15]; g.fan = [31, 33, 4, 12];
+        return g;
+      },
+      // Pressure tank: a blue horizontal vessel on two saddles, its inlet valve and gauge.
+      tank: () => {
+        const g = sketch(36, 20);
+        flange(g);
+        g.rect(2, 4, 6, 6, STEEL); g.rect(3, 7, 4, 8, RED);
+        g.rect(9, 2, 12, 5, STEEL_DARK); g.rect(26, 2, 29, 5, STEEL_DARK);
+        g.capsule(5, 34, 4, 17, 4, (u, v) => (u === 13 || u === 26 ? [56, 100, 146] : v >= 15 ? [110, 160, 206] : v <= 6 ? [50, 92, 136] : [70, 120, 170]));
+        g.rect(20, 18, 20, 18, STEEL_DARK); g.rect(19, 19, 21, 19, [230, 230, 226]);
+        g.light = [4, 9];
+        return g;
+      },
+      // Diesel generator set: a fuel-tank base, the acoustic enclosure (in the side's colours) with
+      // its doors, intake and radiator louvres, the control panel, and the silencer on top.
+      generator: (style) => {
+        const g = sketch(46, 26);
+        const body = ENCLOSURE[style] || ENCLOSURE.modern, lit = tone(body, 1.1), shade = tone(body, 0.82), seam = tone(body, 0.62);
+        g.rect(0, 2, 2, 8, [40, 44, 46]); g.rect(0, 4, 1, 6, BRASS);
+        g.rect(3, 2, 44, 6, (u, v) => (v === 6 ? [62, 62, 64] : u % 9 === 4 && v === 3 ? [70, 70, 72] : BLACK));
+        g.rect(3, 7, 44, 23, (u, v) => (v === 23 || u === 3 ? lit : u === 44 ? shade : body));
+        for (const s of [15, 30]) g.rect(s, 7, s, 22, seam);
+        for (const s of [13, 28, 32]) g.rect(s, 14, s, 16, BLACK);
+        g.rect(5, 10, 12, 20, (u, v) => (v % 2 === 0 ? seam : shade));
+        g.rect(34, 9, 42, 21, (u, v) => (v % 2 === 0 ? seam : shade));
+        g.rect(18, 15, 25, 20, [30, 36, 40]); g.rect(19, 18, 24, 19, [70, 120, 110]); g.put(19, 16, RED);
+        g.rect(34, 24, 42, 25, (u, v) => (v === 25 ? [120, 122, 124] : [92, 94, 96])); g.put(6, 24, STEEL_DARK); g.put(28, 24, STEEL_DARK);
+        g.light = [23, 16];
+        return g;
+      },
+      // Transformer: the cable box the conduit runs into, an oil tank with radiator fins, three
+      // porcelain bushings and a warning sign.
+      transformer: () => {
+        const g = sketch(28, 26);
+        g.rect(0, 2, 5, 9, (u, v) => (v === 9 ? [80, 84, 86] : [52, 56, 58])); g.rect(0, 4, 1, 6, BRASS);
+        g.rect(6, 2, 21, 18, (u, v) => (v === 18 ? [140, 156, 140] : u === 6 ? [130, 146, 130] : [110, 124, 110]));
+        g.rect(22, 4, 26, 16, (u, v) => (v === 4 || v === 16 ? [110, 124, 110] : u % 2 ? [96, 110, 96] : [66, 76, 66]));
+        for (let v = 9; v <= 12; v += 1) { const hw = 12 - v; g.rect(14 - hw, v, 15 + hw, v, [236, 196, 40]); }
+        g.put(14, 10, BLACK); g.put(15, 10, BLACK);
+        for (const b of [10, 14, 18]) {
+          for (let v = 19; v <= 24; v += 1) g.rect(b - (v % 2), v, b + (v % 2), v, v % 2 ? [176, 82, 58] : [142, 62, 44]);
+          g.put(b, 25, STEEL);
+        }
+        g.light = [8, 16];
+        return g;
+      },
+      // Jaw crusher: the chute onto the belt, the frame with its jaw throat full of ore, the feed
+      // hopper, the flywheel and its drive motor.
+      crusher: () => {
+        const g = sketch(36, 28);
+        flange(g, [150, 120, 40]);
+        g.rect(2, 2, 6, 5, STEEL_DARK);
+        g.rect(6, 2, 24, 17, (u, v) => (v === 17 ? [204, 168, 64] : u === 6 ? [190, 152, 52] : u === 24 ? [140, 110, 30] : OCHRE));
+        for (let v = 5; v <= 16; v += 1) { const hw = Math.round((v - 5) * 0.3); g.rect(15 - hw, v, 15 + hw, v, (u) => ((u + v) % 3 ? [40, 36, 30] : ORE_BITS[(u * 7 + v) % 4])); }
+        for (let v = 18; v <= 27; v += 1) {
+          const hw = Math.round(8 + (v - 18) * 0.7);
+          g.rect(15 - hw, v, 15 + hw, v, (u) => (u === 15 - hw || u === 15 + hw || v === 27 ? [110, 114, 116] : v >= 24 ? ORE_BITS[(u * 5 + v * 3) % 4] : [86, 90, 92]));
+        }
+        g.rect(26, 2, 34, 5, (u, v) => (v === 5 ? MOTOR_LIT : MOTOR));
+        g.disc(29, 13, 6.5, (u, v, d) => (d > 5.4 ? [150, 154, 156] : d < 1.5 ? [200, 204, 206] : [58, 62, 64]));
+        g.light = [8, 15]; g.wheel = [29, 13, 5];
+        return g;
+      },
+      // Ball mill: the feed spout from the belt, a rotating drum (liner bolts, girth gear) on its
+      // trunnions and pedestals, and the drive motor.
+      mill: () => {
+        const g = sketch(44, 24);
+        flange(g, [150, 120, 40]);
+        g.rect(2, 8, 7, 11, STEEL_DARK);
+        g.rect(5, 2, 8, 9, [86, 90, 92]); g.rect(36, 2, 39, 9, [86, 90, 92]);
+        g.rect(3, 9, 9, 13, STEEL); g.rect(35, 9, 41, 13, STEEL);
+        g.capsule(9, 35, 4, 19, 3, (u, v) => (v >= 17 ? [130, 142, 156] : v <= 6 ? [70, 80, 94] : [92, 104, 118]));
+        g.rect(28, 3, 30, 20, (u, v) => (v % 2 ? [70, 74, 78] : [110, 114, 118]));
+        g.rect(40, 2, 43, 8, (u, v) => (v === 8 ? MOTOR_LIT : MOTOR));
+        g.light = [42, 9]; g.drum = [11, 26, 6, 17];
+        return g;
+      },
+    };
+    // Compact end fittings, for an end hemmed in between the other lines (11 rows tall): a belt's
+    // head drive (drum and gear motor) or its tail drum with the screw take-up, a main's
+    // gear-operated valve and blind flange, a conduit's cable joint box.
+    Object.assign(MACHINES, {
+      drive: () => {
+        const g = sketch(24, 11);
+        flange(g, [150, 120, 40]);
+        g.rect(2, 2, 22, 2, [60, 64, 66]);
+        g.disc(7, 6, 4.5, (u, v, d) => (d > 3.6 ? BELT : d < 1.2 ? [200, 204, 206] : [96, 100, 104]));
+        g.rect(12, 5, 13, 7, STEEL_DARK);
+        g.rect(14, 3, 22, 9, (u, v) => (v === 9 ? MOTOR_LIT : v === 3 ? MOTOR_DARK : u % 2 ? MOTOR : [34, 128, 94]));
+        g.light = [21, 8]; g.wheel = [7, 6, 3];
+        return g;
+      },
+      tail: () => {
+        const g = sketch(22, 11);
+        flange(g, [150, 120, 40]);
+        g.rect(2, 2, 20, 2, [60, 64, 66]);
+        g.disc(6, 6, 4, (u, v, d) => (d > 3.1 ? BELT : d < 1.2 ? [200, 204, 206] : [96, 100, 104]));
+        g.rect(10, 5, 18, 7, (u, v) => (v === 6 ? ((u & 1) ? [170, 174, 176] : [110, 114, 118]) : [86, 90, 92]));
+        g.rect(19, 3, 20, 9, STEEL_DARK);
+        g.light = [19, 9]; g.wheel = [6, 6, 3];
+        return g;
+      },
+      valve: () => {
+        const g = sketch(20, 11);
+        flange(g);
+        g.disc(7, 5.5, 4.2, (u, v, d) => (d > 3.4 ? STEEL_DARK : (u - 7) - (v - 5.5) < -1.5 ? [170, 176, 180] : STEEL));
+        g.rect(12, 4, 14, 7, (u, v) => (v === 7 ? [236, 184, 60] : [214, 160, 40]));
+        g.rect(15, 2, 15, 10, RED);
+        g.rect(17, 1, 18, 10, (u, v) => (v === 1 || v === 10 ? STEEL_DARK : STEEL));
+        g.light = [13, 8];
+        return g;
+      },
+      joint: () => {
+        const g = sketch(16, 11);
+        g.rect(0, 4, 1, 6, BRASS);
+        g.rect(2, 2, 13, 9, (u, v) => (v === 9 ? [96, 100, 102] : (u === 2 || u === 13) && v % 2 ? [150, 154, 156] : [66, 70, 72]));
+        g.rect(5, 5, 10, 6, [214, 196, 60]);
+        g.rect(14, 3, 15, 3, [90, 160, 70]);
+        g.light = [11, 8];
+        return g;
+      },
+    });
+    const MACHINE_FOR = { water: ['pump', 'tank'], sm: ['generator', 'transformer'], hm: ['crusher', 'mill'] };
+    const FITTING_FOR = { water: ['valve', 'valve'], sm: ['joint', 'joint'], hm: ['tail', 'drive'] };
+    // Ground a machine (or a line run to it) may take: buried, unowned, not in a tunnel.
+    const freeFor = (x, y) => {
+      if (x < 2 || y < 2 || x > W - 3 || y > H - 3 || y <= world.groundTop[x] + 8) return false;
+      const id = mat[y * W + x] & ID_MASK;
+      return terrain[id] && id !== M.ORE && id !== M.BEDROCK && id !== M.PIPE && !PW.getOwner(world, x, y) && !isTunnel(x, y);
+    };
+    // Grow a line to [x0, x1]; new columns get their y from ysFor and are laid.
+    function extendTo(line, x0, x1, ysFor) {
+      const ys = new Int32Array(x1 - x0 + 1);
+      for (let c = x0; c <= x1; c += 1) ys[c - x0] = c >= line.x0 && c <= line.x1 ? line.ys[c - line.x0] : ysFor(c);
+      const broken = new Uint8Array(ys.length), brokenAt = new Int32Array(ys.length), occ = new Uint8Array(ys.length * 3);
+      broken.set(line.broken, line.x0 - x0); brokenAt.set(line.brokenAt, line.x0 - x0); occ.set(line.occ, (line.x0 - x0) * 3);
+      const old0 = line.x0, old1 = line.x1;
+      Object.assign(line, { x0, x1, ys, broken, brokenAt, occ });
+      for (let c = x0; c <= x1; c += 1) if (c < old0 || c > old1) layColumn(line, c);
+    }
+    // Put the machine that belongs at one end of a line (side -1: its left end, +1: its right):
+    // a source's machine where the nearest riser feeds the line, the other where it draws from it.
+    // Where the ground there is taken (most often by the other lines running on past this end),
+    // the line runs on to free ground, stepping up or down at 45° on the way if need be, like a
+    // line elbowing into its plant room.
+    const DROPS = [0, -12, 12, -24, 24, -36, 36, -48, 48, -60, 60];
+    // A line may run across another line's riser (they pass at different depths into the
+    // section, as risers already cross the lines), never across another line's run.
+    const acrossRiser = (x, y) => {
+      const o = PW.getOwner(world, x, y);
+      if (o < OWNER_BASE) return false;
+      const other = lines[o - OWNER_BASE];
+      if (!other) return false;
+      if (x >= other.x0 && x <= other.x1) { const top = other.ys[x - other.x0]; if (y >= top - BED && y <= top + BORE - 1 + BED) return false; }
+      return other.risers.some((r) => Math.abs(x - r.x) <= 1 && y >= r.y0 && y <= r.y1);
+    };
+    // The full machine if it fits within a short run, else the compact fitting; failing both, the
+    // same again further out. An end with no room at all turns up into its riser.
+    const TRIES = [[MACHINE_FOR, 100], [FITTING_FOR, 100], [MACHINE_FOR, 364], [FITTING_FOR, 364]];
+    function placeMachine(line, side) {
+      const risers = [...line.risers].sort((a, b) => a.x - b.x);
+      const nearest = side < 0 ? risers[0] : risers[risers.length - 1];
+      const source = nearest && nearest.flow === 'out' ? 0 : 1;
+      const endX = side > 0 ? line.x1 : line.x0, y = line.ys[side > 0 ? line.ys.length - 1 : 0];
+      const runY = (dy, c) => y + Math.sign(dy) * Math.min(Math.abs(dy), c);
+      const fits = (g, shift, dy) => {
+        const xe = endX + side * shift, base = y + dy + BORE - 1 + BED;
+        for (let c = 1; c <= shift; c += 1) {
+          const yc = runY(dy, c);
+          for (let r = -BED; r < BORE + BED; r += 1) if (!freeFor(endX + side * c, yc + r) && !acrossRiser(endX + side * c, yc + r)) return false;
+        }
+        for (let u = 0; u <= g.w + 1; u += 1) for (let v = -1; v <= g.h + 1; v += 1) if (!freeFor(xe + side * (1 + u), base - v)) return false;
+        return true;
+      };
+      for (const [set, reach] of TRIES) {
+        const kind = set[line.resource][source], g = MACHINES[kind](line.settlement.style);
+        // (a short neck of line first, clear of the riser it leaves)
+        for (let shift = 4; shift <= reach; shift += 6) for (const dy of DROPS) {
+          if (Math.abs(dy) > shift || !fits(g, shift, dy)) continue;
+          return putMachine(line, side, kind, g, endX, endX + side * shift, y + dy + BORE - 1 + BED, (c) => runY(dy, Math.abs(c - endX)));
+        }
+      }
+      stats.machineMisses += 1;
+      return null;
+    }
+    function putMachine(line, side, kind, g, endX, xe, base, ysFor) {
+      {
+        if (xe !== endX) extendTo(line, Math.min(line.x0, xe), Math.max(line.x1, xe), ysFor);
+        const machine = { kind, side, x: xe, base, w: g.w, h: g.h, cells: [], light: null, g };
+        // The pit: sand backfill two cells round the machine's outline.
+        for (let v = -2; v < g.h + 2; v += 1) for (let u = -2; u < g.w + 2; u += 1) {
+          if (u >= 0 && v >= 0 && u < g.w && v < g.h && g.cells[v * g.w + u]) continue;
+          let near = false;
+          for (let dv = -2; dv <= 2 && !near; dv += 1) for (let du = -2; du <= 2 && !near; du += 1) {
+            const uu = u + du, vv = v + dv;
+            if (uu >= 0 && vv >= 0 && uu < g.w && vv < g.h && g.cells[vv * g.w + uu]) near = true;
+          }
+          if (near) bedCell(xe + side * (1 + u), base - v, tone(SAND, (PW.hash2(u, v) & 3) === 0 ? 0.88 : 1));
+        }
+        for (let v = 0; v < g.h; v += 1) for (let u = 0; u < g.w; u += 1) {
+          const cell = g.cells[v * g.w + u];
+          if (!cell) continue;
+          const x = xe + side * (1 + u), yy = base - v;
+          PW.set(world, x, yy, cell.slab ? M.SLAB : M.PIPE, { quiet: true });
+          PW.setLayer(world, 'paint', x, yy, rgb(cell.c));
+          PW.setOwner(world, x, yy, line.owner);
+          machine.cells.push(x, yy);
+        }
+        line.machines.push(machine);
+        stats.machines += 1;
+        return machine;
+      }
+    }
+    // A line growing past one of its machines takes the machine out (its pit is backfilled) and
+    // puts it back at the new end.
+    function removeMachine(line, machine) {
+      for (let i = 0; i < machine.cells.length; i += 2) {
+        const x = machine.cells[i], y = machine.cells[i + 1];
+        if (PW.getOwner(world, x, y) !== line.owner) continue;
+        PW.setOwner(world, x, y, 0);
+        PW.set(world, x, y, M.FILL, { quiet: true });
+        PW.setLayer(world, 'paint', x, y, rgb(SAND));
+      }
+      line.machines.splice(line.machines.indexOf(machine), 1);
+    }
+
     // ---- Anchors -------------------------------------------------------------------------------------
     // Where each building connects: under its floor (below anything it owns in that column). Its
     // three lines rise in their own columns, `offset` cells apart.
@@ -225,7 +544,7 @@
     // ---- Build -------------------------------------------------------------------------------------
     function newLine(settlement, spec, x0, x1, coreX) {
       return { id: lines.length, side: settlement.side, settlement, resource: spec.resource, spec, owner: OWNER_BASE + lines.length,
-        x0, x1, ys: contour(x0, x1, spec.depth), coreX, risers: [], broken: new Uint8Array(x1 - x0 + 1), brokenAt: new Int32Array(x1 - x0 + 1),
+        x0, x1, ys: contour(x0, x1, spec.depth), coreX, risers: [], machines: [], broken: new Uint8Array(x1 - x0 + 1), brokenAt: new Int32Array(x1 - x0 + 1),
         occ: new Uint8Array((x1 - x0 + 1) * 3), packets: [], next: 0 };
     }
     function build() {
@@ -239,12 +558,20 @@
           const users = anchors.filter((a) => USES[a.kind] && USES[a.kind][spec.resource])
             .map((a) => (a.b ? { ...buildingAnchor(a.b, a.kind, (index - 1) * 6), b: a.b } : a));
           if (users.length < 2) continue;
-          const x0 = Math.min(...users.map((a) => a.x)) - 4, x1 = Math.max(...users.map((a) => a.x)) + 4;
+          // (flush with the outer risers: an end turns up into its riser, or runs on to a machine)
+          const x0 = Math.min(...users.map((a) => a.x)) - 1, x1 = Math.max(...users.map((a) => a.x)) + 1;
           const line = newLine(settlement, spec, x0, x1, coreX);
           for (let x = x0; x <= x1; x += 1) layColumn(line, x);
           for (const a of users) line.risers.push(layRiser(line, { ...a, flow: USES[a.kind][spec.resource] }));
           stats.cells += x1 - x0 + 1;
           lines.push(line);
+        }
+        // Then each of the town's lines gets its end machinery (once all its lines are laid, so
+        // no machine is put where another line runs): the ore belt first, as it runs between the
+        // other two, then the conduit (room above it) and the main (room below).
+        const order = { hm: 0, sm: 1, water: 2 };
+        for (const line of lines.filter((l) => l.settlement === settlement).sort((a, b) => order[a.resource] - order[b.resource])) {
+          placeMachine(line, -1); placeMachine(line, 1);
         }
       }
       stats.lines = lines.length;
@@ -266,6 +593,7 @@
     function check() {
       let broken = 0;
       for (const line of lines) {
+        const before = broken;
         for (let x = line.x0; x <= line.x1; x += 1) {
           const k = x - line.x0;
           if (!intactAt(line, x)) {
@@ -273,6 +601,7 @@
             broken += 1;
           } else line.broken[k] = 0;
         }
+        line.anyBroken = broken > before;
       }
       stats.broken = broken;
     }
@@ -285,7 +614,11 @@
           if (!line.broken[k] || tick - line.brokenAt[k] < REPAIR_DELAY) continue;
           const x = line.x0 + k;
           const fresh = contour(Math.max(line.x0, x - 2), Math.min(line.x1, x + 2), line.spec.depth);
-          line.ys[k] = Math.max(fresh[Math.min(2, x - Math.max(line.x0, x - 2))], line.ys[k]);
+          // (at the depth the line actually runs, which may be deeper than its local cover, it
+          // goes below whatever is in the way now: the crater's hole)
+          let y = Math.max(fresh[Math.min(2, x - Math.max(line.x0, x - 2))], line.ys[k]);
+          for (let scan = y - BED; scan <= y + BORE + BED && scan < H - 40; scan += 1) if (blocked(x, scan)) y = scan + BED + 1;
+          line.ys[k] = y;
           layColumn(line, x);
           if (intactAt(line, x)) {
             line.broken[k] = 0;
@@ -314,17 +647,17 @@
       const line = lineFor(op.side, 'hm');
       if (!line || !op.riser) return false;
       const x = op.riser.x;
-      if (x - 4 < line.x0 || x + 4 > line.x1) {
-        const x0 = Math.min(line.x0, x - 4), x1 = Math.max(line.x1, x + 4);
-        const ys = new Int32Array(x1 - x0 + 1), fresh = contour(x0, x1, line.spec.depth);
-        for (let c = x0; c <= x1; c += 1) ys[c - x0] = c >= line.x0 && c <= line.x1 ? line.ys[c - line.x0] : fresh[c - x0];
-        const broken = new Uint8Array(ys.length), brokenAt = new Int32Array(ys.length), occ = new Uint8Array(ys.length * 3);
-        broken.set(line.broken, line.x0 - x0); brokenAt.set(line.brokenAt, line.x0 - x0); occ.set(line.occ, (line.x0 - x0) * 3);
-        const old0 = line.x0, old1 = line.x1;
-        Object.assign(line, { x0, x1, ys, broken, brokenAt, occ });
-        for (let c = x0; c <= x1; c += 1) if (c < old0 || c > old1) layColumn(line, c);
+      const grow = [];
+      if (x - 1 < line.x0) grow.push(-1);
+      if (x + 1 > line.x1) grow.push(1);
+      if (grow.length) {
+        // (the machine at that end comes out, and goes back in at the new end below)
+        for (const side of grow) for (const m of line.machines.filter((q) => q.side === side)) removeMachine(line, m);
+        const x0 = Math.min(line.x0, x - 1), x1 = Math.max(line.x1, x + 1), fresh = contour(x0, x1, line.spec.depth);
+        extendTo(line, x0, x1, (c) => fresh[c - x0]);
       }
       line.risers.push(layRiser(line, { x, y: op.riser.y, flow: 'out', kind: 'mining', op: op.id }));
+      for (const side of grow) placeMachine(line, side);
       return true;
     }
 
@@ -522,10 +855,38 @@
             cell(a, y + 1, cargo[2]); cell(a + 1, y + 1, cargo[3]);
           } else cell(p.x, p.y, cargo[1 + (p.shade % 3)]);
         }
+        // The end machinery runs while its line carries: a steady green light, the pump's fan,
+        // the crusher's flywheel and the mill's drum turning; a cut line stops them and its
+        // lights blink red. (A wrecked machine shows nothing.)
+        for (const m of line.machines) {
+          const a = m.x + m.side, b = m.x + m.side * m.w;
+          if (Math.max(a, b) < vx0 || Math.min(a, b) > vx1 || m.base < vy0 || m.base - m.h > vy1) continue;
+          const g = m.g, at = (u, v) => [m.x + m.side * (1 + u), m.base - v];
+          const [lx, ly] = at(g.light[0], g.light[1]);
+          if ((mat[ly * W + lx] & ID_MASK) !== M.PIPE) continue;
+          const running = !line.anyBroken;
+          cell(lx, ly, running ? (Math.floor(time * 1.5) % 4 ? [90, 240, 130] : [60, 170, 90]) : (Math.floor(time * 3) % 2 ? [255, 70, 50] : [90, 30, 24]));
+          if (!running || z < 1) continue;
+          if (g.fan) {
+            const [u0, u1, v0, v1] = g.fan, s = Math.floor(time * 14);
+            for (let v = v0; v <= v1; v += 1) for (let u = u0; u <= u1; u += 1) { const [x, y] = at(u, v); cell(x, y, (v + s) % 2 ? [60, 64, 66] : [150, 154, 156]); }
+          }
+          if (g.wheel) {
+            const [cu, cv, r] = g.wheel, turn = time * 3;
+            for (let k = 0; k < 2; k += 1) {
+              const angle = turn + k * Math.PI / 2;
+              for (let t = -r; t <= r; t += 1) { const [x, y] = at(Math.round(cu + Math.cos(angle) * t), Math.round(cv + Math.sin(angle) * t)); cell(x, y, [176, 180, 182]); }
+            }
+          }
+          if (g.drum) {
+            const [u0, u1, v0, v1] = g.drum, s = Math.floor(time * 8);
+            for (let v = v0; v <= v1; v += 3) for (let u = u0; u <= u1; u += 1) if ((u + s) % 4 === 0) { const [x, y] = at(u, v); cell(x, y, [52, 60, 70]); }
+          }
+        }
       }
     }
 
-    const api = { build, step, draw, attach, carry, lines, stats, flowing, lineFor, contour, LINES, BORE, BED };
+    const api = { build, step, draw, attach, carry, lines, stats, flowing, lineFor, contour, LINES, BORE, BED, MACHINE_FOR };
     return api;
   }
 
