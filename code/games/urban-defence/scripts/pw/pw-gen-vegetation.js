@@ -497,7 +497,8 @@
     return record;
   }
   function regenerate(record) {
-    return GENERATORS[record.type](PW.createRandom(record.seed), record.size, frozenGround(record.profile), record.look);
+    // (a stored null look must reach the generator as undefined, so its options default applies)
+    return GENERATORS[record.type](PW.createRandom(record.seed), record.size, frozenGround(record.profile), record.look || undefined);
   }
 
   // Remove a plant's cells (those still showing its colours) and throw some leaves and splinters.
@@ -681,13 +682,14 @@
       }
     }
     // The wild land always holds some woodland: more trees on gentle soil if chance left too few.
-    for (let i = 0; i < 2000 && trees < MIN_TREES; i += 1) {
+    for (let i = 0; i < 12000 && trees < MIN_TREES; i += 1) {
       const x = random.int(80, W - 80);
       if (blocked[x] || !soil(x) || nearWater(x, 30) || slopeAt(x) > 1) continue;
       const type = layout.baseY - world.groundTop[x] > 260 ? 'conifer' : random() < 0.6 ? 'broadleaf' : 'birch';
       const size = type === 'conifer' ? random.range(140, 240) : random.range(110, 190);
       const half = type === 'conifer' ? size * 0.3 : size * 0.55;
-      if (!clearOf(x, half * 0.75) || !footClear(x, size * 0.08)) continue;
+      // (hedgerow trees may stand close to fields and streets, their crowns reaching over)
+      if (!clearOf(x, half * 0.35) || !footClear(x, size * 0.08)) continue;
       grow(type, x, size);
       stats.planted += 1;
       trees += 1;
@@ -720,12 +722,16 @@
     }
     // The wild land always holds a few rocks big enough to shelter a crouched trooper: more tries
     // on gentle ground if chance left too few.
-    for (let i = 0; i < 1500 && cover < MIN_COVER_ROCKS; i += 1) {
+    const why = stats.coverMisses = { blocked: 0, ground: 0, slope: 0, crowded: 0, place: 0 };
+    for (let i = 0; i < 12000 && cover < MIN_COVER_ROCKS; i += 1) {
       const x = random.int(60, W - 60), size = random.range(11, 15);
-      if (blocked[x] || !rocky(x) || nearWater(x, 8) || slopeAt(x) > 0.8) continue;
-      if (!clearOf(x, size + 6) || !footClear(x, size + 4)) continue;
-      if (coverRock(x, size)) cover += 1;
+      if (blocked[x]) { why.blocked += 1; continue; }
+      if (!rocky(x) || nearWater(x, 8)) { why.ground += 1; continue; }
+      if (slopeAt(x) > 1.1) { why.slope += 1; continue; }
+      if (!clearOf(x, size + 2) || !footClear(x, size + 4)) { why.crowded += 1; continue; }
+      if (coverRock(x, size)) cover += 1; else why.place += 1;
     }
+    stats.cover = cover;
     // Reeds in the shallows and on the banks of lakes, rising from the bed.
     for (const lake of layout.lakes) {
       if (lake.left === undefined) continue;

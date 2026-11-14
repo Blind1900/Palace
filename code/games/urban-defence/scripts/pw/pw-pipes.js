@@ -195,7 +195,9 @@
     // Where each building connects: under its floor (below anything it owns in that column). Its
     // three lines rise in their own columns, `offset` cells apart.
     function buildingAnchor(b, kind, offset = 0) {
-      const cx = Math.round((b.body.left + b.body.right) / 2) + offset;
+      // (a farm connects under its barn, silos or house, not under its yard)
+      const mid = b.type === 'farm' && b.storage && b.storage.length ? b.storage[0].x : (b.body.left + b.body.right) / 2;
+      const cx = Math.round(mid) + offset;
       for (let shift = 0; shift < 60; shift += 6) {
         for (const x of [cx + shift, cx - shift]) {
           let y = b.ground + 1, clear = true;

@@ -94,12 +94,12 @@
         const top = mat[s * W + x] & ID_MASK;
         if (top === M.WATER) continue;
         const paved = (PW.getFlags(world, x, s) & FLAG.ROAD) || top === M.ASPHALT || top === M.ROADBED || top === M.FOUNDATION;
-        // Down to the bed of the deepest line here; a full depth where no line runs.
+        // Down to the bed of the deepest line here (the lines are the divider, however deep they
+        // dip); where no line runs, a full depth tapering out at 45° towards the town's ends.
         let bottom = -1;
         for (const line of lines) if (x >= line.x0 && x <= line.x1) bottom = Math.max(bottom, line.ys[x - line.x0] + bore - 1 + bed);
-        if (bottom < 0) bottom = s + FULL;
         const start = s + (paved ? PAVED : KEEP_SOIL);
-        const end = Math.min(bottom, start + edge[k] - 1);
+        const end = bottom >= 0 ? bottom : Math.min(s + FULL, start + edge[k] - 1);
         for (let y = start; y <= end; y += 1) {
           const id = mat[y * W + x] & ID_MASK;
           if (!natural[id] || PW.getOwner(world, x, y) || (PW.getFlags(world, x, y) & FLAG.TUNNEL)) continue;

@@ -632,7 +632,8 @@
         if (!lot || !lot.field) continue;
         const outward = b.facing;
         const start = outward > 0 ? b.works[1] + 14 : b.works[0] - 14;
-        let length = neutral ? 150 : 240;
+        // (the farm's own yard takes the first stretch of its land, before the field)
+        let length = neutral ? 110 : 150;
         for (let d = 0; d <= length; d += 1) {
           const x = start + outward * d;
           // (a neutral field leaves room before the shore for the town's defence line on that side)

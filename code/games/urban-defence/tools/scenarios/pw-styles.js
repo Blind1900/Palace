@@ -19,7 +19,7 @@ check(T.networks.length >= 4 && T.networks.every((n) => n.style === styles[n.sid
 PW.tunnels.advanceTo(world, T.time + 4000);
 const looks = {};
 const signature = {
-  modern: [[84, 92, 62], [191, 123, 25]],          // olive dado, hazard stripe
+  modern: [[84, 92, 62], [56, 62, 42]],            // olive dado and its dark edge (every drift has them)
   asian: [[140, 42, 34], [206, 58, 40]],           // lacquer, lantern
   gothic: [[40, 38, 48], [146, 142, 156]],         // lancet niche, rib
 };
