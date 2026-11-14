@@ -727,8 +727,8 @@
       const x = random.int(60, W - 60), size = random.range(11, 15);
       if (blocked[x]) { why.blocked += 1; continue; }
       if (!rocky(x) || nearWater(x, 8)) { why.ground += 1; continue; }
-      if (slopeAt(x) > 1.1) { why.slope += 1; continue; }
-      if (!clearOf(x, size + 2) || !footClear(x, size + 4)) { why.crowded += 1; continue; }
+      if (slopeAt(x) > 1.3) { why.slope += 1; continue; }
+      if (!clearOf(x, size) || !footClear(x, size * 0.6)) { why.crowded += 1; continue; }
       if (coverRock(x, size)) cover += 1; else why.place += 1;
     }
     stats.cover = cover;

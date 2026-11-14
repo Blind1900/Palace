@@ -70,8 +70,12 @@ for (const record of props) for (const index of record.cells) if (!passable[worl
 check(impassable === 0, `units can walk through every cover cell (${impassable} blocking cells)`);
 const target = mineProps.find((r) => r.kind === 'mineCar') || mineProps[0];
 const floorRow = target.y1 + 1;
-const crouchShot = PW.traceShot(world, target.x0 - 30, floorRow - 5, target.x1 + 30, floorRow - 5);
-const headShot = PW.traceShot(world, target.x0 - 30, target.y0 - 3, target.x1 + 30, target.y0 - 3);
+// (the shot comes from open tunnel on whichever side of the cover has room)
+const openAt = (x, y) => PW.mat.open[PW.get(world, x, y) & 63] === 1;
+const fromLeft = openAt(target.x0 - 4, floorRow - 5);
+const sx = fromLeft ? target.x0 - 4 : target.x1 + 4, ex = fromLeft ? target.x1 + 30 : target.x0 - 30;
+const crouchShot = PW.traceShot(world, sx, floorRow - 5, ex, floorRow - 5);
+const headShot = PW.traceShot(world, sx, target.y0 - 3, ex, target.y0 - 3);
 check(!!crouchShot && PW.props.COVER[crouchShot.id] === 1, `a shot at crouch height stops in the ${target.kind} (${crouchShot ? PW.mat.names[crouchShot.id] : 'nothing'} at ${crouchShot ? crouchShot.x - target.x0 : '-'})`);
 const targetCells = new Set(target.cells);
 check(!headShot || !targetCells.has(headShot.y * W + headShot.x), `a shot over the top of the ${target.kind} is not stopped by it (${headShot ? `${PW.mat.names[headShot.id]} beyond it` : 'clear'})`);

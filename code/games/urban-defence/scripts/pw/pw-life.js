@@ -17,9 +17,10 @@
     const stats = { regrown: 0, tufts: 0, unscorched: 0 };
     const rnd = (x, salt) => (PW.hash3(x, salt, tick) & 1023) / 1023;
     const topId = (x) => PW.get(world, x, world.groundTop[x]) & ID_MASK;
+    // (tilled ground carries the FIELD flag on its surface)
     function inField(x) {
-      for (const b of world.buildings || []) if (b.field && x >= b.field.x0 - 1 && x <= b.field.x1 + 1) return true;
-      return false;
+      const y = world.groundTop[x];
+      return (PW.getFlags(world, x, y) & PW.FLAG.FIELD) !== 0 || (PW.getFlags(world, x - 1, world.groundTop[Math.max(0, x - 1)]) & PW.FLAG.FIELD) !== 0;
     }
     function visit(x) {
       const y = world.groundTop[x];
@@ -62,9 +63,11 @@
       }
       if (tick % CROP_EVERY === 0 && PW.settlementTools) {
         for (const b of world.buildings || []) {
-          if (!b.field || b.field.growth >= 1) continue;
-          b.field.growth = Math.min(1, b.field.growth + CROP_STEP);
-          PW.settlementTools.drawCrop(world, b.field);
+          for (const field of [b.field, b.lotField]) {
+            if (!field || field.growth >= 1) continue;
+            field.growth = Math.min(1, field.growth + CROP_STEP);
+            PW.settlementTools.drawCrop(world, field);
+          }
         }
       }
       return stats;

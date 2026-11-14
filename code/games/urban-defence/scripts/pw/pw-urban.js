@@ -76,7 +76,8 @@
     for (const settlement of world.settlements || []) {
       const spans = [[settlement.streetLeft, settlement.streetRight]];
       if (settlement.runway) spans.push([Math.min(settlement.runway.from, settlement.runway.to), Math.max(settlement.runway.from, settlement.runway.to)]);
-      const fields = settlement.buildings.filter((b) => b.field).map((b) => [b.field.x0, b.field.x1]);
+      // (farmland is no town ground: a farm's lot and fields keep their natural soil)
+      const fields = settlement.buildings.flatMap((b) => [b.field, b.lotField]).filter(Boolean).map((f) => [f.x0, f.x1]);
       const x0 = Math.min(...spans.map((s) => s[0])), x1 = Math.max(...spans.map((s) => s[1]));
       const inTown = new Uint8Array(x1 - x0 + 1);
       for (const [a, b] of spans) for (let x = a; x <= b; x += 1) inTown[x - x0] = 1;

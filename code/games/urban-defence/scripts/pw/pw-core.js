@@ -447,7 +447,8 @@
   const FLAG = Object.freeze({ LADDER: 1, ROAD: 2, TUNNEL: 4, NOBUILD: 8, SCORCH: 16, CARVED: 32, BRIDGE: 64, HATCH: 128,
     RAW: 256, FIXTURE: 512, DEVELOPED: 1024, OVERBREAK: 2048,
     // FLORA: a deco cell that is part of a plant (it can burn); CHARRED: burnt, no fuel left.
-    FLORA: 4096, CHARRED: 8192 });
+    // FIELD: tilled farm ground (a surface like ROAD, never on the same cell as one); it yields SM.
+    FLORA: 4096, CHARRED: 8192, FIELD: 16384 });
   function getOwner(world, x, y) {
     if (x < 0 || y < 0 || x >= world.width || y >= world.height) return 0;
     const chunk = world.owner[chunkIndex(world, x, y)];

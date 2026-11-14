@@ -55,7 +55,7 @@
       // Never dig out from under (or bury) something already built here, like a pump's plinth,
       // and never re-level a street or runway that is already paved.
       if (PW.getOwner(world, x, natural) || PW.getOwner(world, x, natural - 1)) continue;
-      if (PW.getFlags(world, x, natural) & FLAG.ROAD) continue;
+      if (PW.getFlags(world, x, natural) & (FLAG.ROAD | FLAG.FIELD)) continue;
       const dist = x < x0 ? x0 - x : x > x1 ? x - x1 : 0;
       // Rows grow downward: higher ground is cut down, lower ground filled up, within the ramp.
       const goal = dist === 0 ? padY : (natural < padY ? Math.max(natural, padY - dist * ramp) : Math.min(natural, padY + dist * ramp));
@@ -150,46 +150,85 @@
   const mod = (a, n) => ((a % n) + n) % n;
 
   // ---- Farms: wheat field and shore pump ----------------------------------------------------------------
+  // A field is a surface, like a road: its tilled rows carry the FIELD flag. A field never goes
+  // over a road, and never over anything a building owns (a building standing on a field keeps it
+  // under its floor). field.columns is what was sown, field.alive what is still field: together
+  // with the crop's growth they set the farm's SM output.
   function sowField(world, x0, x1, padY, random) {
-    const field = { x0, x1, y: padY, growth: 0.55 + random() * 0.4, stalks: [] };
+    const field = { x0, x1, y: padY, growth: 0.55 + random() * 0.4, stalks: [], columns: 0, alive: 0 };
     for (let x = x0; x <= x1; x += 1) {
+      if (PW.getFlags(world, x, padY) & FLAG.ROAD) continue;
+      if (PW.getOwner(world, x, padY)) continue;
+      let sown = false;
       for (let row = 0; row < 3; row += 1) {
         const y = padY + row;
-        if (!PW.mat.ground[PW.get(world, x, y) & 63]) continue;
+        if (!PW.mat.ground[PW.get(world, x, y) & 63] || PW.getOwner(world, x, y)) continue;
         PW.set(world, x, y, M.TOPSOIL | (row << 6), { quiet: true });
-        const furrow = (x % 10) < 5;
-        PW.setLayer(world, 'paint', x, y, rgb(tone(row === 0 ? (furrow ? [92, 66, 42] : [110, 82, 54]) : [96, 72, 48], 1)));
+        const furrow = (x % 6) < 3;                                   // dark furrows between the rows
+        PW.setLayer(world, 'paint', x, y, rgb(row === 0 ? (furrow ? [74, 54, 36] : [104, 78, 52]) : [92, 68, 46]));
+        PW.setFlag(world, x, y, FLAG.FIELD);
+        sown = true;
       }
+      if (sown) field.columns += 1;
     }
+    field.alive = field.columns;
     drawCrop(world, field);
     return field;
   }
+  // Columns of a field still under crop (a road laid over part of it takes those away).
+  function recountField(world, field) {
+    let alive = 0;
+    for (let x = field.x0; x <= field.x1; x += 1) if (PW.getFlags(world, x, field.y) & FLAG.FIELD) alive += 1;
+    field.alive = alive;
+    return alive;
+  }
   // Draw (or redraw) a field's wheat at its current growth: green shoots when young, golden ears
   // when ripe. Stalks only grow from tilled soil that is still there, into open air.
-  const STEMS = [[170, 150, 70], [150, 132, 60]], EARS = [[236, 200, 90], [214, 176, 92], [246, 214, 110]];
-  const SHOOTS = [[96, 140, 60], [80, 122, 52]];
+  // The crop: maize in dense rows, as in the field references. Young plants are short green shoots;
+  // grown ones are tall green stalks (taller than a trooper) with leaves arching out and golden
+  // tassels on top; ripe ones dry to straw gold. Nothing is drawn inside a building or over a yard
+  // prop, and only on ground that is still field.
+  const MAIZE = { stalk: [[66, 108, 44], [80, 124, 50]], leaf: [[92, 146, 58], [70, 118, 46], [108, 160, 66]],
+    tassel: [[226, 200, 112], [204, 174, 92], [240, 216, 132]], straw: [[196, 168, 96], [176, 148, 80]], strawLeaf: [[170, 142, 74], [150, 124, 64]],
+    husk: [[220, 196, 120], [196, 170, 100]] };
   function drawCrop(world, field) {
     const { x0, x1, y: padY, growth } = field;
-    for (let x = x0; x <= x1 + 1; x += 1) {
-      for (let i = 1; i <= 20; i += 1) {
+    const open = (x, y) => (PW.get(world, x, y) & 63) === M.AIR && !(PW.getFlags(world, x, y) & FLAG.CHARRED)
+      && !PW.getLayer(world, 'back', x, y) && !PW.getOwner(world, x, y) && (!PW.getLayer(world, 'deco', x, y) || (PW.getFlags(world, x, y) & FLAG.FLORA));
+    for (let x = x0 - 4; x <= x1 + 4; x += 1) {
+      for (let i = 1; i <= 36; i += 1) {
         if (PW.getFlags(world, x, padY - i) & FLAG.FLORA) { PW.setLayer(world, 'deco', x, padY - i, 0); PW.setFlag(world, x, padY - i, FLAG.FLORA, false); }
       }
     }
     field.stalks = [];
-    const ripe = growth >= 0.6;
-    for (let x = x0; x <= x1; x += 3) {
-      if ((PW.get(world, x, padY) & 63) !== M.TOPSOIL) continue;
-      const h = Math.round((10 + (PW.hash2(x, 41) % 8)) * growth);
-      if (h < 1) continue;
+    const put = (x, y, color) => {
+      if (x < x0 - 3 || x > x1 + 3 || !open(x, y)) return false;
+      PW.setLayer(world, 'deco', x, y, rgb(color));
+      PW.setFlag(world, x, y, FLAG.FLORA);
+      return true;
+    };
+    const ripe = growth >= 0.85, young = growth < 0.4;
+    for (let x = x0; x <= x1; x += 2) {
+      if (!(PW.getFlags(world, x, padY) & FLAG.FIELD)) continue;
+      const full = 24 + (PW.hash2(x, 41) % 9);                      // 1.7-2.3 m
+      const h = Math.max(2, Math.round(full * Math.min(1, growth * 1.1)));
       field.stalks.push({ x, h });
-      const lean = (PW.hash2(x, 43) & 3) === 0 ? 1 : 0;
+      const pick = (list, k) => list[PW.hash2(x, k) % list.length];
       for (let i = 1; i <= h; i += 1) {
-        const color = !ripe ? SHOOTS[(i + x) & 1] : i > h - 4 ? EARS[PW.hash2(x, i) % EARS.length] : STEMS[(i + x) & 1];
-        const sx = x + (lean && i > h - 3 ? 1 : 0);
-        if ((PW.get(world, sx, padY - i) & 63) !== M.AIR || (PW.getFlags(world, sx, padY - i) & FLAG.CHARRED)) break;
-        PW.setLayer(world, 'deco', sx, padY - i, rgb(color));
-        PW.setFlag(world, sx, padY - i, FLAG.FLORA);
+        const top = i > h - 4 && !young;
+        const color = young ? pick(MAIZE.leaf, i) : top ? (ripe ? pick(MAIZE.husk, i) : pick(MAIZE.tassel, i)) : ripe ? pick(MAIZE.straw, i) : pick(MAIZE.stalk, i);
+        if (!put(x, padY - i, color)) break;
+        // Leaves arch out from the stalk every few cells, on alternating sides, drooping at the tip.
+        if (!top && i > 3 && (i + (PW.hash2(x, 7) & 3)) % 5 === 0) {
+          const side = ((i / 5) | 0) % 2 ? 1 : -1, leaf = ripe ? pick(MAIZE.strawLeaf, i) : pick(MAIZE.leaf, i + 1);
+          put(x + side, padY - i - 1, leaf); put(x + 2 * side, padY - i - 1, leaf); put(x + 3 * side, padY - i, leaf);
+          if (!young) put(x + 4 * side, padY - i + 1, leaf);
+        }
+        // An ear of corn halfway up a grown stalk.
+        if (!young && i === Math.round(h * 0.55)) put(x + 1, padY - i, pick(MAIZE.husk, i));
       }
+      // The tassel's side spikes.
+      if (!young && h > 6) { put(x - 1, padY - h + 1, pick(MAIZE.tassel, 3)); put(x + 1, padY - h + 2, pick(MAIZE.tassel, 4)); }
     }
   }
   // Pump house on the flattest dry spot near the shore. It stands level on a concrete plinth that
@@ -596,24 +635,29 @@
         world.buildings.push(record);
         settlement.buildings.push(record);
       }
-      // The street runs 50 cells past the end buildings (in a neutral town it stops at a farm's
-      // field instead, as that is terraced at its own level).
+      // The street runs 50 cells past the end buildings - but a farm's ground is field, never road:
+      // the street stops at a farm that ends the town, and leaves out a farm's lot inside it.
       const ends = settlement.buildings, first = ends[0], last = ends[ends.length - 1];
-      const fieldOut = (b) => (relief && placed.some((lot) => lot.canvas === b.canvas && lot.field) ? b.facing : 0);
-      const streetLeft = settlement.streetLeft = first.works[0] - (fieldOut(first) < 0 ? 13 : 50);
-      const streetRight = settlement.streetRight = last.works[1] + (fieldOut(last) > 0 ? 13 : 50);
+      const farms = settlement.buildings.filter((b) => b.type === 'farm');
+      const onFarm = (x) => farms.some((b) => x >= b.works[0] - 2 && x <= b.works[1] + 2);
+      const streetLeft = settlement.streetLeft = first.type === 'farm' ? first.works[1] + 3 : first.works[0] - 50;
+      const streetRight = settlement.streetRight = last.type === 'farm' ? last.works[0] - 3 : last.works[1] + 50;
       // Streets through the ground floors (style paving) and the runway. In a neutral town the
       // street follows the ground between the buildings' bases (which have their own paving,
       // stages and steps) and runs through each ground floor.
-      const streetAt = !relief ? padY : (x) => {
+      const streetAt = (x) => {
+        if (onFarm(x)) return null;
+        if (!relief) return padY;
         for (const b of settlement.buildings) {
           if (x >= b.body.left && x <= b.body.right) return b.ground;
           if (x >= b.works[0] && x <= b.works[1]) return null;
         }
         return world.groundTop[x];
       };
-      settlement.streetAt = typeof streetAt === 'function' ? streetAt : () => padY;
+      settlement.streetAt = streetAt;
       paveStreet(world, streetLeft, streetRight, streetAt, () => style);
+      // Each farm's own lot is field (under and around its buildings, its yard among the crops).
+      for (const b of farms) b.lotField = sowField(world, b.works[0], b.works[1], b.ground, random);
       for (const b of settlement.buildings) {
         if (b.type !== 'military' || !b.runway || neutral) continue;
         const end = b.runway.from + b.runway.direction * runwayLength;
@@ -622,7 +666,7 @@
         settlement.runway = { from: b.runway.from, to: end, y: padY };
       }
       // Everything laid on the surface, so wild growth keeps clear of it.
-      const footprints = settlement.footprints = [[streetLeft, streetRight]];
+      const footprints = settlement.footprints = [[streetLeft, streetRight], ...farms.map((b) => [b.works[0], b.works[1]])];
       if (settlement.runway) footprints.push([Math.min(settlement.runway.from, settlement.runway.to), Math.max(settlement.runway.from, settlement.runway.to)]);
       // Farm fields on the farm's outward side (stopping short of any water), and a pump at the
       // nearest lake.
@@ -631,7 +675,10 @@
         const lot = placed.find((item) => item.canvas === b.canvas);
         if (!lot || !lot.field) continue;
         const outward = b.facing;
-        const start = outward > 0 ? b.works[1] + 14 : b.works[0] - 14;
+        // (on a flat base the field carries straight on from the lot; on rolling ground it is its
+        // own terrace a little way off)
+        const gap = relief ? 14 : 1;
+        const start = outward > 0 ? b.works[1] + gap : b.works[0] - gap;
         // (the farm's own yard takes the first stretch of its land, before the field)
         let length = neutral ? 110 : 150;
         for (let d = 0; d <= length; d += 1) {
@@ -675,9 +722,12 @@
       // Ground defences beyond the front of each base (past the runway's end); neutrals guard both
       // ends of their street.
       settlement.defences = [];
+      // (past the whole town: its street, and any farm and field at its ends)
+      const extent = [streetLeft, streetRight, ...settlement.buildings.flatMap((b) => [b.works[0], b.works[1]]),
+        ...settlement.buildings.flatMap((b) => [b.field, b.lotField]).filter(Boolean).flatMap((f) => [f.x0, f.x1])];
       const front = (d) => {
         if (settlement.runway && d === dir) return d > 0 ? Math.max(settlement.runway.from, settlement.runway.to) + 40 : Math.min(settlement.runway.from, settlement.runway.to) - 40;
-        return d > 0 ? streetRight + 40 : streetLeft - 40;
+        return d > 0 ? Math.max(...extent) + 40 : Math.min(...extent) - 40;
       };
       const builtOn = (x) => [footprints, ...world.settlements.map((s) => s.footprints || [])]
         .some((spans) => spans.some(([a, c]) => x >= a - 6 && x <= c + 6));
@@ -696,5 +746,5 @@
   }
 
   PW.generateSettlements = generateSettlements;
-  PW.settlementTools = { terracePad, paveStreet, carveBox, ladder, tunnelLamps, drawCrop, TUNNEL, PAVING };
+  PW.settlementTools = { terracePad, paveStreet, carveBox, ladder, tunnelLamps, drawCrop, recountField, TUNNEL, PAVING };
 })();

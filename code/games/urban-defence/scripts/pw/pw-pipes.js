@@ -372,11 +372,22 @@
         if (!line.spec.every) continue;
         for (const riser of line.risers) {
           if (riser.flow !== 'out' || riser.kind === 'mine') continue;
-          riser.timer += dt;
+          // A farm sends SM in proportion to the field it still has under crop, and the crop's growth.
+          const rate = riser.kind === 'farm' ? farmYield(riser.building) : 1;
+          if (rate <= 0) continue;
+          riser.timer += dt * rate;
           if (riser.timer >= line.spec.every && spawn(line, riser)) riser.timer = 0;
         }
       }
       for (const line of lines) for (const riser of line.risers) if (riser.pending > 0 && spawn(line, riser)) riser.pending -= 1;
+    }
+    function farmYield(id) {
+      const b = (world.buildings || [])[id - 1];
+      if (!b) return 1;
+      const fields = [b.field, b.lotField].filter(Boolean);
+      const sown = fields.reduce((s, f) => s + (f.columns || 0), 0);
+      if (!sown) return 0.5;                                     // a farm without a field (greenhouse benches)
+      return fields.reduce((s, f) => s + (f.alive || 0) * Math.min(1, f.growth), 0) / sown;
     }
     // A mining operation loads `value` HM into its hopper riser.
     function carry(op, value) {
