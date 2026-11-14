@@ -80,29 +80,27 @@ check(!!crouchShot && PW.props.COVER[crouchShot.id] === 1, `a shot at crouch hei
 const targetCells = new Set(target.cells);
 check(!headShot || !targetCells.has(headShot.y * W + headShot.x), `a shot over the top of the ${target.kind} is not stopped by it (${headShot ? `${PW.mat.names[headShot.id]} beyond it` : 'clear'})`);
 
-// 4. Structure bases: pump plinths and intakes, fields, defences.
+// 4. Structure bases: the lake pumps under their basins, fields, defences.
 for (const b of world.buildings.filter((item) => item.pump)) {
-  const pump = b.pump;
-  let gaps = 0;
-  const gapAt = [];
-  for (let x = pump.left; x <= pump.right; x += 1) {
-    let y = pump.y;
-    while (id(x, y) === M.FOUNDATION && y < pump.y + 400) y += 1;
-    if (y === pump.y || !solid(x, y)) { gaps += 1; if (gapAt.length < 3) gapAt.push(`${x},${y}:${PW.mat.names[id(x, y)]}`); }   // the plinth must reach solid ground with no gap
+  const { chamber, intakeX } = b.pump;
+  // The chamber lies wholly under the lake floor, and it is dry inside.
+  let dryLand = 0, wet = 0;
+  for (let x = chamber.x0; x <= chamber.x1; x += 1) {
+    if (id(x, world.groundTop[x]) !== M.WATER) dryLand += 1;
+    for (let y = chamber.top; y <= chamber.floor; y += 1) if (id(x, y) === M.WATER) wet += 1;
   }
-  if (gapAt.length) checks.push(`  pump ${b.id} plinth ends at ${gapAt.join(' ')} (floor ${pump.y})`);
-  let pipeGaps = 0;
-  const [s0, s1] = pump.span;
-  for (let x = s0; x <= s1; x += 1) {
-    let lowest = -1;
-    for (let y = pump.y - 30; y < pump.y + 400; y += 1) if (id(x, y) === M.PIPE) lowest = y;
-    if (lowest >= 0 && !solid(x, lowest + 1)) pipeGaps += 1;
-  }
-  check(gaps === 0 && pipeGaps === 0, `pump house ${b.id} stands on a plinth to the ground and its intake lies on the bank and bed (plinth gaps ${gaps}, pipe gaps ${pipeGaps})`);
+  // The strainer is set into the lake floor under the water, and the suction pipe runs unbroken
+  // from it down into the chamber.
+  const bed = PW.supportBelow(world, intakeX, world.groundTop[intakeX], true);
+  const strainer = id(intakeX, bed) === M.STEEL && id(intakeX, bed - 1) === M.WATER;
+  let broken = 0;
+  for (let y = bed + 1; y < chamber.top; y += 1) if (id(intakeX, y) !== M.PIPE) broken += 1;
+  check(dryLand === 0 && wet === 0 && strainer && broken === 0,
+    `farm ${b.id}'s pump draws from below its basin: chamber under the lake floor (${dryLand} columns under dry land), dry inside (${wet} wet cells), strainer in the bed (${strainer}), suction pipe unbroken (${broken} gaps)`);
 }
 for (const b of world.buildings.filter((item) => item.field)) {
   let bad = 0;
-  for (let x = b.field.x0; x <= b.field.x1; x += 1) if (id(x, b.field.y) !== M.TOPSOIL) bad += 1;
+  for (let x = b.field.x0; x <= b.field.x1; x += 1) if (id(x, PW.settlementTools.fieldY(b.field, x)) !== M.TOPSOIL) bad += 1;
   check(bad === 0, `field of farm ${b.id} is all soil, none over water (${bad} bad columns)`);
 }
 for (const s of world.settlements) {
@@ -124,7 +122,7 @@ for (const type of ['broadleaf', 'conifer', 'bush', 'reeds']) {
 const rock = props.filter((r) => r.setting === 'surface').sort((a, b) => (b.y1 - b.y0) - (a.y1 - a.y0))[0];
 if (rock) await view('gr-surface-boulder', (rock.x0 + rock.x1) / 2, (rock.y0 + rock.y1) / 2, 8);
 const pumped = world.buildings.find((b) => b.pump);
-if (pumped) await view('gr-pump', pumped.pump.x + (pumped.pump.intakeX - pumped.pump.x) / 2, pumped.pump.y, 6);
+if (pumped) await view('gr-pump', pumped.pump.intakeX, (pumped.pump.chamber.top + PW.supportBelow(world, pumped.pump.intakeX, world.groundTop[pumped.pump.intakeX], true)) / 2, 6);
 const front = world.settlements.find((s) => !s.style || s.side !== 'neutral');
 if (front && front.defences[0]) await view('gr-defence', (front.defences[0].span[0] + front.defences[0].span[1]) / 2, front.defences[0].cover.y0, 6);
 const core = world.buildings.find((b) => b.type === 'core' && b.mine);

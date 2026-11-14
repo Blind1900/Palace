@@ -5,9 +5,10 @@
   const { M } = PW;
 
   // Write a building canvas into the world with its ground row on world row `groundY`.
-  // Cells with a back colour are open space (interiors above ground, the bunker pit below it), so
-  // any terrain there is carved out; other cells below the ground keep their soil unless the
-  // building has structure there (buried cores). Every written cell gets the owner id.
+  // Cells with a back colour are open space (interiors above ground, the bunker pit and the core
+  // vaults below it), so any terrain there is carved out; other cells below the ground keep their
+  // soil unless the building has structure there (a vault's armour). Every written cell gets the
+  // owner id.
   function stampBuilding(world, canvas, worldX, groundY, options = {}) {
     const ox = Math.round(worldX), oy = Math.round(groundY - canvas.ground);
     const { width, height } = canvas;
@@ -23,8 +24,6 @@
         const mat = canvas.mat[i];
         const any = mat || canvas.back[i] || canvas.deco[i];
         if (!any) continue;
-        // Buried cores are set into the real ground by the foundations instead.
-        if (options.skipBuried && y > canvas.ground && (canvas.role[i] === PW.buildingKit.ROLE.CORE || canvas.role[i] === PW.buildingKit.ROLE.CRADLE)) continue;
         if (mat) {
           PW.set(world, wx, wy, mat, quiet);
           PW.setLayer(world, 'paint', wx, wy, canvas.paint[i]);
@@ -54,7 +53,8 @@
       floors: canvas.floors.map((f) => ({ ...f, y: f.y + oy, left: f.left + ox, right: f.right + ox })),
       stairs: canvas.stairs.map((s) => ({ ...s, from: s.from + ox, to: s.to + ox, floorRow: s.floorRow + oy, upperRow: s.upperRow + oy })),
       doors: canvas.doors.map((d) => ({ ...d, x: d.x + ox, top: d.top + oy, bottom: d.bottom + oy })),
-      slots: canvas.slots.map(pt), panels: canvas.panels.map(pt), cores: canvas.cores.map(pt),
+      slots: canvas.slots.map(pt), panels: canvas.panels.map(pt),
+      cores: canvas.cores.map((c) => ({ ...pt(c), vault: c.vault && { x0: c.vault.x0 + ox, x1: c.vault.x1 + ox, top: c.vault.top + oy, bottom: c.vault.bottom + oy, lid: c.vault.lid + oy } })),
       devices: canvas.devices.map(pt), windows: canvas.windows.map(pt), storage: (canvas.storage || []).map(pt),
       hangar: canvas.hangar && { ...box(canvas.hangar), door: { x: canvas.hangar.door.x + ox, top: canvas.hangar.door.top + oy, bottom: canvas.hangar.door.bottom + oy },
         spawn: pt(canvas.hangar.spawn) },

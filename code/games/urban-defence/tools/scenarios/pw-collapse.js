@@ -15,7 +15,8 @@ const tallest = (side) => world.buildings.filter((b) => b.type === 'population' 
 const A = tallest('left'), B = tallest('right');
 const heightOf = (b) => b.ground - b.body.top;
 const countIn = (x0, x1, y0, y1, ids) => { let n = 0; for (let y = y0; y <= y1; y += 1) for (let x = x0; x <= x1; x += 1) if (ids.includes(id(x, y))) n += 1; return n; };
-const coresUnder = (b) => countIn(b.body.left, b.body.right, b.ground, b.ground + 40, [M.CORE]);
+// (a building's core cells wherever they are: in their vaults, or risen out of the ruins)
+const coresUnder = (b) => countIn(b.body.left - 12, b.body.right + 12, b.body.top - 40, b.ground + 40, [M.CORE]);
 const coresA = coresUnder(A), coresB = coresUnder(B);
 const others = world.buildings.filter((b) => b !== A && b !== B);
 const decoBefore = (b) => { let n = 0; for (let y = b.ground - 120; y < b.ground; y += 1) for (let x = b.body.left - 300; x <= b.body.right + 300; x += 1) if (PW.getLayer(world, 'deco', x, y)) n += 1; return n; };
@@ -64,8 +65,14 @@ check(spread(B, dirB) > heightOf(B) * 0.4, `the tipped tower's rubble reaches ou
 const hurt = others.filter((b) => b.health !== undefined && b.health < 1).length;
 check(hurt > 0 || fragments.stats.chipped > 0, `falling debris damages neighbouring buildings (${hurt} neighbours damaged, ${fragments.stats.chipped} cells chipped)`);
 check((fragments.stats.swept || 0) > 0 && decoBefore(A) < decoA, `falling debris knocks down trees, lamps and fittings (${fragments.stats.swept || 0} swept, deco ${decoA} -> ${decoBefore(A)})`);
-// The cores stay in the ground under the ruins.
-check(coresUnder(A) === coresA && coresUnder(B) === coresB, `the buried cores survive the collapse (${coresUnder(A)}/${coresA}, ${coresUnder(B)}/${coresB} core cells)`);
+// The cores survive the collapse; a ruined building's cores rise out of the rubble into the open,
+// where troops can reach them.
+check(coresUnder(A) === coresA && coresUnder(B) === coresB, `the cores survive the collapse (${coresUnder(A)}/${coresA}, ${coresUnder(B)}/${coresB} core cells)`);
+const ruined = [A, B].filter((b) => b.ruined);
+const out = ruined.flatMap((b) => b.cores.filter((c) => pwApp.cores.exposed(c)));
+check(ruined.length > 0 && out.length === ruined.reduce((n, b) => n + b.cores.length, 0),
+  `a ruined building's cores stand in the open on its rubble (${out.length}/${ruined.reduce((n, b) => n + b.cores.length, 0)} cores of ${ruined.length} ruined buildings; ${ruined.flatMap((b) => b.cores.map((c) => `${c.x},${c.y}${c.free ? 'F' : ''}${c.stopped ? ':' + c.stopped : ''}`)).join(' ')})`);
+if (ruined.length) await view('co-cores-risen', ruined[0].cores[0].x, ruined[0].cores[0].y, 5);
 // Lasting smoke and dust.
 const smoke30 = countIn(A.body.left - 600, A.body.right + 600, A.ground - 900, A.ground, [M.SMOKE]);
 check(dust10 > 1500, `the collapse throws up a dust cloud that hangs (${dust10} dust cells after 10 s)`);

@@ -44,7 +44,7 @@
     const bodyHeight = storeys * S.FLOOR + S.SLAB;
     const modern = style === 'modern';
     const crownLength = Math.min(150, Math.max(modern ? 72 : 54, Math.round(bodyHeight * (modern ? 0.32 : 0.28))));
-    const margin = 20, coreDepth = 22;
+    const margin = 20, coreDepth = K.VAULT_DEPTH + 3;
     const width = bodyWidth + margin * 2;
     const height = bodyHeight + crownLength + 44 + coreDepth;
     const ground = height - coreDepth - 1;
@@ -244,12 +244,12 @@
       if (level >= 3) PW.buildingOrnaments.devices(c, style, roofs, ['interceptor', 'turret'], options.deviceFacing ?? (options.facing || 1), random);
     }
 
-    // Buried cores under the ground floor (no foundation slab: the cores sit in the soil).
+    // The cores, each in its vault under the ground floor, spread along it.
     const coreCount = populationCores(level);
-    const base = spans[0];
+    const reach = K.VAULT.half + K.VAULT.wall;
     for (let i = 0; i < coreCount; i += 1) {
-      const cx = Math.round(margin + S.WALL + 12 + (bodyWidth - 1 - 2 * S.WALL - 24) * (coreCount === 1 ? 0.5 : i / (coreCount - 1)));
-      K.core(c, mx(cx), ground + 11);
+      const cx = Math.round(margin + reach + (bodyWidth - 1 - 2 * reach) * (coreCount === 1 ? 0.5 : i / (coreCount - 1)));
+      K.core(c, mx(cx), ground);
     }
     K.bakeLights(c, style);
     c.floors = spans.map((span) => ({ storey: span.k, y: floorRow(span.k), left: span.left + span.wall, right: span.right - span.wall }));

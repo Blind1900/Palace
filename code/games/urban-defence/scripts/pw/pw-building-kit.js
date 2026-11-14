@@ -40,7 +40,7 @@
 
   // Roles let construction, collapse and units tell parts apart.
   const ROLE = Object.freeze({ NONE: 0, WALL: 1, SLAB: 2, STAIR: 3, ROOF: 4, GLASS: 5, ORNAMENT: 6, DEVICE: 7,
-    CORE: 8, CRADLE: 9, CROWN: 10, VAULT: 11, FRAME: 12, BRIDGE: 13, PROP: 14 });
+    CORE: 8, CRADLE: 9, CROWN: 10, VAULT: 11, FRAME: 12, BRIDGE: 13, PROP: 14, GRATE: 15 });
 
   // A building canvas: local cells for the physical layer (mat + paint + role), the back wall layer
   // and the front deco layer. `ground` is the local row of the terrain surface under the building.
@@ -350,31 +350,98 @@
           if (d >= 1) continue;
           const k = (1 - d) * (1 - d) * lamp.strength + ((x * 7 + y * 3) % 4) * 0.012;
           const color = PW.unpack(c.back[i]);
-          c.back[i] = pack(mix(color, P.lamp, Math.min(0.75, k)));
+          c.back[i] = pack(mix(color, lamp.color || P.lamp, Math.min(0.75, k)));
         }
       }
     }
   }
 
-  // Buried amber core in its cradle (part of the structure, under the building).
-  function core(c, cx, cy) {
-    const r = 4;
-    rect(c, cx - r - 2, cy - r - 2, cx + r + 2, cy + r + 2, (x, y) => {
-      const dx = x - cx, dy = y - cy;
-      if (Math.abs(dx) <= r && Math.abs(dy) <= r) {
-        const k = 1.25 - (dx + dy + 8) / 16 * 0.45;
-        solid(c, x, y, M.CORE, tone(CORE_COLOR, k), ROLE.CORE);
-      } else if (dy > r || Math.abs(dx) > r && dy >= 0) {
-        solid(c, x, y, M.FOUNDATION, tone(CORE_SHADE, 0.9 + (grain(x, y) & 1) * 0.1), ROLE.CRADLE);
+  // ---- Cores ------------------------------------------------------------------------------------------
+  // A building's core: a glowing amber orb held between two reactor stacks of diamond-plate rings
+  // whose joints glow, gripped by clamp arms reaching in from above (after the refs: an energy core
+  // in its clamps, a ringed reactor column, a dark armoured housing round a glowing heart). It is
+  // kept simple and unmistakable: the brightest thing in the building, in one amber for every side.
+  // Under a building it stands in an armoured steel vault below the ground floor, under a grating
+  // its glow shows through; when the building is ruined the grating is blown off and the vault
+  // lies open, so troops can reach the core and hit it (see pw-cores.js). `standing`: on a floor
+  // (a hangar's) instead of in a vault.
+  const CORE_HOT = [255, 240, 186], CORE_RIM = [206, 98, 8];
+  const PLATE = [112, 118, 126], PLATE_LIT = [156, 162, 170], PLATE_DARK = [66, 70, 78], PLATE_BUMP = [176, 182, 190];
+  const ARMOUR = [58, 60, 66], ARMOUR_LIT = [84, 88, 96], HAZARD = [230, 184, 40];
+  const VAULT = Object.freeze({ half: 11, height: 30, wall: 3, lid: 2 });
+  const VAULT_DEPTH = VAULT.lid + VAULT.height + VAULT.wall;   // rows under the ground floor
+  // The column, from its bottom row `b` up 30 rows: ring, glow, ring, glow, neck, orb (r 5), neck,
+  // glow, ring, glow, ring. Returns the orb's centre row.
+  function coreColumn(c, cx, b) {
+    const ring = (y0, rows, half) => {
+      for (let r = 0; r < rows; r += 1) for (let dx = -half; dx <= half; dx += 1) {
+        const x = cx + dx, y = y0 - r;
+        const edge = Math.abs(dx) === half, top = r === rows - 1, bottom = r === 0;
+        const bump = ((x + y) & 3) === 0 && ((x - y) & 3) === 2;
+        solid(c, x, y, M.STEEL, edge ? PLATE_DARK : top ? PLATE_LIT : bottom ? PLATE_DARK : bump ? PLATE_BUMP : PLATE, ROLE.CRADLE);
       }
+    };
+    const glow = (y, half) => {
+      for (let dx = -half; dx <= half; dx += 1) solid(c, cx + dx, y, M.CORE, (dx + y) % 3 === 0 ? CORE_HOT : CORE_COLOR, ROLE.CORE);
+    };
+    ring(b, 3, 8); glow(b - 3, 7); ring(b - 4, 3, 7); glow(b - 7, 6); ring(b - 8, 2, 4);
+    const r = 5, oy = b - 15;
+    for (let dy = -r; dy <= r; dy += 1) for (let dx = -r; dx <= r; dx += 1) {
+      const d = Math.hypot(dx, dy);
+      if (d > r + 0.3) continue;
+      // White-hot where the light catches it, amber, deepening to the rim; a swirl in the glow.
+      const hot = Math.hypot(dx + 1.6, dy + 1.6) < 1.8;
+      const swirl = ((cx + dx) * 3 + (oy + dy) * 5) % 7 === 0;
+      solid(c, cx + dx, oy + dy, M.CORE, hot ? CORE_HOT : mix(swirl ? tone(CORE_COLOR, 1.15) : CORE_COLOR, CORE_RIM, Math.max(0, d / r - 0.45) * 1.4), ROLE.CORE);
+    }
+    ring(b - 21, 2, 4); glow(b - 23, 5); ring(b - 24, 3, 6); glow(b - 27, 7); ring(b - 28, 2, 8);
+    c.lamps.push({ x: cx, y: oy, radius: 34, strength: 0.75, color: CORE_COLOR });
+    return oy;
+  }
+  function core(c, cx, floor, options = {}) {
+    if (options.standing) {
+      const oy = coreColumn(c, cx, floor - 1);
+      c.cores.push({ x: cx, y: oy, standing: true });
+      return;
+    }
+    const { half, height, wall, lid } = VAULT;
+    const top = floor + lid, bottom = top + height - 1;
+    // The vault: armour walls and floor, dark ribbed panels inside, a hazard band along its rim.
+    rect(c, cx - half - wall, floor, cx + half + wall, bottom + wall, (x, y) => {
+      const inner = Math.abs(x - cx) <= half && y <= bottom;
+      if (inner && y < top) return;
+      if (inner) { back(c, x, y, (x - cx + half) % 6 === 0 ? [36, 38, 46] : [24, 26, 32]); return; }
+      const rim = y === floor || y === floor + 1;
+      const hazard = rim && ((x + y) >> 1 & 1) === 0;
+      solid(c, x, y, M.STEEL, hazard ? HAZARD : rim ? [40, 40, 44] : (Math.abs(x - cx) === half + 1 || y === bottom + 1) ? ARMOUR_LIT : ARMOUR, ROLE.CRADLE);
     });
-    c.cores.push({ x: cx, y: cy });
+    // The grating over it, flush with the floor: troops walk on it, and the core's glow comes up
+    // through its slots.
+    for (let x = cx - half; x <= cx + half; x += 1) {
+      solid(c, x, floor, M.PLATFORM, (x & 1) ? [92, 96, 104] : tone(CORE_COLOR, 0.62), ROLE.GRATE);
+      solid(c, x, floor + 1, M.PLATFORM, (x % 4 === 0) ? [70, 74, 82] : [104, 108, 116], ROLE.GRATE);
+    }
+    const oy = coreColumn(c, cx, bottom);
+    // Clamp arms from the vault's upper corners to the orb's shoulders, each ending in a claw.
+    for (const side of [-1, 1]) {
+      const x0 = cx + side * (half - 1), y0 = top + 1, x1 = cx + side * 6, y1 = oy - 3;
+      const n = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0));
+      for (let t = 0; t <= n; t += 1) {
+        const x = Math.round(x0 + (x1 - x0) * t / n), y = Math.round(y0 + (y1 - y0) * t / n);
+        solid(c, x, y, M.STEEL, PLATE_LIT, ROLE.CRADLE);
+        solid(c, x, y + 1, M.STEEL, PLATE_DARK, ROLE.CRADLE);
+      }
+      solid(c, x1 - side, y1 + 2, M.STEEL, PLATE_DARK, ROLE.CRADLE);
+      solid(c, x1 - side, y1 + 3, M.STEEL, PLATE_LIT, ROLE.CRADLE);
+    }
+    c.cores.push({ x: cx, y: oy, vault: { x0: cx - half, x1: cx + half, top, bottom, lid: floor } });
   }
 
   PW.buildingKit = {
     S, STYLES, ROLE, CORE_COLOR, CORE_SHADE, BEACON, SCREEN, GLASS_DARK, GLASS_SIDE, SHINE,
     tone, mix, pack, grain, clamp255,
     createCanvas, inside, solid, solidIfEmpty, clear, back, backIfEmpty, deco, isSolid, rect, bitmap,
-    wallColor, slabColor, backWallColor, backWindow, FURNITURE, ceilingLamp, bakeLights, core,
+    wallColor, slabColor, backWallColor, backWindow, FURNITURE, ceilingLamp, bakeLights, core, coreColumn,
+    VAULT, VAULT_DEPTH, CORE_HOT,
   };
 })();

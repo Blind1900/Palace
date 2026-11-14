@@ -13,7 +13,7 @@
 //   modern - downhill: slender concrete pilotis under a cantilevered deck, cross-braced in steel
 //            when tall; uphill: a board-formed concrete wall with tie-back anchor plates and weep
 //            holes, and a steel railing.
-// The amber cores stay buried in real ground: under the footings where the floor is raised.
+// The cores' vaults hang under the floor with it: in the ground, or among a stage's piers.
 (function () {
   const PW = window.PW;
   const { M, FLAG, ID_MASK } = PW;
@@ -462,16 +462,6 @@
     return { cols: cols.length, stages };
   }
 
-  // A buried amber core in its cradle at world (cx, cy).
-  function core(world, cx, cy, owner) {
-    const r = 4;
-    for (let y = cy - r - 2; y <= cy + r + 2; y += 1) for (let x = cx - r - 2; x <= cx + r + 2; x += 1) {
-      const dx = x - cx, dy = y - cy;
-      if (Math.abs(dx) <= r && Math.abs(dy) <= r) put(world, x, y, M.CORE, tone(K.CORE_COLOR, 1.25 - (dx + dy + 8) / 16 * 0.45), owner);
-      else if (dy > r || (Math.abs(dx) > r && dy >= 0)) put(world, x, y, M.FOUNDATION, tone(K.CORE_SHADE, 0.95), owner);
-    }
-  }
-
   // ---- Measure ----------------------------------------------------------------------------------------
   // The columns [left, right] that place() would build on for this canvas at worldX (walls,
   // forecourts, stages, steps, ramps and buttresses), without writing anything. null if the lot
@@ -481,9 +471,12 @@
     if (!p) return null;
     let left = p.x0 - 2, right = p.x1 + 2;
     const reach = (side, x) => { if (side < 0) left = Math.min(left, x); else right = Math.max(right, x); };
+    // (and how tall a retaining wall each side needs: the town's layout keeps a lot off ground
+    // that would need one much taller than the deepest cut)
+    const wall = { '-1': 0, 1: 0 };
     for (const side of p.uphill) {
       const L = wallLayout(p, side);
-      if (L) reach(side, L.far + side * 2);
+      if (L) { reach(side, L.far + side * 2); wall[side] = L.Hw; }
     }
     for (const side of p.downhill) {
       const st = stagePlan(p, side);
@@ -491,12 +484,12 @@
       const buttress = p.style === 'gothic' ? 3 + Math.floor((p.natural(st.end) + EMBED - p.G) / 16) * 3 : 0;
       reach(side, st.end + side * (Math.max(st.run, buttress) + 2));
     }
-    return { plan: p, left, right };
+    return { plan: p, left, right, wall };
   }
 
   // ---- Place a building with its base ------------------------------------------------------------------
-  // Plans the floor, cuts and builds the base, stamps the canvas at the floor (its buried cores are
-  // set into the real ground under it) and returns { stamp, plan }. null if the lot can't take it.
+  // Plans the floor, cuts and builds the base, stamps the canvas at the floor (with its core vaults
+  // under it) and returns { stamp, plan }. null if the lot can't take it.
   function place(world, canvas, worldX, options = {}) {
     const style = options.style || (canvas.meta && canvas.meta.style) || 'modern';
     const extent = measure(world, canvas, worldX, style);
@@ -516,18 +509,11 @@
     }
     const walls = p.uphill.map((side) => retainingWall(world, p, side, owner)).filter(Boolean);
     const under = underStructure(world, p, owner);
-    const stamp = PW.stampBuilding(world, canvas, worldX, G, { owner, skipBuried: true });
-    // Cores: where the floor is raised, down into the ground under the footing.
-    const cores = [];
-    for (const c of canvas.cores) {
-      const wx = worldX + c.x, depth = c.y - canvas.ground;
-      if (depth <= 0) { cores.push({ x: wx, y: G + depth }); continue; }   // above the floor (a hangar cradle): stamped with the canvas
-      const g = Math.max(G, p.natural(wx));
-      core(world, wx, g + depth, owner);
-      cores.push({ x: wx, y: g + depth });
-    }
+    // (the cores' vaults hang under the floor with it, in the ground or among the stage's piers)
+    const stamp = PW.stampBuilding(world, canvas, worldX, G, { owner });
+    const cores = canvas.cores.map((c) => ({ x: worldX + c.x, y: G + c.y - canvas.ground }));
     return { stamp, plan: p, walls, under, cores, works: [extent.left, extent.right] };
   }
 
-  PW.foundations = { plan, measure, place, core, STYLE, CUT_MAX };
+  PW.foundations = { plan, measure, place, STYLE, CUT_MAX, CUT_MAX_HANGAR };
 })();

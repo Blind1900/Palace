@@ -3,7 +3,9 @@
 // an HM and a water line underground between its own structures. A line follows the ground at its
 // cover depth and dips under basements, the core pit and buried cores; where it crosses a tunnel or
 // a shaft it is fixed to the back wall, so it never blocks the way. Risers connect each building,
-// the lake pump and the mining operations.
+// the lake pump and the mining operations: at a building the riser comes up out of the ground into
+// the machine that belongs there, standing beside it (a tank, a transformer, a generator, a mill, a
+// farm's processor and pump, a mine's crusher). The run's underground ends are capped.
 //
 // Each line is built like the real thing, laid on a sand bed in its trench with a coloured warning
 // tape above it: water in a grey lead/iron main with bell joints, SM in a green conduit with a
@@ -47,11 +49,30 @@
     core: { sm: 'in', hm: 'in', water: 'in' }, population: { sm: 'in', water: 'in' }, military: { hm: 'in', sm: 'in' },
     farm: { sm: 'out', water: 'in' }, mine: { hm: 'out' }, pump: { water: 'out' }, mining: { hm: 'out' },
   };
+  // The machines standing beside each kind of building, one per line it uses, nearest first: where
+  // its line comes up out of the ground (the lake pump house and the mining hoppers are their own).
+  // Water is kept in a pressure tank (a farm's booster pump drives its irrigation); SM comes out of
+  // a farm's processor and goes into a transformer or a generator; ore comes out of a mine's crusher
+  // and goes into a mill. Widths in cells (as drawn: a genset is about 3 m long).
+  const PLANT = {
+    core: [['sm', 'generator'], ['hm', 'mill'], ['water', 'tank']],
+    population: [['sm', 'transformer'], ['water', 'tank']],
+    military: [['sm', 'generator'], ['hm', 'mill']],
+    farm: [['sm', 'processor'], ['water', 'pump']],
+    mine: [['hm', 'crusher']],
+  };
+  const MACHINE_W = { pump: 34, tank: 36, generator: 46, transformer: 28, crusher: 36, mill: 44, processor: 30 };
+  const PLANT_GAP = 4, PLANT_MARGIN = 3;
+  // Ground a building's machines take beside it (0 if it has none).
+  const plantWidth = (type) => {
+    const list = PLANT[type];
+    return list ? PLANT_MARGIN * 2 + list.reduce((sum, [, kind]) => sum + MACHINE_W[kind], 0) + PLANT_GAP * (list.length - 1) : 0;
+  };
 
   function createPipes(world) {
     const { mat, width: W, height: H } = world;
     const lines = [];
-    const stats = { lines: 0, cells: 0, machines: 0, machineMisses: 0, broken: 0, repaired: 0, repairHM: 0, packets: 0, spawned: 0, delivered: { sm: 0, hm: 0, water: 0 }, spilled: 0 };
+    const stats = { lines: 0, cells: 0, machines: 0, caps: 0, broken: 0, repaired: 0, repairHM: 0, packets: 0, spawned: 0, delivered: { sm: 0, hm: 0, water: 0 }, spilled: 0 };
     let tick = 0;
 
     // ---- Routing ----------------------------------------------------------------------------------
@@ -189,7 +210,8 @@
         PW.setFlag(world, x, y, FLAG.FIXTURE);
         return true;
       }
-      if (!terrain[id] && id !== M.PIPE) return false;
+      // (a riser comes up through the street's paving into its machine)
+      if (!terrain[id] && id !== M.PIPE && id !== M.ASPHALT && id !== M.ROADBED) return false;
       if (id === M.ORE) return false;
       PW.set(world, x, y, M.PIPE, { quiet: true });
       PW.setLayer(world, 'paint', x, y, rgb(color));
@@ -232,12 +254,9 @@
         occ: new Uint8Array(yB - yA + 1), timer: 0, pending: 0 };
     }
 
-    // ---- End machinery -----------------------------------------------------------------------------
-    // A line never just stops: each end runs into the machine that belongs there. The water main
-    // starts at a pump and ends at a pressure tank, the SM conduit runs from a generator to a
-    // transformer, the HM belt from a crusher to a mill. A machine stands on a concrete plinth in a
-    // sand-backfilled pit at its line's level (sized as the real thing: a genset is 3 m long), its
-    // inlet on the line's bore. Drawn in its own frame: u outward from the line end, v up from the
+    // ---- Machines ------------------------------------------------------------------------------------
+    // Each machine stands on a concrete plinth on the ground beside its building, drawn in its own
+    // frame: u outward from the building (its inlet flange at u 0-1, over the riser), v up from the
     // plinth's bottom row.
     const STEEL = [120, 128, 134], STEEL_DARK = [72, 78, 84], CONCRETE = [150, 150, 144], BLACK = [34, 34, 36];
     const MOTOR = [42, 150, 110], MOTOR_LIT = [70, 186, 140], MOTOR_DARK = [26, 104, 76], BRASS = [150, 120, 70];
@@ -361,58 +380,23 @@
         g.light = [42, 9]; g.drum = [11, 26, 6, 17];
         return g;
       },
-    };
-    // Compact end fittings, for an end hemmed in between the other lines (11 rows tall): a belt's
-    // head drive (drum and gear motor) or its tail drum with the screw take-up, a main's
-    // gear-operated valve and blind flange, a conduit's cable joint box.
-    Object.assign(MACHINES, {
-      drive: () => {
-        const g = sketch(24, 11);
-        flange(g, [150, 120, 40]);
-        g.rect(2, 2, 22, 2, [60, 64, 66]);
-        g.disc(7, 6, 4.5, (u, v, d) => (d > 3.6 ? BELT : d < 1.2 ? [200, 204, 206] : [96, 100, 104]));
-        g.rect(12, 5, 13, 7, STEEL_DARK);
-        g.rect(14, 3, 22, 9, (u, v) => (v === 9 ? MOTOR_LIT : v === 3 ? MOTOR_DARK : u % 2 ? MOTOR : [34, 128, 94]));
-        g.light = [21, 8]; g.wheel = [7, 6, 3];
+      // Farm processor: the conduit's outlet box, a drying drum (its window showing the SM grain
+      // tumbling), a gear motor, and a feed hopper of grain on four legs above it.
+      processor: () => {
+        const g = sketch(30, 28);
+        const BODY = [72, 132, 62], BODY_LIT = [98, 160, 84], BODY_DARK = [48, 96, 42];
+        g.rect(0, 2, 5, 9, (u, v) => (v === 9 ? [80, 84, 86] : [52, 56, 58])); g.rect(0, 4, 1, 6, BRASS);
+        g.rect(6, 2, 25, 12, (u, v) => (v === 12 ? BODY_LIT : v === 2 ? BODY_DARK : u === 6 ? BODY_LIT : u === 25 ? BODY_DARK : BODY));
+        g.rect(9, 5, 20, 9, (u, v) => ((u + v * 3) % 5 === 0 ? [190, 206, 96] : (u * 7 + v) % 4 === 0 ? [127, 214, 91] : [28, 44, 24]));
+        g.rect(26, 3, 29, 9, (u, v) => (v === 9 ? MOTOR_LIT : MOTOR));
+        for (const leg of [9, 22]) g.rect(leg, 13, leg, 16, STEEL_DARK);
+        for (let v = 17; v <= 27; v += 1) {
+          const hw = Math.round(3 + (v - 17) * 0.8);
+          g.rect(15 - hw, v, 16 + hw, v, (u) => (u === 15 - hw || u === 16 + hw || v === 27 ? STEEL : v >= 24 ? [[127, 214, 91], [190, 206, 96], [96, 170, 70]][(u * 3 + v) % 3] : [58, 64, 60]));
+        }
+        g.light = [7, 10]; g.drum = [9, 20, 5, 9];
         return g;
       },
-      tail: () => {
-        const g = sketch(22, 11);
-        flange(g, [150, 120, 40]);
-        g.rect(2, 2, 20, 2, [60, 64, 66]);
-        g.disc(6, 6, 4, (u, v, d) => (d > 3.1 ? BELT : d < 1.2 ? [200, 204, 206] : [96, 100, 104]));
-        g.rect(10, 5, 18, 7, (u, v) => (v === 6 ? ((u & 1) ? [170, 174, 176] : [110, 114, 118]) : [86, 90, 92]));
-        g.rect(19, 3, 20, 9, STEEL_DARK);
-        g.light = [19, 9]; g.wheel = [6, 6, 3];
-        return g;
-      },
-      valve: () => {
-        const g = sketch(20, 11);
-        flange(g);
-        g.disc(7, 5.5, 4.2, (u, v, d) => (d > 3.4 ? STEEL_DARK : (u - 7) - (v - 5.5) < -1.5 ? [170, 176, 180] : STEEL));
-        g.rect(12, 4, 14, 7, (u, v) => (v === 7 ? [236, 184, 60] : [214, 160, 40]));
-        g.rect(15, 2, 15, 10, RED);
-        g.rect(17, 1, 18, 10, (u, v) => (v === 1 || v === 10 ? STEEL_DARK : STEEL));
-        g.light = [13, 8];
-        return g;
-      },
-      joint: () => {
-        const g = sketch(16, 11);
-        g.rect(0, 4, 1, 6, BRASS);
-        g.rect(2, 2, 13, 9, (u, v) => (v === 9 ? [96, 100, 102] : (u === 2 || u === 13) && v % 2 ? [150, 154, 156] : [66, 70, 72]));
-        g.rect(5, 5, 10, 6, [214, 196, 60]);
-        g.rect(14, 3, 15, 3, [90, 160, 70]);
-        g.light = [11, 8];
-        return g;
-      },
-    });
-    const MACHINE_FOR = { water: ['pump', 'tank'], sm: ['generator', 'transformer'], hm: ['crusher', 'mill'] };
-    const FITTING_FOR = { water: ['valve', 'valve'], sm: ['joint', 'joint'], hm: ['tail', 'drive'] };
-    // Ground a machine (or a line run to it) may take: buried, unowned, not in a tunnel.
-    const freeFor = (x, y) => {
-      if (x < 2 || y < 2 || x > W - 3 || y > H - 3 || y <= world.groundTop[x] + 8) return false;
-      const id = mat[y * W + x] & ID_MASK;
-      return terrain[id] && id !== M.ORE && id !== M.BEDROCK && id !== M.PIPE && !PW.getOwner(world, x, y) && !isTunnel(x, y);
     };
     // Grow a line to [x0, x1]; new columns get their y from ysFor and are laid.
     function extendTo(line, x0, x1, ysFor) {
@@ -424,90 +408,79 @@
       Object.assign(line, { x0, x1, ys, broken, brokenAt, occ });
       for (let c = x0; c <= x1; c += 1) if (c < old0 || c > old1) layColumn(line, c);
     }
-    // Put the machine that belongs at one end of a line (side -1: its left end, +1: its right):
-    // a source's machine where the nearest riser feeds the line, the other where it draws from it.
-    // Where the ground there is taken (most often by the other lines running on past this end),
-    // the line runs on to free ground, stepping up or down at 45° on the way if need be, like a
-    // line elbowing into its plant room.
-    const DROPS = [0, -12, 12, -24, 24, -36, 36, -48, 48, -60, 60];
-    // A line may run across another line's riser (they pass at different depths into the
-    // section, as risers already cross the lines), never across another line's run.
-    const acrossRiser = (x, y) => {
-      const o = PW.getOwner(world, x, y);
-      if (o < OWNER_BASE) return false;
-      const other = lines[o - OWNER_BASE];
-      if (!other) return false;
-      if (x >= other.x0 && x <= other.x1) { const top = other.ys[x - other.x0]; if (y >= top - BED && y <= top + BORE - 1 + BED) return false; }
-      return other.risers.some((r) => Math.abs(x - r.x) <= 1 && y >= r.y0 && y <= r.y1);
-    };
-    // The full machine if it fits within a short run, else the compact fitting; failing both, the
-    // same again further out. An end with no room at all turns up into its riser.
-    const TRIES = [[MACHINE_FOR, 100], [FITTING_FOR, 100], [MACHINE_FOR, 364], [FITTING_FOR, 364]];
-    function placeMachine(line, side) {
-      const risers = [...line.risers].sort((a, b) => a.x - b.x);
-      const nearest = side < 0 ? risers[0] : risers[risers.length - 1];
-      const source = nearest && nearest.flow === 'out' ? 0 : 1;
+    // The run's underground ends are closed with a bolted steel cap: a blind flange two cells
+    // thick over the whole bore, its lip standing proud of the pipe.
+    function capEnd(line, side) {
       const endX = side > 0 ? line.x1 : line.x0, y = line.ys[side > 0 ? line.ys.length - 1 : 0];
-      const runY = (dy, c) => y + Math.sign(dy) * Math.min(Math.abs(dy), c);
-      const fits = (g, shift, dy) => {
-        const xe = endX + side * shift, base = y + dy + BORE - 1 + BED;
-        for (let c = 1; c <= shift; c += 1) {
-          const yc = runY(dy, c);
-          for (let r = -BED; r < BORE + BED; r += 1) if (!freeFor(endX + side * c, yc + r) && !acrossRiser(endX + side * c, yc + r)) return false;
-        }
-        for (let u = 0; u <= g.w + 1; u += 1) for (let v = -1; v <= g.h + 1; v += 1) if (!freeFor(xe + side * (1 + u), base - v)) return false;
-        return true;
-      };
-      for (const [set, reach] of TRIES) {
-        const kind = set[line.resource][source], g = MACHINES[kind](line.settlement.style);
-        // (a short neck of line first, clear of the riser it leaves)
-        for (let shift = 4; shift <= reach; shift += 6) for (const dy of DROPS) {
-          if (Math.abs(dy) > shift || !fits(g, shift, dy)) continue;
-          return putMachine(line, side, kind, g, endX, endX + side * shift, y + dy + BORE - 1 + BED, (c) => runY(dy, Math.abs(c - endX)));
-        }
+      for (let c = 1; c <= 2; c += 1) for (let r = -1; r <= BORE; r += 1) {
+        const lip = r === -1 || r === BORE, bolt = c === 1 && (r === 1 || r === BORE - 2);
+        layCell(line, endX + side * c, y + r, lip ? STEEL_DARK : bolt ? [200, 204, 206] : c === 2 ? tone(STEEL, 0.86) : STEEL);
       }
-      stats.machineMisses += 1;
-      return null;
+      stats.caps += 1;
     }
-    function putMachine(line, side, kind, g, endX, xe, base, ysFor) {
-      {
-        if (xe !== endX) extendTo(line, Math.min(line.x0, xe), Math.max(line.x1, xe), ysFor);
-        const machine = { kind, side, x: xe, base, w: g.w, h: g.h, cells: [], light: null, g };
-        // The pit: sand backfill two cells round the machine's outline.
-        for (let v = -2; v < g.h + 2; v += 1) for (let u = -2; u < g.w + 2; u += 1) {
-          if (u >= 0 && v >= 0 && u < g.w && v < g.h && g.cells[v * g.w + u]) continue;
-          let near = false;
-          for (let dv = -2; dv <= 2 && !near; dv += 1) for (let du = -2; du <= 2 && !near; du += 1) {
-            const uu = u + du, vv = v + dv;
-            if (uu >= 0 && vv >= 0 && uu < g.w && vv < g.h && g.cells[vv * g.w + uu]) near = true;
-          }
-          if (near) bedCell(xe + side * (1 + u), base - v, tone(SAND, (PW.hash2(u, v) & 3) === 0 ? 0.88 : 1));
+
+    // ---- Plant: the machines where the lines come up to a building -----------------------------
+    // Beside each building, on the ground its town left for them (b.plant: the side and the span),
+    // its machines stand in a row outward from it, nearest first, each on its plinth on the
+    // surface. Each line's riser comes up out of the ground under its machine's inlet flange, and
+    // a short pipe runs on from the machine into the building. They are drawn on the back layer,
+    // so troops and vehicles pass in front of them, and a blast wrecks them like a back wall.
+    const plants = new Map();   // building id -> its machines
+    function plantOf(b) {
+      if (!b.plant || !PLANT[b.type]) return null;
+      if (plants.has(b.id)) return plants.get(b.id);
+      const { side, edge } = b.plant;
+      let at = edge + side * (PLANT_MARGIN + 1);
+      const list = PLANT[b.type].map(([resource, kind]) => {
+        const g = MACHINES[kind](b.style);
+        // (the plinth rests on the highest ground under it; it is built up where the ground dips)
+        let top = Infinity;
+        for (let u = 0; u < g.w; u += 1) top = Math.min(top, world.groundTop[at + side * u]);
+        const m = { kind, resource, side, x: at - side, base: top - 1, w: g.w, h: g.h, g, inletX: at + side, building: b.id };
+        at += side * (g.w + PLANT_GAP);
+        return m;
+      });
+      plants.set(b.id, list);
+      return list;
+    }
+    function plantAnchor(b, resource) {
+      const m = (plantOf(b) || []).find((q) => q.resource === resource);
+      return m ? { x: m.inletX, y: world.groundTop[m.inletX], kind: b.type, building: b.id, machine: m } : null;
+    }
+    // Draw a building's machines and their pipes into it, once its lines are laid.
+    function drawPlant(b) {
+      const list = plantOf(b);
+      if (!list) return;
+      const back = (x, y, c) => {
+        if ((mat[y * W + x] & ID_MASK) !== M.AIR) return;
+        PW.setLayer(world, 'back', x, y, rgb(c));
+        PW.setFlag(world, x, y, FLAG.FIXTURE);
+      };
+      // The pipes on to the building first (each machine's runs behind the nearer ones): out of
+      // the machine's flange at its own height, into the building's side.
+      list.forEach((m, i) => {
+        const spec = LINES.find((l) => l.resource === m.resource), row = m.base - 3 - i * 4;
+        // (from just outside the building's edge column, which may be a farm's open yard of crops)
+        for (let x = b.plant.edge + m.side; x !== m.x + m.side; x += m.side) {
+          back(x, row - 1, tone(spec.jacket, 1.12)); back(x, row, spec.channel); back(x, row + 1, tone(spec.jacket, 0.72));
+          if (Math.abs(x - b.plant.edge) % 16 === 1) back(x, row + 2, STEEL_DARK);   // pipe hanger
         }
+      });
+      for (const m of list) {
+        const { g } = m;
         for (let v = 0; v < g.h; v += 1) for (let u = 0; u < g.w; u += 1) {
           const cell = g.cells[v * g.w + u];
-          if (!cell) continue;
-          const x = xe + side * (1 + u), yy = base - v;
-          PW.set(world, x, yy, cell.slab ? M.SLAB : M.PIPE, { quiet: true });
-          PW.setLayer(world, 'paint', x, yy, rgb(cell.c));
-          PW.setOwner(world, x, yy, line.owner);
-          machine.cells.push(x, yy);
+          if (cell) back(m.x + m.side * (1 + u), m.base - v, cell.c);
         }
-        line.machines.push(machine);
+        // The plinth is built up to the ground where it dips under it.
+        for (let u = 0; u < g.w; u += 1) {
+          const x = m.x + m.side * (1 + u);
+          for (let y = m.base + 1; y < world.groundTop[x]; y += 1) back(x, y, tone(CONCRETE, 0.9));
+        }
+        const line = lines.find((l) => l.settlement.buildings.some((q) => q.id === b.id) && l.resource === m.resource);
+        if (line) line.machines.push(m);
         stats.machines += 1;
-        return machine;
       }
-    }
-    // A line growing past one of its machines takes the machine out (its pit is backfilled) and
-    // puts it back at the new end.
-    function removeMachine(line, machine) {
-      for (let i = 0; i < machine.cells.length; i += 2) {
-        const x = machine.cells[i], y = machine.cells[i + 1];
-        if (PW.getOwner(world, x, y) !== line.owner) continue;
-        PW.setOwner(world, x, y, 0);
-        PW.set(world, x, y, M.FILL, { quiet: true });
-        PW.setLayer(world, 'paint', x, y, rgb(SAND));
-      }
-      line.machines.splice(line.machines.indexOf(machine), 1);
     }
 
     // ---- Anchors -------------------------------------------------------------------------------------
@@ -553,10 +526,12 @@
         // mines stockpile until the town is taken).
         const anchors = anchorsFor(settlement);
         const core = settlement.buildings.find((b) => b.type === 'core');
-        const coreX = core ? Math.round((core.body.left + core.body.right) / 2) : (settlement.streetLeft + settlement.streetRight) >> 1;
         for (const [index, spec] of LINES.entries()) {
+          // (the line's core end: where it comes up into the core's machine, else under its middle)
+          const coreAnchor = core && plantAnchor(core, spec.resource);
+          const coreX = coreAnchor ? coreAnchor.x : core ? Math.round((core.body.left + core.body.right) / 2) : (settlement.streetLeft + settlement.streetRight) >> 1;
           const users = anchors.filter((a) => USES[a.kind] && USES[a.kind][spec.resource])
-            .map((a) => (a.b ? { ...buildingAnchor(a.b, a.kind, (index - 1) * 6), b: a.b } : a));
+            .map((a) => (a.b ? { ...(plantAnchor(a.b, spec.resource) || buildingAnchor(a.b, a.kind, (index - 1) * 6)), b: a.b } : a));
           if (users.length < 2) continue;
           // (flush with the outer risers: an end turns up into its riser, or runs on to a machine)
           const x0 = Math.min(...users.map((a) => a.x)) - 1, x1 = Math.max(...users.map((a) => a.x)) + 1;
@@ -566,13 +541,9 @@
           stats.cells += x1 - x0 + 1;
           lines.push(line);
         }
-        // Then each of the town's lines gets its end machinery (once all its lines are laid, so
-        // no machine is put where another line runs): the ore belt first, as it runs between the
-        // other two, then the conduit (room above it) and the main (room below).
-        const order = { hm: 0, sm: 1, water: 2 };
-        for (const line of lines.filter((l) => l.settlement === settlement).sort((a, b) => order[a.resource] - order[b.resource])) {
-          placeMachine(line, -1); placeMachine(line, 1);
-        }
+        // The runs' ends are capped, and each building's machines stand over its risers.
+        for (const line of lines.filter((l) => l.settlement === settlement)) { capEnd(line, -1); capEnd(line, 1); }
+        for (const b of settlement.buildings) drawPlant(b);
       }
       stats.lines = lines.length;
       world.pipes = api;
@@ -609,9 +580,13 @@
     let repairBudget = 0;
     function repair() {
       repairBudget = Math.min(4, repairBudget + REPAIR_CELLS_PER_TICK);
+      // (a few columns are tried each tick; one that can't be re-laid yet - flooded, say - waits
+      // and is tried again later)
+      let tries = 4;
       for (const line of lines) {
-        for (let k = 0; k < line.broken.length && repairBudget >= 1; k += 1) {
+        for (let k = 0; k < line.broken.length && repairBudget >= 1 && tries > 0; k += 1) {
           if (!line.broken[k] || tick - line.brokenAt[k] < REPAIR_DELAY) continue;
+          tries -= 1;
           const x = line.x0 + k;
           const fresh = contour(Math.max(line.x0, x - 2), Math.min(line.x1, x + 2), line.spec.depth);
           // (at the depth the line actually runs, which may be deeper than its local cover, it
@@ -630,7 +605,7 @@
               if (n < 0 || n >= line.ys.length || line.broken[n]) continue;
               if (line.ys[n] < line.ys[k] - 1) { line.ys[n] = line.ys[k] - 1; layColumn(line, line.x0 + n); }
             }
-          }
+          } else line.brokenAt[k] = tick - REPAIR_DELAY + 60;   // (tried again in a second)
         }
       }
     }
@@ -651,13 +626,12 @@
       if (x - 1 < line.x0) grow.push(-1);
       if (x + 1 > line.x1) grow.push(1);
       if (grow.length) {
-        // (the machine at that end comes out, and goes back in at the new end below)
-        for (const side of grow) for (const m of line.machines.filter((q) => q.side === side)) removeMachine(line, m);
+        // (the line runs on over its old cap, and is capped again at its new end)
         const x0 = Math.min(line.x0, x - 1), x1 = Math.max(line.x1, x + 1), fresh = contour(x0, x1, line.spec.depth);
         extendTo(line, x0, x1, (c) => fresh[c - x0]);
       }
       line.risers.push(layRiser(line, { x, y: op.riser.y, flow: 'out', kind: 'mining', op: op.id }));
-      for (const side of grow) placeMachine(line, side);
+      for (const side of grow) capEnd(line, side);
       return true;
     }
 
@@ -863,7 +837,7 @@
           if (Math.max(a, b) < vx0 || Math.min(a, b) > vx1 || m.base < vy0 || m.base - m.h > vy1) continue;
           const g = m.g, at = (u, v) => [m.x + m.side * (1 + u), m.base - v];
           const [lx, ly] = at(g.light[0], g.light[1]);
-          if ((mat[ly * W + lx] & ID_MASK) !== M.PIPE) continue;
+          if (!PW.getLayer(world, 'back', lx, ly)) continue;
           const running = !line.anyBroken;
           cell(lx, ly, running ? (Math.floor(time * 1.5) % 4 ? [90, 240, 130] : [60, 170, 90]) : (Math.floor(time * 3) % 2 ? [255, 70, 50] : [90, 30, 24]));
           if (!running || z < 1) continue;
@@ -886,10 +860,11 @@
       }
     }
 
-    const api = { build, step, draw, attach, carry, lines, stats, flowing, lineFor, contour, LINES, BORE, BED, MACHINE_FOR };
+    const api = { build, step, draw, attach, carry, lines, stats, flowing, lineFor, contour, plantOf, LINES, BORE, BED, PLANT };
     return api;
   }
 
   PW.createPipes = createPipes;
   PW.PIPE_LINES = LINES;
+  PW.PIPE_PLANT = { PLANT, MACHINE_W, width: plantWidth, GAP: PLANT_GAP, MARGIN: PLANT_MARGIN };
 })();

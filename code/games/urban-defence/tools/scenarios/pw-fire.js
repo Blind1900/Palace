@@ -13,13 +13,27 @@ const count = (x0, y0, x1, y1, ids) => { let n = 0; for (let y = y0; y <= y1; y 
 // 1. A meadow fire. Find the longest gentle run of grass away from settlements (and their
 // fields, pumps and defence lines) and water.
 const worked = (x) => (world.settlements || []).some((s) => (s.footprints || []).some(([a, b]) => x > a - 60 && x < b + 60));
+// The flattest open wild stretch is cleared of trees (or the fire climbs a tree instead of running
+// along), levelled, grassed over and sown with an even meadow, the way the crater test levels its
+// ground: the test does not hang on where the map happens to leave open grassland.
 let best = null;
-for (let x = 400; x < W - 400; x += 1) {
-  if (layout.sites.some((s) => x > s.x0 - 200 && x < s.x1 + 200) || worked(x) || layout.lakes.some((l) => x > (l.left ?? l.x - l.half) - 100 && x < (l.right ?? l.x + l.half) + 100)) continue;
-  let n = 0;
-  while (x + n < W - 400 && top(x + n) === M.GRASS && !worked(x + n) && Math.abs(world.groundTop[x + n] - world.groundTop[x]) < 60) n += 1;
-  if (!best || n > best.n) best = { x, n };
-  x += n;
+for (let x = 600; x < W - 600; x += 13) {
+  if (layout.sites.some((s) => x > s.x0 - 200 && x < s.x1 + 200) || layout.lakes.some((l) => x > (l.left ?? l.x - l.half) - 100 && x < (l.right ?? l.x + l.half) + 100)) continue;
+  let lo = Infinity, hi = -Infinity, clear = true;
+  for (let d = -110; d <= 110; d += 5) {
+    if (worked(x + d) || (PW.get(world, x + d, world.groundTop[x + d]) & 63) === M.WATER) { clear = false; break; }
+    lo = Math.min(lo, world.groundTop[x + d]); hi = Math.max(hi, world.groundTop[x + d]);
+  }
+  if (clear && (!best || hi - lo < best.spread)) best = { x: x - 80, n: 161, spread: hi - lo };
+}
+for (const r of (world.flora || []).filter((t) => t.kind === 'tree' && t.x < best.x + best.n + 40 && t.x + t.width > best.x - 40)) PW.flora.fell(world, null, r);
+world.flora = (world.flora || []).filter((t) => !t.felled);
+PW.settlementTools.terracePad(world, best.x, best.x + best.n - 1, world.groundTop[best.x + (best.n >> 1)]);
+for (let x = best.x; x < best.x + best.n; x += 1) {
+  const g = world.groundTop[x];
+  PW.set(world, x, g, M.GRASS | (PW.hash2(x, g) & 3) << 6, { quiet: true });
+  PW.setLayer(world, 'paint', x, g, 0);
+  PW.flora.tuft(world, x, g, 2 + (PW.hash2(x, 77) % 3));   // (a wild meadow's 2-4 cells)
 }
 const fx = best.x + (best.n >> 1), fy = world.groundTop[fx];
 const grassBefore = []; for (let x = fx - 300; x <= fx + 300; x += 1) grassBefore.push(top(x) === M.GRASS);

@@ -113,10 +113,10 @@ for (const lot of placed) {
     const ramp = lot.under && lot.under.stages.some((st) => st.side === p.hangarSide && st.access === 'ramp');
     check(ramp || Math.abs(outside - G) <= 3, `${name}: hangar door at grade (${outside - G} cells) or on a ramp (${ramp})`);
   }
-  // The amber cores sit in real ground.
-  const buried = lot.cores.filter((c) => c.y > G);
-  const ok = buried.filter((c) => id(c.x, c.y) === M.CORE && world.groundTop[c.x] < c.y - 3);
-  check(ok.length === buried.length && buried.length > 0, `${name}: cores buried (${ok.length}/${buried.length})`);
+  // The cores sit in their vaults under the floor, under a grating flush with it.
+  const vaulted = lot.cores.filter((c) => c.y > G);
+  const ok = vaulted.filter((c) => id(c.x, c.y) === M.CORE && id(c.x, G) === M.PLATFORM);
+  check(ok.length === vaulted.length && vaulted.length > 0, `${name}: cores in their vaults under the floor (${ok.length}/${vaulted.length})`);
   // measure() foresaw every column the works took.
   check(lot.works && lot.works[0] <= ox0 && lot.works[1] >= ox1, `${name}: measured extent ${lot.works} covers the works ${ox0}..${ox1}`);
   // The ground beyond the works is as it was.

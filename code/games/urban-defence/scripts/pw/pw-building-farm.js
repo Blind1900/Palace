@@ -168,7 +168,8 @@
     const facing = options.facing || 1, seed = options.seed || 1;
     const random = PW.createRandom(seed);
     const P = STYLES[style];
-    const width = 480, height = 300, ground = height - 30;
+    // (room under the ground for the core's vault)
+    const width = 480, height = 270 + K.VAULT_DEPTH + 5, ground = 270;
     const c = K.createCanvas(width, height, ground);
     c.meta = { type: 'farm', style, level, variant, facing, seed };
     c.storage = [];
@@ -455,7 +456,7 @@
       trough(art, yard0 + 58);
       bodyRight = yard1;
     }
-    K.core(c, X(30), ground + 12);
+    K.core(c, X(30), ground);
     K.bakeLights(c, style);
     const [l, r] = xs(0, bodyRight);
     c.body = { left: l, right: r, top: 0, bottom: ground - 1 };
@@ -468,7 +469,7 @@
     const style = options.style, facing = options.facing || 1, seed = options.seed || 1;
     const P = STYLES[style];
     // Headframe at the front, hoist house behind it (the whole frame fits the canvas either way).
-    const width = 220, height = 260, ground = height - 30;
+    const width = 220, height = 230 + K.VAULT_DEPTH + 5, ground = 230;
     const c = K.createCanvas(width, height, ground);
     c.meta = { type: 'mine', style, facing, seed };
     const shaftX = facing > 0 ? width - 70 : 69;
@@ -511,7 +512,7 @@
     for (let a = 0; a < 48; a += 1) { const angle = a / 48 * Math.PI * 2; K.back(c, Math.round((h0 + h1) / 2 + Math.cos(angle) * 12), ground - 22 + Math.round(Math.sin(angle) * 12), [120, 124, 130]); }
     // Shaft mouth (open to be dug down by the tunnel crews).
     c.shaft = { x: shaftX, top: ground };
-    K.core(c, Math.round((h0 + h1) / 2), ground + 12);
+    K.core(c, Math.round((h0 + h1) / 2), ground);
     c.body = { left: Math.min(h0, shaftX - 30), right: Math.max(h1, shaftX + 30), top: ground - towerH - 20, bottom: ground - 1 };
     K.bakeLights(c, style);
     return c;

@@ -10,12 +10,13 @@ const view = async (name, x, y, zoomIndex) => { pwApp.focus(x, y, zoomIndex); fo
 pwApp.setPaused(true);
 const farms = world.buildings.filter((b) => b.type === 'farm');
 const fieldsOf = (b) => [b.field, b.lotField].filter(Boolean);
+const fy = PW.settlementTools.fieldY;   // (a field follows the land: its row at each column)
 check(farms.length >= 5 && farms.every((b) => b.lotField && b.lotField.columns > 20), `every farm stands on its own field (${farms.map((b) => b.lotField ? b.lotField.columns : 0).join(', ')} columns)`);
 // Fields and roads never share ground; no street runs under a farm.
 let overlap = 0, streetUnderFarm = 0;
 for (const b of farms) {
   for (const f of fieldsOf(b)) for (let x = f.x0; x <= f.x1; x += 1) for (let r = 0; r < 4; r += 1) {
-    const fl = PW.getFlags(world, x, f.y + r);
+    const fl = PW.getFlags(world, x, fy(f, x) + r);
     if ((fl & FLAG.FIELD) && (fl & FLAG.ROAD)) overlap += 1;
   }
   for (let x = b.works[0]; x <= b.works[1]; x += 1) if (PW.getFlags(world, x, b.ground) & FLAG.ROAD) streetUnderFarm += 1;
@@ -40,7 +41,7 @@ check(stalks.length > 100 && tall > stalks.length * 0.6, `grown maize stands tal
 // A road drawn over a field: the cursor warns, then the field there is gone, and its yield falls.
 const farm = farms.find((b) => b.field && b.field.columns > 60);
 const f = farm.field;
-const at = { x: Math.round((f.x0 + f.x1) / 2), y: f.y - 5 };
+const at = { x: Math.round((f.x0 + f.x1) / 2), y: fy(f, Math.round((f.x0 + f.x1) / 2)) - 5 };
 pwApp.setBrush(10);
 const plan = pwApp.planRoad(at);
 const noteEl = document.getElementById('cursor-note');
@@ -50,10 +51,10 @@ await view('fd-plan', at.x, at.y - 10, 6);
 const before = f.alive;
 const laid = pwApp.layRoad(at);
 let cropLeft = 0;
-for (let x = at.x - 10; x <= at.x + 10; x += 1) for (let i = 1; i <= 36; i += 1) if (PW.getFlags(world, x, f.y - i) & FLAG.FLORA) cropLeft += 1;
+for (let x = at.x - 10; x <= at.x + 10; x += 1) for (let i = 1; i <= 36; i += 1) if (PW.getFlags(world, x, fy(f, x) - i) & FLAG.FLORA) cropLeft += 1;
 check(laid > 0 && f.alive < before && cropLeft === 0, `the road replaces the field under it (${laid} columns paved, field ${before} -> ${f.alive} columns, ${cropLeft} crop cells left)`);
 let roadField = 0;
-for (let x = at.x - 10; x <= at.x + 10; x += 1) if ((PW.getFlags(world, x, f.y) & FLAG.ROAD) && (PW.getFlags(world, x, f.y) & FLAG.FIELD)) roadField += 1;
+for (let x = at.x - 10; x <= at.x + 10; x += 1) if ((PW.getFlags(world, x, fy(f, x)) & FLAG.ROAD) && (PW.getFlags(world, x, fy(f, x)) & FLAG.FIELD)) roadField += 1;
 check(roadField === 0, `the new road and the field still never share a cell (${roadField})`);
 // Off the field the cursor just offers the road.
 const town = world.settlements.find((s) => s.side === 'left');

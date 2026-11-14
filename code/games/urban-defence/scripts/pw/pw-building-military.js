@@ -21,7 +21,7 @@
     const rearStoreys = { compound: 2, fortress: 3, command: 4, bastion: 1 }[variant] + (level >= 5 ? 1 : 0);
     const rearWidth = 140;
     const bodyWidth = rearWidth + HANGAR.width - HANGAR.wall;
-    const margin = 44, coreDepth = 24;
+    const margin = 44, coreDepth = K.VAULT_DEPTH + 3;
     const top = Math.max(rearStoreys * S.FLOOR + 120, HANGAR.clear + HANGAR.vaultRise + 90);
     const width = bodyWidth + margin * 2, height = top + coreDepth + 20;
     const ground = height - coreDepth - 1;
@@ -164,8 +164,8 @@
         if ((lx - hx0) % 16 < 8) for (let dy = 1; dy <= 8; dy += 1) K.solid(c, X(lx), roofRow - dy, M.MASONRY, tone(P.frame, 1.05), ROLE.ORNAMENT);
       }
     }
-    // Primary core in its cradle at the back of the hangar.
-    K.core(c, X(hangarLeft + 34), ground - 7);
+    // Primary core standing on the hangar floor at its back.
+    K.core(c, X(hangarLeft + 34), ground, { standing: true });
     c.hangar = { left: Math.min(X(hx0), X(hx1)), right: Math.max(X(hx0), X(hx1)), top: wallTop, bottom: ground - 1,
       door: { x: X(hangarRight), top: ground - HANGAR.door, bottom: ground - 1 }, spawn: { x: X(hangarLeft + 80), y: ground } };
     // The hackable control panel is on the top floor of the rear block.
@@ -225,20 +225,31 @@
       const plan = level >= 4 ? ['launcher', 'interceptor', 'turret'] : level >= 3 ? ['launcher', 'turret'] : ['turret'];
       // Neutral compounds (deviceFacing 0) cover both directions until captured.
       const deviceFacing = options.deviceFacing ?? facing;
+      const before = c.devices.length;
       ornament.devices(c, style, [rearRoof], plan.slice(0, 2), deviceFacing, random, -facing);
-      // Neutral: the rear-roof device faces +1 first, so the hangar turret covers the other way.
-      // Neutral compounds: the rear-roof devices alternate from +1, and the hangar turret guards the
-      // compound's own front, so a cluster of mixed-facing compounds covers both ways.
-      if (!vault) ornament.devices(c, style, [hangarRoof], ['turret'], deviceFacing || facing, random);
+      // Neutral compounds: the rear-roof device faces away from the compound's front and the hangar
+      // turret guards its front, so each covers both ways. Where the rear roof took no device (a
+      // crown or a turret tower stands there), the hangar mounts two turrets, one facing each way.
+      const pair = !deviceFacing && c.devices.length === before;
+      if (!vault) ornament.devices(c, style, [hangarRoof], pair ? ['turret', 'turret'] : ['turret'], deviceFacing || (pair ? 0 : facing), random, facing);
       else {
-        // Turret just forward of the vault's crest: logical span [tx - 15, tx + 14], mirrored by X.
-        const tx = Math.round(hcx) + 10;
-        ornament.DEVICE_DRAW.turret(c, P, Math.min(X(tx - 15), X(tx + 14)), wallTop - HANGAR.vaultRise, deviceFacing || facing);
+        // Turrets on the vault: logical span [tx - 15, tx + 14], mirrored by X, at the crest's
+        // height on a steel mount built down to the curve of the roof.
+        const crest = wallTop - HANGAR.vaultRise;
+        const mount = (tx, turretFacing) => {
+          for (let lx = tx - 15; lx <= tx + 14; lx += 1) {
+            const u = (lx - hcx) / half, roof = wallTop - Math.round(HANGAR.vaultRise * Math.sqrt(Math.max(0, 1 - u * u)));
+            for (let y = crest + 1; y < roof; y += 1) K.solid(c, X(lx), y, M.STEEL, tone(P.frame, 0.7), ROLE.DEVICE);
+          }
+          ornament.DEVICE_DRAW.turret(c, P, Math.min(X(tx - 15), X(tx + 14)), crest, turretFacing);
+        };
+        mount(Math.round(hcx) + 10, deviceFacing || facing);
+        if (pair) mount(Math.round(hcx) - 34, -facing);
       }
     }
-    // Buried extra cores.
+    // Extra cores in vaults under the floor.
     const extraCores = level >= 4 ? 3 : 2;
-    for (let i = 0; i < extraCores; i += 1) K.core(c, X(30 + i * Math.round((bodyWidth - 80) / Math.max(1, extraCores - 1))), ground + 12);
+    for (let i = 0; i < extraCores; i += 1) K.core(c, X(30 + i * Math.round((bodyWidth - 80) / Math.max(1, extraCores - 1))), ground);
     K.bakeLights(c, style);
     c.body = { left: margin, right: margin + bodyWidth - 1, top: Math.min(floorRow(rearStoreys), wallTop - HANGAR.vaultRise), bottom: ground - 1 };
     c.runway = { from: X(hangarRight) + facing, direction: facing, length: 380, y: ground };
@@ -269,20 +280,46 @@
         K.solid(c, cx + x, y, M.FOUNDATION, t === 0 ? tone(P.ornament, 0.7) : tone([104, 102, 96], 1 - t * 0.04), ROLE.WALL);
       }
     }
-    // Pedestal and the core orb.
+    // The main core: a great amber orb on a stepped reactor pedestal of diamond-plate rings with
+    // glowing joints, gripped by four clamp arms rising from the pit floor (the same core as every
+    // building's, at the scale of the base's heart).
     const floor = ground + pitDepth;
-    for (let dy = 1; dy <= 14; dy += 1) for (let dx = -16 + dy / 2; dx <= 16 - dy / 2; dx += 1) {
-      K.solid(c, cx + Math.round(dx), floor - dy, M.FOUNDATION, tone(K.CORE_SHADE, dy < 3 ? 0.8 : 1), ROLE.CRADLE);
-    }
-    const orbY = floor - 34, r = 17;
+    const PLATE = [112, 118, 126], PLATE_LIT = [156, 162, 170], PLATE_DARK = [66, 70, 78], BUMP = [176, 182, 190];
+    const tiers = [[18, 4], [15, 4], [12, 3], [8, 3]];
+    let y = floor - 1;
+    tiers.forEach(([half, rows], t) => {
+      for (let r = 0; r < rows; r += 1, y -= 1) for (let dx = -half; dx <= half; dx += 1) {
+        const x = cx + dx, bump = ((x + y) & 3) === 0 && ((x - y) & 3) === 2;
+        K.solid(c, x, y, M.STEEL, Math.abs(dx) === half || r === 0 ? PLATE_DARK : r === rows - 1 ? PLATE_LIT : bump ? BUMP : PLATE, ROLE.CRADLE);
+      }
+      if (t < tiers.length - 1) {
+        for (let dx = -half + 1; dx <= half - 1; dx += 1) K.solid(c, cx + dx, y, M.CORE, (dx + y) % 3 === 0 ? K.CORE_HOT : K.CORE_COLOR, ROLE.CORE);
+        y -= 1;
+      }
+    });
+    const r = 17, orbY = y - r;
     for (let dy = -r; dy <= r; dy += 1) for (let dx = -r; dx <= r; dx += 1) {
       const d = Math.hypot(dx, dy);
-      if (d > r) continue;
-      const light = 1.3 - (dx + dy + 2 * r) / (4 * r) * 0.6 - (d / r) * 0.15;
-      K.solid(c, cx + dx, orbY + dy, M.CORE, tone(K.CORE_COLOR, light), ROLE.CORE);
+      if (d > r + 0.3) continue;
+      const hot = Math.hypot(dx + r * 0.32, dy + r * 0.32) < r * 0.3;
+      const swirl = Math.abs(Math.sin(Math.atan2(dy, dx) * 3 + d * 0.45)) < 0.12 && d < r * 0.85;
+      const light = 1.25 - (dx + dy + 2 * r) / (4 * r) * 0.5 - Math.max(0, d / r - 0.5) * 0.7;
+      K.solid(c, cx + dx, orbY + dy, M.CORE, hot ? K.CORE_HOT : tone(K.CORE_COLOR, light * (swirl ? 1.18 : 1)), ROLE.CORE);
+    }
+    // Clamp arms: from the pit floor out at the pedestal's foot up to the orb's flanks, claws in.
+    // (each ends just off the orb's surface at height dy from its centre)
+    for (const side of [-1, 1]) for (const [reach, dy] of [[34, 9], [26, -1]]) {
+      const x0 = cx + side * reach, y0 = floor - 1;
+      const x1 = cx + side * Math.round(Math.sqrt(r * r - dy * dy) + 2), y1 = orbY + dy;
+      const n = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0));
+      for (let t = 0; t <= n; t += 1) {
+        const x = Math.round(x0 + (x1 - x0) * t / n), yy = Math.round(y0 + (y1 - y0) * t / n);
+        for (let w = 0; w < 3; w += 1) K.solid(c, x, yy + w, M.STEEL, w === 0 ? PLATE_LIT : w === 2 ? PLATE_DARK : PLATE, ROLE.CRADLE);
+      }
+      for (let k = 0; k < 3; k += 1) K.solid(c, x1 - side * k, y1 - 1, M.STEEL, PLATE_DARK, ROLE.CRADLE);
     }
     c.cores.push({ x: cx, y: orbY, orb: true, radius: r });
-    c.lamps.push({ x: cx, y: orbY, radius: 70, strength: 0.6 });
+    c.lamps.push({ x: cx, y: orbY, radius: 70, strength: 0.6, color: K.CORE_COLOR });
     // Floating armoured block: no support needed (it is anchored by the core's field).
     const by = ground - gap;
     for (let dy = 0; dy < blockHeight; dy += 1) for (let dx = -blockWidth / 2; dx < blockWidth / 2; dx += 1) {

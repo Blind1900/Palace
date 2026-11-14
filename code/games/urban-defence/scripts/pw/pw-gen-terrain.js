@@ -6,15 +6,19 @@
   const { M } = PW;
 
   const smooth = (t) => { t = Math.min(1, Math.max(0, t)); return t * t * (3 - 2 * t); };
-  // A neutral site's relief over its level: a tilt of up to 80 cells across it and a swell of
-  // 10-26 cells every 600-1000 (slopes up to about 1:3). Drawn from the site's position, so the
-  // rest of the layout's random sequence is unchanged.
+  // A site's relief over its level. A neutral site: a tilt of up to 80 cells across it and a swell
+  // of 10-26 cells every 600-1000 (slopes up to about 1:3). A base: gentler (a tilt of up to 36 and
+  // a swell of 5-13), and the same for both bases measured from the rear, so the two sides are
+  // mirror images and neither starts on better ground. Drawn from hashes, so the rest of the
+  // layout's random sequence is unchanged.
   function siteRelief(site, x) {
-    if (site.kind !== 'neutral') return 0;
-    const h = (k) => (PW.hash2(site.x0, k) & 1023) / 1023;
-    const tilt = (h(1) * 2 - 1) * 80, amp = 10 + h(2) * 16, period = 600 + h(3) * 400, phase = h(4) * Math.PI * 2;
-    const u = (x - site.x0) / (site.x1 - site.x0);
-    return tilt * (smooth(u) - 0.5) + amp * Math.sin((x - site.x0) / period * Math.PI * 2 + phase);
+    const base = site.kind !== 'neutral';
+    const h = (k) => (PW.hash2(base ? 0x0ba5e : site.x0, k) & 1023) / 1023;
+    const span = site.x1 - site.x0;
+    const along = base && site.side === 'right' ? site.x1 - x : x - site.x0;
+    const tilt = (h(1) * 2 - 1) * (base ? 36 : 80), amp = base ? 5 + h(2) * 8 : 10 + h(2) * 16;
+    const period = 600 + h(3) * 400, phase = h(4) * Math.PI * 2;
+    return tilt * (smooth(along / span) - 0.5) + amp * Math.sin(along / period * Math.PI * 2 + phase);
   }
 
   function planLayout(world, random) {
@@ -165,23 +169,42 @@
     const stoneNoise = PW.createNoise1D(seed + 44, 700);
     const stoneFine = PW.createNoise1D(seed + 46, 45);
     const bedrockNoise = PW.createNoise1D(seed + 45, 50);
+    const outcrops = PW.createNoise1D(seed + 47, 160), turf = PW.createNoise1D(seed + 48, 26);
     const top = new Int32Array(W);
     const soilEnd = new Int32Array(W), stoneStart = new Int32Array(W), grassEnd = new Int32Array(W),
-      topsoilEnd = new Int32Array(W), bedrockStart = new Int32Array(W);
+      topsoilEnd = new Int32Array(W), bedrockStart = new Int32Array(W), ragged = new Float32Array(W);
+    // The lie of the land: steepness averaged over 40 columns either way. Soil and rock follow it,
+    // not every step of the surface, so a cliff does not drag a seam of soil and stone down
+    // through the ground under it: the soil mantle thins smoothly towards steep ground until bare
+    // rock crops out on the faces, and stays deep on the flats.
+    const LIE = 40, lie = new Float32Array(W), climb = new Float64Array(W + 1);
+    for (let x = 0; x < W; x += 1) climb[x + 1] = climb[x] + Math.abs(surface[Math.min(W - 1, x + 1)] - surface[x]);
+    for (let x = 0; x < W; x += 1) {
+      const a = Math.max(0, x - LIE), b = Math.min(W - 1, x + LIE);
+      lie[x] = (climb[b + 1] - climb[a]) / (b - a + 1);
+    }
     for (let x = 0; x < W; x += 1) {
       const surfaceRow = Math.max(4, Math.min(H - 60, Math.round(surface[x])));
       top[x] = surfaceRow;
       const slope = Math.abs(surface[Math.min(W - 1, x + 3)] - surface[Math.max(0, x - 3)]) / 6;
       const altitude = layout.baseY - surfaceRow;   // positive above the base line
-      // Steep or high ground has thinner soil; flats have deep soil.
-      const thin = Math.min(0.85, Math.max(slope - 0.7, 0) * 0.7 + Math.max(0, altitude - 300) / 520);
-      const grass = slope > 1.7 || altitude > 600 ? 0 : 3 + (PW.hash2(x, 7) & 1);
-      const topsoil = Math.max(2, Math.round((14 + topsoilNoise(x) * 7) * (1 - thin * 0.7)));
-      const soil = Math.round((150 + soilNoise(x) * 70 + soilFine(x) * 16) * (1 - thin * 0.75) + 10);
+      // How much of a full soil profile the ground here keeps: all of it on flats, little on steep
+      // or high ground, and here and there less (rock outcrops on a slope).
+      // (forest still roots on a 45° mountainside; the soil only gives out on cliffs and summits)
+      let keep = Math.min(1, Math.max(0.05, 1.3 - lie[x] * 0.6));
+      keep *= 1 - Math.min(0.6, Math.max(0, altitude - 380) / 800);
+      if (lie[x] > 0.7) keep *= Math.min(1, Math.max(0.2, 0.9 + outcrops(x) * 0.5));
+      const topsoil = Math.round((14 + topsoilNoise(x) * 7) * keep);
+      // Grass needs soil to root in and ground not too steep (it thins out on steep slopes).
+      // (on a steep slope the turf breaks into patches with bare soil between, never column by column)
+      const bare = slope > 1.4 && turf(x) < (slope - 1.4) * 4 - 0.5;
+      const grass = topsoil < 2 || slope > 1.7 || altitude > 600 || bare ? 0 : 3 + (PW.hash2(x, 7) & 1);
+      const soil = Math.round((150 + soilNoise(x) * 70 + soilFine(x) * 16) * keep);
       grassEnd[x] = surfaceRow + grass;
       topsoilEnd[x] = grassEnd[x] + topsoil;
-      soilEnd[x] = surfaceRow + Math.max(topsoil + grass + 4, soil);
-      stoneStart[x] = soilEnd[x] + Math.round(110 + stoneNoise(x) * 90 + stoneFine(x) * 18);
+      soilEnd[x] = topsoilEnd[x] + soil;
+      stoneStart[x] = soilEnd[x] + Math.round((110 + stoneNoise(x) * 90 + stoneFine(x) * 18) * keep);
+      ragged[x] = 0.15 + 0.85 * keep;     // the soil-rock boundary's raggedness, less where it is shallow
       bedrockStart[x] = H - 26 - Math.round((bedrockNoise(x) + 1) * 8);
     }
     // Fill row by row so the smooth fields interpolate along rows.
@@ -201,7 +224,7 @@
         else {
           // Soil gives way to stone through clay and gravel lenses with a ragged boundary.
           const lens = lenses.sample(x);
-          const edge = stoneStart[x] + Math.round((lens - 0.5) * 120);
+          const edge = Math.max(soilEnd[x], stoneStart[x] + Math.round((lens - 0.5) * 120 * ragged[x]));
           if (y >= edge) id = lens > 0.86 ? M.GRAVEL : M.STONE;
           else id = lens < 0.2 ? M.CLAY : lens > 0.84 ? M.GRAVEL : M.SOIL;
         }
@@ -212,6 +235,61 @@
       }
     }
     return top;
+  }
+
+  // Scree: rock falls off a bare rock wall and piles up at its foot at the angle of repose (about 32°),
+  // banked against the lower part of the face and spreading out over the ground below, as under
+  // the walls of a mountain valley. Only in the wild land, never on a settlement site. Updates the
+  // surface and top rows; returns the scree aprons.
+  const REPOSE = 0.62;
+  function scree(world, layout, surface, top, seed) {
+    const { mat, width: W, height: H } = world;
+    const grain = PW.createNoise1D(seed + 61, 9);
+    const wild = (x) => layout.sites.every((s) => x < s.x0 - 320 || x > s.x1 + 320);
+    // (scree never runs into a lake: it stops at the shore)
+    const wet = (x) => layout.lakes.some((l) => Math.abs(x - l.x) < l.half * 1.1);
+    // Faces are found on the land as it was, so an apron's own toe is never taken for a cliff.
+    const land = Float32Array.from(surface);
+    const steep = (x) => (land[Math.min(W - 1, x + 3)] - land[Math.max(0, x - 3)]) / 6;
+    const aprons = [];
+    for (const dir of [1, -1]) {
+      // A face falling away towards `dir`: a run of columns steeper than about 55°.
+      for (let x = 4; x < W - 4; x += 1) {
+        const fx = dir > 0 ? x : W - 1 - x;
+        // (a bare rock wall: steeper than about 60°, where no soil holds)
+        if (steep(fx) * dir < 1.8) continue;
+        let foot = fx;
+        while (foot > 3 && foot < W - 4 && steep(foot + dir) * dir >= 1.8) foot += dir;
+        const head = fx, drop = land[foot] - land[head];
+        x += Math.abs(foot - fx);
+        if (drop < 60 || !wild(head) || !wild(foot) || wet(foot)) continue;
+        // The apron: banked against the face up to its crest, its surface falling away at the
+        // angle of repose, and thinning out to nothing at its toe (as much rock as the face shed).
+        const rise = Math.min(drop * 0.3, 60), reach = Math.min(140, rise / REPOSE * 1.6);
+        const crest = land[foot] - rise;
+        let filled = 0;
+        for (let k = -Math.abs(foot - head); k < reach; k += 1) {
+          const cx = foot + dir * k;
+          if (cx < 2 || cx > W - 3 || !wild(cx) || wet(cx)) break;
+          const cap = k <= 0 ? Infinity : rise * Math.pow(1 - k / reach, 1.6);
+          if (cap < 1) break;
+          const apron = Math.max(crest + k * REPOSE + grain(cx) * 2.5, surface[cx] - cap);
+          if (apron >= surface[cx] - 0.5) continue;
+          const from = Math.max(4, Math.round(apron)), to = Math.round(surface[cx]);
+          for (let y = from; y < to && y < H - 40; y += 1) {
+            // Coarse rock under a skin of finer gravel; the odd block of stone in it.
+            const block = (PW.hash2(cx >> 2, y >> 2) & 15) === 0;
+            mat[y * W + cx] = (block ? M.STONE : M.GRAVEL) | (PW.hash2(cx, y) & 3) << 6;
+          }
+          // (the turf it buried is old topsoil now)
+          for (let y = to; y < to + 5 && y < H - 40; y += 1) if ((mat[y * W + cx] & 63) === M.GRASS) mat[y * W + cx] = M.TOPSOIL | (mat[y * W + cx] & 0xc0);
+          surface[cx] = from; top[cx] = from;
+          filled += 1;
+        }
+        if (filled) aprons.push({ x0: Math.min(foot, foot + dir * filled), x1: Math.max(foot, foot + dir * filled), dir });
+      }
+    }
+    return aprons;
   }
 
   // Stamp an irregular blob of material (lenses, pockets, ore).
@@ -718,6 +796,7 @@
     const layout = planLayout(world, random);
     const surface = surfaceProfile(world, layout, seed);
     const top = fillStrata(world, layout, surface, seed);
+    layout.scree = scree(world, layout, surface, top, seed);
     addLenses(world, layout, top, random);
     // Caves first: veins then run through the rock around them and show in the cave walls.
     layout.caves = carveCaves(world, layout, top, random);

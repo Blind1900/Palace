@@ -646,20 +646,25 @@
     const stats = world.vegetationStats = { candidates: 0, water: 0, ground: 0, crowded: 0, rocks: 0, planted: 0, tops: {} };
     let trees = 0;
     for (let x = 80; x < W - 80;) {
-      const density = forest(x);
-      const gap = density > 0.25 ? random.int(18, 40) : density > -0.2 ? random.int(36, 80) : random.int(70, 140);
+      // (the wild land is mostly mountainside: forest closes in on its slopes, as in a valley)
+      const density = forest(x) + (layout.baseY - world.groundTop[x] > 120 ? 0.3 : 0);
+      const gap = density > 0.25 ? random.int(12, 28) : density > -0.2 ? random.int(26, 60) : random.int(50, 110);
       x += gap;
       // Skip straight over streets, runways and fields: only wild land is sampled.
       while (x < W - 80 && blocked[x]) x += 1;
       if (x >= W - 80) continue;
       stats.candidates += 1;
       if (nearWater(x, 30)) { stats.water += 1; continue; }
-      if (!soil(x)) { stats.ground += 1; stats.tops[PW.mat.names[topId(x)]] = (stats.tops[PW.mat.names[topId(x)]] || 0) + 1; continue; }
       const slope = slopeAt(x);
+      // Old scree is colonised by pioneers: here and there a conifer, a birch or a bush where the
+      // apron has eased off; the rest of it stays bare.
+      const pioneer = topId(x) === M.GRAVEL && slope < 1.2 && random() < 0.55;
+      if (!soil(x) && !pioneer) { stats.ground += 1; stats.tops[PW.mat.names[topId(x)]] = (stats.tops[PW.mat.names[topId(x)]] || 0) + 1; continue; }
       const altitude = layout.baseY - world.groundTop[x];
       const roll = random();
       let type, size;
-      if (slope > 1.5) { type = 'bush'; size = random.range(12, 24); }
+      if (pioneer) { type = roll < 0.55 ? 'conifer' : roll < 0.75 ? 'birch' : 'bush'; size = type === 'bush' ? random.range(12, 22) : random.range(90, 170); }
+      else if (slope > 1.5) { type = 'bush'; size = random.range(12, 24); }
       else if (altitude > 520) { type = roll < 0.55 ? 'deadTree' : 'conifer'; size = type === 'deadTree' ? random.range(70, 130) : random.range(110, 190); }
       else if (altitude > 260 || slope > 1) { type = roll < 0.7 ? 'conifer' : 'broadleaf'; size = type === 'conifer' ? random.range(150, 290) : random.range(120, 200); }
       else if (roll < 0.5) { type = 'broadleaf'; size = random.range(120, 230); }
@@ -684,8 +689,10 @@
     // The wild land always holds some woodland: more trees on gentle soil if chance left too few.
     for (let i = 0; i < 12000 && trees < MIN_TREES; i += 1) {
       const x = random.int(80, W - 80);
-      if (blocked[x] || !soil(x) || nearWater(x, 30) || slopeAt(x) > 1) continue;
-      const type = layout.baseY - world.groundTop[x] > 260 ? 'conifer' : random() < 0.6 ? 'broadleaf' : 'birch';
+      const scree = topId(x) === M.GRAVEL, slope = slopeAt(x);
+      // (conifers hold on to mountainsides up to about 56°; broadleaves want gentler ground)
+      if (blocked[x] || !(soil(x) || scree) || nearWater(x, 30) || slope > 1.5) continue;
+      const type = scree || slope > 1 || layout.baseY - world.groundTop[x] > 260 ? 'conifer' : random() < 0.6 ? 'broadleaf' : 'birch';
       const size = type === 'conifer' ? random.range(140, 240) : random.range(110, 190);
       const half = type === 'conifer' ? size * 0.3 : size * 0.55;
       // (hedgerow trees may stand close to fields and streets, their crowns reaching over)
@@ -739,13 +746,15 @@
         const spots = [];
         for (let d = -24; d <= 70; d += 1) {
           const x = edge + inward * d;
-          if (x < 2 || x >= W - 2 || blocked[x]) continue;
+          // (and not where a boulder already sits on the bank)
+          if (x < 2 || x >= W - 2 || blocked[x] || !footClear(x, 10)) continue;
           const surface = world.groundTop[x];
           const bed = PW.supportBelow(world, x, surface, true);
           const depth = bed - surface;
           const wet = (PW.get(world, x, surface) & ID_MASK) === M.WATER;
-          // In the shallows, or on the bank right at the waterline (not up a steep bank).
-          if ((wet && depth <= 22) || (!wet && d < 0 && lake.level - surface <= 5 && (soil(x) || topId(x) === M.SAND))) spots.push(x);
+          // In the shallows, or on the bank right at the waterline (not up a steep bank, whose loose
+          // shore sand slides down into the lake).
+          if ((wet && depth <= 22) || (!wet && d < 0 && lake.level - surface <= 5 && (soil(x) || topId(x) === M.SAND) && slopeAt(x) <= 0.5)) spots.push(x);
         }
         let last = -100;
         for (const x of spots) {

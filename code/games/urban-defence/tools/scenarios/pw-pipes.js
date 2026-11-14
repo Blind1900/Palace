@@ -63,26 +63,28 @@ const ok = (style, test) => !byStyle[style] || test(byStyle[style]);
 check(ok('modern', (s) => s.slab > 0 && s.cable > 0) && ok('asian', (s) => s.course > 0 && s.fill > s.slab && s.cable === 0)
   && ok('gothic', (s) => s.slab > 0 && s.course > 0 && s.cable === 0), `each faction builds its own made ground (${JSON.stringify(byStyle)})`);
 
-// Every line end runs into the machinery that belongs there (or, with no room at all, turns up
-// into its riser), and the lines run in smooth curves, not over every bump and notch.
-const MACHINES = { water: ['pump', 'tank', 'valve'], sm: ['generator', 'transformer', 'joint'], hm: ['crusher', 'mill', 'tail', 'drive'] };
-let ends = 0, machined = 0, elbows = 0, bare = [], wrong = [];
-for (const line of pipes.lines) {
-  for (const side of [-1, 1]) {
-    ends += 1;
-    const m = line.machines.find((q) => q.side === side);
-    const endX = side < 0 ? line.x0 : line.x1;
-    if (m) {
-      machined += 1;
-      if (!MACHINES[line.resource].includes(m.kind)) wrong.push(`${line.resource}:${m.kind}`);
-      // (the machine's inlet sits on the line's end)
-      if (Math.abs(m.x - endX) > 0) bare.push(`${line.side}/${line.resource}${side < 0 ? 'L' : 'R'} machine off the end`);
-    } else if (line.risers.some((r) => Math.abs(endX - r.x) <= 1)) elbows += 1;
-    else bare.push(`${line.side}/${line.resource}${side < 0 ? 'L' : 'R'}@${endX}`);
+// Nothing just stops: each run's underground ends are capped, and where a line comes up to a
+// building its riser runs into the machine that belongs there, standing on the ground beside it.
+const MACHINES = { water: ['pump', 'tank'], sm: ['generator', 'transformer', 'processor'], hm: ['crusher', 'mill'] };
+check(pipes.stats.caps === pipes.lines.length * 2, `every run's underground ends are capped (${pipes.stats.caps} caps on ${pipes.lines.length} lines)`);
+let served = 0, unserved = [], wrong = [], floating = [];
+for (const s of world.settlements) for (const b of s.buildings) {
+  const plant = pipes.plantOf(b);
+  for (const line of pipes.lines.filter((l) => l.settlement === s)) {
+    if (!line.risers.some((r) => r.building === b.id)) continue;
+    const m = (plant || []).find((q) => q.resource === line.resource);
+    if (!m) { unserved.push(`${b.type}#${b.id}/${line.resource}`); continue; }
+    if (!MACHINES[line.resource].includes(m.kind)) wrong.push(`${line.resource}:${m.kind}`);
+    // (its riser comes up under the machine's inlet, and the machine stands on the ground)
+    if (!line.risers.some((r) => Math.abs(r.x - m.inletX) <= 1)) unserved.push(`${b.type}#${b.id}/${line.resource} riser off the inlet`);
+    let gap = 0;
+    for (let u = 0; u < m.w; u += 1) { const x = m.x + m.side * (1 + u); if (world.groundTop[x] > m.base + 1 && !PW.getLayer(world, 'back', x, m.base + 1)) gap += 1; }
+    if (gap) floating.push(`${m.kind}#${b.id} (${gap} columns)`);
+    served += 1;
   }
 }
-check(bare.length === 0 && wrong.length === 0 && machined >= ends * 0.7,
-  `every line end runs into machinery or turns up into its riser (${machined} machines, ${elbows} elbows of ${ends} ends; bare: ${bare.join(' ') || 'none'}; wrong: ${wrong.join(' ') || 'none'})`);
+check(served > 20 && !unserved.length && !wrong.length && !floating.length,
+  `every building's lines come up into the right machines, standing on the ground (${served} machines; unserved: ${unserved.join(' ') || 'none'}; wrong: ${wrong.join(' ') || 'none'}; floating: ${floating.join(' ') || 'none'})`);
 let notches = 0, runs = 0;
 for (const line of pipes.lines) {
   // A notch: the line dips (or bumps) by 2 rows or more and comes back within 16 columns.
@@ -102,8 +104,10 @@ for (const kind of ['generator', 'pump', 'crusher', 'mill', 'transformer', 'tank
   await view(`pp-machine-${kind}`, m.x + m.side * (m.w / 2), m.base - m.h / 2 - 4, 7);
 }
 
-// 2. Cargo flows from the sources to the buildings.
-pwApp.stepWorld(60 * 30);
+// 2. Cargo flows from the sources to the buildings (ore rides a slow belt from the mine: give it
+// up to a minute).
+const stocked = () => ['left', 'right'].every((side) => { const st = (world.stock || {})[side] || {}; return st.water > 0 && st.sm > 0 && st.hm > 0; });
+for (let t = 0; t < 12 && !stocked(); t += 1) pwApp.stepWorld(60 * 5);
 for (const side of ['left', 'right']) {
   const stock = (world.stock || {})[side] || {};
   check(stock.water > 0 && stock.sm > 0 && stock.hm > 0, `${side}: water, SM and ore arrive through the lines (${JSON.stringify(stock)})`);

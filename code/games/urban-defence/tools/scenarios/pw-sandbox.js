@@ -14,8 +14,12 @@ const run = (ticks) => pwApp.stepWorld(ticks);
 const lake = layout.lakes.filter((l) => !l.pond && l.left !== undefined).sort((a, b) => (b.right - b.left) - (a.right - a.left))[0];
 let deepest = lake.level;
 for (let x = lake.left; x <= lake.right; x += 1) deepest = Math.max(deepest, world.groundTop[x]);
+// (the deepest point clear of anything built under the lake, like a lake pump's chamber: the
+// breach is not cut through a building)
+const builtUnder = (x) => { for (let dx = -16; dx <= 16; dx += 2) for (let y = lake.level; y < lake.level + 420; y += 3) { const o = PW.getOwner(world, x + dx, y); if (o > 0 && o < 50000) return true; } return false; };
 let bottomX = lake.x, bottomY = lake.level;
 for (let x = lake.left; x <= lake.right; x += 1) {
+  if (builtUnder(x)) continue;
   let y = lake.level; while ((PW.get(world, x, y) & 63) === M.WATER) y += 1;
   if (y > bottomY) { bottomY = y; bottomX = x; }
 }
@@ -60,8 +64,10 @@ check(totalWater() === beforeBlast, `water conserved through a blast in the lake
 // 3. Crater on flat open ground: flat floor and steep walls. The flattest wild stretch is levelled
 // first, the way the game terraces a building pad, so the test always has flat ground to blast.
 let flatX = null, bestSpread = Infinity;
+// (wild ground: clear of the sites and of everything a town has built past them)
+const built = (x) => (world.settlements || []).some((s) => (s.footprints || []).some(([a, b]) => x > a - 150 && x < b + 150));
 for (let x = 600; x < world.width - 600; x += 37) {
-  if (layout.sites.some((s) => x > s.x0 - 300 && x < s.x1 + 300)) continue;
+  if (layout.sites.some((s) => x > s.x0 - 300 && x < s.x1 + 300) || built(x)) continue;
   if (layout.lakes.some((l) => Math.abs(x - l.x) < l.half + 300)) continue;
   let lo = Infinity, hi = -Infinity;
   for (let d = -120; d <= 120; d += 10) { lo = Math.min(lo, world.groundTop[x + d]); hi = Math.max(hi, world.groundTop[x + d]); }
@@ -70,6 +76,30 @@ for (let x = 600; x < world.width - 600; x += 37) {
 if (flatX !== null) {
   PW.settlementTools.terracePad(world, flatX - 120, flatX + 120, world.groundTop[flatX]);
   run(30);
+}
+
+// 4. Debris compaction: on the ground it becomes rubble, on a roof it stays debris. (Before the
+// crater is blasted, whose lasting smoke would keep the ground's chunk from ever settling.)
+const tower = world.buildings.find((b) => b.type === 'population');
+const roofY = tower.body.top - 1;
+const roofX = Math.round((tower.body.left + tower.body.right) / 2) - 40;
+pwApp.paint(roofX, roofY - 8, 5, M.DEBRIS);
+// (on the level pad, where it can come to rest)
+const groundX = flatX !== null ? flatX + 80 : tower.body.right + 300;
+const groundY = world.groundTop[groundX] - 10;
+pwApp.paint(groundX, groundY, 6, M.DEBRIS);
+run(60 * 13);
+const countIn = (x0, y0, x1, y1, id) => { let n = 0; for (let y = y0; y <= y1; y += 1) for (let x = x0; x <= x1; x += 1) if ((PW.get(world, x, y) & 63) === id) n += 1; return n; };
+const groundRubble = countIn(groundX - 20, groundY - 10, groundX + 20, groundY + 20, M.RUBBLE);
+const groundDebris = countIn(groundX - 20, groundY - 10, groundX + 20, groundY + 20, M.DEBRIS);
+const roofDebris = countIn(roofX - 30, roofY - 30, roofX + 30, roofY + 2, M.DEBRIS);
+const roofRubble = countIn(roofX - 30, roofY - 30, roofX + 30, roofY + 2, M.RUBBLE);
+check(groundRubble > 0 && groundDebris === 0, `ground debris compacted into rubble (${groundRubble} rubble, ${groundDebris} loose)`);
+check(roofDebris > 0 && roofRubble === 0, `roof debris stays loose (${roofDebris} loose, ${roofRubble} rubble)`);
+await view('sb-roof-debris', roofX, roofY - 20, 6);
+
+// 3 (cont). The crater, blasted into the level pad.
+if (flatX !== null) {
   const surface = world.groundTop[flatX];
   const r = 48;
   const original = Array.from({ length: 2 * r + 1 }, (_, i) => world.groundTop[flatX - r + i]);
@@ -95,23 +125,5 @@ if (flatX !== null) {
   run(120);
   await view('sb-crater', flatX, surface, 5);
 }
-
-// 4. Debris compaction: on the ground it becomes rubble, on a roof it stays debris.
-const tower = world.buildings.find((b) => b.type === 'population');
-const roofY = tower.body.top - 1;
-const roofX = Math.round((tower.body.left + tower.body.right) / 2) - 40;
-pwApp.paint(roofX, roofY - 8, 5, M.DEBRIS);
-const groundX = flatX !== null ? flatX + 160 : tower.body.right + 300;
-const groundY = world.groundTop[groundX] - 10;
-pwApp.paint(groundX, groundY, 6, M.DEBRIS);
-run(60 * 13);
-const countIn = (x0, y0, x1, y1, id) => { let n = 0; for (let y = y0; y <= y1; y += 1) for (let x = x0; x <= x1; x += 1) if ((PW.get(world, x, y) & 63) === id) n += 1; return n; };
-const groundRubble = countIn(groundX - 20, groundY - 10, groundX + 20, groundY + 20, M.RUBBLE);
-const groundDebris = countIn(groundX - 20, groundY - 10, groundX + 20, groundY + 20, M.DEBRIS);
-const roofDebris = countIn(roofX - 30, roofY - 30, roofX + 30, roofY + 2, M.DEBRIS);
-const roofRubble = countIn(roofX - 30, roofY - 30, roofX + 30, roofY + 2, M.RUBBLE);
-check(groundRubble > 0 && groundDebris === 0, `ground debris compacted into rubble (${groundRubble} rubble, ${groundDebris} loose)`);
-check(roofDebris > 0 && roofRubble === 0, `roof debris stays loose (${roofDebris} loose, ${roofRubble} rubble)`);
-await view('sb-roof-debris', roofX, roofY - 20, 6);
 pwApp.setPaused(false);
 return { checks, shots: shots.length, sim: sim.stats, particles: particles.count };
