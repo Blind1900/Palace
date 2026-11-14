@@ -165,7 +165,7 @@
       }
     }
     // Primary core in its cradle at the back of the hangar.
-    K.core(c, X(hangarLeft + 34), ground - 8);
+    K.core(c, X(hangarLeft + 34), ground - 7);
     c.hangar = { left: Math.min(X(hx0), X(hx1)), right: Math.max(X(hx0), X(hx1)), top: wallTop, bottom: ground - 1,
       door: { x: X(hangarRight), top: ground - HANGAR.door, bottom: ground - 1 }, spawn: { x: X(hangarLeft + 80), y: ground } };
     // The hackable control panel is on the top floor of the rear block.

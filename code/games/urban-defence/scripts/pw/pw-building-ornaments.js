@@ -136,7 +136,8 @@
         for (let dy = 0; dy < h; dy += 1) for (let dx = -half; dx <= half; dx += 1) {
           const edge = Math.abs(dx) === half;
           const brace = (dy + dx + 60) % (half + 1) === 0 || (dy - dx + 60) % (half + 1) === 0;
-          if (edge || brace || dy % 9 === 0) orn(c, cx + dx, top - dy, edge ? STEEL : STEEL_DARK, ROLE.CROWN);
+          // A plate across each panel and at the top carries the next section.
+          if (edge || brace || dy % 9 === 0 || dy === h - 1) orn(c, cx + dx, top - dy, edge ? STEEL : STEEL_DARK, ROLE.CROWN);
         }
         top -= h;
       };
@@ -163,11 +164,13 @@
     dish(c, P, cx, y, L, random, facing = 1) {
       for (let dy = 0; dy < 4; dy += 1) for (let dx = -19; dx <= 19; dx += 1) orn(c, cx + dx, y - dy, dy === 3 ? [184, 190, 196] : [140, 146, 152], ROLE.CROWN, M.CONCRETE);
       column(c, cx, y - 4, y - 12, 2, STEEL);
+      // The dish is a bowl seated on the column, the feed arm rising from its centre.
       for (let dx = -12; dx <= 12; dx += 1) {
         const depth = Math.round((dx * dx) / 24);
-        for (let t = 0; t < 2; t += 1) orn(c, cx + dx, y - 13 - (6 - depth) + t, t ? STEEL_DARK : [214, 220, 226]);
+        for (let t = 0; t < 2; t += 1) orn(c, cx + dx, y - 14 - depth + t, t ? STEEL_DARK : [214, 220, 226]);
       }
-      orn(c, cx, y - 20, STEEL); orn(c, cx, y - 21, STEEL); orn(c, cx, y - 22, BEACON);
+      for (let dy = 15; dy <= 21; dy += 1) orn(c, cx, y - dy, STEEL);
+      orn(c, cx, y - 22, BEACON);
       for (const [dx, h] of [[-16, 0.85], [16, 0.55]]) {
         const mh = Math.round(L * h);
         for (let dy = 4; dy < mh; dy += 1) orn(c, cx + dx * facing, y - dy, dy > mh - 3 ? BEACON : [200, 206, 212]);
@@ -259,7 +262,7 @@
       const half = Math.round(3 * Math.sin(dy / 7 * Math.PI));
       for (let dx = -half; dx <= half; dx += 1) orn(c, cx + dx, flame + dy - 6, dy < 3 ? [255, 214, 120] : GOLD);
     }
-    orn(c, cx, flame - 8, BEACON); orn(c, cx, flame - 9, BEACON);
+    orn(c, cx, flame - 7, BEACON); orn(c, cx, flame - 8, BEACON);
   }
   // Coiling dragon: a 5-cell-thick S-curve with spines, claws, a horned head and a red pearl.
   function dragonBody(c, P, cx, baseY, length, facing, random, coilAround = false) {
@@ -350,13 +353,16 @@
     }
     // Radar mast and dish, centred on the 22-cell body (two cells wide so it mirrors exactly).
     for (let dy = 18; dy < 30; dy += 1) { orn(c, x0 + 10, base - dy, DEVICE_STEEL, ROLE.DEVICE); orn(c, x0 + 11, base - dy, DEVICE_STEEL, ROLE.DEVICE); }
+    // The dish is a bowl seated on the mast top, its rim rising to either side; the feed arm
+    // holds the beacon over its centre.
     for (let x = x0 + 2; x <= x0 + 19; x += 1) {
       const dx = x - (x0 + 10.5);
       const depth = Math.round(dx * dx / 16);
-      orn(c, x, base - 30 - (4 - depth), [196, 204, 212], ROLE.DEVICE);
-      orn(c, x, base - 29 - (4 - depth), DEVICE_STEEL, ROLE.DEVICE);
+      orn(c, x, base - 31 - depth, [196, 204, 212], ROLE.DEVICE);
+      orn(c, x, base - 30 - depth, DEVICE_STEEL, ROLE.DEVICE);
     }
-    orn(c, x0 + 10, base - 36, BEACON); orn(c, x0 + 11, base - 36, BEACON);
+    for (let dy = 32; dy < 37; dy += 1) { orn(c, x0 + 10, base - dy, DEVICE_STEEL, ROLE.DEVICE); orn(c, x0 + 11, base - dy, DEVICE_STEEL, ROLE.DEVICE); }
+    orn(c, x0 + 10, base - 37, BEACON); orn(c, x0 + 11, base - 37, BEACON);
     c.devices.push({ kind: 'interceptor', x: x0 + 11, y: base - 30, facing });
     return w;
   }

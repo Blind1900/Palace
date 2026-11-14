@@ -191,13 +191,23 @@
     const shaftX = facing > 0 ? width - 70 : 69;
     const frameColor = style === 'asian' ? [176, 58, 46] : style === 'gothic' ? [74, 70, 80] : [96, 140, 170];
     const towerH = 160;
+    const halfAt = (y) => Math.round(26 - y / towerH * 18);
     for (let y = 0; y < towerH; y += 1) {
-      const t = y / towerH, half = Math.round(26 - t * 18);
+      const half = halfAt(y);
       for (const s of [-1, 1]) for (let k = 0; k < 3; k += 1) K.solid(c, shaftX + s * (half - k), ground - 1 - y, M.STEEL, tone(frameColor, k === 0 ? 1.15 : 0.9), ROLE.WALL);
       if (y % 20 === 0) for (let dx = -half; dx <= half; dx += 1) K.solid(c, shaftX + dx, ground - 1 - y, M.STEEL, tone(frameColor, 0.85), ROLE.WALL);
-      const brace = (y % 20) / 20;
-      K.solid(c, shaftX + Math.round(-half + brace * 2 * half), ground - 1 - y, M.STEEL, tone(frameColor, 0.75), ROLE.WALL);
-      K.solid(c, shaftX + Math.round(half - brace * 2 * half), ground - 1 - y, M.STEEL, tone(frameColor, 0.75), ROLE.WALL);
+    }
+    // X-bracing across each 20-row panel, drawn as unbroken lines between the legs.
+    for (let y0 = 0; y0 < towerH - 1; y0 += 20) {
+      const y1 = Math.min(y0 + 20, towerH - 1), h0 = halfAt(y0) - 2, h1 = halfAt(y1) - 2;
+      for (const s of [-1, 1]) {
+        const steps = Math.max(h0 + h1, y1 - y0);
+        for (let i = 0; i <= steps; i += 1) {
+          // (rounded before the side is applied, so the mirrored frame is exact)
+          const x = shaftX + s * Math.round(-h0 + (h0 + h1) * i / steps), y = ground - 1 - Math.round(y0 + (y1 - y0) * i / steps);
+          if (!c.mat[y * width + x]) K.solid(c, x, y, M.STEEL, tone(frameColor, 0.75), ROLE.WALL);
+        }
+      }
     }
     // Back leg towards the hoist house.
     for (let k = 0; k < 120; k += 1) for (let t = 0; t < 3; t += 1) K.solid(c, shaftX - facing * (26 + Math.round(k * 0.55)), ground - towerH + 12 + k + t, M.STEEL, tone(frameColor, 0.95), ROLE.WALL);

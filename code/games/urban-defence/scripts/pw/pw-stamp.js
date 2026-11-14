@@ -23,6 +23,8 @@
         const mat = canvas.mat[i];
         const any = mat || canvas.back[i] || canvas.deco[i];
         if (!any) continue;
+        // Buried cores are set into the real ground by the foundations instead.
+        if (options.skipBuried && y > canvas.ground && (canvas.role[i] === PW.buildingKit.ROLE.CORE || canvas.role[i] === PW.buildingKit.ROLE.CRADLE)) continue;
         if (mat) {
           PW.set(world, wx, wy, mat, quiet);
           PW.setLayer(world, 'paint', wx, wy, canvas.paint[i]);
@@ -82,11 +84,73 @@
     }
   }
 
+  // Natural ground shaped by surfaceAt(x) (soil strata under it) over [x0, x1).
+  function profileStrip(world, x0, x1, surfaceAt) {
+    const { mat, width: W, height: H } = world;
+    for (let x = Math.max(0, x0); x < Math.min(W, x1); x += 1) {
+      const s = Math.round(surfaceAt(x));
+      for (let y = 0; y < H; y += 1) {
+        let id;
+        if (y < s) id = M.AIR;
+        else if (y < s + 3) id = M.GRASS;
+        else if (y < s + 16) id = M.TOPSOIL;
+        else if (y < s + 260) id = M.SOIL;
+        else if (y < H - 26) id = M.STONE;
+        else id = M.BEDROCK;
+        mat[y * W + x] = id | (PW.hash2(x >> 3, y >> 3) & 3) << 6;
+      }
+    }
+  }
+  // Each style's buildings on three kinds of slope: a gentle rise, a steep hillside, and the foot
+  // of a mountain.
+  function slopeGallery(world, seed, groundY) {
+    const T = PW.buildingTypes;
+    const styles = ['asian', 'gothic', 'modern'];
+    const band = 3000;
+    const smoothstep = (t) => { t = Math.max(0, Math.min(1, t)); return t * t * (3 - 2 * t); };
+    const lots = [];
+    styles.forEach((style, n) => {
+      const b0 = 300 + n * band;
+      // Gentle rise to the right (1:4), a crest, a steep hillside falling to the right (1:1.2) to a
+      // valley floor, then a mountain that steepens as it climbs and falls back to the plain.
+      const valley = groundY + 200, peak = valley - 380;
+      const surfaceAt = (x) => {
+        const u = x - b0;
+        if (u < 100) return groundY;
+        if (u < 800) return groundY - (u - 100) / 4;
+        if (u < 900) return groundY - 175;
+        if (u < 2050) return Math.min(valley, groundY - 175 + (u - 900) / 1.2);
+        if (u < 2500) return valley - 380 * Math.pow((u - 2050) / 450, 1.6);
+        return peak + (groundY - peak) * smoothstep((u - 2500) / 350);
+      };
+      profileStrip(world, b0 - 150, b0 + band - 150, surfaceAt);
+      lots.push({ style, kind: 'population-rise', x: b0 + 450, make: () => T.population({ style, level: 4, variant: 'setback', seed: seed + n * 7, facing: 1 }) });
+      lots.push({ style, kind: 'population-hillside', x: b0 + 1120, make: () => T.population({ style, level: 3, variant: 'slab', seed: seed + n * 11, facing: -1 }) });
+      lots.push({ style, kind: 'military-mountain-foot', x: b0 + 2050, make: () => T.military({ style, level: 3, variant: 'command', seed: seed + n * 13, facing: -1 }) });
+    });
+    PW.rebuildGroundTop(world);
+    world.surface0 = Int32Array.from(world.groundTop);
+    const placed = [];
+    for (const lot of lots) {
+      const canvas = lot.make();
+      const width = canvas.body.right - canvas.body.left + 1;
+      const worldX = Math.round(lot.x - canvas.body.left - width / 2);
+      const result = PW.foundations.place(world, canvas, worldX, { style: lot.style, owner: placed.length + 1 });
+      if (!result) continue;
+      placed.push({ ...result.stamp, style: lot.style, kind: lot.kind, plan: result.plan, walls: result.walls, under: result.under, cores: result.cores, owner: placed.length + 1 });
+    }
+    return placed;
+  }
+
   function generateGallery(world, seed, set = 'population') {
     const groundY = 1500;
     flattenStrip(world, 0, world.width, groundY);
     world.surface0 = new Int32Array(world.width).fill(groundY);
     PW.rebuildGroundTop(world);
+    if (set === 'slopes') {
+      world.gallery = slopeGallery(world, seed, groundY);
+      return { placed: world.gallery, groundY, sites: [], lakes: [], mountains: [], nodes: [], caves: [], baseY: groundY };
+    }
     const placed = [];
     let x = 160;
     const styles = ['asian', 'gothic', 'modern'];
