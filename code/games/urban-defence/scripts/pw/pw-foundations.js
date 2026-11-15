@@ -294,7 +294,8 @@
         const { top, bottom } = span(px);
         if (bottom - top < 3 || ground(world, px) - G <= PLINTH) continue;
         const shade = [C.asian.postLit, C.asian.post, C.asian.post, C.asian.post, C.asian.postDark];
-        for (let y = top; y < bottom; y += 1) for (let d = -2; d <= 2; d += 1) put(world, px + d, y, M.WOOD, shade[d + 2], owner);
+        // (every column of a pillar goes down into the ground under it: none hangs on a slope)
+        for (let d = -2; d <= 2; d += 1) for (let y = top; y < span(px + d).bottom; y += 1) put(world, px + d, y, M.WOOD, shade[d + 2], owner);
         const gy = ground(world, px);
         for (let dy = -2; dy <= 1; dy += 1) for (let d = -4 + Math.max(0, -dy - 1); d <= 4 - Math.max(0, -dy - 1); d += 1) {
           put(world, px + d, gy + dy, M.MASONRY, dy < -1 ? tone(C.asian.footing, 1.15) : dy < 0 ? tone(C.asian.footing, 1.05) : C.asian.footing, owner);
@@ -338,8 +339,8 @@
       }
       for (let n = 0; n < piers.length; n += 1) {
         const px = piers[n];
-        const { top, bottom } = span(px);
-        if (ground(world, px) - G > PLINTH) for (let y = top; y < bottom; y += 1) for (let d = -3; d <= 2; d += 1) {
+        const { top } = span(px);
+        if (ground(world, px) - G > PLINTH) for (let d = -3; d <= 2; d += 1) for (let y = top; y < span(px + d).bottom; y += 1) {
           put(world, px + d, y, M.MASONRY, (y % 6 === 0) ? C.gothic.joint : d === -3 ? C.gothic.stoneLit : d === 2 ? C.gothic.stoneDark : C.gothic.stone, owner);
         }
         // The pointed arch to the next pier (two arcs meeting at the crown, each centred on the
@@ -381,9 +382,9 @@
       for (let x = hi - 10; x >= lo + 10; x -= 30) posts.push(x);
       if (!posts.length) posts.push(Math.round((lo + hi) / 2));
       for (const px of posts) {
-        const { top, bottom } = span(px);
+        const { top } = span(px);
         if (ground(world, px) - G <= PLINTH) continue;
-        for (let y = top; y < bottom; y += 1) for (let d = -1; d <= 2; d += 1) put(world, px + d, y, M.CONCRETE, d === -1 ? C.modern.concreteLit : d === 2 ? C.modern.concreteDark : C.modern.concrete, owner);
+        for (let d = -1; d <= 2; d += 1) for (let y = top; y < span(px + d).bottom; y += 1) put(world, px + d, y, M.CONCRETE, d === -1 ? C.modern.concreteLit : d === 2 ? C.modern.concreteDark : C.modern.concrete, owner);
         const gy = ground(world, px);
         for (let dy = 0; dy < 3; dy += 1) for (let d = -4; d <= 5; d += 1) put(world, px + d, gy + dy, M.FOUNDATION, [124, 122, 116], owner);
       }

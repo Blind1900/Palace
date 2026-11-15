@@ -332,8 +332,10 @@
     c.lamps.push({ x: cx, y: orbY, radius: 70, strength: 0.6, color: K.CORE_COLOR });
     // The armoured block stands on pillars. The main pillar grows out of the top of the core - its
     // translator turns HM into it - up through the pit to the block's underside, seamed with the
-    // core's glow; the secondary pillars carry the block's outer edges down to the ground beyond the
-    // pit's rim. (Nothing hangs in the air: take the pillars out and the block comes down.)
+    // core's glow; a pair of secondary pillars stand beside the core on the pit floor, and another
+    // pair carry the block's outer edges down to the pit's sloping sides. Every pillar goes all the
+    // way down to what it stands on, column by column. (Nothing hangs in the air: take the pillars
+    // out and the block comes down.)
     const by = ground - gap;
     const mainHalf = 8, orbTop = orbY - r;
     for (let yy = by; yy <= orbTop + 2; yy += 1) for (let dx = -mainHalf; dx <= mainHalf; dx += 1) {
@@ -345,13 +347,13 @@
     for (let dx = -mainHalf - 3; dx <= mainHalf + 3; dx += 1) for (let yy = orbTop - 1; yy <= orbTop + 2; yy += 1) {
       if (Math.hypot(dx, yy - orbY) > r + 2.5) K.solid(c, cx + dx, yy, M.STEEL, yy === orbTop - 1 ? PLATE_LIT : PLATE_DARK, ROLE.WALL);
     }
-    // (just inside the pit's rim - clear of the machines beside the bunker - each down to the pit's
-    // lining where it stands)
-    const sideHalf = 6, sideX = pitWidth / 2 - 12;
-    for (const side of [-1, 1]) {
+    // (beside the core, clear of its clamp arms, on the pit floor; and just inside the pit's rim -
+    // clear of the machines beside the bunker - on its slope: each column down to the lining under
+    // it)
+    const sideHalf = 6, liningAt = (x) => ground + Math.round(pitDepth * Math.min(1, (1 - Math.abs(x) / (pitWidth / 2)) / 0.28));
+    for (const sideX of [52, pitWidth / 2 - 12]) for (const side of [-1, 1]) {
       const px = cx + side * sideX;
-      const rim = Math.round(pitDepth * Math.min(1, (1 - (sideX + sideHalf) / (pitWidth / 2)) / 0.28));
-      for (let yy = by; yy <= ground + rim + 1; yy += 1) for (let dx = -sideHalf; dx <= sideHalf; dx += 1) {
+      for (let dx = -sideHalf; dx <= sideHalf; dx += 1) for (let yy = by; yy <= liningAt(side * sideX + dx); yy += 1) {
         const edge = Math.abs(dx) === sideHalf, band = (yy - by) % 16 < 2;
         K.solid(c, px + dx, yy, M.CONCRETE, band ? P.ornament : edge ? tone(P.frame, 0.55) : tone(P.frame, 0.78), ROLE.WALL);
       }

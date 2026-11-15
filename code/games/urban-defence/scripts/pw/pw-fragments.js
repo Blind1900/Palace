@@ -206,11 +206,14 @@
       if (spec.pivot) {
         // (where its anchor is from the pivot, before it turned)
         piece.hx = spec.pivot.x; piece.hy = spec.pivot.y;
+        // (coming down through the stump under it first - see pancake)
+        piece.stage = 'stump'; piece.row = Math.floor(spec.pivot.y); piece.into = 0; piece.vd = 0;
         const c = Math.cos(piece.angle), s = Math.sin(piece.angle), dx = piece.px - piece.hx, dy = piece.py - piece.hy;
         piece.rx = dx * c + dy * s; piece.ry = -dx * s + dy * c;
       }
       // (its foot: the storeys at its bottom, crushed into the ground as it leans over)
-      piece.footV = v0 + gh - Math.max(10, Math.min(80, gh * 0.2));
+      piece.footBand = Math.max(10, Math.min(80, gh * 0.2));
+      piece.footV = v0 + gh - piece.footBand;
       piece.eaten = 0;
       list.push(piece);
       stats.spawned += 1;
@@ -252,7 +255,9 @@
         for (let s = 0; s < sub && !done; s += 1) {
           was.px = p.px; was.py = p.py; was.angle = p.angle;
           if (p.mode === 'hinge') {
-            // Gravity's turning moment about the pivot, plus the lean towards the failed side.
+            // Its weight crushes what it stands on as it leans (see pancake); and gravity's turning
+            // moment about the pivot, plus the lean towards the failed side, turns it over.
+            pancake(p, h);
             const [cx, cy] = centre(p);
             const dx = cx - p.hx, r2 = dx * dx + (cy - p.hy) ** 2;
             const alpha = G * (dx + p.dir * 3) / (p.inertia / p.mass + r2);
@@ -331,6 +336,134 @@
       p.omega *= Math.max(0.98, 1 - eaten * 0.00004);
       stats.footCrushed = (stats.footCrushed || 0) + eaten;
     }
+    // A tipping top far heavier than what it stands on does not just swing over on its pivot: its
+    // weight crushes the storeys under it as it leans - it pancakes. The hinge comes down through
+    // its own building's stump, row by row across the whole width of it, each crushed row bursting
+    // out of its sides as rubble and dust; at the ground it comes on down through the piece's own
+    // lowest storeys, along its own floors. So it comes down storey by storey as it goes over. Each
+    // row resists by what in it carries load down - its walls and pillars, the frame that runs on
+    // up or down from it (a floor slab is crushed, it carries nothing down) - against the weight on
+    // it: a light top stalls on a stump that can hold it; a heavy one comes on down.
+    const PANCAKE_MIN = 1200;     // frame cells: lighter tops only hinge
+    const CRUSH_RESIST = 1.3e5;   // how hard a row resists, per load-bearing cell in it, over the weight on it
+    const MEMBER = 6;             // a cell carries load down if the frame runs on this far beyond it
+    const SELF_MAX = 0.4;         // the share of its own height a piece crushes of itself, at most
+    function pancake(p, h) {
+      if (p.flora || p.mass < PANCAKE_MIN || p.pancaked) return;
+      p.vd = Math.max(0, p.vd + (G - (p.resist || 0)) * h);
+      let go = p.vd * h;
+      while (go > 1e-6) {
+        const left = 1 - p.into;
+        if (go < left) { p.into += go; lower(p, go); return; }
+        lower(p, left); go -= left; p.into = 0; p.resist = 0;
+        const row = nextRow(p);
+        if (!row) return;
+        // (it cannot break the next row - not with its weight, not with the speed it has: that
+        // holds it)
+        const resist = CRUSH_RESIST * row.weight / p.mass;
+        if (resist > G && p.vd * p.vd < 2 * (resist - G)) { p.vd = 0; p.pancaked = true; return; }
+        crushRow(p, row);
+        p.resist = resist;
+      }
+    }
+    // (the hinge comes down by d: through the stump the pivot goes down; through itself the piece
+    // goes down past the pivot, along its own height - and its foot, what it presses into the
+    // ground as it leans, is the bottom of what is left of it)
+    function lower(p, d) {
+      if (p.stage === 'self') { p.ry += d; p.footV = Math.min(p.footV, -p.ry - p.footBand); }
+      else { p.hy += d; p.yf = p.hy; }
+    }
+    // The next row it comes down into: a row of its stump (the cells its building owns, across the
+    // piece's width either side of the pivot), or at the ground - its building's floor, or ground
+    // at the pivot - a row of its own, from the bottom up. Null when it has crushed all of itself
+    // it will.
+    function nextRow(p) {
+      if (p.stage === 'stump') {
+        const y = p.row + 1;
+        // (solid ground at the pivot that is not its building's; rubble lying on the stump is not
+        // ground, it is ploughed aside)
+        let ground = y >= p.base;
+        for (let x = Math.floor(p.hx) - 3; x <= p.hx + 3 && !ground; x += 1) {
+          const id = mat[y * W + x] & ID_MASK;
+          if (PW.mat.terrain[id] && phase[id] === PW.PHASE.SOLID && PW.getOwner(world, x, y) !== p.owner) ground = true;
+        }
+        if (!ground) {
+          const xs = [];
+          let weight = 0;
+          const span = p.gw + 8;
+          for (let x = Math.max(1, Math.floor(p.hx - span)); x <= Math.min(W - 2, p.hx + span); x += 1) {
+            if (PW.getOwner(world, x, y) !== p.owner) continue;
+            const id = mat[y * W + x] & ID_MASK;
+            if (id === M.CORE) continue;
+            if (structural[id] && !PW.mat.terrain[id]) {
+              xs.push(x);
+              const below = Math.min(H - 1, y + MEMBER), bid = mat[below * W + x] & ID_MASK;
+              if (structural[bid] && !PW.mat.terrain[bid]) weight += 1;
+            } else if (PW.getLayer(world, 'back', x, y) || PW.getLayer(world, 'deco', x, y)) xs.push(x);
+          }
+          p.row = y;
+          return { y, xs, weight };
+        }
+        // (at the ground: from here it is its own storeys that give way)
+        p.stage = 'self'; p.row = Math.ceil(-p.ry); p.into = 0;
+        stats.pancakeGround = (stats.pancakeGround || 0) + 1;
+      }
+      const v = p.row - 1;
+      if (p.v0 + p.gh - 1 - v > SELF_MAX * p.gh || v < p.v0) { p.pancaked = true; return null; }
+      let weight = 0;
+      const base = (v - p.v0) * p.gw, up = v - MEMBER >= p.v0 ? (v - MEMBER - p.v0) * p.gw : -1;
+      if (v < p.v0 + p.gh) for (let gu = 0; gu < p.gw; gu += 1) {
+        const g = p.grid[base + gu];
+        if (!g || p.data.solid[g - 1] !== 1 || up < 0) continue;
+        const a = p.grid[up + gu];
+        if (a && p.data.solid[a - 1] === 1) weight += 1;
+      }
+      p.row = v;
+      return { v, weight };
+    }
+    // Crush the row it came down into: a row of its stump bursts into rubble and dust where it
+    // stands; a row of its own is torn out of it, thrown out of its sides. Every few rows the air
+    // and dust in the storey it crushed are blown out of both sides, low.
+    function crushRow(p, row) {
+      let x0 = Infinity, x1 = -Infinity, y = 0, n = 0;
+      if (row.xs) {
+        y = row.y;
+        for (const x of row.xs) {
+          const id = mat[y * W + x] & ID_MASK;
+          if (structural[id] && !PW.mat.terrain[id]) crush(x, y, p.owner);
+          else {
+            const back = PW.getLayer(world, 'back', x, y);
+            PW.setLayer(world, 'back', x, y, 0); PW.setLayer(world, 'deco', x, y, 0); PW.setOwner(world, x, y, 0);
+            if (back && (PW.hash2(x, y) % (WALL_RUBBLE * 2)) === 0) particles.spawn(x + 0.5, y + 0.5, (random() - 0.5) * 80, -20 - random() * 40, M.DEBRIS, back, F.LAND, 5);
+          }
+          if (x < x0) x0 = x; if (x > x1) x1 = x;
+          n += 1;
+        }
+      } else {
+        const [c, s] = cosSin(p), v = row.v, base = (v - p.v0) * p.gw;
+        let lost = 0;
+        if (v < p.v0 + p.gh) for (let gu = 0; gu < p.gw; gu += 1) {
+          const g = p.grid[base + gu];
+          if (!g) continue;
+          const k = g - 1, u = p.u0 + gu;
+          const [wx, wy] = toWorld(p, c, s, u + 0.5, v + 0.5);
+          const side = (u - p.gx) * c - (v - p.gy) * s > 0 ? 1 : -1;
+          if (p.data.solid[k] && (n & 1) === 0 && rubbleFrom(p.data.solid[k], u, v)) {
+            particles.spawn(wx, wy, side * (40 + random() * 120) + (random() - 0.5) * 40, -20 - random() * 50, debrisOf(p.data.byte[k]), p.data.color[k] || 0, F.LAND | F.DAMAGE, 6);
+          } else if ((n & 7) === 3) puff(wx, wy - 1, 1);
+          lost += weightOf(p.data.solid[k]);
+          p.grid[base + gu] = 0; p.data.solid[k] = 0; p.data.color[k] = 0;
+          if (wx < x0) x0 = wx; if (wx > x1) x1 = wx;
+          y = Math.max(y, wy);
+          n += 1;
+        }
+        p.mass = Math.max(1, p.mass - lost);
+        p.eaten += n;
+      }
+      if (!n) return;
+      stats.pancaked = (stats.pancaked || 0) + n;
+      if ((p.crushedRows += 1) % 5 === 0) blowOut(x0, x1, Math.round(y), Math.max(60, p.vd * 1.5), 0.5);
+    }
     // What is left of a piece, made over as a piece of its own going on just as it was (free).
     function rebuild(p) {
       const ks = [];
@@ -357,6 +490,8 @@
       let crushed = 0, smashed = 0, n = 0, sx = 0, sy = 0, fx = 0, fy = 0, hs = 0, wet = 0;
       let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
       for (let k = 0; k < pts.length; k += 2) {
+        // (the storeys of it already crushed under its hinge are gone)
+        if (p.stage === 'self' && p.mode === 'hinge' && pts[k + 1] >= -p.ry) continue;
         const [wx, wy] = toWorld(p, c, s, pts[k], pts[k + 1]);
         const x = Math.floor(wx), y = Math.floor(wy);
         if (!blocking(x, y)) {
