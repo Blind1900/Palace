@@ -269,6 +269,12 @@
       // bridge...): heavier and faster pieces break more.
       const energy = p.mass * speed * speed;
       if (PW.mat.terrain[mat[hy * W + hx] & ID_MASK]) dent(hx, hy, energy, vx);
+      // The shock of it shakes the ground around, and the ground it struck is looked at for what
+      // lost its footing.
+      if (world.stability) {
+        world.stability.shock(hx, hy, energy / 40);
+        world.stability.disturb(hx - 40, hy - 60, hx + 40, hy + 30);
+      }
       const rr = Math.min(10, 1 + Math.sqrt(energy) / 900);
       for (let y = Math.floor(hy - rr); y <= hy + rr; y += 1) for (let x = Math.floor(hx - rr); x <= hx + rr; x += 1) {
         if (x < 1 || y < 1 || x >= W - 1 || y >= H - 1 || (x - hx) ** 2 + (y - hy) ** 2 > rr * rr) continue;

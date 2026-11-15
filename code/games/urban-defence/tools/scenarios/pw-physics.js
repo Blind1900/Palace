@@ -53,6 +53,9 @@ for (let x = fx - 80; x <= fx + 120; x += 2) {
   }
 }
 check(slid > 500 && hanging === 0, `a mountain blown open comes down in a rockslide (${slid} cells broke loose, ${hanging} left hanging)`);
+// Vibration comes from the shock of strikes - the blasts, the slide coming down, the rock raining
+// onto the slope - and loosens what the element table says is loose enough.
+check((stability.stats.shocks || 0) > 5 && stability.stats.loosened > 0, `blasts, the slide and falling rock all shake the ground (${stability.stats.shocks || 0} shocks, ${stability.stats.loosened} cells shaken loose)`);
 await view('ph-mountain-after', fx, fy - 60, 4);
 check((stability.stats.maxMs || 0) < 8, `looking for ground that lost its footing stays in budget (worst ${(stability.stats.maxMs || 0).toFixed(1)} ms)`);
 

@@ -202,11 +202,19 @@
   //   so rock shields what lies behind it and a blast in a mountain chips a small hole where in
   //   soil it blows out a wide crater. cohesion: how many cells ground of it holds out over a void
   //   before it breaks loose (an overhang of soil drops at once; stone spans a cave mouth).
+  // advection: how much of the wind's (or a blast wave's) speed a cell of it takes on - smoke and
+  //   steam go with the air, dust and ash drift, sand and grit barely stir, solids not at all.
+  // shake: how readily vibration (a blast, an avalanche, a collapse, felt from a distance) sets it
+  //   moving - dry sand and ash run at the slightest shaking, loose rubble settles, a heap slumps,
+  //   bare soil ravels on a steep face, rock and buildings stand (glass cracks).
   const weight = new Uint8Array(64), blastResist = new Float32Array(64), cohesion = new Uint8Array(64);
+  const advection = new Float32Array(64), shake = new Float32Array(64);
   const physics = (ids, props) => { for (const id of ids) {
     if (props.weight !== undefined) weight[id] = props.weight;
     if (props.resist !== undefined) blastResist[id] = props.resist;
     if (props.cohesion !== undefined) cohesion[id] = props.cohesion;
+    if (props.advection !== undefined) advection[id] = props.advection;
+    if (props.shake !== undefined) shake[id] = props.shake;
   } };
   for (let id = 1; id < 64; id += 1) if (names[id]) physics([id], { weight: phase[id] === PHASE.SOLID ? 100 : 50, resist: 0.03 });
   physics([M.STEAM], { weight: 1, resist: 0 }); physics([M.SMOKE], { weight: 2, resist: 0 }); physics([M.DUST], { weight: 4, resist: 0 });
@@ -242,6 +250,20 @@
   physics([M.PIPE, M.PLATFORM], { resist: 0.03 });
   physics([M.CORE], { resist: 0.1 });
   physics([M.COVER_ROCK], { resist: 0.065 }); physics([M.COVER_METAL], { resist: 0.04 }); physics([M.COVER_SAND], { resist: 0.03 });
+  // Wind and vibration.
+  physics([M.AIR], { advection: 1 });
+  physics([M.STEAM], { advection: 0.95 }); physics([M.SMOKE], { advection: 0.9 }); physics([M.DUST], { advection: 0.8, shake: 1 });
+  physics([M.ASH], { advection: 0.35, shake: 0.9 });
+  physics([M.SAND], { advection: 0.06, shake: 0.9 });
+  physics([M.LOOSE_SOIL], { advection: 0.04, shake: 0.7 });
+  physics([M.LOOSE_STONE], { advection: 0.02, shake: 0.6 });
+  physics([M.DEBRIS], { advection: 0.03, shake: 0.5 });
+  physics([M.WATER], { advection: 0.05, shake: 0.3 });
+  physics([M.RUBBLE], { shake: 0.25 });
+  physics([M.GRAVEL], { shake: 0.08 });
+  physics([M.GRASS, M.TOPSOIL, M.SOIL], { shake: 0.03 });
+  physics([M.CLAY, M.FILL], { shake: 0.01 });
+  physics([M.GLASS], { shake: 0.6 });
 
   // ---- Hashing and random numbers ------------------------------------------------------------
   function hash2(x, y) {
@@ -606,7 +628,7 @@
   PW.DEBRIS_KIND = DEBRIS_KIND;
   PW.ID_MASK = ID_MASK;
   PW.mat = { phase, structural, ground, skyline, hardness, breaksTo, passable, stopsShots, terrain, open,
-    conduct, ignite, burnTime, burnsTo, palettes, names, weight, blastResist, cohesion };
+    conduct, ignite, burnTime, burnsTo, palettes, names, weight, blastResist, cohesion, advection, shake };
   PW.CHUNK = CHUNK;
   PW.CHUNK_SHIFT = CHUNK_SHIFT;
   PW.CHUNK_MASK = CHUNK_MASK;

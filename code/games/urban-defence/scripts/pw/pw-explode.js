@@ -141,10 +141,10 @@
     if (PW.props) PW.props.afterBlast(world, particles, box);
     if (world.onDamage) for (const [id, cells] of damaged) world.onDamage(id, cells, cx, cy);
     // The ground around and above the hole is looked at for what lost its footing (the slope over
-    // it may come down), and the blast shakes loose the steep ground near it.
+    // it may come down), and the blast's shock - its heat and pressure - shakes the ground around.
     if (world.stability) {
       world.stability.disturb(x0 - 4, y0 - r * 1.5, x1 + 4, y1 + 4);
-      world.stability.shake(cx, cy, r * 1.8, power);
+      world.stability.shock(cx, cy, Math.pow(r * power, 3));
     }
     return { removed, damaged };
   }

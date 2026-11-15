@@ -21,6 +21,12 @@
     const cell = new Uint8Array(capacity), flags = new Uint8Array(capacity);
     const color = new Uint32Array(capacity), owner = new Uint16Array(capacity);
     const painted = new Uint8Array(capacity);   // carries its own colour (a piece of a building)
+    // Shock energy of strikes, gathered over 16x16-cell tiles until the vibration system takes it.
+    const impacts = new Map();
+    function drainImpacts(fn) {
+      for (const [key, energy] of impacts) fn(((key % 4096) << 4) + 8, ((key / 4096 | 0) << 4) + 8, energy);
+      impacts.clear();
+    }
     let count = 0;
     const listeners = { chip: null, hitUnit: null };
     const stats = { count: 0, landed: 0, chipped: 0 };
@@ -159,8 +165,13 @@
             }
             x = tx; y = ty; continue;
           }
-          // Collision with cell (cx, cy).
+          // Collision with cell (cx, cy). The shock of the strike adds to the vibration where it
+          // lands (its kinetic energy: the weight of what struck, times its speed squared).
           const speed = Math.hypot(vx[i], vy[i]);
+          if (fl & (F.LAND | F.DAMAGE) && speed > 40) {
+            const key = (cy >> 4) * 4096 + (cx >> 4);
+            impacts.set(key, (impacts.get(key) || 0) + speed * speed * (PW.mat.weight[cell[i] & ID_MASK] / 80) / 40);
+          }
           if ((fl & F.DAMAGE) && speed > 90 && structural[id] && id !== M.CORE) chip(cx, cy, id, speed, i);   // (cores break only to blasts)
           if ((fl & F.WATER) || ((fl & F.LAND) && speed < 45)) {
             if (deposit(x, y, cell[i], fl, painted[i] ? color[i] : 0)) { kill(i); removed = true; break; }
@@ -221,7 +232,7 @@
         ctx.fill();
       }
     }
-    const api = { spawn, step, draw, F, stats, listeners, get count() { return count; }, px, py, vx, vy, flags };
+    const api = { spawn, step, draw, drainImpacts, F, stats, listeners, get count() { return count; }, px, py, vx, vy, flags };
     return api;
   }
 

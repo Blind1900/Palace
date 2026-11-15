@@ -22,6 +22,9 @@
   const CELLS_PER_TICK = 16000;   // cells of a look worked through per tick
   const BREAKS_PER_TICK = 600;    // cells broken loose per tick
   const GROW = 200;          // rows a look reaches higher when the slide goes on above its box
+  const SHOCK_MIN = 6000;    // a shock weaker than this is felt by nothing (a few pebbles landing)
+  const SLIDE_SPEED = 40;    // cells a second ground breaking loose comes down at, for its shock
+  const SHOCK_EVERY = 6;     // ticks between gathering up the strikes of flying debris
   const FAR = 0xffff;
 
   function createStability(world, particles) {
@@ -115,6 +118,13 @@
       if (region.scan.done < out.length) return -1;
       // (a slide that reached the top of the box goes on above it: the next look reaches higher)
       if (out.some((i) => ((i / W) | 0) < y0 + 6) && y0 > region.scan.top) region.y0 -= GROW;
+      // A slide shakes the ground around it in its turn: its mass coming down (the rock that rains
+      // down adds its own strikes where it lands).
+      if (out.length) {
+        let sx = 0, sy = 0;
+        for (const i of out) { sx += i % W; sy += (i / W) | 0; }
+        shock(sx / out.length, sy / out.length, out.length * SLIDE_SPEED * SLIDE_SPEED / 40);
+      }
       region.scan = null;
       return out.length;
     }
@@ -140,20 +150,37 @@
       pending.push({ x0: Math.floor(x0) - pad, y0: Math.floor(y0), x1: Math.ceil(x1) + pad, y1: Math.ceil(y1), at: tick + SETTLE, rounds: 0 });
       stats.regions += 1;
     }
-    // A blast shakes the steep ground around it: within `reach` of (cx, cy), the surface layer of
-    // ground steeper than about 40° is loosened (more of it nearer the blast) and slides away.
+    // Vibration is the shock of things striking each other, as strong as the energy of the strike:
+    // a falling piece's or a landing rain of rubble's kinetic energy (weight x speed squared), a
+    // blast's (its heat and pressure), a slide's. Its reach grows with the cube root of the energy
+    // (a blast of radius r and power p has (r p)^3): a pebble is felt by nothing, a tower coming
+    // down shakes the heaps a long way off.
+    function shock(x, y, energy) {
+      if (!(energy > SHOCK_MIN)) return;
+      const size = Math.cbrt(energy);
+      shake(x, y, size * 1.65, Math.min(1.6, size / 48));
+      stats.shocks = (stats.shocks || 0) + 1;
+    }
+    // Vibration from a shock at (cx, cy): it dies away over `reach`.
+    // Each kind of ground feels it as much as the element table's `shake` says: the surface of
+    // steep ground ravels away (bare soil on a steep face, gravel on gentler ones; rock and made
+    // ground stand), and loose heaps within reach - sand, ash, rubble, spoil - settle and slump.
     function shake(cx, cy, reach, power = 1) {
       const x0 = Math.max(2, Math.floor(cx - reach)), x1 = Math.min(W - 3, Math.ceil(cx + reach));
       for (let x = x0; x <= x1; x += 1) {
         const g = world.groundTop[x], d = Math.hypot(x - cx, g - cy) / reach;
         if (d >= 1) continue;
+        const felt = (1 - d) * Math.min(1.5, power);
+        // (loose heaps at the surface here are set moving)
+        if (PW.mat.shake[mat[g * W + x] & ID_MASK] > 0.2 && PW.wakeCell) PW.wakeCell(world, x, g);
         const slope = Math.abs(world.groundTop[x + 2] - world.groundTop[x - 2]) / 4;
-        if (slope < 0.85) continue;
-        const depth = Math.round((1 - d) * 7 * power * Math.min(1.6, slope));
+        const depth = Math.round(felt * 7 * Math.min(1.6, slope));
         for (let y = g; y < g + depth; y += 1) {
-          const i = y * W + x, m = mat[i], id = m & ID_MASK;
-          if (!breakable(i, x, y) || cohesion[id] > 12) continue;   // (rock faces stand the shaking)
-          if ((PW.hash3(x, y, 0x5ac) & 255) / 255 > (1 - d) * 0.9) continue;
+          const i = y * W + x, m = mat[i], id = m & ID_MASK, s = PW.mat.shake[id];
+          if (!s || !breakable(i, x, y)) continue;
+          // (the looser the ground, the gentler the slope it ravels on)
+          if (slope < 0.85 - Math.min(0.6, s * 3)) continue;
+          if ((PW.hash3(x, y, 0x5ac) & 255) / 255 > Math.min(0.95, felt * s * 25)) continue;
           PW.set(world, x, y, (breaksTo[id] || M.LOOSE_SOIL) | (m & 0xc0));
           stats.loosened += 1;
         }
@@ -161,6 +188,8 @@
     }
     function step() {
       tick += 1;
+      // The strikes of flying debris, gathered tile by tile, each felt as one shock.
+      if (tick % SHOCK_EVERY === 0 && particles && particles.drainImpacts) particles.drainImpacts(shock);
       // (one disturbance looked at at a time, a few rows a tick)
       const k = pending.findIndex((r) => r.at <= tick);
       if (k < 0) return;
@@ -175,7 +204,7 @@
       if (region.quiet < QUIET && region.rounds < ROUNDS) region.at = tick + AGAIN;
       else pending.splice(k, 1);
     }
-    return { step, disturb, shake, stats, busy: () => pending.length > 0 };
+    return { step, disturb, shock, stats, busy: () => pending.length > 0 };
   }
 
   PW.createStability = createStability;
