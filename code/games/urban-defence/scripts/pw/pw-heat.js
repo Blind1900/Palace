@@ -69,7 +69,7 @@
           if (c[0] + c[1] + c[2] > 120) PW.setLayer(world, 'deco', x, y, scorched(decoAt(x, y), 0.5));
           return false;
         }
-        const leaf = c[1] > c[0] + 8 || !plant;
+        const leaf = !(PW.getFlags(world, x, y) & FLAG.WOOD) || !plant;
         const timber = !leaf && plant.kind === 'tree';
         // Leaves flare up and are gone in a second or two; a tree's wood burns on for a long while
         // (a trunk smoulders on after its crown has burnt off) before it is left as charcoal.
@@ -77,7 +77,11 @@
         burning.set(i, { fuel: timber ? 9 + (h & 15) * 0.33 : leaf ? 1.2 + (h & 3) * 0.3 : 2.5 + (h & 7) * 0.2, deco: true, wood: !leaf, owner: 0 });
         // (bark blackens as it burns; where the fire reaches a tree's foot it may smoulder on there
         // for a minute or so after the fire has passed)
-        if (!leaf) scorchBark(x, y, 0.4);
+        if (!leaf) {
+          // (the leaves in front of a branch go first, showing its bark)
+          if (c[1] > c[0] + 8) { const k = 0.85 + (h & 3) * 0.06; PW.setLayer(world, 'deco', x, y, PW.abgr(70 * k, 53 * k, 38 * k)); }
+          scorchBark(x, y, 0.4);
+        }
         if (timber && !plant.smouldered && y >= plant.row - 10 && PW.addSmoulder) {
           plant.smouldered = true;
           if ((h >> 7 & 3) !== 0) PW.addSmoulder(world, x, y - 2, 40 + (h >> 9 & 63), 3 + (h >> 4 & 3));
@@ -106,11 +110,9 @@
     // How thick the wood is at (x, y): the narrower of its runs across and up (a trunk's width, a
     // bough's depth, a twig's one or two cells). Leaves do not count; charcoal does.
     const isWood = (x, y) => {
-      const d = decoAt(x, y);
-      if (!d || !(PW.getFlags(world, x, y) & FLAG.FLORA)) return false;
-      if (PW.getFlags(world, x, y) & FLAG.CHARRED) return true;
-      const c = PW.unpack(d);
-      return !(c[1] > c[0] + 8);
+      if (!decoAt(x, y)) return false;
+      const f = PW.getFlags(world, x, y);
+      return (f & FLAG.FLORA) !== 0 && (f & (FLAG.WOOD | FLAG.CHARRED)) !== 0;
     };
     function woodThickness(x, y) {
       let h = 1, v = 1;
@@ -136,7 +138,7 @@
         const plant = PW.flora ? PW.flora.recordAt(world, x, y) : null;
         if (!b.wood || thin) {
           PW.setLayer(world, 'deco', x, y, 0);
-          PW.setFlag(world, x, y, FLAG.FLORA | FLAG.CHARRED, false);
+          PW.setFlag(world, x, y, FLAG.FLORA | FLAG.CHARRED | FLAG.WOOD, false);
           // (what that held up may have lost its hold)
           if (thin && plant) (world.floraDirty || (world.floraDirty = new Set())).add(plant);
           // (a leaf leaves only a pinch of ash, a twig a little more: the ground gets a grey-white

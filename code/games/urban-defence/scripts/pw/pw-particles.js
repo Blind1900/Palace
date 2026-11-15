@@ -12,7 +12,14 @@
   const SLIDE_KEEP = 0.94;  // share of its speed rubble keeps each time it strikes the slope it runs down
   // BUBBLE: air in water. It rises (buoyancy against drag gives ~0.5 m/s), wobbles, slides along
   // anything solid above it and pops when it reaches open air. It never leaves the water.
-  const F = Object.freeze({ LAND: 1, DAMAGE: 2, WATER: 4, GLOW: 8, SMOKE: 16, LEAF: 32, BUBBLE: 64 });
+  // GAS: a puff of gas (smoke, dust) thrown out fast - a blast's cloud racing outward - which the
+  // air slows hard (its `wind` in the table), held up as the gas is (its buoyancy); slowed to the
+  // pace gas drifts at, or stopped by what it meets, it is a gas cell again.
+  const F = Object.freeze({ LAND: 1, DAMAGE: 2, WATER: 4, GLOW: 8, SMOKE: 16, LEAF: 32, BUBBLE: 64, GAS: 128 });
+  const GAS_SETTLES = 22;   // cells/s: a gas puff slower than this is a gas cell again
+  const GAS_TRAIL = 2 * Math.PI * 0.85;  // a burst of gas puffs fills most of the disc it sweeps
+  // (how hard the air brakes a puff of gas: the share of its speed it loses each second)
+  const gasBrake = (id) => 2 + 4.5 * advection[id];
   const BUBBLE_RISE = 7;    // cells/s terminal rise speed
 
   function createParticles(world, capacity = 32768) {
@@ -119,6 +126,20 @@
     }
     const OPEN = PW.mat.open;
     const open = (id, fl) => OPEN[id] === 1 || (id === M.WATER && (fl & F.WATER) === 0);
+    const gasFree = (x, y) => x >= 1 && y >= 1 && x < W - 1 && y < H - 1 && OPEN[mat[(y | 0) * W + (x | 0)] & ID_MASK] === 1;
+    // A puff of gas come to rest at (x, y): into the clear air there or just round it; where the
+    // same gas already is, it thickens it.
+    function settleGas(x, y, byte) {
+      const cx = Math.floor(x), cy = Math.floor(y), id = byte & ID_MASK;
+      for (let r = 0; r <= 2; r += 1) for (let dy = -r; dy <= r; dy += 1) for (let dx = -r; dx <= r; dx += 1) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+        const x2 = cx + dx, y2 = cy + dy;
+        if (x2 < 1 || y2 < 1 || x2 >= W - 1 || y2 >= H - 1) continue;
+        const m = mat[y2 * W + x2];
+        if ((m & ID_MASK) === M.AIR) { PW.set(world, x2, y2, byte, { quiet: true }); return; }
+        if ((m & ID_MASK) === id && (m >> 6) < 3) { mat[y2 * W + x2] = id | ((m >> 6) + 1) << 6; PW.markDirty(world, x2, y2); return; }
+      }
+    }
 
     function step(dt) {
       for (let i = count - 1; i >= 0; i -= 1) {
@@ -149,6 +170,39 @@
           }
           px[i] = nx; py[i] = ny;
           if (here !== M.WATER || life[i] <= 0) kill(i);   // reached air: pop
+          continue;
+        }
+        if (fl & F.GAS) {
+          // A puff of gas racing out: the air slows it hard, in proportion to its speed (so it
+          // slows exponentially), and its buoyancy lifts it (or lets it sink). Meeting the ground
+          // or a wall it is turned along it, losing speed; boxed in, it stops. Slowed to a drift,
+          // it is a gas cell again.
+          // It leaves gas behind it as it goes, more the further out it is (the cloud's rim is
+          // longer than its middle), so a burst of them fills out a disc of gas from its centre.
+          // How far out it is follows from its speed and age, as it has been slowing at a known
+          // rate: d = v (e^(kt) - 1) / k. (`owner` holds how many puffs there are in its burst.)
+          const g = cell[i] & ID_MASK, brake = gasBrake(g);
+          vy[i] -= (PW.mat.buoyancy[g] || 0) * 60 * dt;
+          const k = Math.max(0, 1 - brake * dt);
+          vx[i] *= k; vy[i] *= k;
+          const speed = Math.hypot(vx[i], vy[i]);
+          const lay = Math.min(0.9, GAS_TRAIL * speed * (Math.exp(brake * age[i]) - 1) / brake / Math.max(1, owner[i]));
+          let x = px[i], y = py[i], stopped = false, lastCell = -1;
+          const steps = Math.max(1, Math.ceil(Math.max(Math.abs(vx[i]), Math.abs(vy[i])) * dt));
+          let mx = vx[i] * dt / steps, my = vy[i] * dt / steps;
+          for (let s = 0; s < steps; s += 1) {
+            if (gasFree(x + mx, y + my)) { x += mx; y += my; }
+            else if (my && gasFree(x + mx, y)) { vy[i] *= -0.15; vx[i] *= 0.8; my = 0; x += mx; }
+            else if (mx && gasFree(x, y + my)) { vx[i] *= -0.15; vy[i] *= 0.8; mx = 0; y += my; }
+            else { stopped = true; break; }
+            const at = (y | 0) * W + (x | 0);
+            if (at !== lastCell && (mat[at] & ID_MASK) === M.AIR && (PW.hash3(x | 0, y | 0, i + world.tick) & 1023) < lay * 1024) {
+              PW.set(world, x | 0, y | 0, cell[i], { quiet: true });
+            }
+            lastCell = at;
+          }
+          px[i] = x; py[i] = y;
+          if (stopped || speed < GAS_SETTLES || life[i] <= 0) { settleGas(x, y, cell[i]); kill(i); }
           continue;
         }
         // What it is, and what it is flying through. In a liquid the weight of what it pushes
@@ -319,5 +373,7 @@
 
   PW.createParticles = createParticles;
   PW.PARTICLE = F;
+  PW.GAS_SETTLES = GAS_SETTLES;
+  PW.gasBrake = gasBrake;
   PW.GRAVITY = GRAVITY;
 })();

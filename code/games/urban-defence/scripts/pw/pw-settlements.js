@@ -331,7 +331,7 @@
     for (let x = x0 - 4; x <= x1 + 4; x += 1) {
       const b = base(x);
       for (let i = 1; i <= 36; i += 1) {
-        if (PW.getFlags(world, x, b - i) & FLAG.FLORA) { PW.setLayer(world, 'deco', x, b - i, 0); PW.setFlag(world, x, b - i, FLAG.FLORA, false); }
+        if (PW.getFlags(world, x, b - i) & FLAG.FLORA) { PW.setLayer(world, 'deco', x, b - i, 0); PW.setFlag(world, x, b - i, FLAG.FLORA | FLAG.WOOD | FLAG.CHARRED, false); }
       }
     }
     field.stalks = [];

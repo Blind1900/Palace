@@ -576,7 +576,10 @@
     FLORA: 4096, CHARRED: 8192, FIELD: 16384,
     // FITTING: this back-wall cell is something standing in front of the wall face (a timber set,
     // a lamp and its cable): a pipe along the wall passes behind it.
-    FITTING: 32768 });
+    FITTING: 32768,
+    // WOOD: this plant cell is wood (trunk, bough, twig), whatever colour it shows - leaves grow in
+    // front of the branches they are on, but the wood is still there behind them.
+    WOOD: 65536 });
   // Does a pipe fixed to the wall show at open cell (x, y)? Over the wall face (a finished
   // tunnel's too, clamped to it), or across a cave's rock; not behind a fitting, a ladder's rails
   // and rungs, a rail or a belt - but between a ladder's rungs, yes.
@@ -606,7 +609,7 @@
     if (x < 0 || y < 0 || x >= world.width || y >= world.height) return;
     const c = chunkIndex(world, x, y);
     let chunk = world.flags[c];
-    if (!chunk) { if (!on) return; chunk = world.flags[c] = new Uint16Array(CHUNK_CELLS); }
+    if (!chunk) { if (!on) return; chunk = world.flags[c] = new Uint32Array(CHUNK_CELLS); }
     const i = (y & CHUNK_MASK) << CHUNK_SHIFT | x & CHUNK_MASK;
     chunk[i] = on ? chunk[i] | bit : chunk[i] & ~bit;
   }

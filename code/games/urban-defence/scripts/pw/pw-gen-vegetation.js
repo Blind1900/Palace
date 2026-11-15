@@ -18,8 +18,6 @@
   const DEAD_BARK = { dark: [52, 46, 42], base: [84, 76, 68], light: [112, 102, 92] };
   const BIRCH_FOOT = { dark: [36, 34, 32], base: [92, 88, 82], light: [132, 128, 120] };
   const shadeColor = (rgbArray, k) => rgb(Math.min(255, rgbArray[0] * k | 0), Math.min(255, rgbArray[1] * k | 0), Math.min(255, rgbArray[2] * k | 0));
-  // (a drawn colour, darkened: wood in the shade of leaves)
-  const shade = (color, k) => { const c = PW.unpack(color); return rgb(c[0] * k | 0, c[1] * k | 0, c[2] * k | 0); };
   const mixRGB = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
 
   // ---- Ground under a plant ------------------------------------------------------------------------
@@ -66,13 +64,16 @@
   // ---- Sprites ---------------------------------------------------------------------------------------
   // A sprite is a small cell buffer with its anchor on the surface cell under the plant's centre.
   // `base` lists the columns (relative to the anchor) that must reach the ground.
+  // (wood: which of its cells are wood - trunk, boughs, twigs, stems, a boulder's stone - whatever
+  // is later drawn over them: leaves grow in front of their branches, the wood stays behind them)
   function createSprite(width, height) {
-    return { width, height, pixels: new Uint32Array(width * height), anchorX: width >> 1, anchorY: height - 1, base: null, trunk: null };
+    return { width, height, pixels: new Uint32Array(width * height), wood: new Uint8Array(width * height), anchorX: width >> 1, anchorY: height - 1, base: null, trunk: null };
   }
-  function put(sprite, x, y, color) {
+  function put(sprite, x, y, color, wood = false) {
     x = Math.round(x); y = Math.round(y);
     if (x < 0 || y < 0 || x >= sprite.width || y >= sprite.height) return;
     sprite.pixels[y * sprite.width + x] = color;
+    if (wood) sprite.wood[y * sprite.width + x] = 1;
   }
   function get(sprite, x, y) {
     if (x < 0 || y < 0 || x >= sprite.width || y >= sprite.height) return 0;
@@ -91,6 +92,7 @@
     const out = createSprite(x1 - x0 + 1, y1 - y0 + 1);
     for (let y = y0; y <= y1; y += 1) {
       out.pixels.set(sprite.pixels.subarray(y * sprite.width + x0, y * sprite.width + x1 + 1), (y - y0) * out.width);
+      out.wood.set(sprite.wood.subarray(y * sprite.width + x0, y * sprite.width + x1 + 1), (y - y0) * out.width);
     }
     out.anchorX = sprite.anchorX - x0;
     out.anchorY = sprite.anchorY - y0;
@@ -123,7 +125,7 @@
           const side = (dx * -0.8 + dy * -0.6) / (r || 1);
           const groove = (PW.hash2(px, Math.round(py / 3)) & 7) === 0;
           const k = side > 0.35 ? 1.18 : side < -0.4 ? 0.72 : 1;
-          put(sprite, px, py, groove ? shadeColor(bark.dark, 1) : shadeColor(bark.base, k));
+          put(sprite, px, py, groove ? shadeColor(bark.dark, 1) : shadeColor(bark.base, k), true);
         }
       }
     }
@@ -162,10 +164,8 @@
         const n = cluster(x, y), f = fine(x, y);
         // Ragged edge: leaf clusters push out or pull in the outline.
         if (best + n * 0.32 + f * 0.1 < (options.edge || 0.22)) continue;
-        // (the wood the leaves grow on stays wood: seen through the leaves, in their shade)
-        const wood = get(sprite, x, y);
-        if (wood) { put(sprite, x, y, shade(wood, 0.55)); continue; }
-        // Small holes inside the canopy let branches and sky show through.
+        // Small holes inside the canopy let branches and sky show through. (Elsewhere the leaves
+        // are in front of the wood they grow on: it stays wood behind them - see createSprite.)
         if (best > 0.25 && n < -0.55 && f < -0.1) continue;
         const ux = (x - bestClump.x) / bestClump.r, uy = (y - bestClump.y) / bestClump.r;
         const light = -ux * 0.55 - uy * 0.85 + n * 0.55 + (1 - (y - canopyTop) / canopyHeight) * 0.35;
@@ -198,7 +198,7 @@
       const run = random.int(Math.max(2, Math.round(trunkW * 0.3)), Math.max(3, Math.round(trunkW * 1.1)));
       for (let k = 1; k <= run; k += 1) {
         const dx = ex + s * k;
-        put(sprite, cx + dx, baseY + ground(dx) - 1, shadeColor(k > run * 0.6 ? bark.dark : bark.base, 0.92));
+        put(sprite, cx + dx, baseY + ground(dx) - 1, shadeColor(k > run * 0.6 ? bark.dark : bark.base, 0.92), true);
       }
       if (s < 0) from = Math.min(from, ex - run); else to = Math.max(to, ex + run);
     }
@@ -212,8 +212,8 @@
       for (let y = Math.min(sprite.height - 1, surface - 1); y >= Math.max(0, surface - 1 - reachUp); y -= 1) {
         if (get(sprite, x, y)) { lowest = y; break; }
       }
-      if (lowest < 0) { put(sprite, x, surface - 1, shadeColor(bark.dark, 0.9)); put(sprite, x, surface, shadeColor(bark.dark, 0.9)); continue; }
-      for (let y = lowest + 1; y <= surface; y += 1) put(sprite, x, y, shadeColor(y > lowest + 2 ? bark.dark : bark.base, 0.9));
+      if (lowest < 0) { put(sprite, x, surface - 1, shadeColor(bark.dark, 0.9), true); put(sprite, x, surface, shadeColor(bark.dark, 0.9), true); continue; }
+      for (let y = lowest + 1; y <= surface; y += 1) put(sprite, x, y, shadeColor(y > lowest + 2 ? bark.dark : bark.base, 0.9), true);
     }
     return { from, to };
   }
@@ -304,9 +304,7 @@
       const from = yTop + (yBottom - yTop) * 0.35;
       for (const s of [-1, 1]) limb(sprite, trunkX(from), from, cx + s * half * 0.88, yBottom - 1, Math.max(1.2, trunkW * 0.22), 1, BARK, random, s * random.range(0.5, 1.5));
     }
-    // (which cells are wood, before any needles: 1 wood, 2 wood already shaded)
-    const woodPx = new Uint8Array(sprite.pixels.length);
-    for (let k = 0; k < woodPx.length; k += 1) if (sprite.pixels[k]) woodPx[k] = 1;
+    // (the needles grow in front of the branches: the wood stays wood behind them)
     for (let tier = 0; tier < tiers; tier += 1) {
       const { yTop, yBottom, half } = tierOf[tier];
       for (let y = Math.floor(yTop); y <= yBottom; y += 1) {
@@ -316,11 +314,6 @@
         for (let x = Math.floor(cx - spread); x <= cx + spread; x += 1) {
           const u = (x - cx) / Math.max(1, spread);
           if (Math.abs(u) > 0.92 && (PW.hash2(x, y) & 3) === 0) continue;
-          // (the trunk and branches stay wood, in the needles' shade)
-          const px = Math.round(y) * sprite.width + Math.round(x);
-          // (deep in the needles' shade: a dark that is still wood, not needle)
-          if (woodPx[px] === 1) { woodPx[px] = 2; put(sprite, x, y, (PW.hash2(x, y) & 3) ? rgb(30, 33, 28) : rgb(38, 36, 30)); continue; }
-          if (woodPx[px] === 2) continue;
           const light = -u * 0.65 - v * 0.9 + 0.45 + ((PW.hash2(x, y) & 15) - 7.5) / 22;
           const color = light > 0.75 ? NEEDLE.high : light > 0.3 ? NEEDLE.light : light > -0.15 ? NEEDLE.base
             : light > -0.55 ? NEEDLE.shadow : NEEDLE.deep;
@@ -346,7 +339,7 @@
     for (let y = baseY - 4; y > baseY - height * 0.85; y -= random.int(5, 11)) {
       const t = (baseY - y) / (height * 0.9);
       const x = cx + lean * t;
-      put(sprite, x - 1, y, rgb(40, 38, 36)); put(sprite, x, y, rgb(40, 38, 36));
+      put(sprite, x - 1, y, rgb(40, 38, 36), true); put(sprite, x, y, rgb(40, 38, 36), true);
     }
     // Thin branches up and out of the trunk first, then the leaves hanging along them.
     const clumps = [];
@@ -394,9 +387,10 @@
         const light = -t * 0.55 + (0.45 - v) * 1.3 + n * 0.55;
         let color = light > 0.95 ? palette.high : light > 0.45 ? palette.light : light > -0.2 ? palette.base
           : light > -0.65 ? palette.shadow : palette.deep;
-        if (v > 0.8 && (PW.hash2(dx + seed, y) & 7) === 0) color = BARK.dark;   // stems at the foot
+        const stem = v > 0.8 && (PW.hash2(dx + seed, y) & 7) === 0;
+        if (stem) color = BARK.dark;   // stems at the foot
         const speck = PW.hash2(dx * 3 + seed, y) & 31;
-        put(sprite, sprite.anchorX + dx, y, speck === 0 ? shadeColor(color, 1.16) : speck === 1 ? shadeColor(color, 0.82) : rgb(color[0], color[1], color[2]));
+        put(sprite, sprite.anchorX + dx, y, speck === 0 ? shadeColor(color, 1.16) : speck === 1 ? shadeColor(color, 0.82) : rgb(color[0], color[1], color[2]), stem);
       }
     }
     sprite.base = { from: -half, to: half };
@@ -456,7 +450,7 @@
         if (y > baseRow) c = palette[3];
         if (moss && v < 0.3 && noise(dx * 3, y * 3) > 0.15) c = [70, 96, 50];
         if (y === top && light > 0.2) c = mixRGB(c, [180, 172, 158], 0.35);   // lit crest
-        put(sprite, sprite.anchorX + dx, y, shadeColor(c, tone));
+        put(sprite, sprite.anchorX + dx, y, shadeColor(c, tone), true);
       }
     }
     sprite.base = { from: -half, to: half };
@@ -530,6 +524,7 @@
         PW.setLayer(world, 'deco', wx, wy, color);
         PW.setFlag(world, wx, wy, PW.FLAG.FLORA);   // plant matter: it can burn
         const k = sy * sprite.width + sx;
+        if (sprite.wood && sprite.wood[k]) PW.setFlag(world, wx, wy, PW.FLAG.WOOD);
         mask[k >> 3] |= 1 << (k & 7);
         if (foot) {
           const k = wx - footX0;
@@ -584,11 +579,21 @@
   function shed(particles, x, y, color, vx, vy, hard = true, world = null) {
     const F = PW.PARTICLE;
     if (!particles || !F) return;
-    if (world && (PW.getFlags(world, x, y) & PW.FLAG.CHARRED)) charcoal(world, particles, x, y, color, vx, vy);
-    else if (leafy(color)) {
+    const flags = world ? PW.getFlags(world, x, y) : 0;
+    const wood = world ? (flags & (PW.FLAG.WOOD | PW.FLAG.CHARRED)) !== 0 : !leafy(color);
+    if (flags & PW.FLAG.CHARRED) charcoal(world, particles, x, y, color, vx, vy);
+    else if (!wood) {
       if ((PW.hash2(x, y) & 3) === 0) particles.spawn(x + 0.5, y + 0.5, vx, vy, 0, color, F.LEAF, 1.5 + (PW.hash2(y, x) & 3) * 0.5);
-    } else particles.spawn(x + 0.5, y + 0.5, vx, vy, WOOD_DEBRIS, color, hard ? F.LAND | F.DAMAGE : F.LAND, 8);
+    } else {
+      // (wood behind leaves: its leaves flutter off, its splinter is bark)
+      if (leafy(color) && (PW.hash2(x, y) & 3) === 0) particles.spawn(x + 0.5, y + 0.5, vx, vy, 0, color, F.LEAF, 1.5);
+      particles.spawn(x + 0.5, y + 0.5, vx, vy, WOOD_DEBRIS, leafy(color) ? barkTone(x, y) : color, hard ? F.LAND | F.DAMAGE : F.LAND, 8);
+    }
   }
+  // (bark where wood shows from behind its leaves)
+  const barkTone = (x, y) => shadeColor((PW.hash2(x, y) & 7) === 0 ? BARK.dark : BARK.base, 0.85 + (PW.hash2(y, x) & 3) * 0.06);
+  // Is the plant cell at (x, y) wood (trunk, bough, twig, charcoal) rather than leaf?
+  const woodFlag = (f) => (f & (PW.FLAG.WOOD | PW.FLAG.CHARRED)) !== 0;
   // A plant that lost its footing or had its trunk cut comes down: it topples away from the
   // blast (or to the side it leans), every cell of it thrown as leaves and splintered wood that
   // spreads further the higher it was, and lands as wood rubble.
@@ -610,7 +615,7 @@
         n += 1;
         const height = Math.max(0, record.row - wy), r = (PW.hash3(wx, wy, 7) & 255) / 255 - 0.5;
         shed(particles, wx, wy, color, side * height * (1.2 + r * 0.6) + r * 30, -10 - (PW.hash3(wx, wy, 9) & 31), false, world);
-        PW.setFlag(world, wx, wy, PW.FLAG.FLORA | PW.FLAG.CHARRED, false);
+        PW.setFlag(world, wx, wy, PW.FLAG.FLORA | PW.FLAG.CHARRED | PW.FLAG.WOOD, false);
       }
     }
     record.felled = true;
@@ -636,7 +641,7 @@
       const wx = left + (k % w), wy = top + ((k / w) | 0);
       const color = PW.getLayer(world, 'deco', wx, wy), flags = PW.getFlags(world, wx, wy);
       if (!color || !(flags & PW.FLAG.FLORA)) continue;
-      kind[k] = !(flags & PW.FLAG.CHARRED) && leafy(color) ? 2 : 1;
+      kind[k] = woodFlag(flags) ? 1 : 2;
       cells += 1;
     }
     return { left, top, w, h, n, kind, cells };
@@ -648,11 +653,11 @@
     const data = { x: new Int32Array(n), y: new Int32Array(n), color: new Uint32Array(n), byte: new Uint8Array(n), solid: new Uint8Array(n) };
     ks.forEach((k, j) => {
       const x = left + (k % w), y = top + ((k / w) | 0), flags = PW.getFlags(world, x, y), color = PW.getLayer(world, 'deco', x, y);
-      const wood = (flags & PW.FLAG.CHARRED) !== 0 || !leafy(color);
+      const wood = woodFlag(flags);
       data.x[j] = x; data.y[j] = y; data.color[j] = color;
       data.byte[j] = wood ? ((flags & PW.FLAG.CHARRED) ? 2 : 1) : 0; data.solid[j] = wood ? 1 : 0;
       PW.setLayer(world, 'deco', x, y, 0);
-      PW.setFlag(world, x, y, PW.FLAG.FLORA | PW.FLAG.CHARRED, false);
+      PW.setFlag(world, x, y, PW.FLAG.FLORA | PW.FLAG.CHARRED | PW.FLAG.WOOD, false);
     });
     return data;
   }
@@ -754,7 +759,7 @@
           const wx = left + (k % w), wy = top + ((k / w) | 0);
           if (particles) shed(particles, wx, wy, PW.getLayer(world, 'deco', wx, wy), side * 10, -4, false, world);
           PW.setLayer(world, 'deco', wx, wy, 0);
-          PW.setFlag(world, wx, wy, PW.FLAG.FLORA | PW.FLAG.CHARRED, false);
+          PW.setFlag(world, wx, wy, PW.FLAG.FLORA | PW.FLAG.CHARRED | PW.FLAG.WOOD, false);
         }
         continue;
       }
@@ -786,7 +791,7 @@
   // snapping cleanly across the stem; what it held up falls next tick, with its leaves.
   const isWood = (world, x, y) => {
     const c = PW.getLayer(world, 'deco', x, y), f = PW.getFlags(world, x, y);
-    return c !== 0 && (f & PW.FLAG.FLORA) !== 0 && ((f & PW.FLAG.CHARRED) !== 0 || !leafy(c));
+    return c !== 0 && (f & PW.FLAG.FLORA) !== 0 && woodFlag(f);
   };
   function strike(world, particles, x, y, power = 1) {
     const record = recordAt(world, x, y);
@@ -826,7 +831,7 @@
           const color = PW.getLayer(world, 'deco', cx, cy);
           if (particles && (PW.hash2(cx, cy) & 1) === 0) shed(particles, cx, cy, color, ((PW.hash3(cx, cy, 3) & 63) - 32) * 0.5, -8, false, world);
           PW.setLayer(world, 'deco', cx, cy, 0);
-          PW.setFlag(world, cx, cy, PW.FLAG.FLORA | PW.FLAG.CHARRED, false);
+          PW.setFlag(world, cx, cy, PW.FLAG.FLORA | PW.FLAG.CHARRED | PW.FLAG.WOOD, false);
         }
       }
     }
@@ -970,7 +975,8 @@
       }
       PW.setLayer(world, 'deco', x, y, data.color[j]);
       PW.setFlag(world, x, y, PW.FLAG.FLORA);
-      if (data.byte[j] === 2) PW.setFlag(world, x, y, PW.FLAG.CHARRED);
+      PW.setFlag(world, x, y, PW.FLAG.WOOD, data.byte[j] !== 0);
+      PW.setFlag(world, x, y, PW.FLAG.CHARRED, data.byte[j] === 2);
       kept.push(x, y);
       if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
     }
@@ -1004,7 +1010,7 @@
         for (let k = y; k >= y - 30 && (PW.getFlags(world, x, k) & PW.FLAG.FLORA) && PW.getLayer(world, 'deco', x, k); k -= 1) {
           const color = PW.getLayer(world, 'deco', x, k);
           PW.setLayer(world, 'deco', x, k, 0);
-          PW.setFlag(world, x, k, PW.FLAG.FLORA, false);
+          PW.setFlag(world, x, k, PW.FLAG.FLORA | PW.FLAG.WOOD | PW.FLAG.CHARRED, false);
           if (particles && F && (PW.hash2(x, k) & 3) === 0) particles.spawn(x + 0.5, k + 0.5, ((PW.hash2(k, x) & 63) - 32), -10, 0, color, F.LEAF, 1.5);
         }
       }

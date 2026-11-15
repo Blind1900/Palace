@@ -112,7 +112,7 @@
             if (plant) plant.hit = true;
             const [vx, vy] = fling(x, y, 220 * power, 140 * power);
             PW.flora.shed(particles, x, y, deco, vx, vy, true, world);
-            PW.setFlag(world, x, y, PW.FLAG.FLORA | PW.FLAG.CHARRED, false);
+            PW.setFlag(world, x, y, PW.FLAG.FLORA | PW.FLAG.CHARRED | PW.FLAG.WOOD, false);
           } else if (random() < 0.08) {
             const [vx, vy] = fling(x, y, 140 * power, 80);
             particles.spawn(x + 0.5, y + 0.5, vx, vy, 0, deco, F.LEAF, 2 + random() * 2);
@@ -191,17 +191,10 @@
       particles.spawn(cx, cy, Math.cos(a) * sp, Math.sin(a) * sp - 60, 0, PW.abgr(hot[0], hot[1], hot[2]), F.GLOW, 0.25 + random() * 0.5);
     }
     if (world.heatSystem) world.heatSystem.heatDisc(cx, cy, r * 1.15, 380 + 420 * power);
-    for (let y = Math.floor(cy - r * 0.9); y <= cy + r * 0.3; y += 1) {
-      for (let x = Math.floor(cx - r * 0.8); x <= cx + r * 0.8; x += 1) {
-        if (x < 1 || y < 1 || x >= W - 1 || y >= H - 1) continue;
-        const dx = (x - cx) / (r * 0.8), dy = (y - cy) / (r * 0.9);
-        if (dx * dx + dy * dy > 1 || (mat[y * W + x] & ID_MASK) !== M.AIR || random() > 0.4) continue;
-        PW.set(world, x, y, M.SMOKE | (2 + (random() < 0.5 ? 1 : 0)) << 6, { quiet: true });
-      }
-    }
+    smokeBurst(world, particles, cx, cy, r, power, random);
     if (world.effects) world.effects.push({ kind: 'flash', x: cx, y: cy, radius: r * 2.2, age: 0, life: 0.35 });
-    // The crater smoulders, feeding a smoke column for a while after the blast.
-    addSmoulder(world, cx, Math.min(H - 2, cy + below), 8 + r * 0.35 * power, r * 1.1);
+    // A crater (not a blast in the open air) smoulders, feeding a smoke column for a while.
+    if (removed > r) addSmoulder(world, cx, Math.min(H - 2, cy + below), 8 + r * 0.35 * power, r * 1.1);
     // Plants that lost their footing or trunk fall; cover that lost its support or most of
     // itself breaks apart. Nothing is left floating over the crater.
     const box = { x0: x0 - 4, y0: y0 - 4, x1: x1 + 4, y1: y1 + 4 };
@@ -222,6 +215,39 @@
       world.stability.shock(cx, cy, Math.pow(r * power, 3));
     }
     return { removed, damaged };
+  }
+
+  // The blast's smoke: puffs thrown out from the fireball in every direction at once, fast, so the
+  // cloud races out as a near-round disc, a few tongues of it reaching further, that the air brakes
+  // (exponentially) until it drifts like any smoke. The ground and walls near the blast turn and
+  // stop it, which is all that shapes it.
+  function smokeBurst(world, particles, cx, cy, r, power, random) {
+    const F = PW.PARTICLE;
+    const lobes = [];
+    for (let k = 0, n = 4 + Math.floor(random() * 4); k < n; k += 1) {
+      lobes.push({ a: random() * Math.PI * 2, w: 0.08 + random() * 0.18, h: 0.25 + random() * 0.55 });
+    }
+    const reach = (a) => {
+      let s = 1;
+      for (const l of lobes) {
+        const d = Math.abs(((a - l.a + Math.PI * 3) % (Math.PI * 2)) - Math.PI);
+        s += l.h * Math.exp(-(d / l.w) * (d / l.w));
+      }
+      return s;
+    };
+    // (the distance a puff goes before it slows to a drift is (v0 - settle) / brake; spread out
+    // as the root of a uniform draw, where they stop fills the disc evenly)
+    const brake = PW.gasBrake(M.SMOKE), settle = PW.GAS_SETTLES;
+    const radius = r * (1.15 + 0.35 * Math.min(2, power)), core = r * 0.25;
+    const n = Math.min(3000, Math.round(200 + r * r * 0.3));
+    for (let k = 0; k < n; k += 1) {
+      const a = random() * Math.PI * 2, c = Math.cos(a), s = Math.sin(a);
+      const start = core * Math.sqrt(random());
+      const out = radius * reach(a) * Math.sqrt(random()) * (0.94 + random() * 0.12);
+      const v = Math.max(0, out - start) * brake + settle;
+      const byte = M.SMOKE | (2 + (random() < 0.5 ? 1 : 0)) << 6;
+      particles.spawn(cx + c * start, cy + s * start, c * v, s * v, byte, 0, F.GAS, 3, n);
+    }
   }
 
   // Smouldering ground or rubble at (x, y): for `seconds` it keeps putting smoke into the air over
