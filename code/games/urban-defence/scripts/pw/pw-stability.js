@@ -18,7 +18,6 @@
   const QUIET = 3;           // it is let be after this many looks in a row that broke nothing (what
                              // the ground rested on may still be sliding away from under it)
   const RAIN_DEPTH = 4;      // ground breaking over a void deeper than this falls as a particle
-  const THIN = 6;            // a sliver of ground this wide or narrower can topple
   const CELLS_PER_TICK = 16000;   // cells of a look worked through per tick
   const BREAKS_PER_TICK = 600;    // cells broken loose per tick
   const GROW = 200;          // rows a look reaches higher when the slide goes on above its box
@@ -44,6 +43,10 @@
     // (open sky above the ground is never a tunnel, so its flags are not looked up)
     const bears = (i, x, y) => phase[mat[i] & ID_MASK] >= PW.PHASE.POWDER
       || (y > world.groundTop[x] && open[mat[i] & ID_MASK] && (PW.getFlags(world, x, y) & PW.FLAG.TUNNEL) !== 0);
+    // What holds solid ground up: solid ground, a structure, a propped tunnel - never a heap of
+    // loose rubble or earth, which slides out from under it.
+    const holds = (i, x, y) => phase[mat[i] & ID_MASK] === PW.PHASE.SOLID
+      || (y > world.groundTop[x] && open[mat[i] & ID_MASK] && (PW.getFlags(world, x, y) & PW.FLAG.TUNNEL) !== 0);
 
     // Work out, for every bearing cell in the box, how far it reaches out from where its load goes
     // straight down to the ground: 0 for a cell standing on a column of ground, k for a cell k
@@ -60,9 +63,9 @@
         // top of the box - but never above the surface)
         const y0 = Math.max(2, top - 2, region.y0), y1 = Math.min(H - 3, region.y1);
         const bw = x1 - x0 + 1, bh = y1 - y0 + 1;
-        region.scan = { x0, x1, y0, y1, bw, bh, top, y: y1, reach: new Uint16Array(bw * bh).fill(FAR), tall: new Uint16Array(bw * bh), out: [] };
+        region.scan = { x0, x1, y0, y1, bw, bh, top, y: y1, reach: new Uint16Array(bw * bh).fill(FAR), out: [] };
       }
-      const { x0, x1, y0, y1, bw, bh, reach, tall, out } = region.scan;
+      const { x0, x1, y0, y1, bw, bh, reach, out } = region.scan;
       let budget = CELLS_PER_TICK;
       for (; region.scan.y >= y0 && budget > 0; region.scan.y -= 1, budget -= bw) {
         const y = region.scan.y;
@@ -75,42 +78,65 @@
           const edge = (x === x0 && bears(i - 1, x - 1, y)) || (x === x1 && bears(i + 1, x + 1, y));
           if (y === y1 || edge || !breakable(i, x, y)) { reach[row + x - x0] = 0; continue; }
           const below = y + 1 <= y1 ? reach[row + bw + x - x0] : 0;
-          if (below !== FAR && bears(i + W, x, y + 1)) reach[row + x - x0] = below;
+          if (below !== FAR && holds(i + W, x, y + 1)) reach[row + x - x0] = below;
         }
-        // Along the row both ways: a cell held from the side reaches one further than its holder.
+        // Along the row both ways: a cell held from the side by solid ground reaches one further
+        // than its holder.
         for (let pass = 0; pass < 2; pass += 1) {
           const step = pass ? -1 : 1;
           for (let k = 0; k < bw; k += 1) {
             const x = pass ? x1 - k : x0 + k, prev = x - step;
             if (prev < x0 || prev > x1) continue;
             const here = row + x - x0, there = row + prev - x0;
-            if (reach[there] === FAR || !bears(y * W + x, x, y) || !bears(y * W + prev, prev, y)) continue;
+            if (reach[there] === FAR || !holds(y * W + x, x, y) || !holds(y * W + prev, prev, y)) continue;
             if (reach[there] + 1 < reach[here]) reach[here] = reach[there] + 1;
           }
         }
-        // A thin sliver of ground standing free (no wider than THIN) can only stand so tall before it
-        // topples: three times its cohesion.
-        for (let x = x0; x <= x1;) {
-          if (!bears(y * W + x, x, y)) { x += 1; continue; }
-          let b = x;
-          while (b + 1 <= x1 && bears(y * W + b + 1, b + 1, y)) b += 1;
-          const thin = b - x + 1 <= THIN && x > x0 && b < x1;
-          for (let c = x; c <= b; c += 1) {
-            const k = (y - y0) * bw + c - x0;
-            tall[k] = thin && y < y1 ? tall[k + bw] + 1 : 0;
-          }
-          x = b + 1;
-        }
-        // What reaches out too far, or stands too tall and thin, breaks (and holds nothing up any
-        // more).
+        // What reaches out too far breaks (and holds nothing up any more).
         for (let x = x0; x <= x1; x += 1) {
           const here = row + x - x0, i = y * W + x;
-          if (!bears(i, x, y) || !breakable(i, x, y)) continue;
-          const id = mat[i] & ID_MASK;
-          if (reach[here] > cohesion[id] || tall[here] > cohesion[id] * 3) { out.push(i); reach[here] = FAR; tall[here] = 0; }
+          if (!holds(i, x, y) || !breakable(i, x, y)) continue;
+          if (reach[here] > cohesion[mat[i] & ID_MASK]) { out.push(i); reach[here] = FAR; }
         }
       }
       if (region.scan.y >= y0) return -1;
+      // Nothing is left hanging cut off: solid ground is followed out from what anchors it (the
+      // ground under the box, ground carrying on past its sides, buildings, propped tunnels),
+      // through solid ground only; any ground it does not reach - an island left by the slide, a
+      // block resting on loose rubble - comes down too.
+      if (!region.scan.linked) {
+        const linked = region.scan.linked = new Uint8Array(bw * bh), queue = region.scan.queue = [];
+        for (let k = 0; k < bw * bh; k += 1) {
+          const x = x0 + (k % bw), y = y0 + ((k / bw) | 0), i = y * W + x;
+          if (reach[k] === FAR || !holds(i, x, y)) continue;
+          if (y === y1 || x === x0 || x === x1 || !breakable(i, x, y)) { linked[k] = 1; queue.push(k); }
+        }
+        region.scan.head = 0;
+      }
+      if (region.scan.head < region.scan.queue.length) {
+        const { linked, queue } = region.scan;
+        let n = 0;
+        while (region.scan.head < queue.length && n < CELLS_PER_TICK) {
+          const k = queue[region.scan.head++];
+          n += 1;
+          const kx = k % bw;
+          for (const j of [k - bw, k + bw, kx > 0 ? k - 1 : -1, kx < bw - 1 ? k + 1 : -1]) {
+            if (j < 0 || j >= bw * bh || linked[j] || reach[j] === FAR) continue;
+            const x = x0 + (j % bw), y = y0 + ((j / bw) | 0);
+            if (!holds(y * W + x, x, y)) continue;
+            linked[j] = 1; queue.push(j);
+          }
+        }
+        if (region.scan.head < queue.length) return -1;
+        for (let k = 0; k < bw * bh; k += 1) {
+          if (linked[k] || reach[k] === FAR) continue;
+          const x = x0 + (k % bw), y = y0 + ((k / bw) | 0), i = y * W + x;
+          if (holds(i, x, y) && breakable(i, x, y)) { out.push(i); reach[k] = FAR; }
+        }
+        // (from the bottom up, so each comes away from under what rested on it)
+        out.sort((a, b) => b - a);
+        return -1;
+      }
       // (what broke loose comes away a share at a time, from the bottom up)
       if (region.scan.done === undefined) { region.scan.done = 0; stats.looked += bw * bh; }
       const until = Math.min(out.length, region.scan.done + BREAKS_PER_TICK);
@@ -119,11 +145,19 @@
       // (a slide that reached the top of the box goes on above it: the next look reaches higher)
       if (out.some((i) => ((i / W) | 0) < y0 + 6) && y0 > region.scan.top) region.y0 -= GROW;
       // A slide shakes the ground around it in its turn: its mass coming down (the rock that rains
-      // down adds its own strikes where it lands).
+      // down adds its own strikes where it lands). Trees and plants on the ground that came away
+      // come down with it, and so do boulders and cover that lost their footing.
       if (out.length) {
-        let sx = 0, sy = 0;
-        for (const i of out) { sx += i % W; sy += (i / W) | 0; }
+        let sx = 0, sy = 0, bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
+        for (const i of out) {
+          const x = i % W, y = (i / W) | 0;
+          sx += x; sy += y;
+          if (x < bx0) bx0 = x; if (x > bx1) bx1 = x; if (y < by0) by0 = y; if (y > by1) by1 = y;
+        }
         shock(sx / out.length, sy / out.length, out.length * SLIDE_SPEED * SLIDE_SPEED / 40);
+        const box = { x0: bx0 - 4, y0: by0 - 400, x1: bx1 + 4, y1: by1 + 4 };
+        if (PW.flora) PW.flora.afterBlast(world, particles, box);
+        if (PW.props) PW.props.afterBlast(world, particles, box);
       }
       region.scan = null;
       return out.length;

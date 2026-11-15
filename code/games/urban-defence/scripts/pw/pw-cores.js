@@ -147,7 +147,8 @@
           } else if (core.free && tick % SWEEP_EVERY === 0) {
             sweep(b, core);
             // (buried again by the heap slumping onto it, it rises again)
-            if (tick % (SWEEP_EVERY * 6) === 0 && !exposed(core)) core.free = false;
+            // (checked every third of a second: heaps of rubble can rain down on it at any time)
+            if (tick % (SWEEP_EVERY * 2) === 0 && !exposed(core)) core.free = false;
           }
         }
       }

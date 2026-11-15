@@ -49,13 +49,17 @@
         if (s > 1.35) continue;
         const i = y * W + x;
         const m = mat[i], id = m & ID_MASK;
-        // Vegetation and props in the blast are shredded.
+        // Vegetation and props in the blast are torn apart: trees and bushes are blown to pieces,
+        // their leaves flung off and their wood thrown out as splinters that land as wood rubble.
         const deco = PW.getLayer(world, 'deco', x, y);
         if (deco && s <= 1.1) {
           PW.setLayer(world, 'deco', x, y, 0);
           const decoOwner = PW.getOwner(world, x, y);
           if (decoOwner > 0 && decoOwner < 50000) damaged.set(decoOwner, damaged.get(decoOwner) || 0);
-          if (random() < 0.08) {
+          if (PW.flora && (PW.getFlags(world, x, y) & PW.FLAG.FLORA)) {
+            const [vx, vy] = fling(x, y, 220 * power, 140 * power);
+            PW.flora.shed(particles, x, y, deco, vx, vy);
+          } else if (random() < 0.08) {
             const [vx, vy] = fling(x, y, 140 * power, 80);
             particles.spawn(x + 0.5, y + 0.5, vx, vy, 0, deco, F.LEAF, 2 + random() * 2);
           }
@@ -137,7 +141,7 @@
     // Plants that lost their footing or trunk fall; cover that lost its support or most of
     // itself breaks apart. Nothing is left floating over the crater.
     const box = { x0: x0 - 4, y0: y0 - 4, x1: x1 + 4, y1: y1 + 4 };
-    if (PW.flora) PW.flora.afterBlast(world, particles, box);
+    if (PW.flora) PW.flora.afterBlast(world, particles, box, { x: cx, y: cy });
     if (PW.props) PW.props.afterBlast(world, particles, box);
     if (world.onDamage) for (const [id, cells] of damaged) world.onDamage(id, cells, cx, cy);
     // The ground around and above the hole is looked at for what lost its footing (the slope over
@@ -177,7 +181,9 @@
         if (x < 1 || x >= W - 1) continue;
         let y = Math.min(H - 2, Math.round(s.y));
         for (let up = 0; up < 80 && y > 1 && PW.mat.phase[mat[y * W + x] & ID_MASK] >= PW.PHASE.LIQUID; up += 1) y -= 1;
-        if ((mat[y * W + x] & ID_MASK) !== M.AIR) continue;
+        // (buried deep under the heap that came down on it, it smokes out of the heap's top)
+        if ((mat[y * W + x] & ID_MASK) !== M.AIR && world.groundTop[x] - 1 < y) y = world.groundTop[x] - 1;
+        if (y < 1 || (mat[y * W + x] & ID_MASK) !== M.AIR) continue;
         const density = Math.max(0, Math.min(3, Math.round(f * 3 + ((h >>> 10) & 3) / 3 - 0.5)));
         PW.set(world, x, y, M.SMOKE | density << 6, { quiet: true });
       }

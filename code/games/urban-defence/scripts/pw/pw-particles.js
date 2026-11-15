@@ -8,6 +8,7 @@
   const { phase, structural, hardness, breaksTo, palettes } = PW.mat;
 
   const GRAVITY = 260;      // cells/s^2 (about 1.9 g at 7 cm per cell: snappy but readable)
+  const SLIDE_KEEP = 0.94;  // share of its speed rubble keeps each time it strikes the slope it runs down
   // BUBBLE: air in water. It rises (buoyancy against drag gives ~0.5 m/s), wobbles, slides along
   // anything solid above it and pops when it reaches open air. It never leaves the water.
   const F = Object.freeze({ LAND: 1, DAMAGE: 2, WATER: 4, GLOW: 8, SMOKE: 16, LEAF: 32, BUBBLE: 64 });
@@ -178,6 +179,23 @@
           }
           // Bounce: reflect the blocked component, keep some of the other.
           const blockedX = Math.floor(x + sx) !== Math.floor(x) && !open(mat[Math.floor(y) * W + cx] & ID_MASK, fl);
+          // Rubble and earth striking a slope do not bounce: they run on down it, a stream of
+          // rock and earth that keeps its speed on a steep slope, loses it on a gentle one and
+          // spreads to a stop at the foot, throwing up dust as it goes.
+          let downhill = 0;
+          if (!blockedX && (fl & F.LAND) && vy[i] > 0) {
+            const row = cy * W, l = open(mat[row + cx - 1] & ID_MASK, fl), r = open(mat[row + cx + 1] & ID_MASK, fl);
+            downhill = l && r ? (Math.sign(vx[i]) || (i & 1 ? 1 : -1)) : l ? -1 : r ? 1 : 0;
+          }
+          if (downhill) {
+            const run = Math.max(speed * SLIDE_KEEP, 30);
+            vx[i] = downhill * run; vy[i] = 12;
+            x = cx + 0.5 + downhill; y = cy - 0.5;
+            if (run > 110 && (PW.hash3(cx, cy, age[i] * 60 | 0) & 7) === 0 && open(mat[(cy - 3) * W + cx] & ID_MASK, fl) && (mat[(cy - 3) * W + cx] & ID_MASK) === M.AIR) {
+              PW.set(world, cx, cy - 3, M.DUST | 2 << 6, { quiet: true });
+            }
+            break;
+          }
           if (blockedX) { vx[i] = -vx[i] * 0.25; vy[i] *= 0.75; } else { vy[i] = -vy[i] * 0.25; vx[i] *= 0.7; }
           if (!(fl & (F.LAND | F.WATER)) && speed < 30) { kill(i); removed = true; }
           break;

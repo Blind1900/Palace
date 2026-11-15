@@ -287,6 +287,32 @@
         if (owner && world.onDamage) world.onDamage(owner, 1, x, y);
       }
       const [c, s] = cosSin(p);
+      // A big piece coming straight down (a building dropping into its own footprint) does not
+      // burst all at once: only its bottom storey or so is crushed where it strikes, heaping up as
+      // rubble, and the rest comes on down into it, slowed, to be crushed in turn - it sinks into
+      // its own debris, breaking apart as it goes.
+      if (p.mass >= SPLIT_MIN * 4 && Math.abs(vx) < Math.abs(vy) * 0.6 && Math.abs(p.omega) < 0.5 && Math.abs(p.angle) < 0.6) {
+        const placed = place(p, p.data, c, s);
+        let lowest = -Infinity;
+        for (let j = 0; j < placed.x.length; j += 1) if (placed.solid[j]) lowest = Math.max(lowest, placed.y[j]);
+        const band = Math.max(8, Math.round(p.gh * 0.08));
+        const crushedKs = [], restKs = [];
+        for (let j = 0; j < placed.x.length; j += 1) (placed.y[j] >= lowest - band ? crushedKs : restKs).push(j);
+        scatter(pick(placed, crushedKs), vx * 0.3, 0, 0, wx, wy, 0.18);
+        const rest = pick(placed, restKs);
+        let restMass = 0;
+        for (let j = 0; j < rest.x.length; j += 1) restMass += rest.solid[j];
+        if (restMass >= CHUNK_MIN) {
+          spawn({ data: rest, owner: p.owner, vx: vx * 0.4, vy: Math.max(30, vy * 0.65), omega: p.omega * 0.5,
+            drop: true, floor: p.yf, base: p.base, generation: p.generation });
+          stats.crushSteps = (stats.crushSteps || 0) + 1;
+        } else if (rest.x.length) settle(rest, vx, vy);
+        puff(hx, hy - 2, Math.min(900, Math.round(band * Math.sqrt(p.mass) / 2)), 30 + Math.sqrt(p.mass) * 1.2, 10 + band);
+        // (the crushed storeys smoulder in the heap)
+        const crushed = crushedKs.length;
+        if (PW.addSmoulder && crushed > 400) PW.addSmoulder(world, hx, hy, 12 + Math.min(30, crushed / 300), 20 + Math.sqrt(crushed) * 0.6);
+        return;
+      }
       if (speed < SETTLE_SPEED || p.mass < SPLIT_MIN || p.generation >= 2) {
         // Small or slow: it breaks up where it lies, a fraction thrown off the impact.
         scatter(p.data, vx, vy, p.omega, ...centre(p), speed < SETTLE_SPEED ? 0.08 : 0.3, p, c, s);

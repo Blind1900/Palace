@@ -501,11 +501,25 @@
     return GENERATORS[record.type](PW.createRandom(record.seed), record.size, frozenGround(record.profile), record.look || undefined);
   }
 
-  // Remove a plant's cells (those still showing its colours) and throw some leaves and splinters.
-  function fell(world, particles, record) {
+  // A plant's cell as it comes apart: leaves and needles flutter off as leaves; trunk, branches
+  // and charred wood are thrown as splintered wood that lands as wood rubble. `vx`, `vy`: how it
+  // is thrown.
+  const WOOD_DEBRIS = M.DEBRIS | PW.DEBRIS_KIND.WOOD << 6;
+  const leafy = (color) => { const c = PW.unpack(color); return c[1] > c[0] + 6 && c[1] >= c[2]; };
+  function shed(particles, x, y, color, vx, vy) {
+    const F = PW.PARTICLE;
+    if (!particles || !F) return;
+    if (leafy(color)) {
+      if ((PW.hash2(x, y) & 3) === 0) particles.spawn(x + 0.5, y + 0.5, vx, vy, 0, color, F.LEAF, 1.5 + (PW.hash2(y, x) & 3) * 0.5);
+    } else particles.spawn(x + 0.5, y + 0.5, vx, vy, WOOD_DEBRIS, color, F.LAND | F.DAMAGE, 8);
+  }
+  // A plant that lost its footing or had its trunk cut comes down: it topples away from the
+  // blast (or to the side it leans), every cell of it thrown as leaves and splintered wood that
+  // spreads further the higher it was, and lands as wood rubble.
+  function fell(world, particles, record, from = null) {
     const sprite = regenerate(record);
     const left = Math.round(record.anchorX - sprite.anchorX), top = Math.round(record.row - sprite.anchorY);
-    const F = PW.PARTICLE;
+    const side = from ? (record.anchorX >= from.x ? 1 : -1) : (PW.hash2(record.anchorX, record.row) & 1 ? 1 : -1);
     let n = 0;
     for (let sy = 0; sy < sprite.height; sy += 1) {
       for (let sx = 0; sx < sprite.width; sx += 1) {
@@ -515,21 +529,22 @@
         if (PW.getLayer(world, 'deco', wx, wy) !== color) continue;
         PW.setLayer(world, 'deco', wx, wy, 0);
         n += 1;
-        if (particles && F && (PW.hash2(wx, wy) & 31) === 0) {
-          const r = (PW.hash3(wx, wy, 7) & 255) / 255 - 0.5;
-          particles.spawn(wx + 0.5, wy + 0.5, r * 90, -20 - (PW.hash3(wx, wy, 9) & 63), 0, color, F.LEAF, 1.5 + (PW.hash2(wy, wx) & 3) * 0.5);
-        }
+        const height = Math.max(0, record.row - wy), r = (PW.hash3(wx, wy, 7) & 255) / 255 - 0.5;
+        shed(particles, wx, wy, color, side * height * (1.2 + r * 0.6) + r * 30, -10 - (PW.hash3(wx, wy, 9) & 31));
       }
     }
     record.felled = true;
     return n;
   }
-  // After a blast: fell plants that lost their footing or had their trunk cut.
-  function afterBlast(world, particles, box) {
+  // After a blast or a slide: fell plants that lost their footing (the ground under them blown
+  // away, or broken loose and sliding) or had their trunk cut; they come down with the ground.
+  // Grass and flowers left in the air drop too.
+  function afterBlast(world, particles, box, from = null) {
     if (!world.flora) return 0;
     let felled = 0;
     const { mat, width: W } = world;
-    const solid = (x, y) => PW.mat.phase[PW.get(world, x, y) & ID_MASK] >= PW.PHASE.POWDER;
+    const solid = (x, y) => PW.mat.phase[PW.get(world, x, y) & ID_MASK] === PW.PHASE.SOLID;
+    dropTufts(world, particles, box);
     for (const record of world.flora) {
       if (record.x > box.x1 || record.x + record.width < box.x0 || record.y > box.y1 || record.y + record.height < box.y0) continue;
       let footed = 0, lost = 0;
@@ -552,10 +567,31 @@
           if (open(x, y) && open(x - 1, y) && open(x + 1, y)) cut = true;
         }
       }
-      if (cut || (footed && lost / footed > 0.4)) { fell(world, particles, record); felled += 1; }
+      if (cut || (footed && lost / footed > 0.4)) { fell(world, particles, record, from); felled += 1; }
     }
     if (felled) world.flora = world.flora.filter((record) => !record.felled);
     return felled;
+  }
+  // Grass blades and flowers whose ground is gone (no plant cell or solid ground under them, and
+  // not part of a tree or bush) drop away as leaves.
+  function dropTufts(world, particles, box) {
+    const { mat, width: W } = world;
+    const inPlant = (x, y) => (world.flora || []).some((r) => x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height);
+    const F = PW.PARTICLE;
+    for (let x = Math.max(1, box.x0); x <= Math.min(W - 2, box.x1); x += 1) {
+      for (let y = Math.max(1, box.y0); y <= Math.min(world.height - 2, box.y1); y += 1) {
+        if (!(PW.getFlags(world, x, y) & PW.FLAG.FLORA) || !PW.getLayer(world, 'deco', x, y)) continue;
+        const below = mat[(y + 1) * W + x] & ID_MASK;
+        if (PW.mat.phase[below] >= PW.PHASE.POWDER || PW.getLayer(world, 'deco', x, y + 1) || inPlant(x, y)) continue;
+        // (the whole tuft above it goes)
+        for (let k = y; k >= y - 30 && (PW.getFlags(world, x, k) & PW.FLAG.FLORA) && PW.getLayer(world, 'deco', x, k); k -= 1) {
+          const color = PW.getLayer(world, 'deco', x, k);
+          PW.setLayer(world, 'deco', x, k, 0);
+          PW.setFlag(world, x, k, PW.FLAG.FLORA, false);
+          if (particles && F && (PW.hash2(x, k) & 3) === 0) particles.spawn(x + 0.5, k + 0.5, ((PW.hash2(k, x) & 63) - 32), -10, 0, color, F.LEAF, 1.5);
+        }
+      }
+    }
   }
 
   // ---- Wild growth -----------------------------------------------------------------------------------
@@ -783,6 +819,6 @@
     return false;
   }
 
-  PW.flora = { plant, fell, regenerate, afterBlast, strike, makeGround, frozenGround, FLAT, tuft };
+  PW.flora = { plant, fell, regenerate, afterBlast, strike, shed, makeGround, frozenGround, FLAT, tuft };
   PW.vegetation = { broadleaf, conifer, birch, bush, deadTree, boulder, reeds, stamp, createSprite, foliage, limb, trim, spanDrop, spanRise };
 })();
