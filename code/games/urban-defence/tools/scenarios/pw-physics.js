@@ -59,6 +59,20 @@ check((stability.stats.shocks || 0) > 5 && stability.stats.loosened > 0, `blasts
 await view('ph-mountain-after', fx, fy - 60, 4);
 check((stability.stats.maxMs || 0) < 8, `looking for ground that lost its footing stays in budget (worst ${(stability.stats.maxMs || 0).toFixed(1)} ms)`);
 
+// 2b. The blast wave: a blast beside a glazed building shatters glass it does not touch, and the
+// air goes still again within a few seconds; working it stays cheap.
+{
+  const glassOf = (b) => { let n = 0; for (let y = b.body.top; y <= b.ground; y += 1) for (let x = b.body.left; x <= b.body.right; x += 1) if ((PW.get(world, x, y) & 63) === M.GLASS) n += 1; return n; };
+  const b = world.buildings.map((q) => [q, glassOf(q)]).sort((a, c) => c[1] - a[1])[0][0];
+  const before = glassOf(b);
+  pwApp.explode(b.body.right + 40, b.ground - 40, 30, 1.1);
+  let worst = 0;
+  for (let t = 0; t < 60; t += 1) { pwApp.stepWorld(1); worst = Math.max(worst, pwApp.air.stats.ms); }
+  const broken = before - glassOf(b);
+  pwApp.stepWorld(60 * 4);
+  check(broken > 5 && !pwApp.air.busy() && worst < 3, `a blast wave shatters a nearby building's glass (${broken} panes' cells, 40 cells from the blast), and the air settles (${pwApp.air.stats.tiles} tiles still moving, worst step ${worst.toFixed(2)} ms)`);
+}
+
 // 3. Untouched ground stays put: natural caves and overhangs elsewhere do not fall in by themselves.
 const before = stability.stats.broken;
 pwApp.stepWorld(60 * 5);

@@ -150,6 +150,10 @@
     // it may come down), and the blast's shock - its heat and pressure - shakes the ground around.
     if (world.stability) {
       world.stability.disturb(x0 - 4, y0 - r * 1.5, x1 + 4, y1 + 4);
+    }
+    // The blast wave: a burst of pressure in the air that spreads out as a wind.
+    if (world.air) world.air.blast(cx, cy, r * 1.4, power);
+    if (world.stability) {
       world.stability.shock(cx, cy, Math.pow(r * power, 3));
     }
     return { removed, damaged };

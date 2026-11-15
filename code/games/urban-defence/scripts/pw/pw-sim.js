@@ -346,7 +346,18 @@
         mat[i] = id | density << 6;
         PW.markDirty(world, x, y);
       }
-      const wind = windAt(x, y);
+      // The weather's wind, and where a blast has stirred the air, its wind too: each gas goes
+      // with the air as much as the element table's `wind` says.
+      let wind = windAt(x, y), lift = 0;
+      if (world.air && world.air.busy()) {
+        const a = world.air.at(x, y), k = PW.mat.advection[id];
+        wind += a[0] * k; lift = -a[1] * k;
+      }
+      // (a strong updraught or downdraught carries it straight up or down)
+      if (Math.abs(lift) > 20 && (PW.hash3(x, y, world.tick + 7) & 1023) / 1023 < Math.min(0.9, Math.abs(lift) / 120)) {
+        const j = lift > 0 ? i - W : i + W;
+        if (y > 1 && y < H - 2 && isEmpty(mat[j])) { move(i, x, y, j, x, lift > 0 ? y - 1 : y + 1, 'gas'); return true; }
+      }
       const r2 = (PW.hash3(x + 1, y, world.tick) & 1023) / 1023;
       const r3 = (PW.hash3(x, y + 1, world.tick) & 1023) / 1023;
       // Smoke billows: besides the wind it is carried sideways in eddies, patches of air (16 by 8

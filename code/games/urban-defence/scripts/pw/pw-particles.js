@@ -8,6 +8,7 @@
   const { phase, structural, hardness, breaksTo, palettes } = PW.mat;
 
   const GRAVITY = 260;      // cells/s^2 (about 1.9 g at 7 cm per cell: snappy but readable)
+  const MAX_SPEED = 1500;   // cells/s: nothing flies faster
   const SLIDE_KEEP = 0.94;  // share of its speed rubble keeps each time it strikes the slope it runs down
   // BUBBLE: air in water. It rises (buoyancy against drag gives ~0.5 m/s), wobbles, slides along
   // anything solid above it and pops when it reaches open air. It never leaves the water.
@@ -139,6 +140,18 @@
           const gx = Math.max(0, Math.min(W - 1, px[i] | 0));
           if (py[i] < world.groundTop[gx]) vx[i] += ((world.wind || 0) * 1.5 - vx[i]) * Math.min(1, 1.5 * dt);
         }
+        // A blast wave's wind pushes what flies through it: leaves are carried off, splinters and
+        // grit pushed along, heavy rubble barely (as the element table's `wind` says).
+        if (world.air && world.air.busy()) {
+          const a = world.air.at(px[i], py[i]);
+          if (a[0] || a[1]) {
+            const k = (fl & F.LEAF ? 0.7 : Math.max(0.03, PW.mat.advection[cell[i] & ID_MASK])) * Math.min(1, 6 * dt);
+            vx[i] += (a[0] - vx[i]) * k; vy[i] += (a[1] - vy[i]) * k;
+          }
+        }
+        // (nothing flies faster than MAX_SPEED: a bad push can never stall the step)
+        if (!(Math.abs(vx[i]) <= MAX_SPEED)) vx[i] = Math.sign(vx[i]) * MAX_SPEED || 0;
+        if (!(Math.abs(vy[i]) <= MAX_SPEED)) vy[i] = Math.sign(vy[i]) * MAX_SPEED || 0;
         let x = px[i], y = py[i];
         const nx = x + vx[i] * dt, ny = y + vy[i] * dt;
         const steps = Math.max(1, Math.ceil(Math.max(Math.abs(nx - x), Math.abs(ny - y))));
