@@ -47,6 +47,26 @@
     const natural = new Uint8Array(64), banded = new Uint8Array(64);
     for (const id of [M.GRASS, M.TOPSOIL, M.SOIL, M.CLAY, M.GRAVEL, M.STONE, M.BEDROCK, M.SAND, M.LOOSE_SOIL, M.LOOSE_STONE]) natural[id] = 1;
     for (const id of [M.SOIL, M.CLAY, M.GRAVEL, M.STONE]) banded[id] = 1;
+    // Subsoil country (pw-gen-terrain): each column's tint of the subsoil colours (brown earth,
+    // pale loess, red laterite). Loess stands in vertical joints: short darker streaks down it.
+    const soil = world.soil || null;
+    const tinted = new Uint8Array(64);
+    for (const id of [M.SOIL, M.CLAY, M.LOOSE_SOIL]) tinted[id] = 1;
+    function soilShade(color, x, y, k) {
+      const i = x * 3;
+      if (soil.loess[x] > 0.5 && (PW.hash2(x, (y / 7) | 0) & 15) === 0) k = k * 230 >> 8;
+      const r = Math.min(255, ((color & 255) * soil.tint[i] >> 8) * k >> 8);
+      const g = Math.min(255, ((color >>> 8 & 255) * soil.tint[i + 1] >> 8) * k >> 8);
+      const b = Math.min(255, ((color >>> 16 & 255) * soil.tint[i + 2] >> 8) * k >> 8);
+      return (0xff000000 | b << 16 | g << 8 | r) >>> 0;
+    }
+    // Grass roots: pale strands from the turf down into the dark topsoil, two to five cells long,
+    // in about one column in three, fading into the soil at their tips.
+    const ROOT = [112, 96, 66];
+    function rootDepth(x, y) {
+      for (let d = 1; d <= 5; d += 1) if ((mat[(y - d) * W + x] & ID_MASK) === M.GRASS) return d;
+      return 0;
+    }
     const voidColor = [30, 24, 19];
     const waterTop = PW.abgr(128, 186, 236);
     const waterBase = [52, 120, 200];
@@ -136,9 +156,21 @@
         if (banded[id]) {
           if ((h & 1023) === 0 || (h & 1023) === 1) return toned(pebble, dk * grainTone(g) >> 8);
           const band = ((((y + bandWobble[x]) / 27) | 0) % 3 + 3) % 3;
-          return shade(palettes[id][(m >> 6) * 2 + (h & 1)], (BAND_TONES[band] * dk >> 8) * grainTone(g) >> 8);
+          const k = (BAND_TONES[band] * dk >> 8) * grainTone(g) >> 8;
+          return soil && tinted[id] ? soilShade(palettes[id][(m >> 6) * 2 + (h & 1)], x, y, k) : shade(palettes[id][(m >> 6) * 2 + (h & 1)], k);
         }
-        return shade(palettes[id][(m >> 6) * 2 + (h & 1)], (id === M.GRASS ? 256 : dk) * grainTone(g) >> 8);
+        if (id === M.TOPSOIL && y > 5) {
+          const d = rootDepth(x, y), rh = PW.hash2(x, 0x5007);
+          if (d && rh % 3 === 0 && d <= 2 + (rh >>> 4) % 4) {
+            const t = d / (3 + (rh >>> 4) % 4);
+            const base = palettes[id][(m >> 6) * 2 + (h & 1)];
+            const r = (base & 255) + (ROOT[0] - (base & 255)) * (1 - t), gg = (base >>> 8 & 255) + (ROOT[1] - (base >>> 8 & 255)) * (1 - t);
+            const b = (base >>> 16 & 255) + (ROOT[2] - (base >>> 16 & 255)) * (1 - t);
+            return toned([r, gg, b], dk * grainTone(g) >> 8);
+          }
+        }
+        const k = (id === M.GRASS ? 256 : dk) * grainTone(g) >> 8;
+        return soil && tinted[id] ? soilShade(palettes[id][(m >> 6) * 2 + (h & 1)], x, y, k) : shade(palettes[id][(m >> 6) * 2 + (h & 1)], k);
       }
       if (id === M.ORE) return oreColor(x, y, m >> 6, h);
       if (id === M.LINING) {

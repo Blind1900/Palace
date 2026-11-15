@@ -338,8 +338,13 @@
       const wind = windAt(x, y);
       const r2 = (PW.hash3(x + 1, y, world.tick) & 1023) / 1023;
       const r3 = (PW.hash3(x, y + 1, world.tick) & 1023) / 1023;
-      const side = r3 < Math.min(0.9, Math.abs(wind) / 40) ? Math.sign(wind) : (r3 & 1 ? 1 : -1) * ((x + world.tick) & 1 ? 1 : -1);
-      const rise = RISE[id];
+      // Smoke billows: besides the wind it is carried sideways in eddies, patches of air (16 by 8
+      // cells, changing every second) that each push one way, so a plume widens and wanders as it
+      // rises instead of standing in a straight column; thin smoke, cooler, rises slower.
+      const eddy = id === M.SMOKE ? ((PW.hash3(x >> 4, y >> 3, world.tick >> 6) & 1) ? 1 : -1) : 0;
+      const side = r3 < Math.min(0.9, Math.abs(wind) / 40) ? Math.sign(wind)
+        : eddy && r3 < 0.75 ? eddy : (r3 & 1 ? 1 : -1) * ((x + world.tick) & 1 ? 1 : -1);
+      const rise = id === M.SMOKE ? RISE[id] * (0.4 + 0.2 * density) : RISE[id];
       const vert = rise > 0 ? -W : W;
       // Up (or down for dust), through air; rising gas also bubbles up through water.
       if (r2 < Math.abs(rise) && y > 0 && y < H - 1) {
@@ -350,7 +355,7 @@
         if (x + side > 0 && x + side < W - 1 && isEmpty(mat[diag])) { move(i, x, y, diag, x + side, y + (rise > 0 ? -1 : 1), 'gas'); return true; }
       }
       // Sideways: drift with the wind, or spread.
-      if (x + side > 0 && x + side < W - 1 && isEmpty(mat[i + side]) && (wind !== 0 || r2 > 0.6)) {
+      if (x + side > 0 && x + side < W - 1 && isEmpty(mat[i + side]) && (wind !== 0 || eddy || r2 > 0.6)) {
         // Thick smoke spreads into the cell it leaves behind as it drifts.
         move(i, x, y, i + side, x + side, y, 'gas');
         if (id !== M.STEAM && density >= 2 && r < 0.25 && isEmpty(mat[i])) {

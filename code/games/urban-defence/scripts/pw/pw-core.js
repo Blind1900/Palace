@@ -84,8 +84,9 @@
   define(M.AIR, 'air', { phase: PHASE.AIR, hardness: 0 }, [[0, 0, 0, 0]]);
   define(M.GRASS, 'grass', { ground: true, hardness: 0.15, breaksTo: M.LOOSE_SOIL },
     [[88, 124, 54], [64, 96, 42], [92, 128, 56], [70, 102, 45], [84, 120, 52], [60, 92, 40], [96, 132, 58], [66, 98, 43]]);
+  // (dark humus-rich topsoil, a chernozem, clearly darker than the subsoil under it)
   define(M.TOPSOIL, 'topsoil', { ground: true, hardness: 0.2, breaksTo: M.LOOSE_SOIL },
-    [[104, 80, 52], [94, 72, 47], [108, 83, 54], [98, 75, 49], [101, 78, 51], [92, 70, 46], [110, 85, 55], [96, 74, 48]]);
+    [[66, 50, 36], [59, 45, 33], [70, 53, 38], [62, 47, 34], [64, 49, 35], [57, 44, 32], [73, 56, 40], [61, 46, 33]]);
   define(M.SOIL, 'soil', { ground: true, hardness: 0.25, breaksTo: M.LOOSE_SOIL },
     [[92, 72, 48], [88, 69, 46], [95, 74, 50], [86, 67, 45], [93, 73, 49], [89, 70, 47], [97, 76, 51], [85, 66, 44]]);
   define(M.CLAY, 'clay', { ground: true, hardness: 0.35, breaksTo: M.LOOSE_SOIL },

@@ -54,7 +54,8 @@ pwApp.stepWorld(60);
 const brokenNow = [...hm.broken].filter(Boolean).length;
 check(brokenNow > 0 && !pipes.flowing(hm, left.riser.x), `a blast cuts the HM line (${brokenNow} columns broken)`);
 const storedBefore = left.stored, deliveredBefore = left.delivered;
-pwApp.stepWorld(60 * 4);
+// (until the next load comes down the belt to the hopper: a long drift's belt takes a while)
+for (let s = 0; s < 20 && left.stored <= storedBefore; s += 1) pwApp.stepWorld(60);
 check(left.stored > storedBefore, `while the line is cut, the mine stores its ore (${storedBefore} -> ${left.stored} HM stored)`);
 await view('mn-cut', cutX, cutY, 5);
 for (let s = 0; s < 40 && [...hm.broken].some(Boolean); s += 1) pwApp.stepWorld(60);

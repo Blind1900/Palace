@@ -109,4 +109,48 @@ if (asian) {
     `the asian made ground is layered like the Forbidden City's (${best ? `${best.paints} tones, ${best.ids} materials, granite ${best.granite} rows` : 'no street'}, cypress pile ${pile ? `at ${pile}` : 'none'})`);
   await view('mg-asian-section', x0 + 60, world.groundTop[x0 + 60] + 45, 7);
 }
+
+// Roads are built up in courses under the paving (a base course, a sub-base, the compacted
+// subgrade), in towns and on open ground alike, and the base reaches past a road's end, battered
+// back into the ground beside it.
+{
+  const coursed = (x) => {
+    const g = world.groundTop[x];
+    for (let d = 4; d < 11; d += 1) if ((PW.get(world, x, g + d) & 63) !== M.FILL) return false;
+    return true;
+  };
+  let streets = 0, built = 0;
+  for (const s of world.settlements) {
+    for (let x = s.streetLeft + 10; x < s.streetRight - 10; x += 7) {
+      const g = world.groundTop[x];
+      if (!(PW.getFlags(world, x, g) & PW.FLAG.ROAD) || PW.getOwner(world, x, g + 6)) continue;
+      streets += 1;
+      if (coursed(x)) built += 1;
+    }
+  }
+  check(streets > 50 && built >= streets * 0.9, `town streets stand on a base course and sub-base (${built}/${streets} columns)`);
+  // A road laid with the road tool across open, level ground.
+  let rx = null;
+  // (wild land: away from every site, natural turf or topsoil on top)
+  const wild = (x) => pwApp.layout.sites.every((s) => x < s.x0 - 200 || x > s.x1 + 200);
+  for (let x = 600; x < world.width - 600 && rx === null; x += 17) {
+    let ok = wild(x);
+    for (let d = -60; d <= 60 && ok; d += 3) {
+      const c = x + d, g = world.groundTop[c], top = PW.get(world, c, g) & 63;
+      if (Math.abs(g - world.groundTop[x]) > 10 || (top !== M.GRASS && top !== M.TOPSOIL) || PW.getOwner(world, c, g + 8) || (PW.getFlags(world, c, g) & (PW.FLAG.ROAD | PW.FLAG.FIELD))) ok = false;
+    }
+    if (ok) rx = x;
+  }
+  if (rx !== null) {
+    for (let x = rx - 30; x <= rx + 30; x += 1) pwApp.layRoad({ x, y: world.groundTop[x] });
+    let laid = 0;
+    for (let x = rx - 28; x <= rx + 28; x += 1) if (coursed(x)) laid += 1;
+    // (past the road's end, its base lies under the ground beside it)
+    const g = world.groundTop[rx - 30];
+    let flare = 0;
+    for (let d = 2; d <= 4; d += 1) for (let y = g + 8; y < g + 11; y += 1) if ((PW.get(world, rx - 30 - d, y) & 63) === M.FILL) flare += 1;
+    check(laid >= 50 && flare > 0, `a road laid on open ground is built up in courses (${laid}/57 columns), its base battered back past its end (${flare} cells)`);
+    await view('mg-road-courses', rx - 30, world.groundTop[rx - 30] + 6, 9);
+  } else check(false, 'found open level ground to lay a test road on');
+}
 return { checks, shots: shots.length };

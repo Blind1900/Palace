@@ -298,6 +298,9 @@
         if (go(faceSpot)) { m.state = 'drill'; m.timer = 0; m.facing = op.dir; }
         break;
       case 'drill':
+        // (the hauler leaves the face for the stored heap as soon as the line flows again, not
+        // only after a load: driving through rock towards the vein can take a long while)
+        if (hauler && !m.load) { m.state = 'toStorage'; break; }
         m.timer += dt;
         if (m.timer >= DRILL_TIME) {
           m.timer = 0;

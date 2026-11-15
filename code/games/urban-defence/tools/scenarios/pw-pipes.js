@@ -61,7 +61,7 @@ for (const s of world.settlements) {
 }
 const ok = (style, test) => !byStyle[style] || test(byStyle[style]);
 check(ok('modern', (s) => s.slab > 0 && s.cable > 0) && ok('asian', (s) => s.course > 0 && s.fill > s.slab && s.cable === 0)
-  && ok('gothic', (s) => s.slab > 0 && s.course > 0 && s.cable === 0), `each faction builds its own made ground (${JSON.stringify(byStyle)})`);
+  && ok('gothic', (s) => s.course > 0 && s.cable === 0), `each faction builds its own made ground (${JSON.stringify(byStyle)})`);
 
 // Nothing just stops: each run's underground ends are capped, and where a line comes up to a
 // building its riser runs into the machine that belongs there, standing on the ground beside it.

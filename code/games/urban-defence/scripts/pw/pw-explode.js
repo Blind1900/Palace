@@ -106,7 +106,7 @@
     }
     if (world.effects) world.effects.push({ kind: 'flash', x: cx, y: cy, radius: r * 2.2, age: 0, life: 0.35 });
     // The crater smoulders, feeding a smoke column for a while after the blast.
-    addSmoulder(world, cx, Math.min(H - 2, cy + below), 30 + r * 1.5 * power, r * 1.1);
+    addSmoulder(world, cx, Math.min(H - 2, cy + below), 8 + r * 0.35 * power, r * 1.1);
     // Plants that lost their footing or trunk fall; cover that lost its support or most of
     // itself breaks apart. Nothing is left floating over the crater.
     const box = { x0: x0 - 4, y0: y0 - 4, x1: x1 + 4, y1: y1 + 4 };
@@ -117,10 +117,12 @@
   }
 
   // Smouldering ground or rubble at (x, y): for `seconds` it keeps putting smoke into the air over
-  // a `width` wide patch (the first open cells above it), dying down as it goes, so strikes and
-  // big collapses leave a tall plume that lingers and drifts with the wind.
+  // a `width` wide patch (the first open cells above it), dying down as it goes. It does not pour
+  // out of one spot in a steady jet: it comes in puffs that swell and slacken, from all over a patch
+  // that spreads as the rubble smoulders on, thinner as it dies down, and it tails off softly.
   function addSmoulder(world, x, y, seconds, width) {
-    (world.smoulders || (world.smoulders = [])).push({ x, y, width: Math.max(4, width), life: seconds, left: seconds, n: 0 });
+    (world.smoulders || (world.smoulders = [])).push({ x, y, width: Math.max(4, width), life: seconds, left: seconds, n: 0, age: 0,
+      seed: (PW.hash2(x | 0, y | 0) & 1023) / 163 });
   }
   function stepSmoulders(world, dt) {
     const list = world.smoulders;
@@ -128,18 +130,23 @@
     const { mat, width: W, height: H } = world;
     for (let k = list.length - 1; k >= 0; k -= 1) {
       const s = list[k];
-      s.left -= dt;
+      s.left -= dt; s.age += dt;
       if (s.left <= 0) { list.splice(k, 1); continue; }
-      const rate = (s.left / s.life) * (1.5 + s.width / 8);   // smoke cells per tick
+      const f = s.left / s.life;
+      const puff = 0.5 + 0.5 * Math.sin(s.age * 2.1 + s.seed) * Math.sin(s.age * 0.83 + s.seed * 1.7);
+      const rate = Math.pow(f, 1.5) * (2 + s.width / 6) * Math.max(0.08, puff);   // smoke cells per tick
       let n = Math.floor(rate) + ((PW.hash3(s.x | 0, s.n, 11) & 1023) / 1023 < rate % 1 ? 1 : 0);
+      const spread = s.width * (1 + (1 - f) * 0.9);
       while (n-- > 0) {
         s.n += 1;
-        const x = Math.round(s.x + ((PW.hash3(s.x | 0, s.n, 3) & 1023) / 1023 - 0.5) * s.width);
+        const h = PW.hash3(s.x | 0, s.n, 3);
+        const x = Math.round(s.x + ((h & 1023) / 1023 - 0.5) * spread);
         if (x < 1 || x >= W - 1) continue;
         let y = Math.min(H - 2, Math.round(s.y));
         for (let up = 0; up < 80 && y > 1 && PW.mat.phase[mat[y * W + x] & ID_MASK] >= PW.PHASE.LIQUID; up += 1) y -= 1;
         if ((mat[y * W + x] & ID_MASK) !== M.AIR) continue;
-        PW.set(world, x, y, M.SMOKE | 3 << 6, { quiet: true });
+        const density = Math.max(0, Math.min(3, Math.round(f * 3 + ((h >>> 10) & 3) / 3 - 0.5)));
+        PW.set(world, x, y, M.SMOKE | density << 6, { quiet: true });
       }
     }
   }

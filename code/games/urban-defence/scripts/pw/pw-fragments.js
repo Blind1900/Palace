@@ -316,7 +316,7 @@
       // A dust cloud rolls out from where it came down, wide and low; big impacts leave the rubble
       // smouldering.
       puff(hx, hy - 2, Math.min(2600, Math.round(p.mass / 2)), 36 + Math.sqrt(p.mass) * 1.8, 12 + Math.sqrt(p.mass) * 0.4);
-      if (p.mass > 1500 && PW.addSmoulder) PW.addSmoulder(world, hx, hy, 50 + Math.min(150, p.mass / 120), 30 + Math.sqrt(p.mass) * 0.6);
+      if (p.mass > 1500 && PW.addSmoulder) PW.addSmoulder(world, hx, hy, 14 + Math.min(36, p.mass / 400), 30 + Math.sqrt(p.mass) * 0.6);
     }
     // The piece's cells at their present places in the world, as data for a new piece.
     function place(p, part, c, s) {

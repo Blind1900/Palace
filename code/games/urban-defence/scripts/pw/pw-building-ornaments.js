@@ -227,25 +227,44 @@
       CROWN_DRAW.spire(c, P, cx, y - 6, L - 6);
     },
     dragon(c, P, cx, y, L, random, facing = 1) {
-      lotus(c, P, cx, y, 7);
-      dragonBody(c, P, cx, y - 6, Math.max(30, L - 18), facing, random);
+      const top = dragonPedestal(c, P, cx, y, 10);
+      dragonBody(c, P, cx, top, Math.max(30, L - 20), facing, random);
     },
     pillar(c, P, cx, y, L, random, facing = 1) {
-      lotus(c, P, cx, y, 5);
-      const h = Math.max(36, L - 6);
-      for (let dy = 0; dy < h; dy += 1) for (let dx = -1; dx <= 1; dx += 1) orn(c, cx + dx, y - 6 - dy, lit(GOLD, dx, 1));
-      for (let dx = -3; dx <= 3; dx += 1) orn(c, cx + dx, y - 6 - h, P.ornament);
-      orn(c, cx, y - 7 - h, BEACON); orn(c, cx, y - 8 - h, BEACON);
-      dragonBody(c, P, cx, y - 6, Math.max(36, h - 6), facing, random, true);
+      const top = dragonPedestal(c, P, cx, y, 8);
+      const h = Math.max(36, L - 8);
+      for (let dy = 0; dy < h; dy += 1) for (let dx = -1; dx <= 1; dx += 1) orn(c, cx + dx, top - dy, lit(GOLD, dx, 1));
+      for (let dx = -3; dx <= 3; dx += 1) orn(c, cx + dx, top - h, P.ornament);
+      orn(c, cx, top - 1 - h, BEACON); orn(c, cx, top - 2 - h, BEACON);
+      dragonBody(c, P, cx, top, Math.max(36, h - 6), facing, random, true);
     },
     twin(c, P, cx, y, L, random, facing = 1) {
       for (let dy = 0; dy < 5; dy += 1) for (let dx = -28; dx <= 28; dx += 1) orn(c, cx + dx, y - dy, dy === 4 ? GOLD : lit(P.frame, dx, 28), ROLE.CROWN, M.WOOD);
       sorin(c, P, cx, y - 5, Math.round(L * 0.7));
       // The dragons are drawn back one first (each from its own share of the random stream), so the
-      // mirrored building gets the mirror images of the same two dragons.
-      for (const side of facing > 0 ? [-1, 1] : [1, -1]) dragonBody(c, P, cx + side * 22, y - 5, Math.max(24, Math.round(L * 0.6)), side, random);
+      // mirrored building gets the mirror images of the same two dragons, each on its own pedestal.
+      for (const side of facing > 0 ? [-1, 1] : [1, -1]) {
+        const top = dragonPedestal(c, P, cx + side * 20, y - 5, 6);
+        dragonBody(c, P, cx + side * 20, top, Math.max(24, Math.round(L * 0.55)), side, random);
+      }
     },
   };
+  // A dragon's pedestal: a white marble plinth in two steps (its joints dark, its top edge lit)
+  // under a red lacquer drum banded in gold. Returns the row the dragon stands on.
+  const MARBLE = [214, 210, 198], MARBLE_DARK = [150, 146, 136];
+  function dragonPedestal(c, P, cx, y, half) {
+    const rows = [[half + 4, 'marble'], [half + 4, 'joint'], [half + 2, 'marble'], [half + 2, 'marble'],
+      [half, 'band'], [half, 'drum'], [half, 'drum'], [half, 'drum'], [half, 'band']];
+    rows.forEach(([w, kind], dy) => {
+      for (let dx = -w; dx <= w; dx += 1) {
+        const edge = Math.abs(dx) === w;
+        const color = kind === 'joint' ? MARBLE_DARK : kind === 'marble' ? (edge ? MARBLE_DARK : lit(MARBLE, dx, w))
+          : kind === 'band' ? lit(GOLD, dx, w) : edge ? tone(P.frame, 0.7) : lit(P.frame, dx, w);
+        orn(c, cx + dx, y - dy, color, ROLE.CROWN, kind === 'drum' || kind === 'band' ? M.WOOD : M.MASONRY);
+      }
+    });
+    return y - rows.length;
+  }
   function lotus(c, P, cx, y, half) {
     for (let dy = 0; dy < 6; dy += 1) {
       const w = dy < 3 ? half + 4 : half + (dy % 2 ? 2 : 0);
@@ -266,107 +285,55 @@
     }
     orn(c, cx, flame - 7, BEACON); orn(c, cx, flame - 8, BEACON);
   }
-  // Coiling dragon: a 5-cell-thick S-curve with spines, claws, a horned head and a red pearl.
-  // A Chinese dragon climbing in an S-coil, its head turned to look out the facing way: a scaled
-  // gold body thickening from a tufted tail, a cream belly, red flame spines along its back, four
-  // clawed legs, a long head with open jaws and fangs, an eye, antler horns, a flowing red mane,
-  // whiskers and a beard, and the flaming pearl it chases. Everything is placed in the dragon's own
-  // terms (u forward along `facing`, rounded before mirroring) so the mirrored dragon is exact; the
-  // light stays on the canvas left.
-  const DRAGON = { gold: [226, 178, 64], goldLit: [250, 210, 104], goldDark: [170, 120, 36], scale: [196, 142, 44],
-    belly: [244, 222, 150], bellyDark: [214, 186, 112], red: [206, 50, 38], redLit: [244, 104, 58], redDark: [150, 32, 26],
-    ivory: [238, 228, 200], ivoryDark: [196, 182, 150], white: [250, 248, 240], black: [24, 20, 18], mouth: [110, 24, 22] };
+  // A Chinese dragon climbing in an S-coil, its head turned to look out the facing way, kept to a
+  // simple, readable silhouette like the other crowns: a gold body (its back edge darker, its
+  // front edge lit) tapering to the tail, a few red spines along its back, a blunt horned head and
+  // the pearl it chases. Everything is placed in the dragon's own terms (u forward along
+  // `facing`, rounded before mirroring) so the mirrored dragon is exact; the light stays on the
+  // canvas left.
+  const DRAGON = { gold: [226, 178, 64], goldLit: [250, 210, 104], goldDark: [170, 120, 36],
+    red: [206, 50, 38], redDark: [150, 32, 26], ivory: [238, 228, 200], ivoryDark: [196, 182, 150], black: [24, 20, 18], mouth: [110, 24, 22] };
   function dragonBody(c, P, cx, baseY, length, facing, random, coilAround = false) {
     const D = DRAGON;
     const f = facing < 0 ? -1 : 1;
     const put = (u, y, color) => orn(c, cx + f * u, y, color);     // u: cells towards the facing side
-    const amp = Math.max(6, Math.min(14, Math.round(length / 8))) * (coilAround ? 1.2 : 1);
+    const amp = Math.max(6, Math.min(12, Math.round(length / 9))) * (coilAround ? 1.2 : 1);
     const periods = length >= 90 ? 1.5 : 1;
-    const neck = Math.max(24, length - 16);                         // the body climbs to here; the head sits above
-    const half = (t) => Math.max(1, Math.min(4, length / 18) * (t < 0.15 ? 0.3 + t / 0.15 * 0.7 : t > 0.85 ? 1 - (t - 0.85) / 0.15 * 0.35 : 1));
+    const neck = Math.max(24, length - 12);                         // the body climbs to here; the head sits above
+    // (5 cells thick, 7 where it rises from its coil)
+    const half = (t) => (t < 0.18 ? 3 : 2);
     const along = (t) => Math.round(amp * Math.min(1, 4 * t) * Math.sin(2 * Math.PI * periods * t));
-    const lit = (u, color) => tone(color, (f * u) < 0 ? 1.12 : 1);   // canvas-left side catches the light
-    // Body: a ribbon of discs along the path, belly plates on the front, scales on the back.
+    const lit = (u, color) => tone(color, (f * u) < 0 ? 1.1 : 1);    // canvas-left side catches the light
     let headU = 0, headY = baseY - neck;
     for (let i = 0; i <= neck; i += 1) {
-      const t = i / neck, u0 = along(t), y = baseY - i, h = half(t);
-      const r = Math.round(h);
-      for (let d = -r; d <= r; d += 1) {
-        const front = d > r * 0.25;
-        let color;
-        if (front) color = (i % 3 === 0) ? D.bellyDark : D.belly;                                   // belly plates
-        else if (((i + Math.abs(d)) % 4 === 0) || (i % 4 === 2 && Math.abs(d) === r - 1)) color = D.scale;   // scale rows
-        else color = d === -r ? D.goldDark : D.gold;
-        put(u0 + d, y, lit(u0 + d, color));
-      }
-      // Flame spines along the back.
-      if (i % 5 === 2 && t > 0.1 && t < 0.95) {
-        for (let k = 1; k <= Math.max(2, r); k += 1) put(u0 - r - k, y - Math.round(k * 0.6), k === 1 ? D.red : k % 2 ? D.redLit : D.red);
-      }
+      const t = i / neck, u0 = along(t), y = baseY - i, r = half(t);
+      for (let d = -r; d <= r; d += 1) put(u0 + d, y, lit(u0 + d, d === -r ? D.goldDark : d === r ? D.goldLit : D.gold));
+      // A red spine every 7 rows along its back.
+      if (i % 7 === 3 && t > 0.15 && t < 0.9) { put(u0 - r - 1, y, D.red); put(u0 - r - 2, y - 1, D.redDark); }
       if (i === neck) { headU = u0; headY = y; }
     }
-    // Tail tuft at the base.
-    for (let k = 0; k < 5; k += 1) { put(along(0) - 2 - k, baseY + Math.min(0, -k + 2), k % 2 ? D.redLit : D.red); put(along(0) - 1 - k, baseY - 1 - (k >> 1), D.red); }
-    // Four legs: a thigh out of the belly side, a forearm down, three ivory talons.
-    for (const t of [0.3, 0.36, 0.64, 0.7]) {
-      const i = Math.round(t * neck), u0 = along(t), y = baseY - i, r = Math.round(half(t));
-      for (let k = 0; k <= 5; k += 1) { put(u0 + r + k, y + Math.round(k * 0.3), D.gold); put(u0 + r + k, y + 1 + Math.round(k * 0.3), D.goldDark); }
-      for (let k = 0; k <= 3; k += 1) put(u0 + r + 5, y + 2 + k, D.gold);
-      for (const tu of [-1, 0, 1]) { put(u0 + r + 5 + tu, y + 6, D.ivoryDark); put(u0 + r + 5 + tu * 2, y + 7, D.ivory); }
+    // Its tail lies coiled on the pedestal, a flat gold loop around the foot of the body, ending in
+    // a red tip.
+    for (let v = 0; v <= 4; v += 1) for (let u = -9; u <= 9; u += 1) {
+      const k = (u / 9) ** 2 + ((v - 2) / 2.4) ** 2;
+      if (k > 1 || k < 0.42) continue;
+      put(u, baseY - v, lit(u, v === 0 ? D.goldDark : v === 4 ? D.goldLit : D.gold));
     }
-    // Head, looking out the facing way: (hu, hy) is the back of the skull over the neck.
+    put(-10, baseY - 1, D.red); put(-11, baseY - 2, D.redDark);
+    // Head, looking out the facing way: a rounded skull, a blunt snout with the mouth a dark line,
+    // one eye, two short horns swept back and a short red mane.
     const hu = headU, hy = headY - 3;
     const H = (du, dy, color) => put(hu + du, hy + dy, color);
     for (let dy = -4; dy <= 3; dy += 1) for (let du = -3; du <= 5; du += 1) {
-      if ((du - 1) ** 2 / 20 + (dy + 0.5) ** 2 / 14 > 1) continue;
-      H(du, dy, dy < -2 ? D.goldLit : D.gold);                                                      // skull
+      if ((du - 1) ** 2 / 18 + (dy + 0.5) ** 2 / 13 > 1) continue;
+      H(du, dy, dy < -2 ? D.goldLit : D.gold);
     }
-    for (let du = 5; du <= 15; du += 1) {
-      const top = du >= 13 ? -3 : -2;                                                                 // the nose rises at the tip
-      for (let dy = top; dy <= 0; dy += 1) H(du, dy, dy === top ? D.goldLit : D.gold);               // upper jaw
-      H(du, 1, du <= 13 ? D.mouth : D.gold);                                                          // open mouth
-      if (du <= 13) H(du, 2, D.goldDark);                                                             // lower jaw
-      if (du <= 12) H(du, 3, D.bellyDark);
-    }
-    for (let du = 7; du <= 13; du += 2) H(du, 1, D.white);                                            // teeth
-    H(13, 2, D.white); H(14, 1, D.white);                                                             // fang
-    H(14, -2, D.black);                                                                               // nostril
-    H(4, -3, D.white); H(5, -3, D.white); H(5, -2, D.black); H(4, -2, D.white);                       // eye
-    for (let du = 3; du <= 6; du += 1) H(du, -4, D.red);                                              // brow ridge
-    // Antler horns swept back, each with a tine.
-    for (let k = 0; k <= 7; k += 1) { H(-k, -4 - k, k % 3 === 0 ? D.ivoryDark : D.ivory); H(1 - k, -4 - k, D.ivoryDark); }
-    for (let k = 1; k <= 3; k += 1) H(-3 + k, -7 - k, D.ivory);
-    // Mane: red flames streaming back from behind the skull (each strand an unbroken wavy line).
-    for (let s = 0; s < 6; s += 1) {
-      const dy0 = -3 + s * 1.4 | 0, len = 5 + (s % 3) * 2;
-      let prev = null;
-      for (let k = 0; k < len; k += 1) {
-        const v = dy0 + Math.round(Math.sin(k * 0.9 + s) * 1.2);
-        const color = k > len - 3 ? D.redLit : s % 2 ? D.red : D.redDark;
-        if (prev !== null) for (let w = Math.min(prev, v); w <= Math.max(prev, v); w += 1) H(-3 - k, w, color);
-        else H(-3 - k, v, color);
-        prev = v;
-      }
-    }
-    // Whiskers: two long barbels curling from the snout out to the pearl, drawn as unbroken
-    // lines; a beard under the jaw.
-    const line = (points, color) => {
-      for (let n = 0; n + 1 < points.length; n += 1) {
-        const [a0, b0] = points[n], [a1, b1] = points[n + 1];
-        const steps = Math.max(Math.abs(a1 - a0), Math.abs(b1 - b0));
-        for (let s = 0; s <= steps; s += 1) H(Math.round(a0 + (a1 - a0) * s / steps), Math.round(b0 + (b1 - b0) * s / steps), color);
-      }
-    };
-    line([[15, -1], [17, -4], [20, -5], [22, -3]], D.goldDark);
-    line([[12, 3], [14, 6], [17, 7], [20, 5], [21, 3]], D.goldDark);
-    for (let du = 3; du <= 8; du += 1) for (let dy = 4; dy <= 4 + ((du + 1) % 3); dy += 1) H(du, dy, dy > 4 ? D.redDark : D.red);
-    // The flaming pearl just ahead of the mouth, held between the whiskers.
-    const pu = 24, pv = 0;
-    for (let dy = -3; dy <= 3; dy += 1) for (let du = -3; du <= 3; du += 1) {
-      if (du * du + dy * dy > 9) continue;
-      H(pu + du, pv + dy, du + dy < -2 ? [255, 150, 120] : BEACON);
-    }
-    for (let k = 1; k <= 3; k += 1) H(pu + (k % 2 ? 1 : 0), pv - 3 - k, k === 3 ? D.redLit : [255, 170, 80]);   // flame
+    for (let du = 5; du <= 13; du += 1) for (let dy = -2; dy <= 2; dy += 1) H(du, dy, dy === -2 ? D.goldLit : dy === 2 ? D.goldDark : dy === 0 && du < 13 ? D.mouth : D.gold);
+    H(4, -2, D.black); H(4, -3, D.black);                                                              // eye
+    for (let k = 0; k <= 4; k += 1) { H(-k, -4 - k, D.ivory); H(1 - k, -4 - k, D.ivoryDark); }         // horns
+    for (let k = 0; k < 5; k += 1) { H(-4 - k, -1 + (k >> 1), D.red); H(-4 - k, 1 + (k >> 1), D.redDark); }   // mane
+    // The pearl, held at the tip of its jaws (joined to the snout, so it never floats loose).
+    for (let dy = -2; dy <= 2; dy += 1) for (let du = -2; du <= 2; du += 1) if (du * du + dy * dy <= 5) H(15 + du, dy, du + dy < -1 ? [255, 150, 120] : BEACON);
   }
   function angel(c, P, cx, y) {
     const robe = mix(P.ornament, [240, 236, 250], 0.4), wing = tone(P.ornament, 1.05);

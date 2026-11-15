@@ -49,13 +49,26 @@
       [plans[i], plans[j]] = [plans[j], plans[i]];
     }
     const mountains = [], lakes = [];
+    // Each zone also keeps a pocket of flat land, a valley floor, between or beside its features
+    // (where by hash), taking a little more room than a mountain or a lake.
+    const pockets = [];
+    const roll = (a, b) => (PW.hash2(a, b) & 1023) / 1023;
     wilds.forEach((zone, index) => {
       const plan = index === 0 || index === 3 ? (random() < 0.5 ? 'mountain+lake' : 'lake+mountain') : plans[index];
       const width = zone.x1 - zone.x0;
       const parts = plan.split('+');
-      parts.forEach((part, partIndex) => {
-        const share = width / parts.length;
-        const center = zone.x0 + share * (partIndex + 0.5) + random.range(-0.1, 0.1) * share;
+      parts.splice(Math.floor(roll(index, 3) * (parts.length + 1)), 0, 'pocket');
+      const weight = (part) => (part === 'pocket' ? 1.1 : 1), total = parts.reduce((sum, part) => sum + weight(part), 0);
+      let at = zone.x0;
+      parts.forEach((part) => {
+        const share = width * weight(part) / total, from = at;
+        at += share;
+        if (part === 'pocket') {
+          const w = share * 0.82, mid = from + share / 2;
+          pockets.push({ kind: 'valley', x0: Math.round(mid - w / 2), x1: Math.round(mid + w / 2), shoulder: 110 });
+          return;
+        }
+        const center = from + share / 2 + random.range(-0.1, 0.1) * share;
         if (part === 'mountain') {
           // Asymmetric massif: a main peak plus shoulder peaks, each side with its own spread.
           const half = Math.min(share * 0.62, random.range(520, 840));
@@ -79,7 +92,23 @@
     // A pond beside each base for its farms, on the outer side.
     lakes.push({ x: sites[0].x0 - margin * 0.5 + 40, half: 180, depth: 110, pond: true });
     lakes.push({ x: sites[4].x1 + margin * 0.5 - 40, half: 180, depth: 110, pond: true });
-    return { baseY, sites, wilds, mountains, lakes };
+    // Pockets of flat land in the wild, good ground for a city, a farm or both: the valley floors
+    // above, and on a broad mountain now and then a bench, a flat shelf partway up one flank.
+    // (drawn from hashes, so the layout's random sequence is unchanged)
+    mountains.forEach((m, index) => {
+      if (m.half < 380 || m.height < 450 || m.mesa || roll(index, 7) < 0.4) return;
+      const side = roll(index, 8) < 0.5 ? -1 : 1, mid = m.x + side * m.half * (0.45 + roll(index, 9) * 0.15), width = Math.min(320, m.half * (0.5 + roll(index, 10) * 0.2));
+      pockets.push({ kind: 'bench', x0: Math.round(mid - width / 2), x1: Math.round(mid + width / 2), shoulder: 90 });
+    });
+    // (a pocket keeps clear of every lake's shore, and of the sites)
+    for (const p of pockets) {
+      for (const [a, b] of [...lakes.map((l) => [l.x - l.half * 1.25 - 40, l.x + l.half * 1.25 + 40]), ...sites.map((s) => [s.x0, s.x1])]) {
+        if (b < p.x0 || a > p.x1) continue;
+        if ((a + b) / 2 < (p.x0 + p.x1) / 2) p.x0 = Math.ceil(b); else p.x1 = Math.floor(a);
+      }
+    }
+    for (let i = pockets.length - 1; i >= 0; i -= 1) if (pockets[i].x1 - pockets[i].x0 < 200) pockets.splice(i, 1);
+    return { baseY, sites, wilds, mountains, lakes, pockets };
   }
 
   // Surface height (row of the first ground cell) for every column.
@@ -90,6 +119,7 @@
       PW.createNoise1D(seed + 13, 260), PW.createNoise1D(seed + 14, 70), PW.createNoise1D(seed + 15, 22)];
     const ridge = PW.createNoise1D(seed + 21, 140);
     const ridgeFine = PW.createNoise1D(seed + 22, 36);
+    const raw = new Float32Array(W);
     for (let x = 0; x < W; x += 1) {
       let y = layout.baseY
         - hills[0](x) * 170 - hills[1](x) * 95 - hills[2](x) * 32 - hills[3](x) * 9 - hills[4](x) * 2.5;
@@ -110,12 +140,28 @@
       // Edges of the map rise into hills.
       const edge = Math.min(x, W - 1 - x);
       if (edge < 380) y -= Math.pow(1 - edge / 380, 2) * 260;
+      raw[x] = y;
+    }
+    // A pocket of flat land lies at the land's own height: a valley floor at the mean of the
+    // ground over it, a bench at the height of the flank it is cut into. Its shoulders blend into
+    // the land around over `shoulder` columns.
+    for (const p of layout.pockets || []) {
+      if (p.kind === 'valley') { let sum = 0; for (let x = p.x0; x <= p.x1; x += 1) sum += raw[x]; p.level = Math.round(sum / (p.x1 - p.x0 + 1)); }
+      else p.level = Math.round(raw[(p.x0 + p.x1) >> 1]);
+    }
+    for (let x = 0; x < W; x += 1) {
+      let y = raw[x];
       // Settlement sites are eased towards their level with smooth shoulders: bases flat, neutral
       // towns keeping a rolling relief their buildings are set into.
       for (const site of layout.sites) {
         const inside = Math.min(x - site.x0, site.x1 - x);
         const blend = smooth((inside + 260) / 260);
         if (blend > 0) y = y + (site.level + hills[4](x) * 0.6 + siteRelief(site, x) - y) * blend;
+      }
+      // (a pocket beside a site keeps its own level over the site's shoulder)
+      for (const p of layout.pockets || []) {
+        const blend = smooth((Math.min(x - p.x0, p.x1 - x) + p.shoulder) / p.shoulder);
+        if (blend > 0) y += (p.level + hills[4](x) * 0.6 - y) * blend;
       }
       for (const lake of layout.lakes) {
         const t = Math.abs(x - lake.x) / lake.half;
@@ -159,8 +205,25 @@
     };
   }
 
+  // Subsoil country: brown earth, pale yellow loess or red laterite in broad belts across the map,
+  // each blending into the next over a few hundred columns. Kept as each column's tint of the
+  // subsoil's colours (r g b in 1/256) and its loess and laterite shares.
+  const LOESS = [1.3, 1.3, 1.24], LATERITE = [1.2, 0.88, 0.84];
+  function soilProvinces(world, seed) {
+    const W = world.width, belt = PW.createNoise1D(seed + 51, 2200);
+    const tint = new Uint16Array(W * 3), loess = new Float32Array(W), laterite = new Float32Array(W);
+    for (let x = 0; x < W; x += 1) {
+      const v = belt(x);
+      loess[x] = smooth((v - 0.18) / 0.3);
+      laterite[x] = smooth((-v - 0.18) / 0.3);
+      for (let c = 0; c < 3; c += 1) tint[x * 3 + c] = Math.round(256 * (1 + (LOESS[c] - 1) * loess[x] + (LATERITE[c] - 1) * laterite[x]));
+    }
+    return { tint, loess, laterite };
+  }
+
   function fillStrata(world, layout, surface, seed) {
     const { width: W, height: H, mat } = world;
+    const { laterite } = world.soil;
     const variants = createField(world, seed + 31, 6);
     const lenses = createField(world, seed + 35, 4);
     const topsoilNoise = PW.createNoise1D(seed + 41, 90);
@@ -170,9 +233,34 @@
     const stoneFine = PW.createNoise1D(seed + 46, 45);
     const bedrockNoise = PW.createNoise1D(seed + 45, 50);
     const outcrops = PW.createNoise1D(seed + 47, 160), turf = PW.createNoise1D(seed + 48, 26);
+    const foot = PW.createNoise1D(seed + 49, 18);
     const top = new Int32Array(W);
     const soilEnd = new Int32Array(W), stoneStart = new Int32Array(W), grassEnd = new Int32Array(W),
-      topsoilEnd = new Int32Array(W), bedrockStart = new Int32Array(W), ragged = new Float32Array(W);
+      topsoilEnd = new Int32Array(W), bedrockStart = new Int32Array(W), ragged = new Float32Array(W), keeps = new Float32Array(W);
+    // The topsoil's foot is not a clean line: it waves, and tongues of dark topsoil reach down into
+    // the subsoil along old root and worm channels, leaning a little, narrowing to a point (one
+    // every 22 columns or so, two in three places). Now and then a krotovina, an old burrow filled
+    // with topsoil, sits in the subsoil below. Under red laterite the boundary is sharper (short
+    // tongues); on thin soil there are fewer and shorter ones.
+    const TONGUE = 22, BURROW = 76;
+    const tongueAt = (x, y) => {
+      const cell = (x / TONGUE) | 0, h = PW.hash2(cell, seed ^ 0x70e);
+      if (h % 3 === 0) return false;
+      const c = Math.min(W - 1, cell * TONGUE + 6 + (h >>> 4) % 10);
+      const depth = (5 + (h >>> 8) % 11) * keeps[c] * (1 - 0.65 * laterite[c]);
+      const t = (y - topsoilEnd[c]) / depth;
+      if (!(t >= 0 && t < 1)) return false;
+      const w = 1.5 + ((h >>> 12) % 5) * 0.6, lean = (((h >>> 16) % 9) - 4) * 0.12;
+      return Math.abs(x - c - lean * (y - topsoilEnd[c])) < w * Math.pow(1 - t, 0.7) + 0.3;
+    };
+    const burrowAt = (x, y) => {
+      const cell = (x / BURROW) | 0, h = PW.hash2(cell, seed ^ 0xb0e);
+      if (h % 3) return false;
+      const c = Math.min(W - 1, cell * BURROW + 12 + (h >>> 4) % 50);
+      if (keeps[c] < 0.6) return false;
+      const dx = (x - c) / (2 + (h >>> 10) % 3), dy = (y - topsoilEnd[c] - 8 - (h >>> 14) % 22) / (1.6 + ((h >>> 20) % 3) * 0.5);
+      return dx * dx + dy * dy < 1;
+    };
     // The lie of the land: steepness averaged over 40 columns either way. Soil and rock follow it,
     // not every step of the surface, so a cliff does not drag a seam of soil and stone down
     // through the ground under it: the soil mantle thins smoothly towards steep ground until bare
@@ -194,7 +282,8 @@
       let keep = Math.min(1, Math.max(0.05, 1.3 - lie[x] * 0.6));
       keep *= 1 - Math.min(0.6, Math.max(0, altitude - 380) / 800);
       if (lie[x] > 0.7) keep *= Math.min(1, Math.max(0.2, 0.9 + outcrops(x) * 0.5));
-      const topsoil = Math.round((14 + topsoilNoise(x) * 7) * keep);
+      keeps[x] = keep;
+      const topsoil = Math.max(0, Math.round((14 + topsoilNoise(x) * 7 + foot(x) * 2.2) * keep));
       // Grass needs soil to root in and ground not too steep (it thins out on steep slopes).
       // (on a steep slope the turf breaks into patches with bare soil between, never column by column)
       const bare = slope > 1.4 && turf(x) < (slope - 1.4) * 4 - 0.5;
@@ -220,7 +309,7 @@
         if (y >= bedrockStart[x]) id = M.BEDROCK;
         else if (y < grassEnd[x]) id = M.GRASS;
         else if (y < topsoilEnd[x]) id = M.TOPSOIL;
-        else if (y < soilEnd[x]) id = M.SOIL;
+        else if (y < soilEnd[x]) id = y < topsoilEnd[x] + 40 && (tongueAt(x, y) || burrowAt(x, y)) ? M.TOPSOIL : M.SOIL;
         else {
           // Soil gives way to stone through clay and gravel lenses with a ragged boundary.
           const lens = lenses.sample(x);
@@ -795,6 +884,7 @@
     const random = PW.createRandom(seed);
     const layout = planLayout(world, random);
     const surface = surfaceProfile(world, layout, seed);
+    world.soil = soilProvinces(world, seed);
     const top = fillStrata(world, layout, surface, seed);
     layout.scree = scree(world, layout, surface, top, seed);
     addLenses(world, layout, top, random);
@@ -822,4 +912,6 @@
 
   PW.generateTerrain = generateTerrain;
   PW.terrainBlob = blob;
+  // A stringer vein of ore at (x, y), for workings that found none within reach.
+  PW.oreStringer = (world, x, y, random) => oreVein(world, x, y, ORE_TIERS[0], random);
 })();

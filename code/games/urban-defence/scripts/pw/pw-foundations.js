@@ -462,6 +462,29 @@
     return { cols: cols.length, stages };
   }
 
+  // ---- Steep ground -----------------------------------------------------------------------------------
+  // How steep the land under [x0, x1] is, as it lies now: its relief (top to bottom) and its grade
+  // (the mean rise per column over 16-column runs). Each kind of building needs land gentle enough
+  // for it - a farm the gentlest (its yard is worked), houses, cores and mines gentle land - and
+  // only military buildings go on mountain tops and sides, on solid foundations.
+  const STEEP = {
+    farm: { grade: 0.22, relief: 40 },
+    population: { grade: 0.35, relief: 64 },
+    core: { grade: 0.35, relief: 64 },
+    mine: { grade: 0.5, relief: 90 },
+  };
+  function lie(world, x0, x1) {
+    let lo = Infinity, hi = -Infinity, rise = 0, runs = 0;
+    for (let x = x0; x <= x1; x += 1) { const g = ground(world, x); lo = Math.min(lo, g); hi = Math.max(hi, g); }
+    for (let x = x0; x + 16 <= x1; x += 4) { rise += Math.abs(ground(world, x + 16) - ground(world, x)) / 16; runs += 1; }
+    return { relief: hi - lo, grade: runs ? rise / runs : 0 };
+  }
+  // Whether a building of `type` may stand on the land under [x0, x1].
+  function allows(world, type, x0, x1) {
+    const limit = STEEP[type], l = lie(world, x0, x1);
+    return { ok: !limit || (l.grade <= limit.grade && l.relief <= limit.relief), ...l, limit: limit || null };
+  }
+
   // ---- Measure ----------------------------------------------------------------------------------------
   // The columns [left, right] that place() would build on for this canvas at worldX (walls,
   // forecourts, stages, steps, ramps and buttresses), without writing anything. null if the lot
@@ -515,5 +538,5 @@
     return { stamp, plan: p, walls, under, cores, works: [extent.left, extent.right] };
   }
 
-  PW.foundations = { plan, measure, place, STYLE, CUT_MAX, CUT_MAX_HANGAR };
+  PW.foundations = { plan, measure, place, lie, allows, STEEP, STYLE, CUT_MAX, CUT_MAX_HANGAR };
 })();

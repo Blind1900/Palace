@@ -76,7 +76,12 @@ if (ruined.length) await view('co-cores-risen', ruined[0].cores[0].x, ruined[0].
 // Lasting smoke and dust.
 const smoke30 = countIn(A.body.left - 600, A.body.right + 600, A.ground - 900, A.ground, [M.SMOKE]);
 check(dust10 > 1500, `the collapse throws up a dust cloud that hangs (${dust10} dust cells after 10 s)`);
-check(smoke30 > 2000 && (world.smoulders || []).length > 0, `the ruins keep smoking (${smoke30} smoke cells after 30 s, ${(world.smoulders || []).length} smouldering spots)`);
+check(smoke30 > 600 && (world.smoulders || []).length > 0, `the ruins keep smoking for a while (${smoke30} smoke cells after 30 s, ${(world.smoulders || []).length} smouldering spots)`);
+// ...but not for ever, nor in one standing column: the smouldering dies down within about a
+// minute and the smoke drifts off and thins away.
+pwApp.stepWorld(60 * 60);
+const smoke90 = countIn(A.body.left - 600, A.body.right + 600, A.ground - 900, A.ground, [M.SMOKE]);
+check((world.smoulders || []).length === 0 && smoke90 < smoke30 * 0.25, `the smoke dies down and drifts away (${smoke90} smoke cells after 90 s, ${(world.smoulders || []).length} still smouldering)`);
 times.sort((a, b) => a - b);
 const p95 = times[Math.floor(times.length * 0.95)];
 check(p95 < 3, `collapse simulation stays in budget (p95 ${p95.toFixed(2)} ms, max ${times[times.length - 1].toFixed(2)} ms)`);

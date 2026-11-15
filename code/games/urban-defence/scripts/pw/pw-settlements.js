@@ -147,12 +147,85 @@
     asian: { paving: [176, 156, 120], joint: [120, 70, 50], base: [96, 80, 60] },
     modern: { paving: [64, 66, 72], joint: [226, 190, 60], base: [44, 44, 48] },
   };
+  // ---- Road foundations -------------------------------------------------------------------------------
+  // Under the paving a road is built up in courses, as in a road cutting: a base course of crushed
+  // stone (dark grey with pale chips), a sub-base of sand and gravel with pebbles, then the subgrade,
+  // the land itself compacted (darker, with fine cracks), whose foot wanders into the undisturbed
+  // ground. Each style lays its own upper courses: setts sit on a sand bed and broken-granite
+  // hardcore, stone slabs on a lime-sand bed and a tamped earth crust. The base and sub-base are
+  // wider than the paving, their edges battered back into the ground beside the road.
+  const BASE_ROWS = 4, SUBBASE_ROWS = 3, SUBGRADE_ROWS = 3;
+  const ROAD_DEPTH = 4 + BASE_ROWS + SUBBASE_ROWS + SUBGRADE_ROWS;   // (paving rows first)
+  function naturalColor(world, x, y, m) {
+    const id = m & 63, c = PW.unpack(PW.mat.palettes[id][(m >> 6) * 2]);
+    const soil = world.soil, k = 1 - Math.min(0.28, Math.max(0, y - (world.surface0 || world.groundTop)[x]) / 1260);
+    const t = soil && (id === M.SOIL || id === M.CLAY || id === M.LOOSE_SOIL) ? [soil.tint[x * 3] / 256, soil.tint[x * 3 + 1] / 256, soil.tint[x * 3 + 2] / 256] : [1, 1, 1];
+    return [c[0] * t[0] * k, c[1] * t[1] * k, c[2] * t[2] * k];
+  }
+  // The course `row` cells below the street's top (4 = first row under the paving) at (x, y).
+  function roadCourse(world, style, x, y, row, m) {
+    const h = PW.hash2(x, y * 7 + 3), piece = PW.hash2(x >> 1, y);   // (chips and pebbles two cells long)
+    if (row < 4 + BASE_ROWS) {
+      if (style === 'gothic' && row === 4) return { id: M.FILL, color: (h & 3) ? [176, 160, 124] : [190, 176, 140] };       // setts' sand bed
+      if (style === 'asian') return { id: M.FILL, color: row < 7 ? ((h & 7) ? [206, 198, 172] : [222, 214, 192]) : (x % 6 === 0 ? [126, 106, 76] : [148, 126, 90]) };   // lime-sand bed, tamped crust
+      if (style === 'gothic') return { id: M.FILL, color: (piece & 7) === 0 ? [138, 82, 62] : (piece & 7) < 3 ? [124, 120, 118] : [86, 82, 80] };   // hardcore
+      return { id: M.FILL, color: (piece & 7) < 2 ? [172, 170, 162] : (piece & 7) < 4 ? [114, 116, 118] : (h & 1) ? [62, 64, 68] : [74, 76, 80] };   // crushed stone
+    }
+    if (row < 4 + BASE_ROWS + SUBBASE_ROWS) {
+      const pebble = PW.hash2(x >> 1, y >> 1) & 15;
+      return { id: M.FILL, color: pebble === 0 ? [122, 112, 100] : pebble === 1 ? [148, 98, 70] : pebble === 2 ? [196, 184, 160] : (h & 3) ? [170, 146, 106] : [184, 160, 120] };
+    }
+    // Subgrade: the land itself, compacted; fine cracks run down through it.
+    const c = naturalColor(world, x, y, m), crack = PW.hash2(x - (y >> 1), y >> 2) % 19 === 0;
+    const k = crack ? 0.62 : 0.84;
+    return { id: m & 63, color: [c[0] * k, c[1] * k, c[2] * k], natural: true };
+  }
+  function layRoadBase(world, x, top, style, rows = ROAD_DEPTH) {
+    const { mat, width: W } = world;
+    // (the subgrade's foot wanders a row or two into the ground under it)
+    const last = Math.min(rows, ROAD_DEPTH - 2 + (PW.hash2(x >> 2, 0x5b6) % 3));
+    for (let row = 4; row < last; row += 1) {
+      const y = top + row;
+      if (y >= world.height - 30) break;
+      const m = mat[y * W + x], id = m & 63;
+      if (!PW.mat.terrain[id] || id === M.FILL || id === M.SLAB || id === M.COURSE || id === M.ORE || id === M.BEDROCK || id === M.WATER) continue;
+      if (PW.getOwner(world, x, y) || (PW.getFlags(world, x, y) & (FLAG.TUNNEL | FLAG.ROAD))) continue;
+      const course = roadCourse(world, style, x, y, row, m);
+      if (!course.natural) PW.set(world, x, y, course.id | (PW.hash2(x, y) & 3) << 6, { quiet: true });
+      PW.setLayer(world, 'paint', x, y, rgb(course.color.map((v) => Math.round(v))));
+    }
+  }
+  // Where a run of road ends, its base and sub-base reach on under the ground beside it, battered
+  // back at about 1:1.2 (deeper rows reach further).
+  function flareRoadBase(world, end, side, top, style) {
+    const { mat, width: W } = world;
+    for (let d = 1; d <= 6; d += 1) {
+      const x = end + side * d;
+      if (x < 1 || x >= W - 1 || (PW.getFlags(world, x, world.groundTop[x]) & FLAG.ROAD)) break;
+      for (let row = 4 + Math.ceil(d * 1.2); row < 4 + BASE_ROWS + SUBBASE_ROWS; row += 1) {
+        const y = top + row;
+        if (y < world.groundTop[x] + 2) continue;
+        const m = mat[y * W + x], id = m & 63;
+        if (!PW.mat.terrain[id] || id === M.FILL || id === M.SLAB || id === M.COURSE || id === M.ORE || id === M.WATER) continue;
+        if (PW.getOwner(world, x, y) || (PW.getFlags(world, x, y) & FLAG.TUNNEL)) continue;
+        const course = roadCourse(world, style, x, y, row, m);
+        PW.set(world, x, y, course.id | (PW.hash2(x, y) & 3) << 6, { quiet: true });
+        PW.setLayer(world, 'paint', x, y, rgb(course.color.map((v) => Math.round(v))));
+      }
+    }
+  }
   // The street's top row is padY, or padY(x) where it follows the ground (null: no street there).
   function paveStreet(world, x0, x1, padY, styleAt) {
+    const topAt = (x) => (typeof padY === 'function' ? padY(x) : padY);
+    for (const [end, side] of [[x0, -1], [x1, 1]]) {
+      const top = topAt(end);
+      if (top !== null && top !== undefined) flareRoadBase(world, end, side, top, styleAt(end));
+    }
     for (let x = x0; x <= x1; x += 1) {
-      const top = typeof padY === 'function' ? padY(x) : padY;
+      const top = topAt(x);
       if (top === null || top === undefined) continue;
       const style = styleAt(x);
+      layRoadBase(world, x, top, style);
       const P = PAVING[style];
       for (let row = 0; row < 4; row += 1) {
         const y = top + row;
@@ -224,7 +297,7 @@
         if (!PW.mat.ground[PW.get(world, x, y) & 63] || PW.getOwner(world, x, y)) continue;
         PW.set(world, x, y, M.TOPSOIL | (row << 6), { quiet: true });
         const furrow = (x % 6) < 3;                                   // dark furrows between the rows
-        PW.setLayer(world, 'paint', x, y, rgb(row === 0 ? (furrow ? [74, 54, 36] : [104, 78, 52]) : [92, 68, 46]));
+        PW.setLayer(world, 'paint', x, y, rgb(row === 0 ? (furrow ? [48, 37, 28] : [82, 63, 45]) : [64, 49, 35]));
         PW.setFlag(world, x, y, FLAG.FIELD);
         sown = true;
       }
@@ -449,6 +522,21 @@
   // Where a drift running from x towards `dir` first meets ore within rows [top, bottom]: the
   // column just short of the vein, so the ore forms the working face. Falls back to the node's
   // centre minus its half-width when the vein misses the drift's level.
+  // The height a drift coming from column `from` should run at to meet the vein's body: the middle
+  // of the ore in the vein's first column of ore on that side (a vein slants and curls, so its
+  // centre's height may be bare rock where the drift arrives).
+  function veinRow(world, node, from) {
+    const box = node.box;
+    if (!box) return node.y;
+    const dir = from < (box.x0 + box.x1) / 2 ? 1 : -1;
+    for (let cx = dir > 0 ? box.x0 : box.x1; dir > 0 ? cx <= box.x1 : cx >= box.x0; cx += dir) {
+      const rows = [];
+      for (let y = box.y0; y <= box.y1; y += 1) if ((PW.get(world, cx, y) & 63) === M.ORE) rows.push(y);
+      // (a column of a few cells is the vein's frayed tip; the body is where it runs thick)
+      if (rows.length >= 4) return rows[rows.length >> 1];
+    }
+    return node.y;
+  }
   function oreFace(world, node, x, dir, top, bottom) {
     for (let k = 0; k < 700; k += 1) {
       const cx = x + dir * k;
@@ -468,7 +556,7 @@
     const sx = (clear.length ? clear : sides).sort((a, b) => Math.abs(a - node.x) - Math.abs(b - node.x))[clear.length ? 0 : 1];
     const toward = Math.sign(node.x - sx) || dir;
     const pitFloor = core.ground + core.pit.depth;
-    const driftBottom = node.y + 20, driftTop = driftBottom - 44;
+    const driftBottom = veinRow(world, node, sx) + 20, driftTop = driftBottom - 44;
     const net = PW.tunnels.createNetwork(world, { side, x: sx, y: pitFloor - 2, building: core.id });
     PW.tunnels.digBox(world, net, sx - 15, pitFloor - 2, sx + 15, driftBottom, { kind: 'shaft' });
     const face = Math.sign(node.x - sx) || toward;
@@ -485,10 +573,17 @@
   // A mine headframe's own shaft: straight down to a nearby vein, or a short sump if none is near.
   function headframeShaft(world, mine, nodes, side) {
     const x = mine.shaft.x, top = mine.shaft.top;
-    // (the nearest vein in reach of a drift: below the shaft's first 200 rows, within 800 columns)
-    const node = nodes.filter((n) => n.y > top + 200 && n.y < top + 1300 && Math.abs(n.x - x) < 800)
+    // (the nearest vein in reach of a drift: below the shaft's first 200 rows, within 800 columns.
+    // A town's mine is sunk where there is ore: failing one in reach, there is a stringer vein a
+    // short drift from the shaft.)
+    let node = nodes.filter((n) => n.y > top + 200 && n.y < top + 1300 && Math.abs(n.x - x) < 800)
       .sort((a, b) => Math.abs(a.x - x) - Math.abs(b.x - x))[0];
-    const bottom = node ? node.y + 20 : top + 220;
+    if (!node && PW.oreStringer) {
+      const random = PW.createRandom(PW.hash2(x, top));
+      node = PW.oreStringer(world, x + (random() < 0.5 ? -1 : 1) * random.range(180, 300), top + random.range(320, 460), random);
+      if (node) nodes.push(node);
+    }
+    const bottom = node ? veinRow(world, node, x) + 20 : top + 220;
     const net = PW.tunnels.createNetwork(world, { side, x, y: top, building: mine.id });
     PW.tunnels.digBox(world, net, x - 15, top, x + 15, bottom, { kind: 'shaft' });
     let drift = null;
@@ -684,7 +779,9 @@
               x += step > 0 ? cursor - m.left : cursor - m.right;
               m = PW.foundations.measure(world, lot.canvas, x, style);
             }
-            if (!m) { cursor += step * (lot.bodyWidth + gaps[index]); return; }   // standing water: the lot is left out
+            // (standing water, or land too steep for the building - only military buildings go
+            // on mountainsides: the lot is left out here)
+            if (!m || !PW.foundations.allows(world, lot.type, m.plan.x0, m.plan.x1).ok) { cursor += step * (lot.bodyWidth + gaps[index]); return; }
             const near = step > 0 ? m.left : m.right, far = step > 0 ? m.right : m.left;
             const plant = lot.plantW ? (last ? plantSpan(near, -step, lot.plantW) : plantSpan(far, step, lot.plantW)) : null;
             row.push({ lot, x, m, plant });
@@ -711,15 +808,17 @@
           // ...and back from a mountain at either end: a lot there would need a retaining wall far
           // taller than the deepest cut, so the town keeps to the foot of the slope.
           // (it tries shifts either way, nearest first, and takes the first that keeps every lot out
-          // of the water with both end walls in bounds; failing that, the lowest walls)
+          // of the water and off ground too steep for it, with both end walls in bounds; failing
+          // that, the most lots placed, then the lowest walls)
           const WALL_OK = PW.foundations.CUT_MAX_HANGAR;
           let chosen = null;
-          for (let n = 0; n <= 40 && !(chosen && chosen.ok); n += 1) {
+          for (let n = 0; n <= 60 && !(chosen && chosen.ok); n += 1) {
             const s = shift + (n & 1 ? 1 : -1) * Math.ceil(n / 2) * 24;
             const r = lay(centre - Math.round(total / 2) + s);
-            if (r.length < lots.length) continue;
+            if (!r.length) continue;
             const tallest = Math.max(r[0].m.wall[-1], r[r.length - 1].m.wall[1]);
-            if (!chosen || tallest < chosen.tallest) chosen = { s, tallest, ok: tallest <= WALL_OK };
+            const better = !chosen || r.length > chosen.count || (r.length === chosen.count && tallest < chosen.tallest);
+            if (better) chosen = { s, tallest, count: r.length, ok: r.length === lots.length && tallest <= WALL_OK };
           }
           if (chosen) shift = chosen.s;
           start = centre - Math.round(total / 2) + shift;
