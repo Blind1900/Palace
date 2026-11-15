@@ -13,20 +13,21 @@
   const { phase, terrain, breaksTo, cohesion, open } = PW.mat;
 
   const SETTLE = 8;          // ticks after a disturbance before the ground there is looked at
-  const AGAIN = 40;          // and again this long after, while the slide goes on
-  const ROUNDS = 24;         // at most this many looks at one disturbance
+  const AGAIN = 20;          // and again this long after, while the slide goes on
+  const ROUNDS = 40;         // at most this many looks at one disturbance
+  const MAX_TALL = 1200;     // rows a look at the surface reaches up the face or slope above it
   const QUIET = 3;           // it is let be after this many looks in a row that broke nothing (what
                              // the ground rested on may still be sliding away from under it)
   const RAIN_DEPTH = 4;      // ground breaking over a void deeper than this falls as a particle
   const CELLS_PER_TICK = 16000;   // cells of a look worked through per tick
-  const BREAKS_PER_TICK = 600;    // cells broken loose per tick
+  const BREAKS_PER_TICK = 1200;   // cells broken loose per tick
   const GROW = 200;          // rows a look reaches higher when the slide goes on above its box
   const GROW_SIDE = 160;     // columns it reaches further out when the slide goes on past its sides
   // A cut face stands only so tall: a free face taller than FACE x the ground's cohesion (soil about
   // a metre, rock four or five) fails - a wedge of it comes away, thicker the higher the face
   // stood (WEDGE cells per cell of height over what it can hold), and pours down the slope; the face
   // goes on failing until what fell banks against its foot and buttresses it.
-  const FACE = 4, WEDGE = 0.3, MAX_WEDGE = 60;
+  const FACE = 4, WEDGE = 0.4, MAX_WEDGE = 80;
   const SHOCK_MIN = 6000;    // a shock weaker than this is felt by nothing (a few pebbles landing)
   const SLIDE_SPEED = 40;    // cells a second ground breaking loose comes down at, for its shock
   const SHOCK_EVERY = 6;     // ticks between gathering up the strikes of flying debris
@@ -72,9 +73,10 @@
         const x0 = Math.max(2, region.x0), x1 = Math.min(W - 3, region.x1);
         let top = region.y1;
         for (let x = x0; x <= x1; x += 1) top = Math.min(top, world.groundTop[x]);
-        // (from the disturbance up - and further up, round by round, while the slide reaches the
-        // top of the box - but never above the surface)
-        const y0 = Math.max(2, top - 2, region.y0), y1 = Math.min(H - 3, region.y1);
+        // (from the disturbance up - at the surface, all the way up the face or slope over it;
+        // underground, further up round by round while the slide reaches the top of the box - but
+        // never above the surface)
+        const y0 = Math.max(2, top - 2, region.atSurface ? Math.min(region.y0, region.y1 - MAX_TALL) : region.y0), y1 = Math.min(H - 3, region.y1);
         const bw = x1 - x0 + 1, bh = y1 - y0 + 1;
         region.scan = { x0, x1, y0, y1, bw, bh, top, y: y1, reach: new Uint16Array(bw * bh).fill(FAR), out: [] };
       }
@@ -241,12 +243,12 @@
     // Look at the ground in a box, and everything above it up to the surface, a moment from now.
     function disturb(x0, y0, x1, y1) {
       const pad = 24;   // (as far as any ground but bedrock reaches out, and more)
-      // (a disturbance at the surface may set off a slide that runs out along it; one deep
-      // underground only a cave-in)
-      let top = Infinity;
-      for (let x = Math.max(0, Math.floor(x0)); x <= Math.min(W - 1, Math.ceil(x1)); x += 4) top = Math.min(top, world.groundTop[x]);
+      // (a disturbance at the surface - anywhere along it: at the foot of a cliff too - may set off
+      // a slide that runs out along it; one deep underground only a cave-in)
+      let low = -Infinity;
+      for (let x = Math.max(0, Math.floor(x0) - pad); x <= Math.min(W - 1, Math.ceil(x1) + pad); x += 4) low = Math.max(low, world.groundTop[x]);
       pending.push({ x0: Math.floor(x0) - pad, y0: Math.floor(y0), x1: Math.ceil(x1) + pad, y1: Math.ceil(y1), at: tick + SETTLE, rounds: 0,
-        atSurface: y0 < top + 80 });
+        atSurface: y0 < low + 80 });
       stats.regions += 1;
     }
     // Vibration is the shock of things striking each other, as strong as the energy of the strike:

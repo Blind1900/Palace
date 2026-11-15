@@ -370,7 +370,8 @@
       const color = PW.getLayer(world, 'deco', x, y);
       PW.setLayer(world, 'deco', x, y, 0);
       fell += 1;
-      if (!particles) continue;
+      // (a lamp, a railing, a gate is thin metal and timber: only a share of it lands as rubble)
+      if (!particles || PW.hash2(x, y) % 3 !== 0) continue;
       // Toppling, the top swings over fastest; struck by a blast, it is thrown away from it.
       let vx = lean * (footY - y) * 2.2 + ((PW.hash3(x, y, 7) & 63) - 32) * 0.4, vy = -8 - (PW.hash3(x, y, 9) & 15);
       if (from) {

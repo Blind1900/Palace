@@ -306,12 +306,19 @@
         move(i, x, y, i - W, x, y - 1, 'float');
         return true;
       }
-      if (rnd(x, y) >= SLIDE[id]) return false;
+      // (it slides off only now and then - the looser it is, the more often - but a grain that has
+      // somewhere to slide stays awake until it does: a heap never freezes steeper than it stands)
+      const slides = rnd(x, y) < SLIDE[id];
+      if (!SLIDE[id]) return false;
       const dir = ((x * 7 + y + world.tick) & 1) ? 1 : -1;
       for (let k = 0; k < 2; k += 1) {
         const d = k ? -dir : dir, nx = x + d;
         if (nx < 0 || nx >= W) continue;
-        if (lighter(mat[i + d], id) && lighter(mat[i + W + d], id)) { move(i, x, y, i + W + d, nx, y + 1); return true; }
+        if (lighter(mat[i + d], id) && lighter(mat[i + W + d], id)) {
+          if (slides) { move(i, x, y, i + W + d, nx, y + 1); return true; }
+          PW.wakeCell(world, x, y);
+          return false;
+        }
       }
       // Some (building rubble) spread out flatter: they also slide along a slope that falls away
       // farther out (a heap settles at about 1 in 2, not 45°).
@@ -321,7 +328,11 @@
           if (nx < 0 || nx >= W) continue;
           let open = true;
           for (let s = 1; s <= reach + 1 && open; s += 1) open = lighter(mat[i + s * d], id);
-          if (open && lighter(mat[i + W + (reach + 1) * d], id)) { move(i, x, y, i + d, x + d, y); return true; }
+          if (open && lighter(mat[i + W + (reach + 1) * d], id)) {
+            if (slides) { move(i, x, y, i + d, x + d, y); return true; }
+            PW.wakeCell(world, x, y);
+            return false;
+          }
         }
       }
       return false;

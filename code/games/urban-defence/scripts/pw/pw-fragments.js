@@ -22,6 +22,10 @@
   // A piece (or a chunk of one) at least RUIN_MIN cells big comes to rest whole where it lands -
   // tilted, misplaced, cracked at its edges - as a ruin, part of the ground.
   const RUIN_MIN = 60;
+  // Most of a falling building's rubble is its structure - pillars, floors, outer walls. A cell of
+  // back wall (marked THIN in a piece) is part of the body while it holds together, but broken up
+  // only one in WALL_RUBBLE of them leaves a grain of rubble; the rest goes to dust.
+  const THIN = 2, WALL_RUBBLE = 4;
 
   function createFragments(world, particles) {
     const { mat, width: W, height: H } = world;
@@ -38,6 +42,9 @@
       if (y < 0) return false;
       return phase[mat[y * W + x] & ID_MASK] >= PW.PHASE.POWDER;
     };
+    // (a cell of a piece broken up: does it leave a grain of rubble? Structure does; back wall one
+    // in WALL_RUBBLE - the rest goes up as a little dust)
+    const rubbleFrom = (solid, x, y) => solid === 1 || (solid === THIN && (PW.hash2(x | 0, y | 0) % WALL_RUBBLE) === 0);
     const debrisOf = (byte) => {
       const id = byte & ID_MASK;
       if (structural[id] || id === M.FOUNDATION) return breaksTo[id] || M.DEBRIS;
@@ -65,15 +72,16 @@
           const backs = world.back[c], decos = world.deco[c], paints = world.paint[c], owners = world.owner[c];
           const m = mat[i], id = m & ID_MASK;
           const back = backs ? backs[l] : 0, deco = decos ? decos[l] : 0;
-          // A building's back wall is part of its frame: it has weight, it strikes what it falls
-          // on, and it breaks into debris like the rest.
+          // A building's back wall is part of its frame: it has weight and it strikes what it
+          // falls on. But it is a thin panel: broken up, it leaves far less rubble than the
+          // pillars, floors and outer walls (THIN, see wallBits).
           const heavy = phase[id] >= PW.PHASE.POWDER;
           const wall = !heavy && back !== 0 && spec.owner && owners && owners[l] === spec.owner;
           const solid = heavy || wall;
           const paint = heavy ? ((paints && paints[l]) || palettes[id][(m >> 6) * 2 + (PW.hash2(x, y) & 1)]) : 0;
           const color = deco || paint || back;
           if (!color && !solid) continue;
-          data.x[k] = x; data.y[k] = y; data.color[k] = color; data.byte[k] = wall ? M.DEBRIS : solid ? m : 0; data.solid[k] = solid ? 1 : 0;
+          data.x[k] = x; data.y[k] = y; data.color[k] = color; data.byte[k] = wall ? M.DEBRIS : solid ? m : 0; data.solid[k] = heavy ? 1 : wall ? THIN : 0;
           k += 1;
           if (heavy) PW.set(world, x, y, M.AIR, { quiet: true });
           if (backs) backs[l] = 0;
@@ -113,7 +121,7 @@
       const gw = u1 - u0 + 1, gh = v1 - v0 + 1;
       const grid = new Int32Array(gw * gh);
       for (let k = 0; k < n; k += 1) grid[(data.y[k] - ay - v0) * gw + (data.x[k] - ax - u0)] = k + 1;
-      const solidAt = (u, v) => { if (u < u0 || u > u1 || v < v0 || v > v1) return false; const g = grid[(v - v0) * gw + (u - u0)]; return g > 0 && data.solid[g - 1] === 1; };
+      const solidAt = (u, v) => { if (u < u0 || u > u1 || v < v0 || v > v1) return false; const g = grid[(v - v0) * gw + (u - u0)]; return g > 0 && data.solid[g - 1] > 0; };
       // Outline: solid cells with an open side (where it touches the world first), and which way
       // each faces (out through its open sides).
       const outline = [], facing = [];
@@ -222,7 +230,7 @@
             const c = Math.cos(p.angle), sn = Math.sin(p.angle);
             p.px = cx - (p.gx * c - p.gy * sn); p.py = cy - (p.gx * sn + p.gy * c);
           }
-          done = contact(p);
+          done = contact(p, h);
         }
         if (!done && p.footTouch) { p.footTouch = false; if (p.mode === 'hinge') eatFoot(p); }
         if (!done) {
@@ -259,7 +267,7 @@
           // (out at the surface above it)
           let ty = y;
           while (ty > 1 && blocking(x, ty) && y - ty < 24) ty -= 1;
-          if ((eaten & 1) === 0) particles.spawn(x + 0.5, ty + 0.5, p.dir * (30 + random() * 140) + (random() - 0.5) * 60, -20 - random() * 60, debrisOf(data.byte[k]), data.color[k] || 0, F.LAND | F.DAMAGE, 6);
+          if ((eaten & 1) === 0 && rubbleFrom(data.solid[k], u, v)) particles.spawn(x + 0.5, ty + 0.5, p.dir * (30 + random() * 140) + (random() - 0.5) * 60, -20 - random() * 60, debrisOf(data.byte[k]), data.color[k] || 0, F.LAND | F.DAMAGE, 6);
           else if ((eaten & 3) === 1) puff(x, ty - 2, 2, 5, 3);
           grid[gi] = 0; data.solid[k] = 0; data.color[k] = 0;
           eaten += 1;
@@ -289,18 +297,22 @@
     // building as it swings down into it; anything else it strikes pushes back on it where they
     // touch (see strike). True when the piece is gone (come to rest, broken up, or replaced by what
     // is left of it).
-    function contact(p) {
+    function contact(p, h) {
       const [c, s] = cosSin(p);
       const pts = p.points, faces = p.faces;
       const c0 = Math.cos(was.angle), s0 = Math.sin(was.angle);
-      let crushed = 0, smashed = 0, n = 0, sx = 0, sy = 0, fx = 0, fy = 0;
+      let crushed = 0, smashed = 0, n = 0, sx = 0, sy = 0, fx = 0, fy = 0, hs = 0, wet = 0;
+      let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
       for (let k = 0; k < pts.length; k += 2) {
         const [wx, wy] = toWorld(p, c, s, pts[k], pts[k + 1]);
         const x = Math.floor(wx), y = Math.floor(wy);
         if (!blocking(x, y)) {
+          if (x < 1 || y < 1 || x >= W - 1 || y >= H - 1) continue;
+          // (in water: see soak)
+          if ((mat[y * W + x] & ID_MASK) === M.WATER) { if (wet < WET_MAX) { wetAt[wet * 2] = x; wetAt[wet * 2 + 1] = y; } wet += 1; }
           // Whatever stands in the open where it passes is swept away: trees and bushes are
           // knocked down, lamps, railings and furniture smashed.
-          if (x > 0 && y > 0 && x < W && y < H && PW.getLayer(world, 'deco', x, y) && PW.getOwner(world, x, y) !== p.owner) sweep(x, y, p.flora ? 1 : 8);
+          if (PW.getLayer(world, 'deco', x, y) && PW.getOwner(world, x, y) !== p.owner) sweep(x, y, p.flora ? 1 : 8);
           continue;
         }
         // (something it was in already before this sub-step - rubble come to lie where the piece
@@ -343,7 +355,8 @@
         }
         if (inside) continue;
         if (n < OUTLINE_MAX) { went[n * 2] = wx - ox; went[n * 2 + 1] = wy - oy; }
-        n += 1; sx += wx; sy += wy;
+        n += 1; sx += wx; sy += wy; hs += hardness[mat[y * W + x] & ID_MASK];
+        if (wx < bx0) bx0 = wx; if (wx > bx1) bx1 = wx; if (wy < by0) by0 = wy; if (wy > by1) by1 = wy;
         // (which way the surface it struck faces there - out through its open sides - and, less,
         // the other way from the side of the piece that struck it)
         let gx = 0, gy = 0;
@@ -365,13 +378,41 @@
           blowOut(Math.min(lx, rx), Math.max(lx, rx), footY, Math.max(60, p.vy), 0.4);
         }
       }
+      if (wet && !p.flora) soak(p, wet, pts.length / 2, h);
       if (!n) { p.jam = 0; return false; }
       wentN = Math.min(n, OUTLINE_MAX);
-      return strike(p, sx / n, sy / n, fx / n, fy / n);
+      return strike(p, sx / n, sy / n, fx / n, fy / n, hs / n, Math.hypot(bx1 - bx0, by1 - by0));
     }
     // (how far each point that struck something moved this sub-step)
     const went = new Float32Array(OUTLINE_MAX * 2);
     let wentN = 0;
+    // (where its outline is in water)
+    const WET_MAX = 64, wetAt = new Int32Array(WET_MAX * 2);
+    // In water a piece is held back by the water it pushes aside - the more of it is in, the more
+    // - and where it comes in fast the water splashes up and out round it.
+    function soak(p, wet, outline, h) {
+      const share = Math.min(1, wet / Math.max(1, outline));
+      const k = Math.max(0, 1 - share * 5 * h);
+      if (p.mode !== 'hinge') { p.vx *= k; p.vy *= k; }
+      p.omega *= k;
+      if (p.splashed) return;
+      p.splashed = true;
+      const speed = motion(p);
+      if (speed < 40) return;
+      // (the water at the surface over where it came in is thrown up: it falls back as water)
+      const count = Math.min(400, Math.round(speed * Math.min(wet, WET_MAX) / 6));
+      for (let q = 0; q < count; q += 1) {
+        const w = Math.floor(random() * Math.min(wet, WET_MAX));
+        const x = wetAt[w * 2] + Math.round((random() - 0.5) * 6);
+        let y = wetAt[w * 2 + 1];
+        if (x < 1 || x >= W - 1) continue;
+        while (y > 1 && (mat[(y - 1) * W + x] & ID_MASK) === M.WATER) y -= 1;
+        if ((mat[y * W + x] & ID_MASK) !== M.WATER) continue;
+        PW.set(world, x, y, M.AIR);
+        particles.spawn(x + 0.5, y - 0.5, p.vx * 0.3 + (random() - 0.5) * speed * 0.8, -speed * (0.3 + random() * 0.6), M.WATER, 0, F.WATER, 6);
+      }
+      stats.splashes = (stats.splashes || 0) + 1;
+    }
     // A stump cell crushed under a swinging piece: it bursts into debris and dust.
     function crush(x, y, owner) {
       const m = mat[y * W + x], id = m & ID_MASK;
@@ -409,7 +450,7 @@
         const m = mat[y * W + x], id = m & ID_MASK;
         if (!PW.mat.terrain[id] || hardness[id] > 0.5 || PW.getOwner(world, x, y)) continue;
         PW.set(world, x, y, M.AIR);
-        if (random() < 0.4) particles.spawn(x + 0.5, y - 0.5, vx * 0.2 + (random() - 0.5) * 120, -60 - random() * 90, breaksTo[id] || M.LOOSE_SOIL, 0, F.LAND, 5);
+        if (random() < 0.6) particles.spawn(x + 0.5, y - 0.5, vx * 0.3 + (random() - 0.5) * (80 + r * 20), -50 - random() * (60 + r * 15), breaksTo[id] || M.LOOSE_SOIL, 0, F.LAND, 5);
         stats.dented = (stats.dented || 0) + 1;
       }
     }
@@ -423,17 +464,25 @@
     // harder one cracks the piece right through into chunks that go on from where they were, each
     // with its own part of the motion: it breaks apart as it comes down, part by part, never all at
     // once.
+    // What it strikes decides how hard the blow is: rock and concrete give nothing, so the piece
+    // takes all of it - it breaks more, and what breaks off bounces away fast and far; soil and sand
+    // give way under it (they are dented and thrown up instead), and a rubble heap softens the
+    // landing most. (The blow is the speed it struck at times 0.55 + the struck ground's hardness.)
     const BOUNCE = 0.12;          // share of its speed into what it struck that it bounces back with
     const FRICTION = 0.7;
     const REST_SPEED = 16;        // cells/s: slower than this, and touching, it is coming to rest
-    const CRUMBLE_SPEED = 55;     // a blow harder than this breaks the corner that took it...
-    const SPLIT_SPEED = 100;      // ...and harder than this (and more for each time it broke before)
+    const CRUMBLE_SPEED = 45;     // a blow harder than this breaks the corner that took it...
+    const SPLIT_SPEED = 80;       // ...and harder than this (and more for each time it broke before)
                                   // cracks it right through,
-    const MAX_CRACKS = 2;         // ...this many times at most: the last chunks stay whole, as ruins
+    const MAX_CRACKS = 3;         // ...this many times at most: the last chunks stay whole, as ruins
+    const SNAP_SPEED = 30;        // a long piece landing across something narrow (a ridge, a rock, a
+    const SNAP_SLENDER = 2.2;     // building's corner) snaps over it, if it is this many times as
+                                  // long as it is thick
     const MAX_AGE = 24;
     // (wx, wy): the middle of where it touches; (fx, fy): which way, all told, what it struck
-    // pushes back on it there.
-    function strike(p, wx, wy, fx, fy) {
+    // pushes back on it there; hard: how hard that is (the element table's hardness); spread: how
+    // far apart the places it touches are.
+    function strike(p, wx, wy, fx, fy, hard = 0.5, spread = 0) {
       const hx = Math.floor(wx), hy = Math.floor(wy);
       const [vx, vy] = velocityAt(p, wx, wy);
       // A big piece coming straight down into its own footprint sinks into it storey by storey.
@@ -466,17 +515,18 @@
       const rx = wx - cx, ry = wy - cy;
       const invM = 1 / p.mass, invI = 1 / Math.max(1, p.inertia);
       const rn = rx * ny - ry * nx;
-      const j = (1 + (hit > CRUMBLE_SPEED ? BOUNCE : 0)) * hit / (invM + rn * rn * invI);
+      const firm = 0.55 + hard, felt = hit * firm;
+      const j = (1 + (felt > CRUMBLE_SPEED ? BOUNCE * (0.4 + hard * 1.2) : 0)) * hit / (invM + rn * rn * invI);
       const tx = -ny, ty = nx, vt = vx * tx + vy * ty, rt = rx * ty - ry * tx;
       const jt = Math.max(-FRICTION * j, Math.min(FRICTION * j, -vt / (invM + rt * rt * invI)));
       const ix = j * nx + jt * tx, iy = j * ny + jt * ty;
       p.vx += ix * invM; p.vy += iy * invM;
       p.omega += (rx * iy - ry * ix) * invI;
-      if (hit < CRUMBLE_SPEED) return false;
+      if (felt < SNAP_SPEED) return false;
       // A blow: what it struck feels it, and the piece breaks where it took it.
       const fwd = Math.sign(vt) || (random() < 0.5 ? 1 : -1);
-      blow(hx, hy, vx, vy, hit, j * hit, tx * fwd, ty * fwd, Math.abs(vt));
-      return breaks(p, wx, wy, vx, vy, nx, ny, hit);
+      if (felt >= CRUMBLE_SPEED) blow(hx, hy, vx, vy, hit, j * hit, tx * fwd, ty * fwd, Math.abs(vt), hard);
+      return breaks(p, wx, wy, vx, vy, nx, ny, felt, hard, spread);
     }
     // Which way the surface at (x, y) faces: away from the solid cells about it (deep inside
     // something, back the way the piece came).
@@ -492,10 +542,11 @@
     // stopped): the ground is dented and shaken, and looked at for what lost its footing; a struck
     // building gives way around the point of impact. Dust is driven out along the ground the way the
     // piece was going (fx, fy, at `along`), and a big blow leaves the rubble smouldering.
-    function blow(hx, hy, vx, vy, hit, energy, fx, fy, along) {
+    function blow(hx, hy, vx, vy, hit, energy, fx, fy, along, hard = 0.5) {
       stats.shattered += 1;
       const speed = hit;
-      if (PW.mat.terrain[mat[hy * W + hx] & ID_MASK]) dent(hx, hy, energy, vx);
+      // (soft ground takes the blow in a dent, its clods thrown up; rock hardly)
+      if (PW.mat.terrain[mat[hy * W + hx] & ID_MASK]) dent(hx, hy, energy * Math.max(0.1, 1.3 - hard * 1.5), vx);
       // The shock of it shakes the ground around, and the ground it struck is looked at for what
       // lost its footing.
       if (world.stability) {
@@ -522,43 +573,78 @@
       }
       if (energy > 4e7) smoulder(hx, hy, 24 + Math.min(36, energy / 4e6), 20 + Math.sqrt(energy) / 600);
     }
-    // The piece took a blow at (wx, wy), going (vx, vy) into a surface facing (nx, ny) at `hit`:
-    // the corner or edge there crumbles - its cells thrown off along the surface the way the piece
-    // was going, and up off it - and a hard enough blow cracks the rest right through, along jagged
-    // lines, into chunks. (False when nothing came of it.)
-    function breaks(p, wx, wy, vx, vy, nx, ny, hit) {
+    // The piece took a blow at (wx, wy), going (vx, vy) into a surface facing (nx, ny), felt as
+    // `felt` (see BOUNCE): the corner or edge there crumbles - its cells thrown off along the
+    // surface the way the piece was going, and up off it, faster and farther off hard ground - and
+    // a hard enough blow cracks the rest right through, along jagged lines, into chunks. A long
+    // piece that lands across something narrow snaps over it. (False when nothing came of it.)
+    function breaks(p, wx, wy, vx, vy, nx, ny, felt, hard = 0.5, spread = 0) {
       const [c, s] = cosSin(p);
       // (the point struck, in the piece's own cells)
       const dx = wx - p.px, dy = wy - p.py;
       const lu = dx * c + dy * s, lv = -dx * s + dy * c;
-      const r = Math.min(8, 1.5 + (hit - CRUMBLE_SPEED) / 30);
       const { grid, gw, gh, u0, v0, data } = p;
       const gone = new Uint8Array(data.x.length);
       let lost = 0;
-      for (let v = Math.floor(lv - r); v <= lv + r; v += 1) for (let u = Math.floor(lu - r); u <= lu + r; u += 1) {
-        if (u < u0 || v < v0 || u >= u0 + gw || v >= v0 + gh || (u + 0.5 - lu) ** 2 + (v + 0.5 - lv) ** 2 > r * r) continue;
-        const g = grid[(v - v0) * gw + (u - u0)];
-        if (!g || (PW.hash3(u, v, p.generation) & 3) < 2) continue;    // (raggedly)
-        gone[g - 1] = 1; lost += 1;
+      if (felt >= CRUMBLE_SPEED) {
+        const r = Math.min(12, 2 + (felt - CRUMBLE_SPEED) / 22);
+        for (let v = Math.floor(lv - r); v <= lv + r; v += 1) for (let u = Math.floor(lu - r); u <= lu + r; u += 1) {
+          if (u < u0 || v < v0 || u >= u0 + gw || v >= v0 + gh || (u + 0.5 - lu) ** 2 + (v + 0.5 - lv) ** 2 > r * r) continue;
+          const g = grid[(v - v0) * gw + (u - u0)];
+          if (!g || (PW.hash3(u, v, p.generation) & 3) === 0) continue;    // (raggedly)
+          gone[g - 1] = 1; lost += 1;
+        }
       }
-      const cracks = hit > SPLIT_SPEED + p.generation * 60 && p.generation < MAX_CRACKS && p.mass >= SPLIT_MIN && list.length < MAX_PIECES - 4;
-      if (!lost && !cracks) return false;
+      const room = p.mass >= SPLIT_MIN && list.length < MAX_PIECES - 4;
+      const cracks = room && felt > SPLIT_SPEED + p.generation * 45 && p.generation < MAX_CRACKS;
+      // (snaps: long for its thickness, struck at one narrow place away from its ends)
+      const long = gw >= gh ? gw : gh, thick = gw >= gh ? gh : gw;
+      const along = gw >= gh ? (lu - u0) / gw : (lv - v0) / gh;
+      const snaps = room && !cracks && p.generation <= MAX_CRACKS && long >= thick * SNAP_SLENDER && spread < long * 0.25 && along > 0.18 && along < 0.82;
+      if (!lost && !cracks && !snaps) return false;
+      // What crumbles off is thrown along the surface the way the piece was going and bounces up
+      // off it - off rock fast and far, off soft ground barely.
       const tx = -ny, ty = nx, vt = vx * tx + vy * ty;
+      const kick = 0.3 + hard * 1.2;
       for (let k = 0; k < gone.length; k += 1) {
         if (!gone[k]) continue;
         const [x, y] = toWorld(p, c, s, data.x[k] - p.ox0 + 0.5, data.y[k] - p.oy0 + 0.5);
-        if (!data.solid[k]) { if ((k & 7) === 0) puff(x, y, 1); continue; }
-        const f = 0.3 + random() * 0.7, up = hit * (0.1 + random() * 0.25);
-        particles.spawn(x, y, tx * vt * f + nx * up + (random() - 0.5) * 50, ty * vt * f + ny * up - random() * 20, debrisOf(data.byte[k]), data.color[k] || 0, F.LAND | F.DAMAGE, 6);
+        if (!rubbleFrom(data.solid[k], data.x[k], data.y[k])) { if ((k & 3) === 0) puff(x, y, 1); continue; }
+        const f = 0.4 + random() * 0.8, up = felt * kick * (0.1 + random() * 0.35);
+        const side = (random() - 0.5) * (40 + 120 * hard);
+        particles.spawn(x, y, tx * (vt * f + side) + nx * up, ty * (vt * f + side) + ny * up - random() * 20, debrisOf(data.byte[k]), data.color[k] || 0, F.LAND | F.DAMAGE, 6);
         stats.crumbled = (stats.crumbled || 0) + 1;
       }
       // (and dust with it, the same way)
-      if (lost) jet(wx, wy - 1, Math.round(lost / 2), tx * vt * 0.6 + nx * hit * 0.15, ty * vt * 0.6 + ny * hit * 0.15 - 10, 0.8);
+      if (lost) jet(wx, wy - 1, Math.round(lost / 2), tx * vt * 0.6 + nx * felt * 0.15, ty * vt * 0.6 + ny * felt * 0.15 - 10, 0.8);
       const ks = [];
       for (let k = 0; k < gone.length; k += 1) if (!gone[k]) ks.push(k);
-      if (cracks) breakUp(p, ks, Math.max(16, Math.min(72, Math.sqrt(p.mass) / 2.2)), 1);
+      if (cracks) breakUp(p, ks, Math.max(14, Math.min(64, Math.sqrt(p.mass) / 2.6)), 1);
+      else if (snaps) snap(p, ks, gw >= gh, gw >= gh ? lu : lv);
       else spawn({ data: pick(data, ks), parent: p, inherit: true, owner: p.owner, from: p.from, generation: p.generation, h0: p.h0, floor: p.yf, base: p.base });
       return true;
+    }
+    // A long piece snaps across where it struck (at `at` along its long side - its own u if `wide`,
+    // else v): a jagged crack right across it, a band of it crumbling there, and the two halves go
+    // on each with its own part of the motion - the one hanging over falls on round the break.
+    function snap(p, ks, wide, at) {
+      const d = p.data, [c, s] = cosSin(p);
+      const a = [], b = [];
+      for (const k of ks) {
+        const u = d.x[k] - p.ox0, v = d.y[k] - p.oy0;
+        const along = wide ? u : v, across = wide ? v : u;
+        const line = at + ((PW.hash2(Math.floor(across / 3), p.generation + 11) & 7) - 3.5);
+        if (Math.abs(along - line) < 1.5 && d.solid[k]) {
+          // (the crack itself crumbles)
+          const [x, y] = toWorld(p, c, s, u + 0.5, v + 0.5);
+          if ((k & 1) === 0 && rubbleFrom(d.solid[k], d.x[k], d.y[k])) particles.spawn(x, y, (random() - 0.5) * 60, -20 - random() * 40, debrisOf(d.byte[k]), d.color[k] || 0, F.LAND, 6);
+          else if ((k & 7) === 1) puff(x, y, 1);
+          continue;
+        }
+        (along < line ? a : b).push(k);
+      }
+      for (const part of [a, b]) if (part.length) spawn({ data: pick(d, part), parent: p, inherit: true, owner: 0, from: p.from || p.owner, h0: p.h0, generation: p.generation + 1 });
+      stats.snapped = (stats.snapped || 0) + 1;
     }
     // A big piece coming straight down into its own footprint does not burst all at once: only its
     // bottom storey or so is crushed where it strikes, bursting out of its sides, and the rest
@@ -586,7 +672,7 @@
       const [mid] = centre(p);
       scatter(pick(placed, crushedKs), vx * 0.3, 0, 0, mid, wy, 0.45, undefined, undefined, undefined, Math.min(2.2, 0.6 + speed / 220));
       let restMass = 0;
-      for (const k of restKs) restMass += p.data.solid[k];
+      for (const k of restKs) if (p.data.solid[k]) restMass += 1;
       if (restMass >= CHUNK_MIN) {
         spawn({ data: pick(p.data, restKs), parent: p, owner: p.owner, from: p.from, vx: vx * 0.4, vy: Math.max(30, vy * 0.65), omega: p.omega * 0.5,
           drop: true, floor: p.yf, base: p.base, generation: p.generation, sunk: p.sunk + 1, h0: p.h0 });
@@ -697,10 +783,11 @@
         const edge = !here.has(i - 1) || !here.has(i + 1) || !here.has(i - W) || !here.has(i + W);
         const room = !blocking(x, y);
         if ((byte & ID_MASK) === M.GLASS || !room || (edge && (PW.hash2(x, y) & 3) === 0)) {
-          particles.spawn(x + 0.5, y - 0.5, (random() - 0.5) * 60, -20 - random() * 40, debrisOf(byte), data.color[j] || 0, F.LAND, 6);
+          if (rubbleFrom(data.solid[j], x, y)) particles.spawn(x + 0.5, y - 0.5, (random() - 0.5) * 60, -20 - random() * 40, debrisOf(byte), data.color[j] || 0, F.LAND, 6);
+          else if ((q & 7) === 0) puff(x, y, 1);
           continue;
         }
-        PW.set(world, x, y, M.RUIN | (PW.hash2(x, y) & 3) << 6);
+        put(x, y, M.RUIN | (PW.hash2(x, y) & 3) << 6);
         if (data.color[j]) PW.setLayer(world, 'paint', x, y, ruinTone(data.color[j], x, y));
         cells += 1;
         if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
@@ -709,6 +796,12 @@
       (world.ruins || (world.ruins = [])).push({ from: p.from || p.owner, x0, y0, x1, y1, cells });
       stats.ruins = (stats.ruins || 0) + cells;
       if (world.stability) world.stability.disturb(x0, y0, x1, y1);
+    }
+    // (a cell of rubble or ruin put down where water is: the water is pushed up out of its way, to
+    // the surface - never lost)
+    function put(x, y, byte) {
+      if ((mat[y * W + x] & ID_MASK) === M.WATER) particles.spawn(x + 0.5, y + 0.5, 0, -30, M.WATER, 0, F.WATER, 6);
+      PW.set(world, x, y, byte);
     }
     // The piece's cells at their present places in the world, as data for a new piece.
     function place(p, part, c, s) {
@@ -758,13 +851,14 @@
       for (let k = 0; k < n; k += 1) {
         const x = wxs[k], y = wys[k];
         if (!data.solid[k]) { if ((k & 15) === 0) puff(x, y, 1); continue; }
+        if (!rubbleFrom(data.solid[k], data.x[k], data.y[k])) { if ((k & 3) === 0) puff(x, y, 1); continue; }
         const byte = debrisOf(data.byte[k]);
         if (random() < thrown) {
           const dx = x + 0.5 - cx, dy = y + 0.5 - cy;
           if (burst) particles.spawn(x + 0.5, y - 0.5, Math.sign(dx || random() - 0.5) * (60 + random() * 180) * burst + vx * 0.3, -10 - random() * 45 * burst, byte, data.color[k] || 0, F.LAND | F.DAMAGE, 6);
           else particles.spawn(x + 0.5, y - 0.5, vx * 0.5 - omega * dy * 0.5 + (random() - 0.5) * 160, -Math.abs(vy) * 0.3 - random() * 120 + omega * dx * 0.2, byte, 0, F.LAND | F.DAMAGE, 6);
         } else if (x > 0 && y > 0 && x < W - 1 && y < H - 1 && !blocking(x, y) && support.get(x) - y <= HEAP) {
-          PW.set(world, x, y, byte);
+          put(x, y, byte);
           if (data.color[k] && (byte & ID_MASK) === M.DEBRIS) PW.setLayer(world, 'paint', x, y, rubbleTone(data.color[k], x, y));
           stats.debris += 1;
         } else if (x > 0 && y > 0 && x < W - 1 && y < H - 1 && !blocking(x, y)) {
