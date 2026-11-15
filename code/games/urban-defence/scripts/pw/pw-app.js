@@ -67,6 +67,8 @@
   }
   // A ruined building's cores lie open in their vaults, kept clear of rubble.
   const cores = PW.createCores ? PW.createCores(world, particles) : null;
+  // Ground that loses its footing breaks loose: cave-ins, landslides and avalanches.
+  const stability = world.stability = PW.createStability ? PW.createStability(world, particles) : null;
   // Bubbles the water simulation releases: one or two cells of pale air, rising to pop.
   const BUBBLE_COLORS = [PW.abgr(206, 232, 248, 230), PW.abgr(168, 210, 238, 210), PW.abgr(232, 244, 252, 240)];
   world.emitBubble = (x, y) => {
@@ -234,6 +236,7 @@
       if (structure) structure.step(1.5);
       if (fragments) fragments.step(DT);
       if (cores) cores.step();
+      if (stability) stability.step();
       if (PW.stepSmoulders) PW.stepSmoulders(world, DT);
       if (PW.mining) PW.mining.step(world, DT);
       if (pipes) pipes.step();
@@ -285,7 +288,7 @@
   }
 
   window.pwApp = { world, layout, renderer, sim, particles, seed, timings, ready: true,
-    explode, dig, planDig, preview, pipes, setDevelopSpeed: (k) => { devSpeed = k; }, heat, life, structure, fragments, cores,
+    explode, dig, planDig, preview, pipes, setDevelopSpeed: (k) => { devSpeed = k; }, heat, life, structure, fragments, cores, stability,
     setBrush: (b) => { brush = b; },
     paint: (x, y, radius, material) => paint(x, y, radius, () => material),
     stepWorld, countWater: () => sim.countWater(), simTimes,

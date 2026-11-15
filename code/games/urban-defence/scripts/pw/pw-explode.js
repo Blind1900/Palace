@@ -24,6 +24,24 @@
       const a = speed * (0.55 + random() * 0.8);
       return [dx / d * a + (random() - 0.5) * speed * 0.5, dy / d * a * 0.6 - up * (0.6 + random() * 0.7)];
     };
+    // What the blast has to pass through on its way to each cell takes strength out of it: rock
+    // shields what lies behind it, so in a mountain a blast chips out a small rough hole where in
+    // soil it blows out a wide crater. (Worked outward ring by ring: each cell's shielding is
+    // that of the cell one step nearer the centre plus what that cell resists.)
+    const bw = x1 - x0 + 1, bh = y1 - y0 + 1, shield = new Float32Array(bw * bh);
+    const icx = Math.round(cx), icy = Math.round(cy), resist = PW.mat.blastResist;
+    for (let k = 1; k <= Math.max(bw, bh); k += 1) {
+      for (let dy = -k; dy <= k; dy += 1) {
+        const step = Math.abs(dy) === k ? 1 : 2 * k;
+        for (let dx = -k; dx <= k; dx += step) {
+          const x = icx + dx, y = icy + dy;
+          if (x < x0 || x > x1 || y < y0 || y > y1) continue;
+          const d = Math.hypot(dx, dy), px = Math.round(x - dx / d), py = Math.round(y - dy / d);
+          if (px < x0 || px > x1 || py < y0 || py > y1 || (px === icx && py === icy)) continue;
+          shield[(y - y0) * bw + (x - x0)] = shield[(py - y0) * bw + (px - x0)] + resist[mat[py * W + px] & ID_MASK];
+        }
+      }
+    }
     for (let y = y0; y <= y1; y += 1) {
       for (let x = x0; x <= x1; x += 1) {
         const nx = (x - cx) / r, ny = (y - cy) / (y > cy ? below : r);
@@ -43,8 +61,8 @@
           }
         }
         if (s > 1) {
-          // Scorch the rim.
-          if (id !== M.AIR && id !== M.WATER && s < 1.3 && !structural[id]) {
+          // Scorch the rim (where the blast reached it: not behind the rock that stopped it).
+          if (id !== M.AIR && id !== M.WATER && s < 1.3 && !structural[id] && shield[(y - y0) * bw + (x - x0)] < 0.3) {
             const paint = PW.getLayer(world, 'paint', x, y) || palettes[id][(m >> 6) * 2];
             const c = PW.unpack(paint), k = 0.55 + (s - 1) * 1.2;
             PW.setLayer(world, 'paint', x, y, PW.abgr(c[0] * k, c[1] * k, c[2] * k));
@@ -52,7 +70,7 @@
           }
           continue;
         }
-        const strength = power * (1 - s) * 1.4 + (PW.hash2(x, y) & 255) / 255 * 0.2 - 0.1;
+        const strength = power * (1 - s) * 1.4 + (PW.hash2(x, y) & 255) / 255 * 0.2 - 0.1 - shield[(y - y0) * bw + (x - x0)];
         // Back walls and everything fixed to them break in the blast: a building's walls (the
         // building is told), a tunnel's or shaft's lining and timbering, ladders, rails, belts and
         // pipes on the wall. Underground the rock behind shows through, blackened.
@@ -122,6 +140,12 @@
     if (PW.flora) PW.flora.afterBlast(world, particles, box);
     if (PW.props) PW.props.afterBlast(world, particles, box);
     if (world.onDamage) for (const [id, cells] of damaged) world.onDamage(id, cells, cx, cy);
+    // The ground around and above the hole is looked at for what lost its footing (the slope over
+    // it may come down), and the blast shakes loose the steep ground near it.
+    if (world.stability) {
+      world.stability.disturb(x0 - 4, y0 - r * 1.5, x1 + 4, y1 + 4);
+      world.stability.shake(cx, cy, r * 1.8, power);
+    }
     return { removed, damaged };
   }
 

@@ -127,9 +127,9 @@
     [[128, 122, 112], [120, 114, 105], [136, 130, 119], [114, 108, 100]]);
   define(M.FOUNDATION, 'foundation', { structural: true, ground: true, hardness: 0.75, breaksTo: debris(DEBRIS_KIND.CONCRETE) },
     [[104, 102, 96], [98, 96, 90], [110, 108, 101], [94, 92, 87]]);
-  define(M.ASPHALT, 'asphalt', { ground: true, hardness: 0.4, breaksTo: M.LOOSE_STONE },
+  define(M.ASPHALT, 'asphalt', { ground: true, hardness: 0.5, breaksTo: M.LOOSE_STONE },
     [[58, 60, 62], [54, 56, 58], [62, 64, 66], [52, 53, 55]]);
-  define(M.ROADBED, 'road bed', { ground: true, hardness: 0.35, breaksTo: M.LOOSE_STONE },
+  define(M.ROADBED, 'road bed', { ground: true, hardness: 0.45, breaksTo: M.LOOSE_STONE },
     [[104, 96, 84], [98, 90, 79], [110, 101, 88], [94, 86, 76]]);
   define(M.LINING, 'tunnel lining', { ground: true, hardness: 0.6, breaksTo: debris(DEBRIS_KIND.CONCRETE) },
     [[191, 123, 25], [180, 116, 24], [200, 130, 28], [172, 110, 22]]);
@@ -156,11 +156,11 @@
     [[176, 158, 112], [150, 134, 94], [196, 178, 130], [140, 124, 88]]);
   define(M.REINFORCED, 'reinforced lining', { ground: true, hardness: 0.85, breaksTo: debris(DEBRIS_KIND.CONCRETE) },
     [[132, 134, 130], [124, 126, 122], [140, 142, 138], [118, 120, 116]]);
-  define(M.FILL, 'made ground', { ground: true, hardness: 0.35, breaksTo: M.LOOSE_STONE },
+  define(M.FILL, 'made ground', { ground: true, hardness: 0.5, breaksTo: M.LOOSE_STONE },
     [[112, 104, 92], [104, 96, 85], [118, 110, 97], [98, 91, 81]]);
-  define(M.SLAB, 'buried slab', { ground: true, hardness: 0.55, breaksTo: debris(DEBRIS_KIND.CONCRETE) },
+  define(M.SLAB, 'buried slab', { ground: true, hardness: 0.65, breaksTo: debris(DEBRIS_KIND.CONCRETE) },
     [[146, 144, 136], [138, 136, 129], [152, 150, 142], [132, 130, 124]]);
-  define(M.COURSE, 'brick course', { ground: true, hardness: 0.45, breaksTo: debris(DEBRIS_KIND.BRICK) },
+  define(M.COURSE, 'brick course', { ground: true, hardness: 0.55, breaksTo: debris(DEBRIS_KIND.BRICK) },
     [[124, 84, 66], [116, 78, 62], [130, 90, 70], [110, 74, 58]]);
   for (const id of [M.GRASS, M.TOPSOIL, M.SOIL, M.CLAY, M.GRAVEL, M.STONE, M.BEDROCK, M.SAND, M.ORE, M.WATER,
     M.LOOSE_SOIL, M.LOOSE_STONE, M.RUBBLE, M.ASPHALT, M.ROADBED, M.LINING, M.PIPE, M.REINFORCED, M.FILL, M.SLAB, M.COURSE]) skyline[id] = 1;
@@ -195,6 +195,53 @@
   for (const id of [M.GRASS, M.TOPSOIL, M.SOIL, M.CLAY, M.GRAVEL, M.STONE, M.BEDROCK, M.SAND, M.ORE,
     M.LOOSE_SOIL, M.LOOSE_STONE, M.DEBRIS, M.RUBBLE, M.FILL, M.SLAB, M.COURSE]) terrain[id] = 1;
   thermal([M.SLAB, M.COURSE], { conduct: 0.08 });
+
+  // ---- Element physics (after The Powder Toy's element model; our own code and numbers) ----------
+  // weight: what sinks through what (heavier displaces lighter: debris sinks through water, smoke
+  //   rises through air). blastResist: blast strength lost per cell of it the blast passes through,
+  //   so rock shields what lies behind it and a blast in a mountain chips a small hole where in
+  //   soil it blows out a wide crater. cohesion: how many cells ground of it holds out over a void
+  //   before it breaks loose (an overhang of soil drops at once; stone spans a cave mouth).
+  const weight = new Uint8Array(64), blastResist = new Float32Array(64), cohesion = new Uint8Array(64);
+  const physics = (ids, props) => { for (const id of ids) {
+    if (props.weight !== undefined) weight[id] = props.weight;
+    if (props.resist !== undefined) blastResist[id] = props.resist;
+    if (props.cohesion !== undefined) cohesion[id] = props.cohesion;
+  } };
+  for (let id = 1; id < 64; id += 1) if (names[id]) physics([id], { weight: phase[id] === PHASE.SOLID ? 100 : 50, resist: 0.03 });
+  physics([M.STEAM], { weight: 1, resist: 0 }); physics([M.SMOKE], { weight: 2, resist: 0 }); physics([M.DUST], { weight: 4, resist: 0 });
+  physics([M.WATER], { weight: 30, resist: 0.025 });
+  physics([M.ASH], { weight: 40, resist: 0.004 });
+  physics([M.SAND], { weight: 70, resist: 0.008, cohesion: 0 });
+  physics([M.LOOSE_SOIL], { weight: 72, resist: 0.008, cohesion: 0 });
+  physics([M.DEBRIS], { weight: 80, resist: 0.01, cohesion: 0 });
+  physics([M.LOOSE_STONE], { weight: 85, resist: 0.012, cohesion: 0 });
+  physics([M.GRASS, M.TOPSOIL], { resist: 0.012, cohesion: 4 });
+  physics([M.SOIL], { resist: 0.012, cohesion: 3 });
+  physics([M.CLAY], { resist: 0.02, cohesion: 6 });
+  physics([M.GRAVEL], { resist: 0.02, cohesion: 2 });
+  physics([M.RUBBLE], { resist: 0.012, cohesion: 2 });
+  physics([M.STONE], { resist: 0.045, cohesion: 16 });
+  physics([M.ORE], { resist: 0.05, cohesion: 20 });
+  physics([M.BEDROCK], { resist: 1, cohesion: 255 });
+  // (a town's ground - compacted fill, buried slabs, brick courses, paving and its road base - is
+  // made to carry its weight, and stands a blast nearly as well as rock)
+  physics([M.FILL], { resist: 0.035, cohesion: 6 });
+  physics([M.COURSE, M.BRICK], { resist: 0.045, cohesion: 10 });
+  physics([M.ASPHALT], { resist: 0.045, cohesion: 12 });
+  physics([M.ROADBED], { resist: 0.04, cohesion: 8 });
+  physics([M.LINING], { resist: 0.05, cohesion: 40 });
+  physics([M.REINFORCED], { resist: 0.08, cohesion: 60 });
+  physics([M.CONCRETE, M.SLAB], { resist: 0.055, cohesion: 20 });
+  physics([M.MASONRY, M.PILLAR], { resist: 0.055 });
+  physics([M.FOUNDATION], { resist: 0.06 });
+  physics([M.STEEL, M.BRIDGE], { resist: 0.06 });
+  physics([M.GLASS], { resist: 0.004 });
+  physics([M.WOOD, M.COVER_WOOD], { resist: 0.015 });
+  physics([M.TILE], { resist: 0.02 });
+  physics([M.PIPE, M.PLATFORM], { resist: 0.03 });
+  physics([M.CORE], { resist: 0.1 });
+  physics([M.COVER_ROCK], { resist: 0.065 }); physics([M.COVER_METAL], { resist: 0.04 }); physics([M.COVER_SAND], { resist: 0.03 });
 
   // ---- Hashing and random numbers ------------------------------------------------------------
   function hash2(x, y) {
@@ -559,7 +606,7 @@
   PW.DEBRIS_KIND = DEBRIS_KIND;
   PW.ID_MASK = ID_MASK;
   PW.mat = { phase, structural, ground, skyline, hardness, breaksTo, passable, stopsShots, terrain, open,
-    conduct, ignite, burnTime, burnsTo, palettes, names };
+    conduct, ignite, burnTime, burnsTo, palettes, names, weight, blastResist, cohesion };
   PW.CHUNK = CHUNK;
   PW.CHUNK_SHIFT = CHUNK_SHIFT;
   PW.CHUNK_MASK = CHUNK_MASK;
