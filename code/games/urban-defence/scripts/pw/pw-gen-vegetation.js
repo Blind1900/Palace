@@ -18,6 +18,8 @@
   const DEAD_BARK = { dark: [52, 46, 42], base: [84, 76, 68], light: [112, 102, 92] };
   const BIRCH_FOOT = { dark: [36, 34, 32], base: [92, 88, 82], light: [132, 128, 120] };
   const shadeColor = (rgbArray, k) => rgb(Math.min(255, rgbArray[0] * k | 0), Math.min(255, rgbArray[1] * k | 0), Math.min(255, rgbArray[2] * k | 0));
+  // (a drawn colour, darkened: wood in the shade of leaves)
+  const shade = (color, k) => { const c = PW.unpack(color); return rgb(c[0] * k | 0, c[1] * k | 0, c[2] * k | 0); };
   const mixRGB = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
 
   // ---- Ground under a plant ------------------------------------------------------------------------
@@ -132,24 +134,37 @@
     if (!clumps.length) return;
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
     for (const c of clumps) {
-      x0 = Math.min(x0, c.x - c.r); x1 = Math.max(x1, c.x + c.r);
-      y0 = Math.min(y0, c.y - c.r); y1 = Math.max(y1, c.y + c.r);
+      x0 = Math.min(x0, c.x - c.r * (c.sx || 1)); x1 = Math.max(x1, c.x + c.r * (c.sx || 1));
+      y0 = Math.min(y0, c.y - c.r * (c.sy || 1)); y1 = Math.max(y1, c.y + c.r * (c.sy || 1));
     }
+    x0 = Math.floor(x0); y0 = Math.floor(y0);
     const seed = random.int(1, 1e9);
     const cluster = PW.createNoise2D(seed, options.clusterSize || 5);
     const fine = PW.createNoise2D(seed + 7, 2);
     const canopyTop = y0, canopyHeight = Math.max(1, y1 - y0);
-    for (let y = Math.floor(y0); y <= y1; y += 1) {
-      for (let x = Math.floor(x0); x <= x1; x += 1) {
-        let best = 0, bestClump = null;
-        for (const c of clumps) {
-          const d = Math.hypot((x - c.x) / (c.sx || 1), (y - c.y) / (c.sy || 1)) / c.r;
-          if (d < 1 && 1 - d > best) { best = 1 - d; bestClump = c; }
-        }
-        if (!bestClump) continue;
+    // (each pixel takes the clump it lies deepest in: worked clump by clump over its own box)
+    const bw = Math.ceil(x1) - x0 + 1, bh = Math.ceil(y1) - y0 + 1;
+    const depth = new Float32Array(bw * bh), owner = new Int32Array(bw * bh).fill(-1);
+    clumps.forEach((c, n) => {
+      const sx = c.sx || 1, sy = c.sy || 1;
+      for (let y = Math.floor(c.y - c.r * sy); y <= c.y + c.r * sy; y += 1) for (let x = Math.floor(c.x - c.r * sx); x <= c.x + c.r * sx; x += 1) {
+        const d = Math.hypot((x - c.x) / sx, (y - c.y) / sy) / c.r;
+        if (d >= 1) continue;
+        const k = (y - y0) * bw + (x - x0);
+        if (k >= 0 && k < depth.length && 1 - d > depth[k]) { depth[k] = 1 - d; owner[k] = n; }
+      }
+    });
+    for (let y = y0; y <= y1; y += 1) {
+      for (let x = x0; x <= x1; x += 1) {
+        const k = (y - y0) * bw + (x - x0);
+        if (owner[k] < 0) continue;
+        const best = depth[k], bestClump = clumps[owner[k]];
         const n = cluster(x, y), f = fine(x, y);
         // Ragged edge: leaf clusters push out or pull in the outline.
         if (best + n * 0.32 + f * 0.1 < (options.edge || 0.22)) continue;
+        // (the wood the leaves grow on stays wood: seen through the leaves, in their shade)
+        const wood = get(sprite, x, y);
+        if (wood) { put(sprite, x, y, shade(wood, 0.55)); continue; }
         // Small holes inside the canopy let branches and sky show through.
         if (best > 0.25 && n < -0.55 && f < -0.1) continue;
         const ux = (x - bestClump.x) / bestClump.r, uy = (y - bestClump.y) / bestClump.r;
@@ -214,19 +229,39 @@
     limb(sprite, base.x, base.y, trunkTop.x, trunkTop.y, trunkW, trunkW * 0.62, BARK, random, random.range(-2, 2));
     sprite.base = rootFoot(sprite, base.x, base.y, trunkW, ground, BARK, random);
     sprite.trunk = { dx: trunkTop.x - base.x, dy: trunkTop.y - base.y };
+    // It grows as a tree does: the wood first - trunk, boughs, branches, and twigs off the ends of
+    // the branches - then the leaves, in clusters along the outer branches and on the twigs, so
+    // every leaf grows on wood a few cells from it (a bough that breaks off takes its leaves).
+    const leafR = () => height * random.range(0.055, 0.085);
+    const leavesAlong = (x0, y0, x1, y1, from) => {
+      const len = Math.hypot(x1 - x0, y1 - y0);
+      for (let t = from; t <= 1.001; t += Math.max(0.15, height * 0.05 / Math.max(1, len))) {
+        const r = leafR();
+        clumps.push({ x: x0 + (x1 - x0) * t + random.range(-0.3, 0.3) * r, y: y0 + (y1 - y0) * t - r * 0.35, r, sx: random.range(1.05, 1.3), sy: random.range(0.8, 0.95) });
+      }
+    };
     function branch(x, y, angle, length, w, depth) {
       const ex = x + Math.cos(angle) * length, ey = y + Math.sin(angle) * length;
       limb(sprite, x, y, ex, ey, w, w * 0.62, BARK, random, random.range(-length * 0.08, length * 0.08));
       if (depth <= 0 || length < height * 0.09) {
-        clumps.push({ x: ex, y: ey, r: height * random.range(0.13, 0.2), sx: random.range(1.1, 1.35), sy: random.range(0.8, 0.95) });
+        // (twigs off the end, reaching up and out, each with its leaves)
+        const twigs = random.int(2, 4);
+        for (let i = 0; i < twigs; i += 1) {
+          const a = (angle + random.range(-0.9, 0.9)) * 0.75 - Math.PI / 2 * 0.25, tl = height * random.range(0.05, 0.09);
+          const tx = ex + Math.cos(a) * tl, ty = ey + Math.sin(a) * tl;
+          limb(sprite, ex, ey, tx, ty, Math.max(1.2, w * 0.6), 1, BARK, random);
+          const r = leafR();
+          clumps.push({ x: tx, y: ty - r * 0.3, r, sx: random.range(1.05, 1.3), sy: random.range(0.8, 0.95) });
+        }
+        leavesAlong(x, y, ex, ey, 0.35);
         return;
       }
+      if (depth === 1) leavesAlong(x, y, ex, ey, 0.6);
       const children = random.int(2, 3);
       for (let i = 0; i < children; i += 1) {
         const spread = random.range(0.25, 0.75) * (i % 2 ? 1 : -1);
         branch(ex, ey, angle + spread + random.range(-0.15, 0.15), length * random.range(0.6, 0.78), w * 0.62, depth - 1);
       }
-      if (random() < 0.5) clumps.push({ x: ex, y: ey, r: height * random.range(0.1, 0.15), sx: 1.2, sy: 0.85 });
     }
     const mainBranches = random.int(2, 4);
     for (let i = 0; i < mainBranches; i += 1) {
@@ -234,8 +269,9 @@
       branch(trunkTop.x, trunkTop.y, -Math.PI / 2 + t * random.range(1.1, 1.6), height * random.range(0.2, 0.28),
         trunkW * 0.62, random.int(2, 3));
     }
-    clumps.push({ x: trunkTop.x, y: trunkTop.y - height * 0.12, r: height * 0.2, sx: 1.4, sy: 0.9 });
-    foliage(sprite, clumps, LEAF, random, { clusterSize: Math.max(4, height / 30) });
+    // (a leader shoot carries on up from the top of the trunk, leafed like the rest)
+    branch(trunkTop.x, trunkTop.y, -Math.PI / 2 + random.range(-0.15, 0.15), height * random.range(0.16, 0.22), trunkW * 0.5, 1);
+    foliage(sprite, clumps, LEAF, random, { clusterSize: Math.max(3, height / 40) });
     return trim(sprite);
   }
 
@@ -256,10 +292,23 @@
     const tiers = random.int(7, 12);
     const crown = height - skirt;
     const noise = PW.createNoise1D(random.int(1, 1e9), 3);
+    // The wood first: a whorl of branches out of the trunk for each tier, drooping to its tips;
+    // then the needles along them.
+    const trunkX = (y) => cx + (topX - cx) * (baseY - y) / (height * 0.95);
+    const tierOf = [];
     for (let tier = 0; tier < tiers; tier += 1) {
       const t0 = tier / tiers, t1 = (tier + 1.35) / tiers;
       const yTop = top + crown * t0, yBottom = top + crown * Math.min(1, t1);
       const half = maxHalf * Math.pow((tier + 1) / tiers, 0.85) * random.range(0.85, 1.08);
+      tierOf.push({ yTop, yBottom, half });
+      const from = yTop + (yBottom - yTop) * 0.35;
+      for (const s of [-1, 1]) limb(sprite, trunkX(from), from, cx + s * half * 0.88, yBottom - 1, Math.max(1.2, trunkW * 0.22), 1, BARK, random, s * random.range(0.5, 1.5));
+    }
+    // (which cells are wood, before any needles: 1 wood, 2 wood already shaded)
+    const woodPx = new Uint8Array(sprite.pixels.length);
+    for (let k = 0; k < woodPx.length; k += 1) if (sprite.pixels[k]) woodPx[k] = 1;
+    for (let tier = 0; tier < tiers; tier += 1) {
+      const { yTop, yBottom, half } = tierOf[tier];
       for (let y = Math.floor(yTop); y <= yBottom; y += 1) {
         const v = (y - yTop) / Math.max(1, yBottom - yTop);
         // Each tier widens downward, with drooping, ragged needle tips.
@@ -267,6 +316,11 @@
         for (let x = Math.floor(cx - spread); x <= cx + spread; x += 1) {
           const u = (x - cx) / Math.max(1, spread);
           if (Math.abs(u) > 0.92 && (PW.hash2(x, y) & 3) === 0) continue;
+          // (the trunk and branches stay wood, in the needles' shade)
+          const px = Math.round(y) * sprite.width + Math.round(x);
+          // (deep in the needles' shade: a dark that is still wood, not needle)
+          if (woodPx[px] === 1) { woodPx[px] = 2; put(sprite, x, y, (PW.hash2(x, y) & 3) ? rgb(30, 33, 28) : rgb(38, 36, 30)); continue; }
+          if (woodPx[px] === 2) continue;
           const light = -u * 0.65 - v * 0.9 + 0.45 + ((PW.hash2(x, y) & 15) - 7.5) / 22;
           const color = light > 0.75 ? NEEDLE.high : light > 0.3 ? NEEDLE.light : light > -0.15 ? NEEDLE.base
             : light > -0.55 ? NEEDLE.shadow : NEEDLE.deep;
@@ -294,12 +348,19 @@
       const x = cx + lean * t;
       put(sprite, x - 1, y, rgb(40, 38, 36)); put(sprite, x, y, rgb(40, 38, 36));
     }
+    // Thin branches up and out of the trunk first, then the leaves hanging along them.
     const clumps = [];
-    for (let i = 0; i < 6; i += 1) {
-      const t = random.range(0.35, 0.95);
-      clumps.push({ x: cx + lean * t + random.range(-0.18, 0.18) * height, y: baseY - height * t,
-        r: height * random.range(0.1, 0.16), sx: 0.9, sy: 1.25 });
+    for (let i = 0; i < 9; i += 1) {
+      const t = random.range(0.32, 0.9), side = i % 2 ? 1 : -1;
+      const fx = cx + lean * t, fy = baseY - height * t;
+      const a = -Math.PI / 2 + side * random.range(0.5, 1.1), len = height * random.range(0.1, 0.18);
+      const ex = fx + Math.cos(a) * len, ey = fy + Math.sin(a) * len;
+      limb(sprite, fx, fy, ex, ey, 1.8, 1, bark, random, side * random.range(0.5, 2));
+      for (const along of [0.55, 1]) {
+        clumps.push({ x: fx + (ex - fx) * along, y: fy + (ey - fy) * along + height * 0.02, r: height * random.range(0.05, 0.08), sx: 0.9, sy: 1.25 });
+      }
     }
+    clumps.push({ x: cx + lean * 0.9, y: baseY - height * 0.88, r: height * 0.07, sx: 0.9, sy: 1.25 });
     foliage(sprite, clumps, BIRCH_LEAF, random, { clusterSize: 3.5, edge: 0.28 });
     return trim(sprite);
   }
@@ -603,9 +664,31 @@
   }
   function settle(world, particles, record, from = null) {
     if (record.felled) return 0;
+    const solid = (x, y) => PW.mat.phase[PW.get(world, x, y) & ID_MASK] === PW.PHASE.SOLID;
+    // A tree whose ground is hollowed out from under its trunk - a crater, a slide, a dug hole -
+    // comes down whole ("timber!"): over into the hole, about the edge of the ground still under
+    // it, or dropping into it if nothing holds it at all.
+    if (!record.fallen && record.kind === 'tree' && record.foot) {
+      const tw = Math.max(2, Math.round((record.size || 60) * 0.03));
+      let trunk = 0, held = 0, leftHeld = 0, rightHeld = 0, innerL = -Infinity, innerR = Infinity;
+      for (let k = 0; k < record.foot.length; k += 1) {
+        if (record.foot[k] < 0) continue;
+        const x = record.footX0 + k, ok = solid(x, record.foot[k] + 1);
+        if (Math.abs(x - record.anchorX) <= tw) { trunk += 1; if (ok) held += 1; }
+        // (the edge of the ground still holding it nearest the trunk, on each side)
+        if (ok && x < record.anchorX - tw) { leftHeld += 1; innerL = Math.max(innerL, x); }
+        if (ok && x > record.anchorX + tw) { rightHeld += 1; innerR = Math.min(innerR, x); }
+      }
+      if (trunk && held < trunk * 0.4) {
+        // (held on one side only, it swings over that edge into the hole; roots caught on both
+        // sides, or on none, it drops into it)
+        if (leftHeld && !rightHeld) return timber(world, particles, record, 1, innerL + 1);
+        if (rightHeld && !leftHeld) return timber(world, particles, record, -1, innerR);
+        return timber(world, particles, record, lean(world, record), null);
+      }
+    }
     const { left, top, w, h, n, kind, cells } = cellsOf(world, record);
     if (!cells) { record.felled = true; return 0; }
-    const solid = (x, y) => PW.mat.phase[PW.get(world, x, y) & ID_MASK] === PW.PHASE.SOLID;
     // label: 1 wood joined to the roots (wood at the foot - anywhere along it, for a fallen tree -
     // standing on solid ground), 2.. each piece of wood cut off from them; leaves take their wood's.
     const label = new Int32Array(n), queue = [];
@@ -633,8 +716,21 @@
       label[k] = next++; queue.push(k);
       spread(q0, (j) => kind[j] === 1);
     }
-    // (leaves, nearest wood first: one sweep out from all the wood at once)
-    spread(0, (j) => kind[j] === 2);
+    // (leaves, nearest wood first: one sweep out from all the wood at once. A leaf grows on wood a
+    // few cells from it: one further than that from any wood - its twig gone - is held by nothing,
+    // and drops)
+    const reach = record.kind === 'bush' || record.kind === 'reeds' ? 255 : Math.max(16, Math.round((record.size || 120) * 0.11));
+    const far = new Uint8Array(n);
+    for (let q = 0; q < queue.length; q += 1) {
+      const k = queue[q], x = k % w, y = (k / w) | 0;
+      if (far[k] >= reach) continue;
+      for (let dy = -1; dy <= 1; dy += 1) for (let dx = -1; dx <= 1; dx += 1) {
+        const nx = x + dx, ny = y + dy;
+        if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+        const j = ny * w + nx;
+        if (!label[j] && kind[j] === 2) { label[j] = label[k]; far[j] = far[k] + 1; queue.push(j); }
+      }
+    }
     // What fell: each piece, wood and its leaves, lifted out to fall on its own.
     const pieces = new Map();
     let held = 0, fell = 0;
@@ -700,7 +796,12 @@
     const { across } = stem(world, x, y);
     if (power >= across * (charred ? 0.3 : 1)) {
       cut(world, particles, x, y);
-      (world.floraDirty || (world.floraDirty = new Set())).add(record);
+      // (every plant whose crown is there looks again at what it still holds: crowns overlap)
+      const dirty = world.floraDirty || (world.floraDirty = new Set());
+      dirty.add(record);
+      for (const r of world.floraIndex ? world.floraIndex.get(x >> 7) || [] : []) {
+        if (!r.felled && x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height) dirty.add(r);
+      }
     }
     return true;
   }
@@ -826,6 +927,21 @@
       settle(world, particles, record, from);
     } else if (push > 0.3 && !record.fallen) topple(world, particles, record, side, 0.25 + push * 0.4);
     else settle(world, particles, record, from);
+  }
+  // A tree whose ground was hollowed out comes down whole: swinging over about the edge of the
+  // ground still under it (pivotX), or - nothing under it at all - dropping, turning a little.
+  function timber(world, particles, record, side, pivotX) {
+    const { left, top, w, n, kind } = cellsOf(world, record);
+    const ks = [];
+    for (let k = 0; k < n; k += 1) if (kind[k]) ks.push(k);
+    record.felled = true;
+    if (!ks.length) return 0;
+    const data = lift(world, left, top, w, ks);
+    if (!world.fragments) land(world, particles, data, null);
+    else if (pivotX === null) world.fragments.spawn({ data, flora: true, vx: side * 8, vy: 0, omega: side * 0.3 });
+    else world.fragments.spawn({ data, flora: true, pivot: { x: pivotX, y: record.row }, dir: side, omega: side * 0.15, base: record.row + 1 });
+    world.floraIndex = null;
+    return ks.length;
   }
   // The whole plant falls as one piece, swinging down about the foot of its trunk.
   function topple(world, particles, record, side, omega) {

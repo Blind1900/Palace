@@ -330,8 +330,32 @@
     }
     c.cores.push({ x: cx, y: orbY, orb: true, radius: r });
     c.lamps.push({ x: cx, y: orbY, radius: 70, strength: 0.6, color: K.CORE_COLOR });
-    // Floating armoured block: no support needed (it is anchored by the core's field).
+    // The armoured block stands on pillars. The main pillar grows out of the top of the core - its
+    // translator turns HM into it - up through the pit to the block's underside, seamed with the
+    // core's glow; the secondary pillars carry the block's outer edges down to the ground beyond the
+    // pit's rim. (Nothing hangs in the air: take the pillars out and the block comes down.)
     const by = ground - gap;
+    const mainHalf = 8, orbTop = orbY - r;
+    for (let yy = by; yy <= orbTop + 2; yy += 1) for (let dx = -mainHalf; dx <= mainHalf; dx += 1) {
+      const edge = Math.abs(dx) === mainHalf, seam = Math.abs(dx) === 2 && (yy & 7) < 5;
+      const color = seam ? K.CORE_COLOR : edge ? PLATE_DARK : Math.abs(dx) < 2 ? PLATE_LIT : (yy - by) % 12 === 0 ? PLATE_DARK : PLATE;
+      K.solid(c, cx + dx, yy, M.STEEL, color, ROLE.WALL);
+    }
+    // (the collar where it meets the orb)
+    for (let dx = -mainHalf - 3; dx <= mainHalf + 3; dx += 1) for (let yy = orbTop - 1; yy <= orbTop + 2; yy += 1) {
+      if (Math.hypot(dx, yy - orbY) > r + 2.5) K.solid(c, cx + dx, yy, M.STEEL, yy === orbTop - 1 ? PLATE_LIT : PLATE_DARK, ROLE.WALL);
+    }
+    // (just inside the pit's rim - clear of the machines beside the bunker - each down to the pit's
+    // lining where it stands)
+    const sideHalf = 6, sideX = pitWidth / 2 - 12;
+    for (const side of [-1, 1]) {
+      const px = cx + side * sideX;
+      const rim = Math.round(pitDepth * Math.min(1, (1 - (sideX + sideHalf) / (pitWidth / 2)) / 0.28));
+      for (let yy = by; yy <= ground + rim + 1; yy += 1) for (let dx = -sideHalf; dx <= sideHalf; dx += 1) {
+        const edge = Math.abs(dx) === sideHalf, band = (yy - by) % 16 < 2;
+        K.solid(c, px + dx, yy, M.CONCRETE, band ? P.ornament : edge ? tone(P.frame, 0.55) : tone(P.frame, 0.78), ROLE.WALL);
+      }
+    }
     for (let dy = 0; dy < blockHeight; dy += 1) for (let dx = -blockWidth / 2; dx < blockWidth / 2; dx += 1) {
       const u = (dx + blockWidth / 2) / blockWidth;
       const chamfer = dy > blockHeight - 14 ? (dy - (blockHeight - 14)) * 1.6 : 0;
@@ -345,8 +369,7 @@
     for (let dx = -blockWidth / 2 + 30; dx < blockWidth / 2 - 30; dx += 1) {
       for (let dy = 0; dy < 6; dy += 1) if ((Math.round(dx) + dy) % 3 === 0) K.back(c, cx + Math.round(dx), by + dy, mix(K.CORE_COLOR, [20, 20, 24], 0.5 + dy * 0.08));
     }
-    c.floating = { left: cx - blockWidth / 2, right: cx + blockWidth / 2, top: by - blockHeight, bottom: by - 1 };
-    c.body = { left: cx - pitWidth / 2, right: cx + pitWidth / 2, top: by - blockHeight, bottom: floor };
+    c.body ={ left: cx - pitWidth / 2, right: cx + pitWidth / 2, top: by - blockHeight, bottom: floor };
     K.bakeLights(c, style);
     return c;
   }

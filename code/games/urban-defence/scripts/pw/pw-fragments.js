@@ -22,6 +22,7 @@
   // A piece (or a chunk of one) at least RUIN_MIN cells big comes to rest whole where it lands -
   // tilted, misplaced, cracked at its edges - as a ruin, part of the ground.
   const RUIN_MIN = 60;
+  const FLORA_MIN = 14;       // a piece of a plant with less wood than this comes apart as it falls
   // A building is mostly air. Its weight and strength are in its frame - pillars, floors, outer
   // walls; a cell of back wall (marked THIN in a piece) is a light panel behind its rooms: it goes
   // along with the frame, weighing THIN_WEIGHT of a frame cell, strikes nothing, and broken up only
@@ -116,7 +117,14 @@
       // (a piece of a plant - a tree, a bough - is light and comes to rest as it is: its wood is
       // what it strikes with, its leaves go along)
       if (spec.flora) {
-        if (!mass || list.length >= MAX_PIECES) { if (PW.flora) PW.flora.land(world, particles, here(), null); return null; }
+        // (a twig with its leaves is too slight to fall as one piece: it comes apart as it falls,
+        // leaves fluttering down, splinters dropping)
+        if (mass < FLORA_MIN && PW.flora && PW.flora.shed) {
+          const at = here();
+          for (let k = 0; k < at.x.length; k += 1) PW.flora.shed(particles, at.x[k], at.y[k], at.color[k], (spec.vx || 0) * 0.5, (spec.vy || 0) * 0.5, false, world);
+          return null;
+        }
+        if (list.length >= MAX_PIECES) { if (PW.flora) PW.flora.land(world, particles, here(), null); return null; }
       } else {
         // (too little frame to hold together - a scrap, or a panel of back wall with nothing
         // round it: it comes apart where it is)
@@ -221,7 +229,8 @@
       return [p.vx - p.omega * (wy - cy), p.vy + p.omega * (wx - cx)];
     }
     const motion = (p) => {
-      const reach = Math.hypot(p.gw, p.gh) / 2;
+      // (a plant's leaves reach far out round its wood: its turning is reckoned at its wood)
+      const reach = p.flora ? Math.min(20, Math.hypot(p.gw, p.gh) / 2) : Math.hypot(p.gw, p.gh) / 2;
       return p.mode === 'hinge' ? Math.abs(p.omega) * (Math.hypot(p.rx, p.ry) + reach) : Math.hypot(p.vx, p.vy) + Math.abs(p.omega) * reach;
     };
     const was = { px: 0, py: 0, angle: 0 };
@@ -274,9 +283,14 @@
         if (!done) {
           // At rest on what it lies on (barely moving, and touching something lately) for a moment:
           // it stays there.
+          // (not one just setting off from rest: that is slow and touching too, but gaining speed)
+          // (gaining: its speed rising steadily, tick after tick - not the jitter of resting contact)
           const now = motion(p);
-          if (now > REST_SPEED * 2) p.still = 0;
-          else if (now < REST_SPEED && p.age - p.touched < 0.25) p.still += dt;
+          p.gain = (p.gain || 0) * 0.7 + (now - (p.lastMotion ?? now)) * 0.3;
+          p.lastMotion = now;
+          const gaining = p.age < 1 && p.gain > 1.5;
+          if (now > REST_SPEED * 2 || gaining) p.still = 0;
+          else if (now < REST_SPEED && p.age - p.touched < 0.25 && p.age > 0.3) p.still += dt;
           if (p.py > H + 400) done = true;
           else if (p.still > 0.3 || p.age > MAX_AGE || (p.age > 10 && now < 40)) { finish(p); done = true; }
         }
@@ -328,7 +342,7 @@
     // rubble; a tree lies as it fell.
     function finish(p) {
       const [c, s] = cosSin(p);
-      if (p.flora) { if (PW.flora) PW.flora.land(world, particles, place(p, p.data, c, s), p); return; }
+      if (p.flora) { if (PW.flora) PW.flora.land(world, particles, place(p, p.data, c, s), p); stats.landedPlants = (stats.landedPlants || 0) + 1; return; }
       if (p.mass >= RUIN_MIN) ruin(p, c, s);
       else settle(p.data, 0, 0, p);
     }
@@ -386,12 +400,6 @@
         if (p.mode === 'hinge' && PW.mat.terrain[mat[y * W + x] & ID_MASK] && y >= p.yf && Math.abs(x - p.hx) < 6) continue;   // seated on its pivot
         // (a building leaning over presses its foot into the ground: see eatFoot)
         if (p.mode === 'hinge' && !p.flora && pts[k + 1] > p.footV) { p.footTouch = true; continue; }
-        // (a tree or a bough comes to rest where it lands, lying as it fell)
-        if (p.flora) {
-          if (PW.flora) PW.flora.land(world, particles, place(p, p.data, c, s), p);
-          stats.landedPlants = (stats.landedPlants || 0) + 1;
-          return true;
-        }
         if (inside) continue;
         if (n < OUTLINE_MAX) { went[n * 2] = wx - ox; went[n * 2 + 1] = wy - oy; }
         n += 1; sx += wx; sy += wy; hs += hardness[mat[y * W + x] & ID_MASK];
@@ -567,6 +575,9 @@
       const ix = j * nx + jt * tx, iy = j * ny + jt * ty;
       p.vx += ix * invM; p.vy += iy * invM;
       p.omega += (rx * iy - ry * ix) * invI;
+      // (a falling tree or bough rolls and slides over what it strikes until it lies still - see
+      // finish - and breaks nothing: one tree coming down does not set off the next)
+      if (p.flora) { p.omega *= 0.7; p.vx *= 0.92; p.vy *= 0.92; return false; }
       if (felt < SNAP_SPEED) return false;
       // A blow: what it struck feels it, and the piece breaks where it took it.
       if (felt >= CRUMBLE_SPEED && p.crumpled !== world.tick) blow(hx, hy, vx, vy, hit, j * hit, tx * fwd, ty * fwd, Math.abs(vt), hard);
