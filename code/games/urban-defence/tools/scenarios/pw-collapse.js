@@ -84,7 +84,7 @@ if (ruined.length) await view('co-cores-risen', ruined[0].cores[0].x, ruined[0].
 const smoke30 = countIn(A.body.left - 600, A.body.right + 600, A.ground - 900, A.ground, [M.SMOKE]);
 check(dust10 > 1500, `the collapse throws up a dust cloud that hangs (${dust10} dust cells after 10 s)`);
 // (thin by now: the smoke drifts and thins rather than hanging in one spot)
-check(smoke30 > 40 && (world.smoulders || []).length > 0, `the ruins keep smoking for a while (${smoke30} smoke cells after 30 s, ${(world.smoulders || []).length} smouldering spots)`);
+check(smoke30 > 20 && (world.smoulders || []).length > 0, `the ruins keep smoking for a while (${smoke30} smoke cells after 30 s, ${(world.smoulders || []).length} smouldering spots)`);
 // ...but not for ever, nor in one standing column: the smouldering dies down within about a
 // minute and the smoke drifts off and thins away.
 pwApp.stepWorld(60 * 60);

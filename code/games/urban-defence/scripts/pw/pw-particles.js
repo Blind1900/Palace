@@ -5,7 +5,7 @@
 (function () {
   const PW = window.PW;
   const { M, ID_MASK } = PW;
-  const { phase, structural, hardness, breaksTo, palettes } = PW.mat;
+  const { phase, structural, hardness, breaksTo, palettes, weight, advection } = PW.mat;
 
   const GRAVITY = 260;      // cells/s^2 (about 1.9 g at 7 cm per cell: snappy but readable)
   const MAX_SPEED = 1500;   // cells/s: nothing flies faster
@@ -56,12 +56,25 @@
       life[i] = life[last]; age[i] = age[last]; cell[i] = cell[last]; flags[i] = flags[last];
       color[i] = color[last]; owner[i] = owner[last]; painted[i] = painted[last];
     }
-    // Put a landed particle into the first open cell at or above (x, y).
+    // A grain coming to rest in water takes the place of the water it lands in, and that water
+    // goes up to the top of the column it stands in: the surface rises by the grain's volume.
+    // (false where the water is shut in and cannot rise)
+    function displace(cx, cy) {
+      let top = cy;
+      while (top > 0 && phase[mat[(top - 1) * W + cx] & ID_MASK] === PW.PHASE.LIQUID && cy - top < 512) top -= 1;
+      if (top === 0 || !OPEN[mat[(top - 1) * W + cx] & ID_MASK]) return false;
+      PW.set(world, cx, top - 1, mat[cy * W + cx]);
+      return true;
+    }
+    // Put a landed particle into the first open cell at or above (x, y): air, or water it is heavy
+    // enough to sink in (a light one rests on the surface). (A grain that came to rest and was
+    // buried by the rest of the heap landing on it goes to the top of the heap.)
     function deposit(x, y, byte, fl, paint = 0) {
       let cx = Math.max(1, Math.min(W - 2, Math.floor(x))), cy = Math.min(H - 1, Math.floor(y));
-      for (let k = 0; k < 24 && cy >= 0; k += 1, cy -= 1) {
+      for (let k = 0; k < 400 && cy >= 0; k += 1, cy -= 1) {
         const id = mat[cy * W + cx] & ID_MASK;
-        if (OPEN[id] || ((fl & F.WATER) === 0 && id === M.WATER && k > 0)) {
+        const sinks = (fl & F.WATER) === 0 && phase[id] === PW.PHASE.LIQUID && weight[id] < weight[byte & ID_MASK];
+        if (OPEN[id] || (sinks && displace(cx, cy))) {
           // Rubble and earth landing on a heap roll off it, down its slope, so falling debris builds
           // a heap spreading out wide rather than a column: earth settles at about 45°, building
           // rubble flatter, about 1 in 2.
@@ -127,18 +140,31 @@
           if (here !== M.WATER || life[i] <= 0) kill(i);   // reached air: pop
           continue;
         }
-        const inWater = (() => {
+        // What it is, and what it is flying through. In a liquid the weight of what it pushes
+        // aside holds it up: a stone sinks slower, ash floats up (the element table's weights).
+        const own = cell[i] & ID_MASK;
+        const around = (() => {
           const cx = px[i] | 0, cy = py[i] | 0;
-          return cy >= 0 && cy < H && cx >= 0 && cx < W && (mat[cy * W + cx] & ID_MASK) === M.WATER;
+          return cy >= 0 && cy < H && cx >= 0 && cx < W ? mat[cy * W + cx] & ID_MASK : M.AIR;
         })();
-        vy[i] += GRAVITY * dt * (fl & F.LEAF ? 0.25 : 1);
-        const drag = inWater ? 3.5 : fl & F.LEAF ? 1.6 : 0.12;
+        const inLiquid = phase[around] === PW.PHASE.LIQUID;
+        let g = GRAVITY * (fl & F.LEAF ? 0.25 : 1);
+        if (inLiquid && own && !(fl & F.WATER)) g *= 1 - weight[around] / Math.max(1, weight[own]);
+        const buoyant = g < 0;
+        vy[i] += g * dt;
+        // Drag: what the air takes hold of most (the table's `wind`) is slowed most - ash and
+        // grit drift down, a stone flies on.
+        const drag = inLiquid ? 3.5 : fl & F.LEAF ? 1.6 : own ? 0.12 + 2.5 * advection[own] : 0.12;
         vx[i] *= Math.max(0, 1 - drag * dt); vy[i] *= Math.max(0, 1 - drag * dt);
-        if (fl & F.LEAF) {
-          vx[i] += Math.sin(age[i] * 5 + i) * 30 * dt;
-          // Light things ride the wind above ground.
+        if (fl & F.LEAF) vx[i] += Math.sin(age[i] * 5 + i) * 30 * dt;
+        // (sinking or floating through water, each grain is turned this way and that by the
+        // eddies it makes, so a mass of them spreads out)
+        else if (inLiquid && own) { vx[i] += Math.sin(age[i] * 4 + i * 1.7) * 40 * dt; vy[i] += Math.cos(age[i] * 3 + i * 2.3) * 25 * dt; }
+        // Light things ride the wind above ground.
+        const ride = fl & F.LEAF ? 1.5 : own && !inLiquid ? 3 * advection[own] : 0;
+        if (ride) {
           const gx = Math.max(0, Math.min(W - 1, px[i] | 0));
-          if (py[i] < world.groundTop[gx]) vx[i] += ((world.wind || 0) * 1.5 - vx[i]) * Math.min(1, 1.5 * dt);
+          if (py[i] < world.groundTop[gx]) vx[i] += ((world.wind || 0) * 1.5 - vx[i]) * Math.min(1, ride * dt);
         }
         // A blast wave's wind pushes what flies through it: leaves are carried off, splinters and
         // grit pushed along, heavy rubble barely (as the element table's `wind` says).
@@ -167,6 +193,10 @@
           if (cy < 0) { x = tx; y = ty; continue; }          // above the grid: open sky
           if (cy >= H) { kill(i); removed = true; break; }
           const id = mat[cy * W + cx] & ID_MASK;
+          // (floating up, it stops at the surface and rests there)
+          if (buoyant && OPEN[id]) {
+            if (deposit(x, y, cell[i], fl, painted[i] ? color[i] : 0)) { kill(i); removed = true; break; }
+          }
           if (open(id, fl)) {
             // Fast heavy debris knocks down plants and smashes lamps and fittings it flies through.
             if ((fl & F.DAMAGE) && (Math.abs(vx[i]) + Math.abs(vy[i])) > 110 && PW.getLayer(world, 'deco', cx, cy)) {
@@ -264,7 +294,7 @@
         ctx.fill();
       }
     }
-    const api = { spawn, step, draw, drainImpacts, F, stats, listeners, get count() { return count; }, px, py, vx, vy, flags };
+    const api = { spawn, step, draw, drainImpacts, F, stats, listeners, get count() { return count; }, capacity, px, py, vx, vy, flags };
     return api;
   }
 

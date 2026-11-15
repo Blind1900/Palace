@@ -207,14 +207,30 @@
   // shake: how readily vibration (a blast, an avalanche, a collapse, felt from a distance) sets it
   //   moving - dry sand and ash run at the slightest shaking, loose rubble settles, a heap slumps,
   //   bare soil ravels on a steep face, rock and buildings stand (glass cracks).
+  // How things move (every moving cell, in the grid or flying, goes by these):
+  // slide: the chance a resting grain runs off a slope each tick (dry sand always, building
+  //   rubble often, so its heaps are rough). spread: cells farther out it still runs to where the
+  //   ground falls away (rubble settles flatter than 45 degrees). settlesTo: what loose stuff
+  //   resting on natural ground for a while packs down into. buoyancy: how fast a gas rises (cells
+  //   per tick, as a chance; below zero it sinks). fade: the chance a gas thins each tick.
+  //   Heavier sinks through lighter: grains sink through water unless lighter than it (ash floats),
+  //   a gas rises through water and through a heavier gas. Anything with a long way to fall flies
+  //   (gravity, drag and the wind, as the table says), and lands back in the grid.
   const weight = new Uint8Array(64), blastResist = new Float32Array(64), cohesion = new Uint8Array(64);
   const advection = new Float32Array(64), shake = new Float32Array(64);
+  const slide = new Float32Array(64), spread = new Uint8Array(64), settlesTo = new Int16Array(64).fill(-1);
+  const buoyancy = new Float32Array(64), fade = new Float32Array(64);
   const physics = (ids, props) => { for (const id of ids) {
     if (props.weight !== undefined) weight[id] = props.weight;
     if (props.resist !== undefined) blastResist[id] = props.resist;
     if (props.cohesion !== undefined) cohesion[id] = props.cohesion;
     if (props.advection !== undefined) advection[id] = props.advection;
     if (props.shake !== undefined) shake[id] = props.shake;
+    if (props.slide !== undefined) slide[id] = props.slide;
+    if (props.spread !== undefined) spread[id] = props.spread;
+    if (props.settlesTo !== undefined) settlesTo[id] = props.settlesTo;
+    if (props.buoyancy !== undefined) buoyancy[id] = props.buoyancy;
+    if (props.fade !== undefined) fade[id] = props.fade;
   } };
   for (let id = 1; id < 64; id += 1) if (names[id]) physics([id], { weight: phase[id] === PHASE.SOLID ? 100 : 50, resist: 0.03 });
   physics([M.STEAM], { weight: 1, resist: 0 }); physics([M.SMOKE], { weight: 2, resist: 0 }); physics([M.DUST], { weight: 4, resist: 0 });
@@ -264,6 +280,16 @@
   physics([M.GRASS, M.TOPSOIL, M.SOIL], { shake: 0.03 });
   physics([M.CLAY, M.FILL], { shake: 0.01 });
   physics([M.GLASS], { shake: 0.6 });
+  // Movement.
+  physics([M.SAND], { slide: 1 });
+  physics([M.ASH], { slide: 0.8, weight: 20 });   // (light and fluffy: it floats on water)
+  physics([M.LOOSE_SOIL], { slide: 0.6, settlesTo: M.SOIL });
+  physics([M.LOOSE_STONE], { slide: 0.45, settlesTo: M.GRAVEL });
+  physics([M.DEBRIS], { slide: 0.7, spread: 1, settlesTo: M.RUBBLE });
+  physics([M.SMOKE], { buoyancy: 0.55, fade: 1 / 150 });
+  physics([M.STEAM], { buoyancy: 0.8 });
+  // (dust from blasts and collapses hangs in the air a long while, settling slowly)
+  physics([M.DUST], { buoyancy: -0.12, fade: 1 / 350 });
 
   // ---- Hashing and random numbers ------------------------------------------------------------
   function hash2(x, y) {
@@ -441,6 +467,18 @@
     const top = world.groundTop[x];
     if (skyline[id]) { if (y < top) world.groundTop[x] = y; }
     else if (top === y) refreshGroundTop(world, x, y + 1);
+    if (world.groundTop[x] !== top) groundTopMoved(world, x, top, world.groundTop[x]);
+  }
+  // The ground line of column x moved from a to b: open air between went from sky to underground
+  // (drawn dark, as a cave) or back, so it is drawn again.
+  function groundTopMoved(world, x, a, b) {
+    let y0 = Math.min(a, b);
+    const y1 = Math.min(world.height - 1, Math.max(a, b));
+    while (y0 <= y1) {
+      const end = Math.min(y1, y0 | CHUNK_MASK);
+      markDirty(world, x, y0); markDirty(world, x, end);
+      y0 = end + 1;
+    }
   }
   // Set a cell's material. Keeps groundTop, render dirtiness and simulation activity in step.
   function set(world, x, y, value, options) {
@@ -628,7 +666,8 @@
   PW.DEBRIS_KIND = DEBRIS_KIND;
   PW.ID_MASK = ID_MASK;
   PW.mat = { phase, structural, ground, skyline, hardness, breaksTo, passable, stopsShots, terrain, open,
-    conduct, ignite, burnTime, burnsTo, palettes, names, weight, blastResist, cohesion, advection, shake };
+    conduct, ignite, burnTime, burnsTo, palettes, names, weight, blastResist, cohesion, advection, shake,
+    slide, spread, settlesTo, buoyancy, fade };
   PW.CHUNK = CHUNK;
   PW.CHUNK_SHIFT = CHUNK_SHIFT;
   PW.CHUNK_MASK = CHUNK_MASK;

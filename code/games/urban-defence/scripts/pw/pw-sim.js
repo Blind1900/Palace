@@ -1,15 +1,19 @@
 'use strict';
-// Cell automaton for water and powders (sand, loose soil and stone, building debris), run only on
-// active chunks inside their changed rectangles. Water is moved by swaps only, so it is conserved.
-// Debris that comes to rest on the ground compacts into rubble after about 10 seconds; debris on
-// roofs and other structures stays loose.
+// Cell automaton for water, powders (sand, loose soil and stone, building debris, ash) and gases,
+// run only on active chunks inside their changed rectangles. How each moves comes from the element
+// table (PW.mat): its weight (heavier sinks through lighter), how readily it slides and spreads,
+// what it settles into, how a gas rises and thins. Water is moved by swaps only, so it is
+// conserved. A grain with a long way to fall is handed to the particles, which fly it with
+// gravity, drag and the wind and put it back into the grid where it lands. Debris that comes to
+// rest on the ground compacts into rubble after about 10 seconds; debris on roofs stays loose.
 (function () {
   const PW = window.PW;
   const { M, PHASE, ID_MASK, CHUNK, CHUNK_SHIFT, CHUNK_MASK, CHUNK_CELLS } = PW;
-  const { phase, skyline, structural } = PW.mat;
+  const { phase, skyline, structural, weight } = PW.mat;
 
   const WATER_FALL = 6;          // cells per tick a free-falling water cell can drop
   const POWDER_FALL = 4;
+  const FLY_DROP = 24;           // a grain with at least this much open air under it flies
   const DROP_SEARCH = 32;        // how far water looks sideways for somewhere lower
   const DROP_STEP = 12;          // how far it moves towards it in one tick
   const SPREAD = 4;              // cells a pushed water front advances along a floor per tick
@@ -17,22 +21,17 @@
   const DISPERSE = 8;            // cells pressurised water squirts sideways per tick
   const PUSH_REACH = 48;         // how far a surge carries through standing water
   const COMPACT_TICKS = 600;     // 10 s at 60 Hz
-  // Chance a resting powder slides off a slope each tick (debris rarely: irregular heaps).
-  const SLIDE = new Float32Array(64);
-  SLIDE[M.SAND] = 1; SLIDE[M.LOOSE_SOIL] = 0.6; SLIDE[M.LOOSE_STONE] = 0.45; SLIDE[M.DEBRIS] = 0.7;
-  const SPREADS = new Uint8Array(64);   // (spreads out flatter than its diagonal slide alone)
-  SPREADS[M.DEBRIS] = 1;
-  const COMPACTS_TO = new Int16Array(64).fill(-1);
-  COMPACTS_TO[M.DEBRIS] = M.RUBBLE; COMPACTS_TO[M.LOOSE_SOIL] = M.SOIL; COMPACTS_TO[M.LOOSE_STONE] = M.GRAVEL;
+  const { slide: SLIDE, spread: SPREADS, settlesTo: COMPACTS_TO, buoyancy: RISE, fade: FADE } = PW.mat;
 
   function createSim(world) {
     const { mat, width: W, height: H, chunksX } = world;
     const stamps = new Array(world.chunkCount).fill(null);
     const pool = [];
-    const compactQueue = [];          // { c, due, version }
+    const compactQueue = [];          // { c, due, since }
     const hadPowder = new Uint8Array(world.chunkCount);
+    const sleptAt = new Int32Array(world.chunkCount);   // tick a chunk with loose stuff last settled
     let stamp = 1, cursor = 0;
-    const stats = { ms: 0, chunks: 0, moves: 0, active: 0, compacted: 0, pending: 0, kinds: {} };
+    const stats = { ms: 0, chunks: 0, moves: 0, active: 0, compacted: 0, pending: 0, flown: 0, kinds: {} };
 
     function stampsOf(c) {
       let s = stamps[c];
@@ -63,6 +62,9 @@
     const isAir = (m) => OPEN[m & ID_MASK] === 1;
     const isWater = (m) => (m & ID_MASK) === M.WATER;
     const isEmpty = (m) => (m & ID_MASK) === M.AIR;
+    // (a fluid - air, a gas or a liquid - lighter than `id`: what it can fall, sink or slide into)
+    const lighter = (m, id) => phase[m & ID_MASK] <= PHASE.LIQUID && weight[m & ID_MASK] < weight[id];
+    const isLiquid = (m) => phase[m & ID_MASK] === PHASE.LIQUID;
 
     // The water column standing on a cell that just fell `d` rows follows it in the same tick:
     // its top min(h, d) cells move into the gap (a few swaps instead of shifting every cell), so a
@@ -287,40 +289,69 @@
       const below = mat[i + W];
       if (isAir(below)) {
         let j = i + W, ny = y + 1;
-        while (ny + 1 < H && ny - y < POWDER_FALL && isAir(mat[j + W])) { j += W; ny += 1; }
+        while (ny + 1 < H && ny - y < FLY_DROP && isAir(mat[j + W])) { j += W; ny += 1; }
+        // A long way down: it flies, picking up speed, and lands back in the grid.
+        if (ny - y >= FLY_DROP && fly(i, x, y)) return true;
+        if (ny - y > POWDER_FALL) { ny = y + POWDER_FALL; j = i + POWDER_FALL * W; }
         move(i, x, y, j, x, ny);
         return true;
       }
-      if (isWater(below)) { move(i, x, y, i + W, x, y + 1); return true; }   // sinks; the water rises
+      // Heavier than the liquid under it: it sinks, and the liquid rises past it. Lighter than the
+      // liquid over it (ash in water): it floats up.
+      if (isLiquid(below)) {
+        if (weight[below & ID_MASK] < weight[id]) { move(i, x, y, i + W, x, y + 1, 'sink'); return true; }
+        return false;   // (floating)
+      }
+      if (y >= 1 && isLiquid(mat[i - W]) && weight[mat[i - W] & ID_MASK] > weight[id] && rnd(x, y) < 0.5) {
+        move(i, x, y, i - W, x, y - 1, 'float');
+        return true;
+      }
       if (rnd(x, y) >= SLIDE[id]) return false;
       const dir = ((x * 7 + y + world.tick) & 1) ? 1 : -1;
       for (let k = 0; k < 2; k += 1) {
         const d = k ? -dir : dir, nx = x + d;
         if (nx < 0 || nx >= W) continue;
-        const side = mat[i + d], diag = mat[i + W + d];
-        if ((isAir(side) || isWater(side)) && (isAir(diag) || isWater(diag))) { move(i, x, y, i + W + d, nx, y + 1); return true; }
+        if (lighter(mat[i + d], id) && lighter(mat[i + W + d], id)) { move(i, x, y, i + W + d, nx, y + 1); return true; }
       }
-      // Building rubble spreads out flatter: it also slides a cell along a slope that falls away
-      // two cells out (a heap settles at about 1 in 2, not 45°).
-      if (SPREADS[id]) {
+      // Some (building rubble) spread out flatter: they also slide along a slope that falls away
+      // farther out (a heap settles at about 1 in 2, not 45°).
+      for (let reach = 1; reach <= SPREADS[id]; reach += 1) {
         for (let k = 0; k < 2; k += 1) {
-          const d = k ? -dir : dir, nx = x + 2 * d;
+          const d = k ? -dir : dir, nx = x + (reach + 1) * d;
           if (nx < 0 || nx >= W) continue;
-          if (isAir(mat[i + d]) && isAir(mat[i + 2 * d]) && isAir(mat[i + W + 2 * d])) { move(i, x, y, i + d, x + d, y); return true; }
+          let open = true;
+          for (let s = 1; s <= reach + 1 && open; s += 1) open = lighter(mat[i + s * d], id);
+          if (open && lighter(mat[i + W + (reach + 1) * d], id)) { move(i, x, y, i + d, x + d, y); return true; }
         }
       }
       return false;
     }
+    // Hand a grain to the particles: it falls from rest, so it picks up speed under gravity, the
+    // wind takes it as much as the table says, and it lands back in the grid wherever it comes
+    // down (rolling off a heap). Building rubble keeps its colours.
+    function fly(i, x, y) {
+      const particles = world.particles;
+      if (!particles || particles.count > particles.capacity - 256) return false;
+      const byte = mat[i], paint = PW.getLayer(world, 'paint', x, y);
+      PW.set(world, x, y, M.AIR, { quiet: true });
+      PW.wake(world, x, y - 1);
+      // (no two grains leave quite alike, so a falling mass loosens and spreads as it goes)
+      const h = PW.hash3(x, y, world.tick);
+      particles.spawn(x + 0.5, y + 0.5, ((h & 255) / 255 - 0.5) * 16, POWDER_FALL * 60 * (0.85 + (h >>> 8 & 255) / 255 * 0.3), byte, paint, PW.PARTICLE.LAND, 12);
+      stats.flown += 1;
+      return true;
+    }
 
     // ---- Gases --------------------------------------------------------------------------------------
-    // Smoke and steam rise (steam faster: it is hotter), dust sinks slowly; all drift with the
-    // wind above ground and spread under ceilings below it. Density lives in the variant bits.
-    // Smoke and dust thin out over time; steam condenses back into water once it has cooled.
-    const RISE = new Float32Array(64), FADE = new Float32Array(64);
-    RISE[M.SMOKE] = 0.55; RISE[M.STEAM] = 0.8; RISE[M.DUST] = -0.12;
-    // (dust from blasts and collapses hangs in the air a long while, settling slowly)
-    FADE[M.SMOKE] = 1 / 150; FADE[M.DUST] = 1 / 350;
+    // Smoke and steam rise (steam faster: it is hotter), dust sinks slowly (their `buoyancy`); all
+    // drift with the wind above ground and spread under ceilings below it. A rising gas passes up
+    // through water and through a heavier gas, a sinking one down through a lighter gas. Density
+    // lives in the variant bits. Smoke and dust thin out over time (their `fade`); steam condenses
+    // back into water once it has cooled.
     const CONDENSE_BELOW = 70;       // °C
+    // (can the gas `id`, rising or sinking, move into the cell m?)
+    const passes = (m, id, up) => isEmpty(m) || (phase[m & ID_MASK] <= PHASE.LIQUID && phase[m & ID_MASK] >= PHASE.GAS
+      && (up ? weight[m & ID_MASK] > weight[id] : weight[m & ID_MASK] < weight[id]));
     world.wind = world.wind || 0;
     const windNoise = PW.createNoise1D((world.windSeed || 1) * 31 + 7, 1);
     const gustNoise = PW.createNoise1D((world.windSeed || 1) * 17 + 3, 1);
@@ -356,7 +387,7 @@
       // (a strong updraught or downdraught carries it straight up or down)
       if (Math.abs(lift) > 20 && (PW.hash3(x, y, world.tick + 7) & 1023) / 1023 < Math.min(0.9, Math.abs(lift) / 120)) {
         const j = lift > 0 ? i - W : i + W;
-        if (y > 1 && y < H - 2 && isEmpty(mat[j])) { move(i, x, y, j, x, lift > 0 ? y - 1 : y + 1, 'gas'); return true; }
+        if (y > 1 && y < H - 2 && passes(mat[j], id, lift > 0)) { move(i, x, y, j, x, lift > 0 ? y - 1 : y + 1, 'gas'); return true; }
       }
       const r2 = (PW.hash3(x + 1, y, world.tick) & 1023) / 1023;
       const r3 = (PW.hash3(x, y + 1, world.tick) & 1023) / 1023;
@@ -378,13 +409,13 @@
         return true;
       }
       const vert = rise > 0 ? -W : W;
-      // Up (or down for dust), through air; rising gas also bubbles up through water.
+      // Up (or down for dust), through air, water or a heavier gas (a lighter one, sinking).
       if (r2 < Math.abs(rise) && y > 0 && y < H - 1) {
         const above = mat[i + vert];
-        if (isEmpty(above) || (rise > 0 && isWater(above))) { move(i, x, y, i + vert, x, y + (rise > 0 ? -1 : 1), 'gas'); return true; }
+        if (passes(above, id, rise > 0)) { move(i, x, y, i + vert, x, y + (rise > 0 ? -1 : 1), 'gas'); return true; }
         // Blocked: slip diagonally.
         const diag = i + vert + side;
-        if (x + side > 0 && x + side < W - 1 && isEmpty(mat[diag])) { move(i, x, y, diag, x + side, y + (rise > 0 ? -1 : 1), 'gas'); return true; }
+        if (x + side > 0 && x + side < W - 1 && passes(mat[diag], id, rise > 0)) { move(i, x, y, diag, x + side, y + (rise > 0 ? -1 : 1), 'gas'); return true; }
       }
       // Sideways: drift with the wind, or spread.
       if (x + side > 0 && x + side < W - 1 && isEmpty(mat[i + side]) && (wind !== 0 || eddy || r2 > 0.6)) {
@@ -478,7 +509,7 @@
         if (world.simIdle[c] < 2 || r[o + 2] >= r[o]) { keep.push(c); continue; }
         world.simActive[c] = 0;
         release(c);
-        if (hadPowder[c]) { compactQueue.push({ c, due: world.tick + COMPACT_TICKS, version: world.chunkVersion[c] }); hadPowder[c] = 0; }
+        if (hadPowder[c]) { sleptAt[c] = world.tick; compactQueue.push({ c, due: world.tick + COMPACT_TICKS, since: world.tick }); hadPowder[c] = 0; }
       }
       // Chunks woken during this pass were appended to the live list; carry them over.
       for (let n = count; n < list.length; n += 1) keep.push(list[n]);
@@ -491,6 +522,9 @@
           if (entry.due > world.tick) continue;
           compactQueue.splice(q, 1);
           if (world.simActive[entry.c]) continue;
+          // (it has settled again since - fresh debris landed there: that later settling decides,
+          // so the fresh debris gets its full rest time before it packs down)
+          if (sleptAt[entry.c] !== entry.since) continue;
           compact(entry.c);
         }
       }
