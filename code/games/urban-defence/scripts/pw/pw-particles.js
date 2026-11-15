@@ -96,8 +96,14 @@
           }
           // (smoke or dust lying there is pushed up out of its way, not lost)
           const there = mat[cy * W + cx];
-          if (phase[there & ID_MASK] === PW.PHASE.GAS && phase[byte & ID_MASK] !== PW.PHASE.GAS) {
-            for (let up = cy - 1; up > 0 && cy - up <= 16; up -= 1) if ((mat[up * W + cx] & ID_MASK) === M.AIR) { PW.set(world, cx, up, there, { quiet: true }); break; }
+          if (phase[there & ID_MASK] === PW.PHASE.GAS) {
+            // (up through the cloud to clear air over it; in a thick cloud, out to its side)
+            let moved = false;
+            for (let up = cy - 1; up > 0 && cy - up <= 200 && !moved; up -= 1) if ((mat[up * W + cx] & ID_MASK) === M.AIR) { PW.set(world, cx, up, there, { quiet: true }); moved = true; }
+            for (let k = 1; k <= 160 && !moved; k += 1) for (const sx of [cx - k, cx + k]) {
+              if (!moved && sx > 0 && sx < W - 1 && (mat[cy * W + sx] & ID_MASK) === M.AIR) { PW.set(world, sx, cy, there, { quiet: true }); moved = true; }
+            }
+            stats.gasLost = (stats.gasLost || 0) + (moved ? 0 : 1);
           }
           PW.set(world, cx, cy, byte);
           // (a piece of a building keeps its colours as rubble, a little dulled with dust)
@@ -254,6 +260,12 @@
         if (removed) continue;
         px[i] = x; py[i] = y;
         if (life[i] <= 0) {
+          // (a leaf still in the air drifts on down until it comes to the ground: nothing hangs in
+          // the air, nor goes before it lands)
+          if ((fl & F.LEAF) && age[i] < 30) {
+            const cx = Math.floor(x), cy = Math.floor(y) + 1;
+            if (cy < H && cx > 0 && cx < W - 1 && OPEN[mat[cy * W + cx] & ID_MASK]) { life[i] = 0.5; continue; }
+          }
           if (fl & (F.LAND | F.WATER)) deposit(x, y, cell[i], fl, painted[i] ? color[i] : 0);
           kill(i);
         }

@@ -251,7 +251,9 @@
   physics([M.CLAY], { resist: 0.02, cohesion: 6 });
   physics([M.GRAVEL], { resist: 0.02, cohesion: 2 });
   physics([M.RUBBLE], { resist: 0.012, cohesion: 2 });
-  physics([M.RUIN], { resist: 0.025, cohesion: 4, shake: 0.12 });
+  // (a ruin is the frame of a wrecked building round its open rooms: its slabs still span a room
+  // or so, cracked; wider ones sag in and fall)
+  physics([M.RUIN], { resist: 0.025, cohesion: 14, shake: 0.12 });
   physics([M.STONE], { resist: 0.045, cohesion: 16 });
   physics([M.ORE], { resist: 0.05, cohesion: 20 });
   physics([M.BEDROCK], { resist: 1, cohesion: 255 });

@@ -15,6 +15,7 @@
   const SETTLE = 8;          // ticks after a disturbance before the ground there is looked at
   const AGAIN = 20;          // and again this long after, while the slide goes on
   const ROUNDS = 40;         // at most this many looks at one disturbance
+  const OVERTIME = 20;       // ...and this many more while its ground is still running off
   const MAX_TALL = 1200;     // rows a look at the surface reaches up the face or slope above it
   const QUIET = 3;           // it is let be after this many looks in a row that broke nothing (what
                              // the ground rested on may still be sliding away from under it)
@@ -129,8 +130,10 @@
             const hc = FACE * cohesion[mat[i] & ID_MASK];
             for (const d of [-1, 1]) {
               if (!free(x + d, y)) continue;
+              // (how far the face drops below it, steeper than about 72° - it may lean a little:
+              // the open air is followed down a line one cell out for every three down)
               let depth = 0;
-              while (depth <= hc + MAX_WEDGE / WEDGE && free(x + d, y + 1 + depth)) depth += 1;
+              while (depth <= hc + MAX_WEDGE / WEDGE && free(x + d * (1 + Math.floor((depth + 1) / 3)), y + 1 + depth)) depth += 1;
               if (depth <= hc) continue;
               const wedge = Math.min(MAX_WEDGE, 1 + Math.floor((depth - hc) * WEDGE));
               for (let w = 0; w < wedge; w += 1) {
@@ -216,7 +219,7 @@
         }
         shock(sx / out.length, sy / out.length, out.length * SLIDE_SPEED * SLIDE_SPEED / 40);
         const box = { x0: bx0 - 4, y0: by0 - 400, x1: bx1 + 4, y1: by1 + 4 };
-        if (PW.flora) PW.flora.afterBlast(world, particles, box);
+        if (PW.flora) PW.flora.afterBlast(world, particles, box, null, { x0: box.x0, y0: by0 - 40, x1: box.x1, y1: box.y1 });
         if (PW.props) PW.props.afterBlast(world, particles, box);
       }
       region.scan = null;
@@ -302,8 +305,22 @@
       if (broke < 0) return;
       region.rounds += 1;
       region.quiet = broke ? 0 : (region.quiet || 0) + 1;
-      if (region.quiet < QUIET && region.rounds < ROUNDS) region.at = tick + AGAIN;
+      // (a slide is not over while its ground is still running off: the face it was banked against
+      // may come free yet - though never for ever)
+      if (region.quiet >= QUIET && region.rounds < ROUNDS + OVERTIME && running(region)) region.quiet = QUIET - 1;
+      if (region.quiet < QUIET && region.rounds < ROUNDS + (running(region) ? OVERTIME : 0)) region.at = tick + AGAIN;
       else pending.splice(k, 1);
+    }
+    // (ground ran off somewhere in the region's box in the last second: see the sim's run)
+    function running(region) {
+      const seen = world.running;
+      if (!seen || !seen.size) return false;
+      const now = world.tick || 0;
+      for (let ty = region.y0 >> 6; ty <= region.y1 >> 6; ty += 1) for (let tx = region.x0 >> 6; tx <= region.x1 >> 6; tx += 1) {
+        const at = seen.get(ty * 4096 + tx);
+        if (at !== undefined && now - at < 60) return true;
+      }
+      return false;
     }
     return { step, disturb, shock, stats, busy: () => pending.length > 0 };
   }

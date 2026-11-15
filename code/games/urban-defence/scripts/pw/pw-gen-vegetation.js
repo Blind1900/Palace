@@ -763,12 +763,14 @@
   }
   // After a blast or a slide: the plants it reached settle - whatever lost its footing or was cut
   // off comes down with the ground. Grass and flowers left in the air drop too.
-  function afterBlast(world, particles, box, from = null) {
+  // (tufts: the box grass and flowers are looked at in, when it is smaller than the plants' - a
+  // slide's reaches far up for tall trees, but a tuft stands only a few cells over its ground)
+  function afterBlast(world, particles, box, from = null, tufts = box) {
     if (!world.flora) return 0;
     let felled = 0;
     const { mat, width: W } = world;
     const solid = (x, y) => PW.mat.phase[PW.get(world, x, y) & ID_MASK] === PW.PHASE.SOLID;
-    dropTufts(world, particles, box);
+    dropTufts(world, particles, tufts);
     for (const record of world.flora) {
       if (record.x > box.x1 || record.x + record.width < box.x0 || record.y > box.y1 || record.y + record.height < box.y0) continue;
       // (only a plant that was hit, or whose footing or trunk is gone, needs looking at closely)
@@ -871,9 +873,15 @@
     const { mat, width: W } = world;
     const inPlant = (x, y) => (world.flora || []).some((r) => x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height);
     const F = PW.PARTICLE;
-    for (let x = Math.max(1, box.x0); x <= Math.min(W - 2, box.x1); x += 1) {
-      for (let y = Math.max(1, box.y0); y <= Math.min(world.height - 2, box.y1); y += 1) {
-        if (!(PW.getFlags(world, x, y) & PW.FLAG.FLORA) || !PW.getLayer(world, 'deco', x, y)) continue;
+    const { CHUNK_SHIFT, CHUNK_MASK } = PW, size = 1 << CHUNK_SHIFT;
+    const x0 = Math.max(1, Math.floor(box.x0)), x1 = Math.min(W - 2, Math.ceil(box.x1));
+    const y0 = Math.max(1, Math.floor(box.y0)), y1 = Math.min(world.height - 2, Math.ceil(box.y1));
+    // (chunk by chunk: one with no plant marks at all - most of a mountain's inside - is passed over)
+    for (let cy = y0 >> CHUNK_SHIFT; cy <= y1 >> CHUNK_SHIFT; cy += 1) for (let cx = x0 >> CHUNK_SHIFT; cx <= x1 >> CHUNK_SHIFT; cx += 1) {
+      const flags = world.flags[cy * world.chunksX + cx];
+      if (!flags) continue;
+      for (let x = Math.max(x0, cx * size); x <= Math.min(x1, cx * size + size - 1); x += 1) for (let y = Math.max(y0, cy * size); y <= Math.min(y1, cy * size + size - 1); y += 1) {
+        if (!(flags[(y & CHUNK_MASK) << CHUNK_SHIFT | x & CHUNK_MASK] & PW.FLAG.FLORA) || !PW.getLayer(world, 'deco', x, y)) continue;
         const below = mat[(y + 1) * W + x] & ID_MASK;
         if (PW.mat.phase[below] >= PW.PHASE.POWDER || PW.getLayer(world, 'deco', x, y + 1) || inPlant(x, y)) continue;
         // (the whole tuft above it goes)

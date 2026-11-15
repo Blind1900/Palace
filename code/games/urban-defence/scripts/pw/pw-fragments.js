@@ -18,14 +18,16 @@
   const SPLIT_MIN = 300;      // pieces at least this big can crack into chunks
   const CHUNK_MIN = 36;       // chunks smaller than this turn straight into debris
   const MAX_PIECES = 100;
-  const OUTLINE_MAX = 360;    // contact points tested per sub-step
+  const OUTLINE_MAX = 480;    // contact points tested per sub-step
   // A piece (or a chunk of one) at least RUIN_MIN cells big comes to rest whole where it lands -
   // tilted, misplaced, cracked at its edges - as a ruin, part of the ground.
   const RUIN_MIN = 60;
-  // Most of a falling building's rubble is its structure - pillars, floors, outer walls. A cell of
-  // back wall (marked THIN in a piece) is part of the body while it holds together, but broken up
-  // only one in WALL_RUBBLE of them leaves a grain of rubble; the rest goes to dust.
-  const THIN = 2, WALL_RUBBLE = 4;
+  // A building is mostly air. Its weight and strength are in its frame - pillars, floors, outer
+  // walls; a cell of back wall (marked THIN in a piece) is a light panel behind its rooms: it goes
+  // along with the frame, weighing THIN_WEIGHT of a frame cell, strikes nothing, and broken up only
+  // one in WALL_RUBBLE of them leaves a grain of rubble (the rest goes to dust).
+  const THIN = 2, THIN_WEIGHT = 0.1, WALL_RUBBLE = 4;
+  const weightOf = (solid) => (solid === 1 ? 1 : solid === THIN ? THIN_WEIGHT : 0);
 
   function createFragments(world, particles) {
     const { mat, width: W, height: H } = world;
@@ -98,8 +100,14 @@
         for (const key of ['x', 'y', 'color', 'byte', 'solid']) data[key] = data[key].slice(0, k);
       }
       const n = data.x.length;
-      let mass = 0, sx = 0, sy = 0;
-      for (let k = 0; k < n; k += 1) if (data.solid[k]) { mass += 1; sx += data.x[k] + 0.5; sy += data.y[k] + 0.5; }
+      // (its weight is in its frame: a back wall weighs little - see THIN)
+      let mass = 0, heavy = 0, thin = 0, sx = 0, sy = 0;
+      for (let k = 0; k < n; k += 1) {
+        const w = weightOf(data.solid[k]);
+        if (!w) continue;
+        mass += w; sx += (data.x[k] + 0.5) * w; sy += (data.y[k] + 0.5) * w;
+        if (data.solid[k] === 1) heavy += 1; else thin += 1;
+      }
       // A part of a piece (a chunk it broke into, what is left of it) goes on from just where it
       // was in the piece, turned as it was, and - unless told otherwise - moving as that part of it
       // was moving: its cells are kept as they were in the building, never re-drawn.
@@ -110,7 +118,9 @@
       if (spec.flora) {
         if (!mass || list.length >= MAX_PIECES) { if (PW.flora) PW.flora.land(world, particles, here(), null); return null; }
       } else {
-        if (mass < CHUNK_MIN) { settle(here(), spec.vx || 0, spec.vy || 0); return null; }
+        // (too little frame to hold together - a scrap, or a panel of back wall with nothing
+        // round it: it comes apart where it is)
+        if (mass < CHUNK_MIN || heavy < CHUNK_MIN / 2) { settle(here(), spec.vx || 0, spec.vy || 0); return null; }
         if (list.length >= MAX_PIECES) { settle(here(), spec.vx || 0, spec.vy || 0); return null; }
       }
       const cx = sx / mass, cy = sy / mass;
@@ -121,33 +131,61 @@
       const gw = u1 - u0 + 1, gh = v1 - v0 + 1;
       const grid = new Int32Array(gw * gh);
       for (let k = 0; k < n; k += 1) grid[(data.y[k] - ay - v0) * gw + (data.x[k] - ax - u0)] = k + 1;
-      const solidAt = (u, v) => { if (u < u0 || u > u1 || v < v0 || v > v1) return false; const g = grid[(v - v0) * gw + (u - u0)]; return g > 0 && data.solid[g - 1] > 0; };
-      // Outline: solid cells with an open side (where it touches the world first), and which way
-      // each faces (out through its open sides).
-      const outline = [], facing = [];
+      // What it strikes with is its frame - pillars, floors, outer walls (a tree's wood). A
+      // building is mostly air: its rooms are open, the back wall only a panel behind them, so
+      // what it falls on can come into its rooms (and a piece hollow enough breaks up the easier).
+      const solidAt = (u, v) => { if (u < u0 || u > u1 || v < v0 || v > v1) return false; const g = grid[(v - v0) * gw + (u - u0)]; return g > 0 && data.solid[g - 1] === 1; };
+      // (the open space outside it: everything not frame reached from the edges of its box)
+      const outside = new Uint8Array(gw * gh), fill = [];
+      for (let gv = 0; gv < gh; gv += 1) for (let gu = 0; gu < gw; gu += 1) {
+        if (gu > 0 && gv > 0 && gu < gw - 1 && gv < gh - 1) continue;
+        if (!solidAt(gu + u0, gv + v0)) { outside[gv * gw + gu] = 1; fill.push(gv * gw + gu); }
+      }
+      for (let q = 0; q < fill.length; q += 1) {
+        const g = fill[q], gu = g % gw, gv = (g / gw) | 0;
+        for (const [du, dv] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          const nu = gu + du, nv = gv + dv;
+          if (nu < 0 || nv < 0 || nu >= gw || nv >= gh) continue;
+          const j = nv * gw + nu;
+          if (outside[j] || solidAt(nu + u0, nv + v0)) continue;
+          outside[j] = 1; fill.push(j);
+        }
+      }
+      const isOutside = (u, v) => u < u0 || u > u1 || v < v0 || v > v1 || outside[(v - v0) * gw + (u - u0)] === 1;
+      // Outline: frame cells with an open side (where it touches the world first), and which way
+      // each faces (out through its open sides). Its outer faces are tested closely, the faces of
+      // its rooms more sparsely.
+      const outer = [], inner = [];
       let inertia = 0;
       for (let k = 0; k < n; k += 1) {
-        if (!data.solid[k]) continue;
+        const wgt = weightOf(data.solid[k]);
+        if (!wgt) continue;
         const u = data.x[k] - ax, v = data.y[k] - ay;
-        inertia += (u + 0.5 - (cx - ax)) ** 2 + (v + 0.5 - (cy - ay)) ** 2;
+        inertia += wgt * ((u + 0.5 - (cx - ax)) ** 2 + (v + 0.5 - (cy - ay)) ** 2);
+        if (data.solid[k] !== 1) continue;
         const l = solidAt(u - 1, v), r = solidAt(u + 1, v), t = solidAt(u, v - 1), b = solidAt(u, v + 1);
         if (l && r && t && b) continue;
-        outline.push(u + 0.5, v + 0.5);
-        facing.push((l ? 0 : -1) + (r ? 0 : 1), (t ? 0 : -1) + (b ? 0 : 1));
+        const out = (!l && isOutside(u - 1, v)) || (!r && isOutside(u + 1, v)) || (!t && isOutside(u, v - 1)) || (!b && isOutside(u, v + 1));
+        (out ? outer : inner).push(u + 0.5, v + 0.5, (l ? 0 : -1) + (r ? 0 : 1), (t ? 0 : -1) + (b ? 0 : 1));
       }
-      const stride = Math.max(1, Math.ceil(outline.length / 2 / OUTLINE_MAX));
-      const points = new Float32Array(Math.ceil(outline.length / 2 / stride) * 2), faces = new Float32Array(points.length);
-      for (let k = 0, j = 0; k < outline.length; k += 2 * stride, j += 2) {
-        points[j] = outline[k]; points[j + 1] = outline[k + 1];
-        const len = Math.hypot(facing[k], facing[k + 1]) || 1;
-        faces[j] = facing[k] / len; faces[j + 1] = facing[k + 1] / len;
+      const picked = [];
+      for (const [set, share] of [[outer, 0.75], [inner, 0.25]]) {
+        const stride = Math.max(1, Math.ceil(set.length / 4 / (OUTLINE_MAX * share)));
+        for (let k = 0; k < set.length; k += 4 * stride) picked.push(set[k], set[k + 1], set[k + 2], set[k + 3]);
+      }
+      const points = new Float32Array(picked.length / 2), faces = new Float32Array(picked.length / 2);
+      for (let k = 0, j = 0; k < picked.length; k += 4, j += 2) {
+        points[j] = picked[k]; points[j + 1] = picked[k + 1];
+        const len = Math.hypot(picked[k + 2], picked[k + 3]) || 1;
+        faces[j] = picked[k + 2] / len; faces[j + 1] = picked[k + 3] / len;
       }
       // data.x/y are world cells as they were when the piece was formed, (ox0, oy0) its anchor
       // cell then; (px, py) is where that anchor's corner is now.
       const piece = { data, n, mass, inertia, grid, gw, gh, u0, v0, points, faces, owner: spec.owner || 0, from: spec.from || spec.owner || 0, generation: spec.generation || 0,
         ox0: ax, oy0: ay, px: ax, py: ay, gx: cx - ax, gy: cy - ay, angle: 0, omega: spec.omega || 0, vx: spec.vx || 0, vy: spec.vy || 0,
         mode: spec.pivot ? 'hinge' : spec.drop ? 'drop' : 'fly', dir: spec.dir || 1, age: 0, flora: !!spec.flora,
-        yf: spec.pivot ? spec.pivot.y : spec.floor || 0, crushedRows: 0, base: spec.base ?? H, h0: spec.h0 || gh, still: 0, touched: -1, sunk: spec.sunk || 0 };
+        yf: spec.pivot ? spec.pivot.y : spec.floor || 0, crushedRows: 0, base: spec.base ?? H, h0: spec.h0 || gh, still: 0, touched: -1, sunk: spec.sunk || 0,
+        hollow: heavy + thin ? thin / (heavy + thin) : 0 };
       if (parent) {
         const [c, s] = cosSin(parent);
         [piece.px, piece.py] = toWorld(parent, c, s, ax - parent.ox0, ay - parent.oy0);
@@ -253,7 +291,7 @@
     function eatFoot(p) {
       const [c, s] = cosSin(p);
       const { grid, gw, gh, u0, v0, data } = p;
-      let eaten = 0;
+      let eaten = 0, lost = 0;
       for (let v = Math.max(v0, Math.ceil(p.footV)); v < v0 + gh; v += 1) {
         for (let u = u0; u < u0 + gw; u += 1) {
           const gi = (v - v0) * gw + (u - u0), g = grid[gi];
@@ -269,12 +307,13 @@
           while (ty > 1 && blocking(x, ty) && y - ty < 24) ty -= 1;
           if ((eaten & 1) === 0 && rubbleFrom(data.solid[k], u, v)) particles.spawn(x + 0.5, ty + 0.5, p.dir * (30 + random() * 140) + (random() - 0.5) * 60, -20 - random() * 60, debrisOf(data.byte[k]), data.color[k] || 0, F.LAND | F.DAMAGE, 6);
           else if ((eaten & 3) === 1) puff(x, ty - 2, 2, 5, 3);
+          lost += weightOf(data.solid[k]);
           grid[gi] = 0; data.solid[k] = 0; data.color[k] = 0;
           eaten += 1;
         }
       }
       if (!eaten) return;
-      p.mass -= eaten; p.eaten += eaten;
+      p.mass = Math.max(1, p.mass - lost); p.eaten += eaten;
       p.omega *= Math.max(0.98, 1 - eaten * 0.00004);
       stats.footCrushed = (stats.footCrushed || 0) + eaten;
     }
@@ -518,15 +557,75 @@
       const firm = 0.55 + hard, felt = hit * firm;
       const j = (1 + (felt > CRUMBLE_SPEED ? BOUNCE * (0.4 + hard * 1.2) : 0)) * hit / (invM + rn * rn * invI);
       const tx = -ny, ty = nx, vt = vx * tx + vy * ty, rt = rx * ty - ry * tx;
+      const fwd = Math.sign(vt) || (random() < 0.5 ? 1 : -1);
+      // A hollow piece - a building, mostly air - folds up where it lands, like a box (see crumple).
+      if (p.hollow > HOLLOW && felt >= FOLD_SPEED && p.mass >= SPLIT_MIN && p.crumpled !== world.tick) {
+        blow(hx, hy, vx, vy, hit, j * hit, tx * fwd, ty * fwd, Math.abs(vt), hard);
+        if (crumple(p, wx, wy, nx, ny, felt, spread, vt)) return true;
+      }
       const jt = Math.max(-FRICTION * j, Math.min(FRICTION * j, -vt / (invM + rt * rt * invI)));
       const ix = j * nx + jt * tx, iy = j * ny + jt * ty;
       p.vx += ix * invM; p.vy += iy * invM;
       p.omega += (rx * iy - ry * ix) * invI;
       if (felt < SNAP_SPEED) return false;
       // A blow: what it struck feels it, and the piece breaks where it took it.
-      const fwd = Math.sign(vt) || (random() < 0.5 ? 1 : -1);
-      if (felt >= CRUMBLE_SPEED) blow(hx, hy, vx, vy, hit, j * hit, tx * fwd, ty * fwd, Math.abs(vt), hard);
+      if (felt >= CRUMBLE_SPEED && p.crumpled !== world.tick) blow(hx, hy, vx, vy, hit, j * hit, tx * fwd, ty * fwd, Math.abs(vt), hard);
       return breaks(p, wx, wy, vx, vy, nx, ny, felt, hard, spread);
+    }
+    // A building is a box of thin floors and walls round open rooms. Where it lands hard, the rooms
+    // nearest the blow give way - their floors and walls fold in, bursting out of the sides of the
+    // fold as rubble and dust - and the rest of it comes on into the room they left, slowed but
+    // still going, to give way again: it collapses storey by storey wherever and however it lands
+    // (the harder, the more at once), never bouncing off whole like a block. (False when nothing
+    // was there to fold.)
+    const HOLLOW = 0.25;          // a piece at least this much room (back wall) to frame folds up,
+    const FOLD_SPEED = 30;        // under a blow harder than this - up to a storey at a time
+    function crumple(p, wx, wy, nx, ny, felt, spread, vt) {
+      const [c, s] = cosSin(p);
+      const band = Math.max(4, Math.min(40, felt / 6 * (0.3 + p.hollow)));
+      const lateral = spread / 2 + band * 2 + 8;
+      const tx = -ny, ty = nx;
+      const d = p.data, n = d.x.length;
+      const folded = [], rest = [];
+      let lost = 0;
+      for (let k = 0; k < n; k += 1) {
+        const [x, y] = toWorld(p, c, s, d.x[k] - p.ox0 + 0.5, d.y[k] - p.oy0 + 0.5);
+        const ex = x - wx, ey = y - wy;
+        // (how high above what it struck, and how far along it; the fold is ragged)
+        const h = ex * nx + ey * ny, a = ex * tx + ey * ty;
+        const edge = band + ((PW.hash2(d.x[k] >> 2, d.y[k] >> 2) & 7) - 3.5) * 0.6;
+        if (h < edge && Math.abs(a) < lateral) { folded.push(k); lost += weightOf(d.solid[k]); } else rest.push(k);
+      }
+      if (lost < 4 || !rest.length) return false;
+      const go = (40 + felt * 0.8);
+      for (const k of folded) {
+        const [x, y] = toWorld(p, c, s, d.x[k] - p.ox0 + 0.5, d.y[k] - p.oy0 + 0.5);
+        if (!d.solid[k]) { if ((k & 15) === 0) puff(x, y, 1); continue; }
+        if (!rubbleFrom(d.solid[k], d.x[k], d.y[k])) { if ((k & 3) === 0) puff(x, y, 1); continue; }
+        // (out of whichever side of the fold it is nearer, low along what it struck)
+        const a = (x - wx) * tx + (y - wy) * ty, side = Math.sign(a) || (random() < 0.5 ? 1 : -1);
+        const out = side * go * (0.3 + random() * 0.9) + vt * 0.5, up = 15 + random() * 45;
+        particles.spawn(x, y, tx * out + nx * up, ty * out + ny * up, debrisOf(d.byte[k]), d.color[k] || 0, F.LAND | F.DAMAGE, 6);
+        stats.folded = (stats.folded || 0) + 1;
+      }
+      // The air in the rooms that folded is driven out of both sides, with their dust.
+      for (const side of [-1, 1]) {
+        const ex = wx + tx * side * lateral, ey = wy + ty * side * lateral;
+        jet(ex, ey - 2, Math.round(10 + Math.min(80, folded.length / 30)), tx * side * go, ty * side * go - 15, 0.4);
+        if (world.air) world.air.gust(ex + tx * side * 12, ey - 6, 24, tx * side * go * 0.8, ty * side * go * 0.8 - 10);
+      }
+      if (folded.length > 400) smoulder(wx, wy, 24 + Math.min(30, folded.length / 300), 20 + Math.sqrt(folded.length) * 0.6);
+      // What is left comes on into the space, slowed by as much as the folding took up: the more
+      // of its frame folded, the more of its speed into what it struck is spent.
+      const piece = spawn({ data: pick(d, rest), parent: p, inherit: true, owner: p.owner, from: p.from, generation: p.generation, h0: p.h0, floor: p.yf, base: p.base, sunk: p.sunk });
+      if (piece) {
+        const vn = piece.vx * nx + piece.vy * ny, spent = Math.min(0.65, lost / p.mass * 2.5);
+        if (vn < 0) { piece.vx -= nx * vn * spent; piece.vy -= ny * vn * spent; }
+        piece.omega *= 0.85;
+        piece.crumpled = world.tick;
+      }
+      stats.crumples = (stats.crumples || 0) + 1;
+      return true;
     }
     // Which way the surface at (x, y) faces: away from the solid cells about it (deep inside
     // something, back the way the piece came).
@@ -586,8 +685,9 @@
       const { grid, gw, gh, u0, v0, data } = p;
       const gone = new Uint8Array(data.x.length);
       let lost = 0;
+      // (a hollow piece - thin walls round its rooms - gives way the more readily)
       if (felt >= CRUMBLE_SPEED) {
-        const r = Math.min(12, 2 + (felt - CRUMBLE_SPEED) / 22);
+        const r = Math.min(14, (2 + (felt - CRUMBLE_SPEED) / 22) * (1 + p.hollow * 0.6));
         for (let v = Math.floor(lv - r); v <= lv + r; v += 1) for (let u = Math.floor(lu - r); u <= lu + r; u += 1) {
           if (u < u0 || v < v0 || u >= u0 + gw || v >= v0 + gh || (u + 0.5 - lu) ** 2 + (v + 0.5 - lv) ** 2 > r * r) continue;
           const g = grid[(v - v0) * gw + (u - u0)];
@@ -596,7 +696,7 @@
         }
       }
       const room = p.mass >= SPLIT_MIN && list.length < MAX_PIECES - 4;
-      const cracks = room && felt > SPLIT_SPEED + p.generation * 45 && p.generation < MAX_CRACKS;
+      const cracks = room && felt > (SPLIT_SPEED + p.generation * 45) * (1 - p.hollow * 0.35) && p.generation < MAX_CRACKS;
       // (snaps: long for its thickness, struck at one narrow place away from its ends)
       const long = gw >= gh ? gw : gh, thick = gw >= gh ? gh : gw;
       const along = gw >= gh ? (lu - u0) / gw : (lv - v0) / gh;
@@ -773,12 +873,17 @@
         const g = grid[v * gw + u];
         if (!g) continue;
         at.push(y * W + x, g - 1);
-        if (data.solid[g - 1]) here.add(y * W + x);
+        if (data.solid[g - 1] === 1) here.add(y * W + x);
       }
       let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity, cells = 0;
       for (let q = 0; q < at.length; q += 2) {
         const i = at[q], j = at[q + 1], x = i % W, y = (i / W) | 0;
         if (!data.solid[j]) { if ((q & 31) === 0) puff(x, y, 1); continue; }
+        // (its rooms stay open: the back wall behind them stays as a wall, dulled with dust)
+        if (data.solid[j] === THIN) {
+          if ((mat[i] & ID_MASK) === M.AIR && data.color[j]) PW.setLayer(world, 'back', x, y, ruinTone(data.color[j], x, y));
+          continue;
+        }
         const byte = data.byte[j];
         const edge = !here.has(i - 1) || !here.has(i + 1) || !here.has(i - W) || !here.has(i + W);
         const room = !blocking(x, y);

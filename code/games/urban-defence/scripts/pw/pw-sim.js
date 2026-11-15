@@ -315,7 +315,13 @@
         const d = k ? -dir : dir, nx = x + d;
         if (nx < 0 || nx >= W) continue;
         if (lighter(mat[i + d], id) && lighter(mat[i + W + d], id)) {
-          if (slides) { move(i, x, y, i + W + d, nx, y + 1); return true; }
+          if (slides) {
+            // (over the edge of a slope steeper than it can lie on - nothing under where it slides
+            // to - it runs on down with its own momentum: see run)
+            if (y + 2 < H && isAir(mat[i + 2 * W + d]) && run(i, x, y, d, id)) return true;
+            move(i, x, y, i + W + d, nx, y + 1);
+            return true;
+          }
           PW.wakeCell(world, x, y);
           return false;
         }
@@ -336,6 +342,30 @@
         }
       }
       return false;
+    }
+    // A grain going over the edge of a slope steeper than it can lie on runs on down it with its own
+    // momentum: handed to the particles, it picks up speed as it drops and runs down the slope below
+    // (the steeper and longer the run, the faster), spends it where the slope eases, and comes to
+    // rest there, back in the grid. So a landslide gathers speed as it goes, pours over drops and
+    // runs out across the flat below - moving as all falling rubble does. Rock and building rubble
+    // coming down fast break what they strike (the particles' DAMAGE).
+    const RUN_START = 36;            // cells/s a grain goes over the edge at
+    function run(i, x, y, d, id) {
+      const particles = world.particles;
+      if (!particles || particles.count > particles.capacity - 512) return false;
+      const byte = mat[i], paint = PW.getLayer(world, 'paint', x, y);
+      PW.set(world, x, y, M.AIR, { quiet: true });
+      PW.wake(world, x, y - 1);
+      const h = PW.hash3(x, y, world.tick), v = RUN_START * (0.8 + (h & 255) / 255 * 0.4);
+      const F = PW.PARTICLE;
+      particles.spawn(x + d + 0.5, y + 0.5, d * v, v * 0.6, byte, paint, F.LAND | (weight[id] >= 80 ? F.DAMAGE : 0), 12);
+      stats.ran = (stats.ran || 0) + 1;
+      // (where ground is running off, the slide is still going: the stability system keeps looking
+      // there - the face it was banked against may stand free now, and fail in its turn)
+      const running = world.running || (world.running = new Map());
+      if (running.size > 4000) running.clear();
+      running.set((y >> 6) * 4096 + (x >> 6), world.tick);
+      return true;
     }
     // Hand a grain to the particles: it falls from rest, so it picks up speed under gravity, the
     // wind takes it as much as the table says, and it lands back in the grid wherever it comes

@@ -64,12 +64,24 @@
         // green: leaves and grass; brown: bark and stems - a tree's trunk and boughs are wood that
         // burns long; grass, flowers and a bush's twigs flare and are gone
         const plant = PW.flora ? PW.flora.recordAt(world, x, y) : null;
+        // (a boulder among the plants does not burn: the fire blackens it with soot)
+        if (plant && plant.kind === 'boulder') {
+          if (c[0] + c[1] + c[2] > 120) PW.setLayer(world, 'deco', x, y, scorched(decoAt(x, y), 0.5));
+          return false;
+        }
         const leaf = c[1] > c[0] + 8 || !plant;
         const timber = !leaf && plant.kind === 'tree';
         // Leaves flare up and are gone in a second or two; a tree's wood burns on for a long while
         // (a trunk smoulders on after its crown has burnt off) before it is left as charcoal.
         const h = PW.hash2(x, y);
         burning.set(i, { fuel: timber ? 9 + (h & 15) * 0.33 : leaf ? 1.2 + (h & 3) * 0.3 : 2.5 + (h & 7) * 0.2, deco: true, wood: !leaf, owner: 0 });
+        // (bark blackens as it burns; where the fire reaches a tree's foot it may smoulder on there
+        // for a minute or so after the fire has passed)
+        if (!leaf) scorchBark(x, y, 0.4);
+        if (timber && !plant.smouldered && y >= plant.row - 10 && PW.addSmoulder) {
+          plant.smouldered = true;
+          if ((h >> 7 & 3) !== 0) PW.addSmoulder(world, x, y - 2, 40 + (h >> 9 & 63), 3 + (h >> 4 & 3));
+        }
         stats.ignited += 1;
         return true;
       }
@@ -108,27 +120,38 @@
       }
       return Math.min(h, v);
     }
+    // What a fire leaves of a plant. Leaves, grass, flowers and twigs burn to ash - a little from a
+    // leaf, more from wood - that drifts down onto the ground and lies there grey and white (and
+    // weathers in time into rich soil, where the green comes back first). A tree's trunk and its
+    // thickest boughs are left standing as charcoal - a black, leafless snag, flecked with white
+    // ash - until another fire takes more of it; charcoal that burns again goes unless it is thick.
+    // The ground a plant burnt on is charred black, and here and there a burnt trunk smoulders on
+    // for a minute or so after the fire has passed.
     function burnOut(i, x, y, b) {
       burning.delete(i);
       stats.burnedOut += 1;
       if (b.deco) {
-        // Leaves and twigs burn away; a tree's trunk and its thickest boughs are left standing as
-        // charcoal (a black, leafless snag) until another fire takes more of it - charcoal that
-        // burns again goes unless it is thick.
+        const h = PW.hash2(x, y);
         const thin = b.wood && woodThickness(x, y) < (b.charred ? 5 : 3);
+        const plant = PW.flora ? PW.flora.recordAt(world, x, y) : null;
         if (!b.wood || thin) {
-          const plant = thin && PW.flora ? PW.flora.recordAt(world, x, y) : null;
           PW.setLayer(world, 'deco', x, y, 0);
           PW.setFlag(world, x, y, FLAG.FLORA | FLAG.CHARRED, false);
           // (what that held up may have lost its hold)
-          if (plant) (world.floraDirty || (world.floraDirty = new Set())).add(plant);
+          if (thin && plant) (world.floraDirty || (world.floraDirty = new Set())).add(plant);
+          // (a leaf leaves only a pinch of ash, a twig a little more: the ground gets a grey-white
+          // dusting, not a heap)
+          if ((h >> 3) % (b.wood ? 6 : 24) === 0 && world.particles) {
+            world.particles.spawn(x + 0.5, y + 0.5, ((h >> 5 & 15) - 7.5) * 1.5, -4, M.ASH | (h & 3) << 6, 0, PW.PARTICLE.LAND, 30);
+          }
         } else {
-          const k = 0.22 + (PW.hash2(x, y) & 3) * 0.05;
-          PW.setLayer(world, 'deco', x, y, PW.abgr(52 * k + 20, 44 * k + 18, 40 * k + 16));
+          const k = 0.1 + (h & 3) * 0.03;
+          PW.setLayer(world, 'deco', x, y, (h >> 4 & 15) === 0 ? PW.abgr(84, 80, 76) : PW.abgr(52 * k + 14, 44 * k + 13, 40 * k + 12));
           PW.setFlag(world, x, y, FLAG.CHARRED);
           charredAt.set(i, tick);
           if (charredAt.size > 60000) for (const [j, t] of charredAt) if (tick - t > CHAR_COOL) charredAt.delete(j);
         }
+        charGround(x, y + 1);
         return;
       }
       if (b.rubble) { if (woodRubble(i)) PW.set(world, x, y, M.ASH | (PW.hash2(x, y) & 3) << 6); return; }
@@ -137,10 +160,30 @@
       if (to === M.ASH) {
         PW.set(world, x, y, M.ASH | (PW.hash2(x, y) & 3) << 6);
       } else if (to) {
+        // (burnt turf: charred black, with its ash lying on it)
         PW.set(world, x, y, to | (mat[i] & 0xc0));
-        PW.setLayer(world, 'paint', x, y, scorched(palettes[to][(PW.hash2(x, y) & 3) * 2]));
+        PW.setLayer(world, 'paint', x, y, scorched(palettes[to][(PW.hash2(x, y) & 3) * 2], CHAR));
         PW.setFlag(world, x, y, FLAG.SCORCH);
+        if (id === M.GRASS && y > 0 && (mat[i - W] & ID_MASK) === M.AIR && !decoAt(x, y - 1) && (PW.hash2(x, y) & 1)) PW.set(world, x, y - 1, M.ASH | (PW.hash2(y, x) & 3) << 6);
       }
+    }
+    // The ground under a plant that burnt is charred black (once: the life lane fades it in time).
+    const CHAR = 0.3;
+    // Bark scorched by the fire beside it, or burning: blackened (darker each time, to near black).
+    const BARK_SCORCH = 330;          // °C
+    function scorchBark(x, y, k) {
+      const d = decoAt(x, y);
+      if (!d) return;
+      const c = PW.unpack(d);
+      if (c[0] + c[1] + c[2] > 70) PW.setLayer(world, 'deco', x, y, scorched(d, k));
+    }
+    function charGround(x, y) {
+      if (x < 1 || y < 1 || x >= W - 1 || y >= H - 1) return;
+      const j = y * W + x, id = mat[j] & ID_MASK;
+      if (!terrain[id] || PW.mat.phase[id] !== PW.PHASE.SOLID || (PW.getFlags(world, x, y) & FLAG.SCORCH)) return;
+      const paint = PW.getLayer(world, 'paint', x, y) || palettes[id][((mat[j] >> 6) * 2 + (PW.hash2(x, y) & 1)) & 7];
+      PW.setLayer(world, 'paint', x, y, scorched(paint, CHAR));
+      PW.setFlag(world, x, y, FLAG.SCORCH);
     }
     function puffSmoke(x, y) {
       for (let k = 1; k <= 3; k += 1) {
@@ -163,6 +206,12 @@
         if (y > 0) PW.setHeat(world, x, y - 1, Math.max(PW.heatAt(world, x, y - 1), FLAME * 0.8));
         if ((PW.hash3(x, y, tick) & 1023) / 1023 < SMOKE_CHANCE) puffSmoke(x, y);
         if (b.owner) world.fireByOwner.set(b.owner, (world.fireByOwner.get(b.owner) || 0) + 1);
+        // (fire creeps along the bark, down a trunk as well as up it: the wood next to burning wood
+        // catches, so a crown fire works its way down the trunk and out along the boughs)
+        if (b.wood && (PW.hash3(x, y, tick + 3) & 7) < 2) {
+          const d = PW.hash3(x, y, tick) & 3, nx = x + (d === 0 ? -1 : d === 1 ? 1 : 0), ny = y + (d === 2 ? 1 : d === 3 ? -1 : 0);
+          if (isWood(nx, ny) && !(PW.getFlags(world, nx, ny) & FLAG.CHARRED)) igniteCell(nx, ny);
+        }
         b.fuel -= DT;
         if (b.fuel <= 0) burnOut(i, x, y, b);
       }
@@ -278,9 +327,11 @@
       }
       if (t >= SCORCH && terrain[id] && !(PW.getFlags(world, x, y) & FLAG.SCORCH) && hasAir(i, x, y)) {
         const paint = PW.getLayer(world, 'paint', x, y) || palettes[id][((mat[i] >> 6) * 2 + (PW.hash2(x, y) & 1)) & 7];
-        PW.setLayer(world, 'paint', x, y, scorched(paint, 0.55));
+        PW.setLayer(world, 'paint', x, y, scorched(paint, 0.42));
         PW.setFlag(world, x, y, FLAG.SCORCH);
       }
+      // (wood the fire is beside is scorched black, even where it has not caught)
+      if (t >= BARK_SCORCH && (PW.hash3(x, y, tick) & 3) === 0 && isWood(x, y) && !(PW.getFlags(world, x, y) & FLAG.CHARRED)) scorchBark(x, y, 0.6);
       if (t >= PLANT_IGNITE && !burning.has(i)) {
         // Catching is a little uneven, so fronts are ragged and sparse fuel lets a fire die.
         if ((PW.hash3(x, y, tick) & 7) < 3 && (t >= ignite[id] || open[id])) igniteCell(x, y);
