@@ -237,6 +237,7 @@
       heat.step(1);
       if (structure) structure.step(1.5);
       if (fragments) fragments.step(DT);
+      if (PW.streetProps) PW.streetProps.step(world, particles);
       if (cores) cores.step();
       if (stability) stability.step();
       if (air) air.step();

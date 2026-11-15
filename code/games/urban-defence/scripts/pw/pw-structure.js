@@ -147,6 +147,15 @@
         report.frame += 1;
         if (support(x, y + 1) || support(x + 1, y) || support(x - 1, y) || support(x, y - 1)) { state[k] = 1; queue.push(x, y); }
       }
+      // The main base's armoured block floats over its pit, held up by its core's field for as
+      // long as the core lives.
+      const f = b.floating;
+      if (f && (b.cores || []).some((core) => (mat[core.y * W + core.x] & ID_MASK) === M.CORE)) {
+        for (let y = Math.max(S.fy0, f.top); y <= Math.min(S.fy1, f.bottom); y += 1) for (let x = Math.max(S.fx0, f.left); x <= Math.min(S.fx1, f.right); x += 1) {
+          const k = at(x, y);
+          if ((cls[k] & FRAME) && !state[k]) { state[k] = 1; queue.push(x, y); }
+        }
+      }
       for (let q = 0; q < queue.length; q += 2) {
         const x = queue[q], y = queue[q + 1];
         for (let dy = -1; dy <= 1; dy += 1) for (let dx = -1; dx <= 1; dx += 1) {

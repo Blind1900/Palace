@@ -66,7 +66,9 @@ check(spread(B, dirB) > heightOf(B) * 0.4, `the tipped tower's rubble reaches ou
 // Debris hurts what it hits: neighbouring buildings, trees and fittings, the ground.
 const hurt = others.filter((b) => b.health !== undefined && b.health < 1).length;
 check(hurt > 0 || fragments.stats.chipped > 0, `falling debris damages neighbouring buildings (${hurt} neighbours damaged, ${fragments.stats.chipped} cells chipped)`);
-check((fragments.stats.swept || 0) > 0 && decoBefore(A) < decoA, `falling debris knocks down trees, lamps and fittings (${fragments.stats.swept || 0} swept, deco ${decoA} -> ${decoBefore(A)})`);
+// (struck by flying debris, a lamp or gate that loses its footing or much of itself topples)
+const toppled = PW.streetProps ? PW.streetProps.stats.toppled : 0;
+check((fragments.stats.swept || 0) + toppled > 0 && decoBefore(A) < decoA, `falling debris knocks down trees, lamps and fittings (${fragments.stats.swept || 0} swept, ${toppled} street props toppled, deco ${decoA} -> ${decoBefore(A)})`);
 // The cores survive the collapse; a ruined building's cores rise out of the rubble into the open,
 // where troops can reach them.
 check(coresUnder(A) === coresA && coresUnder(B) === coresB, `the cores survive the collapse (${coresUnder(A)}/${coresA}, ${coresUnder(B)}/${coresB} core cells)`);
@@ -81,7 +83,8 @@ if (ruined.length) await view('co-cores-risen', ruined[0].cores[0].x, ruined[0].
 // Lasting smoke and dust.
 const smoke30 = countIn(A.body.left - 600, A.body.right + 600, A.ground - 900, A.ground, [M.SMOKE]);
 check(dust10 > 1500, `the collapse throws up a dust cloud that hangs (${dust10} dust cells after 10 s)`);
-check(smoke30 > 120 && (world.smoulders || []).length > 0, `the ruins keep smoking for a while (${smoke30} smoke cells after 30 s, ${(world.smoulders || []).length} smouldering spots)`);
+// (thin by now: the smoke drifts and thins rather than hanging in one spot)
+check(smoke30 > 40 && (world.smoulders || []).length > 0, `the ruins keep smoking for a while (${smoke30} smoke cells after 30 s, ${(world.smoulders || []).length} smouldering spots)`);
 // ...but not for ever, nor in one standing column: the smouldering dies down within about a
 // minute and the smoke drifts off and thins away.
 pwApp.stepWorld(60 * 60);

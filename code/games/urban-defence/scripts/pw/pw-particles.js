@@ -172,6 +172,7 @@
             if ((fl & F.DAMAGE) && (Math.abs(vx[i]) + Math.abs(vy[i])) > 110 && PW.getLayer(world, 'deco', cx, cy)) {
               if (!(PW.flora && PW.flora.strike(world, api, cx, cy))) {
                 PW.setLayer(world, 'deco', cx, cy, 0);
+                if (PW.streetProps) PW.streetProps.struck(world, cx, cy);
                 const owner = PW.getOwner(world, cx, cy);
                 if (owner > 0 && owner < 50000 && world.onDamage) world.onDamage(owner, 0, cx, cy);
               }

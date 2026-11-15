@@ -145,6 +145,7 @@
     // Tunnels it reached are dug out and re-lined by their crews.
     if (PW.tunnels && PW.tunnels.damaged) PW.tunnels.damaged(world, box.x0 - 10, box.y0 - 10, box.x1 + 10, box.y1 + 10);
     if (PW.props) PW.props.afterBlast(world, particles, box);
+    if (PW.streetProps) PW.streetProps.afterBlast(world, particles, box, { x: cx, y: cy, power });
     if (world.onDamage) for (const [id, cells] of damaged) world.onDamage(id, cells, cx, cy);
     // The ground around and above the hole is looked at for what lost its footing (the slope over
     // it may come down), and the blast's shock - its heat and pressure - shakes the ground around.

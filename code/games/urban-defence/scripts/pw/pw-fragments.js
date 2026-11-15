@@ -241,6 +241,7 @@
       if (owner > 0 && owner < 50000 && world.onDamage) world.onDamage(owner, 0, x, y);
       const color = PW.getLayer(world, 'deco', x, y);
       PW.setLayer(world, 'deco', x, y, 0);
+      if (PW.streetProps) PW.streetProps.struck(world, x, y);
       if ((PW.hash2(x, y) & 3) === 0) particles.spawn(x + 0.5, y + 0.5, (random() - 0.5) * 140, -40 - random() * 80, 0, color, F.LEAF, 1.5);
       stats.swept = (stats.swept || 0) + 1;
     }

@@ -14,17 +14,32 @@
     asian: { post: [176, 58, 46], stone: [150, 140, 120], rail: [60, 52, 50], ornament: [226, 178, 64], light: [255, 190, 90], glass: [190, 120, 90] },
     modern: { post: [120, 128, 136], stone: [170, 170, 166], rail: [96, 140, 170], ornament: [196, 224, 236], light: [240, 250, 255], glass: [120, 180, 205] },
   };
-  // Prop drawing buffer: props are drawn bottom-anchored at (x, groundY) into deco.
+  // Prop drawing buffer: props are drawn bottom-anchored at (x, groundY) into deco. Each prop drawn
+  // (begun with piece()) is kept as a record of its cells, so it can be knocked down (see Damage).
   function prop(world, owner) {
-    const cells = [];
+    const cells = [], starts = [0, 'prop'];
     return {
       cells,
+      piece(kind) {
+        if (starts[starts.length - 2] === cells.length) starts[starts.length - 1] = kind;
+        else starts.push(cells.length, kind);
+      },
       put(x, y, color) { cells.push(x | 0, y | 0, rgb(color)); },
       commit() {
-        for (let i = 0; i < cells.length; i += 3) {
-          if ((PW.get(world, cells[i], cells[i + 1]) & 63) !== M.AIR) continue;   // props stand in open air only
-          PW.setLayer(world, 'deco', cells[i], cells[i + 1], cells[i + 2]);
-          if (owner) PW.setOwner(world, cells[i], cells[i + 1], owner);
+        const W = world.width;
+        const records = world.streetProps || (world.streetProps = []);
+        for (let s = 0; s < starts.length; s += 2) {
+          const end = s + 2 < starts.length ? starts[s + 2] : cells.length;
+          const own = new Set();
+          let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+          for (let i = starts[s]; i < end; i += 3) {
+            if ((PW.get(world, cells[i], cells[i + 1]) & 63) !== M.AIR) continue;   // props stand in open air only
+            PW.setLayer(world, 'deco', cells[i], cells[i + 1], cells[i + 2]);
+            if (owner) PW.setOwner(world, cells[i], cells[i + 1], owner);
+            own.add(cells[i + 1] * W + cells[i]);
+            x0 = Math.min(x0, cells[i]); x1 = Math.max(x1, cells[i]); y0 = Math.min(y0, cells[i + 1]); y1 = Math.max(y1, cells[i + 1]);
+          }
+          if (own.size) records.push({ kind: starts[s + 1], cells: Int32Array.from(own), x0, y0, x1, y1 });
         }
         // Lamp light pools tint the street surface below each lamp head (following the ground).
         for (const pool of this.pool || []) {
@@ -114,6 +129,7 @@
       }
       for (let dx = 8; dx < w - 8; dx += 1) { p.put(x - w / 2 + dx, g - 12, [150, 110, 70]); if (dx % 12 === 0) for (let dy = 1; dy < 12; dy += 1) p.put(x - w / 2 + dx, g - dy, [90, 92, 96]); }
       for (let dx = w - 16; dx < w - 4; dx += 1) for (let dy = 18; dy < 30; dy += 1) p.put(x - w / 2 + dx, g - dy, dy % 4 === 0 ? [40, 44, 50] : [210, 240, 255]);
+      for (let dx = w - 4; dx < w - 1; dx += 1) for (const dy of [20, 27]) p.put(x - w / 2 + dx, g - dy, C.post);   // (its brackets)
     }
   }
 
@@ -233,6 +249,7 @@
   function generateDistricts(world, seed) {
     const random = PW.createRandom(seed + 777);
     world.districts = [];
+    world.streetProps = [];
     for (const settlement of world.settlements || []) {
       const list = settlement.buildings.slice().sort((p, q) => p.body.left - q.body.left);
       // Props stand on the street between the buildings' bases (walls, stages and steps on
@@ -260,14 +277,14 @@
         const used = [];
         if (room >= 28) {
           const gl = standAt(left + 3, 7), gr = standAt(right - 9, 7);
-          if (gl !== null) { lamp(p, a.style, left + 6, gl, 1); used.push([left, left + 14]); report.props.push(`${a.style} lamp`); }
-          if (gr !== null) { lamp(p, b.style, right - 6, gr, -1); used.push([right - 14, right]); report.props.push(`${b.style} lamp`); }
+          if (gl !== null) { p.piece('lamp'); lamp(p, a.style, left + 6, gl, 1); used.push([left, left + 14]); report.props.push(`${a.style} lamp`); }
+          if (gr !== null) { p.piece('lamp'); lamp(p, b.style, right - 6, gr, -1); used.push([right - 14, right]); report.props.push(`${b.style} lamp`); }
         }
         const mid = Math.round((left + right) / 2);
         if (room >= 80) {
           const gm = mixed ? standAt(mid - 26, 53, 3) : standAt(mid - 38, 77, 2);
-          if (gm !== null && mixed) { parkTree(world, p, mid, gm, random); report.props.push('park tree (style boundary)'); used.push([mid - 30, mid + 30]); }
-          else if (gm !== null) { landmark(p, a.style, mid, gm); report.props.push(`${a.style} landmark`); used.push([mid - 38, mid + 38]); }
+          if (gm !== null && mixed) { p.piece('flower bed'); parkTree(world, p, mid, gm, random); report.props.push('park tree (style boundary)'); used.push([mid - 30, mid + 30]); }
+          else if (gm !== null) { p.piece('landmark'); landmark(p, a.style, mid, gm); report.props.push(`${a.style} landmark`); used.push([mid - 38, mid + 38]); }
         }
         if (room >= 56) {
           const style = mixed ? (random() < 0.5 ? a.style : b.style) : a.style;
@@ -279,6 +296,7 @@
             if (x + w > right - 16 || used.some(([u0, u1]) => x < u1 + 3 && x + w > u0 - 3)) continue;
             const gf = standAt(x, w);
             if (gf === null) continue;
+            p.piece(name);
             furniture(p, style, name, x, gf);
             used.push([x, x + w]);
             report.props.push(name);
@@ -289,8 +307,8 @@
           // Railings on the stretches nothing else uses.
           let x = left + 2;
           const sorted = used.slice().sort((u, v) => u[0] - v[0]);
-          for (const [u0, u1] of sorted) { if (u0 - 4 > x + 10) railing(p, a.style, x, u0 - 4, gAt); x = Math.max(x, u1 + 4); }
-          if (right - 2 > x + 10) railing(p, b.style, x, right - 2, gAt);
+          for (const [u0, u1] of sorted) { if (u0 - 4 > x + 10) { p.piece('railing'); railing(p, a.style, x, u0 - 4, gAt); } x = Math.max(x, u1 + 4); }
+          if (right - 2 > x + 10) { p.piece('railing'); railing(p, b.style, x, right - 2, gAt); }
         }
         p.commit();
         world.districts.push(report);
@@ -299,6 +317,102 @@
     return world.districts;
   }
 
+  // ---- Damage ------------------------------------------------------------------------------------------
+  // A street prop stands on its feet. When something strikes one (a blast, flying debris, a falling
+  // piece of building, fire), what is left of it is looked at: parts no longer joined to its feet
+  // fall, and a prop that has lost much of itself, or whose weight now lies beyond its feet (a gate
+  // with one pillar gone), topples and breaks up as it comes down. Nothing is left hanging.
+  const REACH = 3;          // cells this close count as joined (the drawings have hairline gaps)
+  const KEEPS = 0.7;        // a prop that has lost more than this share of itself comes down
+  const { METAL, WOOD } = PW.DEBRIS_KIND;
+  const RUBBLE_KIND = { lamp: METAL, railing: METAL, signal: METAL, hydrant: METAL, bin: METAL, bollards: METAL,
+    bench: WOOD, planter: WOOD, cypress: WOOD, 'flower bed': WOOD };
+  function struck(world, x, y) { (world.decoHits || (world.decoHits = [])).push(x, y); }
+  // (dry: only count what would fall)
+  function check(world, particles, rec, from, dry = false) {
+    const W = world.width, phase = PW.mat.phase;
+    const gw = rec.x1 - rec.x0 + 1, gh = rec.y1 - rec.y0 + 1;
+    const grid = new Uint8Array(gw * gh);          // 1 still there, 2 joined to its feet
+    const queue = [];
+    let alive = 0, fx0 = Infinity, fx1 = -Infinity;
+    for (const i of rec.cells) {
+      const x = i % W, y = (i / W) | 0;
+      if (!PW.getLayer(world, 'deco', x, y)) continue;
+      alive += 1;
+      const k = (y - rec.y0) * gw + (x - rec.x0);
+      grid[k] = 1;
+      // (a foot: standing on ground or structure)
+      if (phase[PW.get(world, x, y + 1) & 63] >= PW.PHASE.POWDER) { grid[k] = 2; queue.push(k); fx0 = Math.min(fx0, x); fx1 = Math.max(fx1, x); }
+    }
+    if (!alive) { if (!dry) rec.broken = true; return 0; }
+    let joined = 0, sx = 0;
+    for (let q = 0; q < queue.length; q += 1) {
+      const k = queue[q], x = k % gw, y = (k / gw) | 0;
+      joined += 1; sx += x;
+      for (let dy = -REACH; dy <= REACH; dy += 1) for (let dx = -REACH; dx <= REACH; dx += 1) {
+        const nx = x + dx, ny = y + dy;
+        if (nx < 0 || ny < 0 || nx >= gw || ny >= gh) continue;
+        const n = ny * gw + nx;
+        if (grid[n] === 1) { grid[n] = 2; queue.push(n); }
+      }
+    }
+    // (its weight over its feet, give or take a little)
+    const centre = joined ? rec.x0 + sx / joined : 0;
+    const topples = alive < rec.cells.length * KEEPS || !joined || centre < fx0 - 2 || centre > fx1 + 2;
+    const lean = !joined ? 0 : centre < fx0 ? -1 : centre > fx1 ? 1 : 0;
+    const footY = rec.y1 + 1;
+    const rubble = M.DEBRIS | (RUBBLE_KIND[rec.kind] ?? PW.DEBRIS_KIND.CONCRETE) << 6;
+    let fell = 0;
+    for (let k = 0; k < grid.length; k += 1) {
+      if (!grid[k] || (grid[k] === 2 && !topples)) continue;
+      if (dry) { fell += 1; continue; }
+      const x = rec.x0 + (k % gw), y = rec.y0 + ((k / gw) | 0);
+      const color = PW.getLayer(world, 'deco', x, y);
+      PW.setLayer(world, 'deco', x, y, 0);
+      fell += 1;
+      if (!particles) continue;
+      // Toppling, the top swings over fastest; struck by a blast, it is thrown away from it.
+      let vx = lean * (footY - y) * 2.2 + ((PW.hash3(x, y, 7) & 63) - 32) * 0.4, vy = -8 - (PW.hash3(x, y, 9) & 15);
+      if (from) {
+        const dx = x - from.x, dy = y - from.y, d = Math.hypot(dx, dy) || 1, push = Math.min(240, 9000 * (from.power || 1) / (d + 20));
+        vx += dx / d * push; vy += dy / d * push * 0.6 - push * 0.3;
+      }
+      particles.spawn(x + 0.5, y + 0.5, vx, vy, rubble, color, PW.PARTICLE.LAND, 6, 0);
+    }
+    if (!dry) { stats.fell += fell; if (topples) { rec.broken = true; stats.toppled += 1; } }
+    return fell;
+  }
+  const stats = { toppled: 0, fell: 0 };
+  function afterBlast(world, particles, box, from) {
+    if (!world.streetProps) return 0;
+    let fell = 0;
+    for (const rec of world.streetProps) {
+      if (rec.broken || rec.x0 > box.x1 || rec.x1 < box.x0 || rec.y0 > box.y1 || rec.y1 < box.y0) continue;
+      fell += check(world, particles, rec, from);
+    }
+    world.streetProps = world.streetProps.filter((rec) => !rec.broken);
+    return fell;
+  }
+  // Each tick: the props struck since the last look are looked at.
+  function step(world, particles) {
+    const hits = world.decoHits;
+    if (!hits || !hits.length) return 0;
+    if (!world.streetProps) { hits.length = 0; return 0; }
+    let fell = 0;
+    for (const rec of world.streetProps) {
+      if (rec.broken) continue;
+      for (let k = 0; k < hits.length; k += 2) {
+        if (hits[k] < rec.x0 || hits[k] > rec.x1 || hits[k + 1] < rec.y0 || hits[k + 1] > rec.y1) continue;
+        fell += check(world, particles, rec, null);
+        break;
+      }
+    }
+    hits.length = 0;
+    if (fell) world.streetProps = world.streetProps.filter((rec) => !rec.broken);
+    return fell;
+  }
+
   PW.generateDistricts = generateDistricts;
   PW.districtProps = { lamp, landmark, furniture, parkTree, railing, skybridge, COLORS, FURNITURE };
+  PW.streetProps = { struck, check, afterBlast, step, stats };
 })();
