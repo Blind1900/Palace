@@ -14,8 +14,8 @@
   for (const id of [M.DEBRIS, M.RUBBLE, M.LOOSE_SOIL, M.LOOSE_STONE, M.SAND, M.ASH]) LOOSE[id] = 1;
   const SETTLE = 60;        // ticks after the gratings blow before the cores start to rise (1 s)
   const RISE_EVERY = 1;     // ticks per row risen (60 rows a second: up through a tower's heap in seconds)
-  const SWEEP_EVERY = 10;   // ticks between sweeps once a core stands in the open
-  const PER_SWEEP = 40;     // cells a core throws off per sweep
+  const SWEEP_EVERY = 6;    // ticks between sweeps once a core stands in the open
+  const PER_SWEEP = 80;     // cells a core throws off per sweep (a heap can rain down on it)
   const REACH = 10;         // the core column and its clamps: 10 cells either side of its axis
 
   function createCores(world, particles) {

@@ -152,6 +152,18 @@ pwApp.stepWorld(60 * 4);
 const leftovers = pipes.stats.delivered.water - arrived;
 for (let s = 0; s < 40 && [...water.broken].some(Boolean); s += 1) pwApp.stepWorld(60);
 check(![...water.broken].some(Boolean), `the crew re-lays the main around the crater (${pipes.stats.repaired} cells)`);
+// It is one smooth run (no bend steeper than 45°) with nothing of the old pipe left lying about.
+let steep = 0, stray = 0;
+for (let x = cutX - 90; x < cutX + 90; x += 1) {
+  const k = x - water.x0;
+  if (k < 1 || k >= water.ys.length) continue;
+  if (Math.abs(water.ys[k] - water.ys[k - 1]) > 1) steep += 1;
+  for (let y = water.ys[k] - 60; y < water.ys[k] + 70; y += 1) {
+    if (y >= water.ys[k] - 1 && y <= water.ys[k] + pipes.BORE) continue;
+    if ((PW.get(world, x, y) & 63) === M.PIPE && PW.getOwner(world, x, y) === water.owner) stray += 1;
+  }
+}
+check(steep === 0 && stray === 0, `the re-laid main is one smooth run, the old pipe taken up (${steep} steep steps, ${stray} stray pipe cells)`);
 const afterRepair = pipes.stats.delivered.water;
 pwApp.stepWorld(60 * 20);
 check(pipes.stats.delivered.water - afterRepair > leftovers, `water flows again once the main is whole (${leftovers} arrived while cut, ${pipes.stats.delivered.water - afterRepair} after)`);

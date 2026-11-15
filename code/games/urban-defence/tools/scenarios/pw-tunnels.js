@@ -80,5 +80,27 @@ const late = PW.tunnels.digBox(world, enemy, mine.storage.x0 + 20, mine.storage.
 check(late.blocked, `once developed, the storage room's lining stops enemy digging too (${late.blocked ? 'blocked' : 'dug ' + late.cells})`);
 await view('tn-developed-room', (room.x0 + room.x1) / 2, room.bottom - 22, 6);
 await view('tn-developed-shaft', shaft.x, shaft.top + 60, 5);
+
+// 6. A blast in the storage room fills it with rubble and blows its lining open; the crew digs
+// the rubble out and the lining is cast again along the room's own profile.
+const bx = Math.round((room.x0 + room.x1) / 2), by = room.bottom - 12;
+pwApp.explode(bx, by - 30, 26, 1.1);   // (from above, through the room's roof)
+pwApp.stepWorld(60);
+const inProfile = () => {
+  let filled = 0;
+  for (let y = room.top; y <= room.bottom; y += 2) for (let x = room.x0; x <= room.x1; x += 2) {
+    if (PW.tunnels.netAt(world, x, y) !== net.id) continue;
+    const id = PW.get(world, x, y) & 63;
+    if (PW.mat.phase[id] === PW.PHASE.POWDER || PW.mat.terrain[id]) filled += 1;
+  }
+  return filled;
+};
+const filledAfter = inProfile();
+for (let s = 0; s < 40 && inProfile() > 0; s += 1) pwApp.stepWorld(60);
+PW.tunnels.advanceTo(world, PW.tunnels.state(world).time + 400);
+const filledLater = inProfile();
+check(filledLater < Math.max(3, filledAfter * 0.1) && (PW.tunnels.state(world).repaired || 0) > 0,
+  `the crew digs the rubble out of a blasted room and re-lines it (${filledAfter} -> ${filledLater} filled cells, ${PW.tunnels.state(world).repaired || 0} cells repaired)`);
+await view('tn-repaired-room', bx, room.bottom - 22, 6);
 pwApp.setPaused(false);
 return { checks, shots: shots.length, stats: PW.tunnels.stats(world) };

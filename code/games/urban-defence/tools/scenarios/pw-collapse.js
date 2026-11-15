@@ -71,6 +71,9 @@ check((fragments.stats.swept || 0) > 0 && decoBefore(A) < decoA, `falling debris
 // where troops can reach them.
 check(coresUnder(A) === coresA && coresUnder(B) === coresB, `the cores survive the collapse (${coresUnder(A)}/${coresA}, ${coresUnder(B)}/${coresB} core cells)`);
 const ruined = [A, B].filter((b) => b.ruined);
+// (rubble may still be raining onto one: its field clears it within a few seconds)
+const allOut = () => ruined.every((b) => b.cores.every((c) => pwApp.cores.exposed(c)));
+for (let s = 0; s < 5 && !allOut(); s += 1) pwApp.stepWorld(60);
 const out = ruined.flatMap((b) => b.cores.filter((c) => pwApp.cores.exposed(c)));
 check(ruined.length > 0 && out.length === ruined.reduce((n, b) => n + b.cores.length, 0),
   `a ruined building's cores stand in the open on its rubble (${out.length}/${ruined.reduce((n, b) => n + b.cores.length, 0)} cores of ${ruined.length} ruined buildings; ${ruined.flatMap((b) => b.cores.map((c) => `${c.x},${c.y}${c.free ? 'F' : ''}${c.stopped ? ':' + c.stopped : ''}`)).join(' ')})`);

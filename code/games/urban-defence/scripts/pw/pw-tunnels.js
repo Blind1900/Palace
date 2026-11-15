@@ -623,10 +623,84 @@
     }
     return true;
   }
+  // ---- Repair -------------------------------------------------------------------------------------------
+  // A blast that reaches a tunnel fills it with rubble and blows its lining away. The crew comes
+  // a few seconds later and works the damaged stretch over and over while the ground around it is
+  // still settling: it digs out the rubble that fell in (a hundred-odd cells a second), timbering what it
+  // opens as raw tunnel, and every hole blown through the lining around the tunnel's profile is
+  // claimed again to be cast in concrete when development comes back round to it - so the tunnel
+  // rebuilds itself along its own profile, around whatever the blast and the slide left.
+  const REPAIR_DELAY = 3, REPAIR_EVERY = 1.5, REPAIR_PER_STEP = 2;   // (about 120 cells a second)
+  function damaged(world, x0, y0, x1, y1) {
+    const T = state(world);
+    for (const seg of T.segments) {
+      if (seg.x1 + LINE < x0 || seg.x0 - LINE > x1 || seg.y1 + LINE < y0 || seg.y0 - LINE > y1) continue;
+      // (the whole stretch the blast reached: rubble spreads along it, and the roof beyond the hole
+      // may come down into it)
+      if ((T.repairs || []).some((b) => b.seg === seg)) continue;
+      const box = { seg, x0: seg.x0 - LINE, y0: seg.y0 - LINE, x1: seg.x1 + LINE, y1: seg.y1 + LINE, at: T.time + REPAIR_DELAY, work: null };
+      (T.repairs || (T.repairs = [])).push(box);
+    }
+  }
+  // Work out what a damaged stretch needs: rubble to dig out of its profile, holes in its lining.
+  function survey(world, box) {
+    const { seg } = box, net = state(world).networks[seg.net - 1], W = world.width, out = [];
+    for (let y = box.y0; y <= box.y1; y += 1) for (let x = box.x0; x <= box.x1; x += 1) {
+      const id = PW.get(world, x, y) & ID_MASK, inside = x >= seg.x0 && x <= seg.x1 && y >= seg.y0 && y <= seg.y1;
+      if (inside) {
+        // (the profile itself: anything that is not open space, and not ore left as the face)
+        if (netAt(world, x, y) === net.id && !PW.mat.open[id] && id !== M.ORE && id !== M.BEDROCK && (PW.mat.phase[id] === PW.PHASE.POWDER || PW.mat.terrain[id])) out.push(y * W + x, 1);
+      } else if (PW.mat.open[id] && !netAt(world, x, y) && y > world.groundTop[x]) {
+        // (the ring around the profile, blown open into a void: lining to cast again)
+        let near = false;
+        for (let dy = -1; dy <= 1 && !near; dy += 1) for (let dx = -1; dx <= 1; dx += 1) if (netAt(world, x + dx, y + dy) === net.id) { near = true; break; }
+        if (near) out.push(y * W + x, 2);
+      }
+    }
+    return out;
+  }
+  function repairStep(world, dt) {
+    const T = state(world);
+    if (!T.repairs || !T.repairs.length) return;
+    const box = T.repairs.find((b) => b.at <= T.time);
+    if (!box) return;
+    if (!box.work) { box.work = survey(world, box); box.k = 0; }
+    const net = T.networks[box.seg.net - 1], W = world.width, fresh = [];
+    for (let n = 0; n < REPAIR_PER_STEP && box.k < box.work.length; n += 1, box.k += 2) {
+      const i = box.work[box.k], kind = box.work[box.k + 1], x = i % W, y = (i / W) | 0;
+      const id = PW.get(world, x, y) & ID_MASK;
+      if (kind === 1) {
+        if (!PW.mat.open[id]) PW.set(world, x, y, M.AIR);
+        setL(world, 'tunnelNet', Uint16Array, x, y, net.id);
+        setL(world, 'tunnelSeg', Uint16Array, x, y, box.seg.id);
+        PW.setFlag(world, x, y, FLAG.TUNNEL | FLAG.CARVED | FLAG.RAW);
+        PW.setFlag(world, x, y, FLAG.DEVELOPED, false);
+        PW.setOwner(world, x, y, net.owner);
+        PW.setLayer(world, 'back', x, y, rgb(rawBack(net, box.seg, x, y)));
+      } else {
+        if (!PW.mat.open[id]) continue;
+        setL(world, 'tunnelNet', Uint16Array, x, y, net.id);
+        setL(world, 'tunnelSeg', Uint16Array, x, y, box.seg.id);
+        PW.setFlag(world, x, y, FLAG.TUNNEL | FLAG.CARVED | FLAG.RAW | FLAG.OVERBREAK);
+        PW.setOwner(world, x, y, net.owner);
+        PW.setLayer(world, 'back', x, y, rgb(rawBack(net, box.seg, x, y)));
+      }
+      fresh.push(i);
+      T.repaired = (T.repaired || 0) + 1;
+    }
+    if (fresh.length) schedule(world, net, fresh);
+    // (when a pass is done, the stretch is looked over again a moment later: more may have slid
+    // in while the crew worked; once a look finds nothing to do, it is finished)
+    if (box.k >= box.work.length) {
+      if (box.work.length) { box.work = null; box.at = T.time + REPAIR_EVERY; } else T.repairs.splice(T.repairs.indexOf(box), 1);
+    }
+    void dt;
+  }
   // Advance the development waves by dt seconds (budgeted per call).
   function step(world, dt, budget = 2000) {
     const T = state(world);
     T.time += dt;
+    repairStep(world, dt);
     let n = 0;
     while (T.pending.size && T.pending.peek() <= T.time && n < budget) {
       developCell(world, T.pending.pop());
@@ -649,6 +723,6 @@
       networks: T.networks.map((n) => ({ id: n.id, side: n.side, cells: n.cells, developed: n.developed, lined: n.lined })) };
   }
 
-  PW.tunnels = { RATE, LINE, SET_PITCH, RIB_PITCH, createNetwork, digBox, claimCell, step, advanceTo, networkAt, networkOfOwner, stats, state,
+  PW.tunnels = { RATE, LINE, SET_PITCH, RIB_PITCH, createNetwork, digBox, claimCell, step, advanceTo, networkAt, networkOfOwner, stats, state, damaged,
     netAt, devAtOf, rawBack, devBack };
 })();

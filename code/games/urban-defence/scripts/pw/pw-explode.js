@@ -142,6 +142,8 @@
     // itself breaks apart. Nothing is left floating over the crater.
     const box = { x0: x0 - 4, y0: y0 - 4, x1: x1 + 4, y1: y1 + 4 };
     if (PW.flora) PW.flora.afterBlast(world, particles, box, { x: cx, y: cy });
+    // Tunnels it reached are dug out and re-lined by their crews.
+    if (PW.tunnels && PW.tunnels.damaged) PW.tunnels.damaged(world, box.x0 - 10, box.y0 - 10, box.x1 + 10, box.y1 + 10);
     if (PW.props) PW.props.afterBlast(world, particles, box);
     if (world.onDamage) for (const [id, cells] of damaged) world.onDamage(id, cells, cx, cy);
     // The ground around and above the hole is looked at for what lost its footing (the slope over

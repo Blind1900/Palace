@@ -39,7 +39,7 @@
   const BED = 2;                     // sand bed rows above and below the pipe
   const SMOOTH = 28;                 // a line's bends are eased over this many columns each way
   const OWNER_BASE = 60000;
-  const REPAIR_DELAY = 6 * 60, REPAIR_CELLS_PER_TICK = 0.1, REPAIR_HM_PER_CELL = 0.25;
+  const REPAIR_DELAY = 6 * 60, REPAIR_HM_PER_CELL = 0.25;
   const BELT = [30, 30, 32], BELT_MARK = [62, 62, 60], ROLLER = [150, 150, 142], SAND = [170, 156, 118];
 
   const rgb = (c) => PW.abgr(c[0] | 0, c[1] | 0, c[2] | 0);
@@ -577,37 +577,68 @@
       }
       stats.broken = broken;
     }
-    // The crew re-lays broken columns after a delay, along the new contour (around the crater).
-    let repairBudget = 0;
-    function repair() {
-      repairBudget = Math.min(4, repairBudget + REPAIR_CELLS_PER_TICK);
-      // (a few columns are tried each tick; one that can't be re-laid yet - flooded, say - waits
-      // and is tried again later)
-      let tries = 4;
-      for (const line of lines) {
-        for (let k = 0; k < line.broken.length && repairBudget >= 1 && tries > 0; k += 1) {
-          if (!line.broken[k] || tick - line.brokenAt[k] < REPAIR_DELAY) continue;
-          tries -= 1;
-          const x = line.x0 + k;
-          const fresh = contour(Math.max(line.x0, x - 2), Math.min(line.x1, x + 2), line.spec.depth);
-          // (at the depth the line actually runs, which may be deeper than its local cover, it
-          // goes below whatever is in the way now: the crater's hole)
-          let y = Math.max(fresh[Math.min(2, x - Math.max(line.x0, x - 2))], line.ys[k]);
-          for (let scan = y - BED; scan <= y + BORE + BED && scan < H - 40; scan += 1) if (blocked(x, scan)) y = scan + BED + 1;
-          line.ys[k] = y;
-          layColumn(line, x);
-          if (intactAt(line, x)) {
-            line.broken[k] = 0;
-            repairBudget -= 1;
-            stats.repaired += 1;
-            stats.repairHM += REPAIR_HM_PER_CELL;
-            // Keep the bends no steeper than 45°: neighbours step down to meet a deeper span.
-            for (const n of [k - 1, k + 1]) {
-              if (n < 0 || n >= line.ys.length || line.broken[n]) continue;
-              if (line.ys[n] < line.ys[k] - 1) { line.ys[n] = line.ys[k] - 1; layColumn(line, line.x0 + n); }
-            }
-          } else line.brokenAt[k] = tick - REPAIR_DELAY + 60;   // (tried again in a second)
+    // The crew re-lays a broken stretch after a delay as one smooth run, never column by column:
+    // the stretch and a margin either side are planned again along the ground as it lies now
+    // (down under a crater's floor, under the foot of a heap), eased into the intact line at both
+    // ends with no bend steeper than 45°; the old pipe left in that stretch is taken up and
+    // backfilled, and the new run is laid from both ends inward, a few columns a second, for HM
+    // per cell. If the ground goes on moving and cuts it again, it is planned again.
+    const MARGIN = 40, LAY_PER_TICK = 2;
+    function plan(line) {
+      let k0 = -1;
+      for (let k = 0; k < line.broken.length; k += 1) if (line.broken[k] && tick - line.brokenAt[k] >= REPAIR_DELAY) { k0 = k; break; }
+      if (k0 < 0) return null;
+      // (one stretch: broken columns with no more than a few intact ones between them)
+      let k1 = k0;
+      for (let k = k0 + 1, gap = 0; k < line.broken.length && gap <= 8; k += 1) { if (line.broken[k]) { k1 = k; gap = 0; } else gap += 1; }
+      const a = Math.max(0, k0 - MARGIN), b = Math.min(line.ys.length - 1, k1 + MARGIN);
+      const fresh = contour(line.x0 + a, line.x0 + b, line.spec.depth);
+      const ys = new Int32Array(b - a + 1);
+      const ease = (t) => t * t * (3 - 2 * t);
+      for (let j = 0; j <= b - a; j += 1) {
+        const k = a + j, old = line.ys[k];
+        const t = ease(Math.min(1, Math.min(k - a, b - k) / MARGIN));
+        // (never shallower than the old line where it was intact and the new ground allows it)
+        ys[j] = k >= k0 && k <= k1 ? fresh[j] : Math.round(old + (Math.max(old, fresh[j]) - old) * t);
+      }
+      for (let j = 1; j < ys.length; j += 1) ys[j] = Math.max(ys[j], ys[j - 1] - 1);
+      for (let j = ys.length - 2; j >= 0; j -= 1) ys[j] = Math.max(ys[j], ys[j + 1] - 1);
+      // Take up what is left of the old pipe in the stretch.
+      for (let k = a; k <= b; k += 1) {
+        const x = line.x0 + k, y0 = line.ys[k];
+        for (let r = -1; r <= BORE; r += 1) {
+          const y = y0 + r;
+          if ((mat[y * W + x] & ID_MASK) === M.PIPE && PW.getOwner(world, x, y) === line.owner) {
+            PW.set(world, x, y, M.FILL, { quiet: true });
+            PW.setLayer(world, 'paint', x, y, rgb(tone(SAND, (PW.hash2(x, y) & 3) === 0 ? 0.82 : 0.92)));
+            PW.setOwner(world, x, y, 0);
+          }
         }
+        line.broken[k] = 1;
+      }
+      return { a, b, ys, left: a, right: b };
+    }
+    function repair() {
+      for (const line of lines) {
+        if (!line.reroute) {
+          line.reroute = plan(line);
+          if (!line.reroute) continue;
+          stats.reroutes = (stats.reroutes || 0) + 1;
+        }
+        const r = line.reroute;
+        for (let n = 0; n < LAY_PER_TICK && r.left <= r.right; n += 1) {
+          for (const k of r.left === r.right ? [r.left] : [r.left, r.right]) {
+            line.ys[k] = r.ys[k - r.a];
+            layColumn(line, line.x0 + k);
+            if (intactAt(line, line.x0 + k)) {
+              line.broken[k] = 0;
+              stats.repaired += 1;
+              stats.repairHM += REPAIR_HM_PER_CELL;
+            } else line.brokenAt[k] = tick;   // (something in the way: planned again later)
+          }
+          r.left += 1; r.right -= 1;
+        }
+        if (r.left > r.right) line.reroute = null;
       }
     }
     // Is the line carrying from (x) to the core? (no break between them)
@@ -785,7 +816,7 @@
     function step(dt = 1 / 60) {
       tick += 1;
       if (tick % 30 === 0) check();
-      if (stats.broken) repair();
+      if (stats.broken || lines.some((l) => l.reroute)) repair();
       produce(dt);
       moveCargo(dt);
     }
