@@ -81,8 +81,8 @@
     function blocked(x, y) {
       const i = y * W + x, id = mat[i] & ID_MASK;
       if (id === M.ORE || id === M.CORE || (structural[id] && !isTunnel(x, y))) return true;
-      // An underground cavity (a cave, a blast hole) is gone round below, not bridged.
-      if (PW.mat.open[id] && y > world.groundTop[x] && !isTunnel(x, y) && !buildingOwned(x, y) && !PW.getLayer(world, 'back', x, y)) return true;
+      // (an underground cavity - a cave, a blast hole - is crossed on its rock face, as a tunnel
+      // is on its back wall)
       // A building's structure (not a tunnel network, and not plain ground a building owns, such
       // as the soil lining a mine shaft).
       return buildingOwned(x, y) && !isTunnel(x, y) && !terrain[id];
@@ -192,17 +192,18 @@
       if (spec.look === 'conveyor' && row === BORE - 3) return along % 6 === 0 ? BELT_MARK : BELT;            // belt
       return spec.channel;
     }
-    // Lay one pipe cell: in the ground it is a PIPE cell; across open tunnel it is drawn on the back
-    // wall; through a tunnel's lining it shows in a sleeve.
+    // Lay one pipe cell: in the ground it is a PIPE cell; across open space underground (a tunnel,
+    // a shaft, a cave, a room, flooded or not) it is fixed to the wall face, part of the background:
+    // it shows over the bare wall and behind everything in front of it (timbers, lamps, ladders,
+    // rails, crates, plants); through a tunnel's lining it shows in a sleeve.
     function layCell(line, x, y, color) {
       if (x < 1 || y < 1 || x >= W - 1 || y >= H - 1) return false;
       const id = mat[y * W + x] & ID_MASK;
-      if (id === M.AIR) {
-        // Never in the open sky, nor across a cave or a blast hole (only along a tunnel's or a
-        // building room's back wall).
-        if (!isTunnel(x, y) && (y < world.groundTop[x] || !(buildingOwned(x, y) || PW.getLayer(world, 'back', x, y)))) return false;
-        PW.setLayer(world, 'back', x, y, rgb(color));
-        PW.setFlag(world, x, y, FLAG.FIXTURE);
+      // (cover standing in the way - a stalagmite, a boulder, a crate - stands in front of it)
+      const cover = id === M.COVER_ROCK || id === M.COVER_WOOD || id === M.COVER_METAL || id === M.COVER_SAND;
+      if (PW.mat.open[id] || id === M.WATER || cover) {
+        if (y < world.groundTop[x] && !isTunnel(x, y) && !buildingOwned(x, y)) return false;   // never in the open sky
+        PW.setLayer(world, 'pipe', x, y, rgb(color));
         return true;
       }
       if (id === M.REINFORCED || id === M.LINING) {
@@ -556,8 +557,9 @@
       for (let r = 1; r < BORE - 1; r += 1) {
         const id = mat[(y + r) * W + x] & ID_MASK;
         if (id === M.PIPE) return true;
-        // (along a tunnel wall: a fitting there, until a blast tears it off)
-        if (id === M.AIR && isTunnel(x, y + r) && (PW.getFlags(world, x, y + r) & FLAG.FIXTURE) && PW.getLayer(world, 'back', x, y + r)) return true;
+        // (on the wall of a tunnel or a cave, whatever has come to lie in front of it, until a
+        // blast tears it off)
+        if (PW.getLayer(world, 'pipe', x, y + r)) return true;
         if ((id === M.REINFORCED || id === M.LINING) && (PW.getFlags(world, x, y + r) & FLAG.FIXTURE)) return true;   // in a sleeve
       }
       return false;
@@ -613,6 +615,7 @@
             PW.setLayer(world, 'paint', x, y, rgb(tone(SAND, (PW.hash2(x, y) & 3) === 0 ? 0.82 : 0.92)));
             PW.setOwner(world, x, y, 0);
           }
+          if (r >= 0 && r < BORE) PW.setLayer(world, 'pipe', x, y, 0);   // (and off the wall)
         }
         line.broken[k] = 1;
       }
@@ -828,13 +831,22 @@
       if (z < 0.25) return;
       const size = Math.max(1, Math.round(z));
       const vx0 = camera.x - 4, vx1 = camera.x + view.width / z + 4, vy0 = camera.y - 4, vy1 = camera.y + view.height / z + 4;
-      const cell = (x, y, c) => {
-        if (x < vx0 || x > vx1 || y < vy0 || y > vy1) return;
-        // (in the pipe itself or its sleeve, or on a back wall where nothing stands in front of it)
-        const id = mat[y * W + x] & ID_MASK;
-        if (id !== M.PIPE && !PW.mat.open[id] && !(PW.getFlags(world, x, y) & FLAG.FIXTURE)) return;
+      const put = (x, y, c) => {
         ctx.fillStyle = `rgb(${c[0] | 0},${c[1] | 0},${c[2] | 0})`;
         ctx.fillRect(Math.round((x - camera.x) * z), Math.round((y - camera.y) * z), size, size);
+      };
+      // Cargo shows only where its pipe does: in the pipe itself or its sleeve, or on a wall where
+      // nothing stands in front of it.
+      const cell = (x, y, c) => {
+        if (x < vx0 || x > vx1 || y < vy0 || y > vy1) return;
+        const id = mat[y * W + x] & ID_MASK;
+        if (id === M.PIPE || ((id === M.REINFORCED || id === M.LINING) && (PW.getFlags(world, x, y) & FLAG.FIXTURE))
+          || (PW.mat.open[id] && PW.pipeShows(world, x, y))) put(x, y, c);
+      };
+      // (a machine's lights and moving parts, on its own face)
+      const machineCell = (x, y, c) => {
+        if (x < vx0 || x > vx1 || y < vy0 || y > vy1) return;
+        if (PW.getFlags(world, x, y) & FLAG.FIXTURE) put(x, y, c);
       };
       for (const line of lines) {
         if (line.x1 < vx0 || line.x0 > vx1) continue;
@@ -874,22 +886,22 @@
           const [lx, ly] = at(g.light[0], g.light[1]);
           if (!PW.getLayer(world, 'back', lx, ly)) continue;
           const running = !line.anyBroken;
-          cell(lx, ly, running ? (Math.floor(time * 1.5) % 4 ? [90, 240, 130] : [60, 170, 90]) : (Math.floor(time * 3) % 2 ? [255, 70, 50] : [90, 30, 24]));
+          machineCell(lx, ly, running ? (Math.floor(time * 1.5) % 4 ? [90, 240, 130] : [60, 170, 90]) : (Math.floor(time * 3) % 2 ? [255, 70, 50] : [90, 30, 24]));
           if (!running || z < 1) continue;
           if (g.fan) {
             const [u0, u1, v0, v1] = g.fan, s = Math.floor(time * 14);
-            for (let v = v0; v <= v1; v += 1) for (let u = u0; u <= u1; u += 1) { const [x, y] = at(u, v); cell(x, y, (v + s) % 2 ? [60, 64, 66] : [150, 154, 156]); }
+            for (let v = v0; v <= v1; v += 1) for (let u = u0; u <= u1; u += 1) { const [x, y] = at(u, v); machineCell(x, y, (v + s) % 2 ? [60, 64, 66] : [150, 154, 156]); }
           }
           if (g.wheel) {
             const [cu, cv, r] = g.wheel, turn = time * 3;
             for (let k = 0; k < 2; k += 1) {
               const angle = turn + k * Math.PI / 2;
-              for (let t = -r; t <= r; t += 1) { const [x, y] = at(Math.round(cu + Math.cos(angle) * t), Math.round(cv + Math.sin(angle) * t)); cell(x, y, [176, 180, 182]); }
+              for (let t = -r; t <= r; t += 1) { const [x, y] = at(Math.round(cu + Math.cos(angle) * t), Math.round(cv + Math.sin(angle) * t)); machineCell(x, y, [176, 180, 182]); }
             }
           }
           if (g.drum) {
             const [u0, u1, v0, v1] = g.drum, s = Math.floor(time * 8);
-            for (let v = v0; v <= v1; v += 3) for (let u = u0; u <= u1; u += 1) if ((u + s) % 4 === 0) { const [x, y] = at(u, v); cell(x, y, [52, 60, 70]); }
+            for (let v = v0; v <= v1; v += 3) for (let u = u0; u <= u1; u += 1) if ((u + s) % 4 === 0) { const [x, y] = at(u, v); machineCell(x, y, [52, 60, 70]); }
           }
         }
       }

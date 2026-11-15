@@ -200,7 +200,9 @@
           if (open(id, fl)) {
             // Fast heavy debris knocks down plants and smashes lamps and fittings it flies through.
             if ((fl & F.DAMAGE) && (Math.abs(vx[i]) + Math.abs(vy[i])) > 110 && PW.getLayer(world, 'deco', cx, cy)) {
-              if (!(PW.flora && PW.flora.strike(world, api, cx, cy))) {
+              // (the blow: its speed and weight - a fast lump of rubble about 1.5)
+              const blow = Math.hypot(vx[i], vy[i]) / 200 * Math.max(0.2, weight[cell[i] & ID_MASK] / 80);
+              if (!(PW.flora && PW.flora.strike(world, api, cx, cy, blow))) {
                 PW.setLayer(world, 'deco', cx, cy, 0);
                 if (PW.streetProps) PW.streetProps.struck(world, cx, cy);
                 const owner = PW.getOwner(world, cx, cy);

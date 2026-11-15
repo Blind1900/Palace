@@ -506,12 +506,22 @@
   // is thrown.
   const WOOD_DEBRIS = M.DEBRIS | PW.DEBRIS_KIND.WOOD << 6;
   const leafy = (color) => { const c = PW.unpack(color); return c[1] > c[0] + 6 && c[1] >= c[2]; };
-  function shed(particles, x, y, color, vx, vy) {
+  // Charred wood is brittle: it comes apart as ash, with a puff of dust, more than as charcoal.
+  function charcoal(world, particles, x, y, color, vx, vy) {
+    const F = PW.PARTICLE, h = PW.hash2(x, y);
+    if ((h & 3) === 0) particles.spawn(x + 0.5, y + 0.5, vx, vy, WOOD_DEBRIS, color, F.LAND, 8);
+    else if ((h & 3) !== 3) particles.spawn(x + 0.5, y + 0.5, vx * 0.6, vy * 0.6, M.ASH | (h >>> 4 & 3) << 6, 0, F.LAND, 8);
+    else if (world && (PW.get(world, x, y) & ID_MASK) === M.AIR) PW.set(world, x, y, M.DUST | (1 + (h >>> 6 & 1)) << 6, { quiet: true });
+  }
+  // A plant's cell as it comes apart. `hard`: thrown hard enough to hurt what it hits (blast
+  // splinters); a branch that only breaks off and falls does not.
+  function shed(particles, x, y, color, vx, vy, hard = true, world = null) {
     const F = PW.PARTICLE;
     if (!particles || !F) return;
-    if (leafy(color)) {
+    if (world && (PW.getFlags(world, x, y) & PW.FLAG.CHARRED)) charcoal(world, particles, x, y, color, vx, vy);
+    else if (leafy(color)) {
       if ((PW.hash2(x, y) & 3) === 0) particles.spawn(x + 0.5, y + 0.5, vx, vy, 0, color, F.LEAF, 1.5 + (PW.hash2(y, x) & 3) * 0.5);
-    } else particles.spawn(x + 0.5, y + 0.5, vx, vy, WOOD_DEBRIS, color, F.LAND | F.DAMAGE, 8);
+    } else particles.spawn(x + 0.5, y + 0.5, vx, vy, WOOD_DEBRIS, color, hard ? F.LAND | F.DAMAGE : F.LAND, 8);
   }
   // A plant that lost its footing or had its trunk cut comes down: it topples away from the
   // blast (or to the side it leans), every cell of it thrown as leaves and splintered wood that
@@ -523,22 +533,166 @@
     let n = 0;
     for (let sy = 0; sy < sprite.height; sy += 1) {
       for (let sx = 0; sx < sprite.width; sx += 1) {
-        const color = sprite.pixels[sy * sprite.width + sx];
-        if (!color) continue;
+        if (!sprite.pixels[sy * sprite.width + sx]) continue;
         const wx = left + sx, wy = top + sy;
-        if (PW.getLayer(world, 'deco', wx, wy) !== color) continue;
+        // (what is left of it there, burnt or not)
+        const color = PW.getLayer(world, 'deco', wx, wy);
+        if (!color || !(PW.getFlags(world, wx, wy) & PW.FLAG.FLORA)) continue;
         PW.setLayer(world, 'deco', wx, wy, 0);
         n += 1;
         const height = Math.max(0, record.row - wy), r = (PW.hash3(wx, wy, 7) & 255) / 255 - 0.5;
-        shed(particles, wx, wy, color, side * height * (1.2 + r * 0.6) + r * 30, -10 - (PW.hash3(wx, wy, 9) & 31));
+        shed(particles, wx, wy, color, side * height * (1.2 + r * 0.6) + r * 30, -10 - (PW.hash3(wx, wy, 9) & 31), false, world);
+        PW.setFlag(world, wx, wy, PW.FLAG.FLORA | PW.FLAG.CHARRED, false);
       }
     }
     record.felled = true;
+    world.floraIndex = null;
     return n;
   }
-  // After a blast or a slide: fell plants that lost their footing (the ground under them blown
-  // away, or broken loose and sliding) or had their trunk cut; they come down with the ground.
-  // Grass and flowers left in the air drop too.
+  // ---- A plant comes apart a piece at a time ---------------------------------------------------------
+  // A plant is wood (trunk, branches, stems) holding leaves. What is still joined, wood to wood,
+  // to its roots on solid ground stands, and the leaves within reach of that wood (through the
+  // foliage) stay on it; everything else has lost its hold and falls: a branch snapped off drops
+  // as one piece with its leaves, a trunk broken through brings the crown down beside its stump,
+  // a plant whose ground is gone comes down whole. Pieces that only break off and fall do not
+  // hurt what they land on (so one tree coming down does not set off the next).
+  function settle(world, particles, record, from = null) {
+    if (record.felled) return 0;
+    const sprite = regenerate(record);
+    const left = Math.round(record.anchorX - sprite.anchorX), top = Math.round(record.row - sprite.anchorY);
+    const w = sprite.width, h = sprite.height, n = w * h;
+    const kind = new Uint8Array(n);       // 1 wood, 2 leaf
+    const solid = (x, y) => PW.mat.phase[PW.get(world, x, y) & ID_MASK] === PW.PHASE.SOLID;
+    const queue = [];
+    let cells = 0;
+    for (let k = 0; k < n; k += 1) {
+      if (!sprite.pixels[k]) continue;
+      const wx = left + (k % w), wy = top + ((k / w) | 0);
+      const color = PW.getLayer(world, 'deco', wx, wy), flags = PW.getFlags(world, wx, wy);
+      if (!color || !(flags & PW.FLAG.FLORA)) continue;
+      kind[k] = !(flags & PW.FLAG.CHARRED) && leafy(color) ? 2 : 1;
+      cells += 1;
+      // (the roots: wood at the foot standing on solid ground)
+      if (kind[k] === 1 && wy >= record.row - 6 && solid(wx, wy + 1)) { kind[k] = 5; queue.push(k); }
+    }
+    if (!cells) { record.felled = true; return 0; }
+    // Wood joined to the roots (5 = held wood), then leaves within reach of it (6 = held leaf).
+    for (let q = 0; q < queue.length; q += 1) {
+      const k = queue[q], x = k % w, y = (k / w) | 0;
+      for (let dy = -1; dy <= 1; dy += 1) for (let dx = -1; dx <= 1; dx += 1) {
+        const nx = x + dx, ny = y + dy;
+        if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+        const j = ny * w + nx;
+        if (kind[j] === 1) { kind[j] = 5; queue.push(j); }
+      }
+    }
+    const reach = Math.max(10, w >> 1), dist = new Uint16Array(n);
+    const leaves = queue.slice();
+    for (let q = 0; q < leaves.length; q += 1) {
+      const k = leaves[q], x = k % w, y = (k / w) | 0;
+      if (dist[k] >= reach) continue;
+      for (let dy = -1; dy <= 1; dy += 1) for (let dx = -1; dx <= 1; dx += 1) {
+        const nx = x + dx, ny = y + dy;
+        if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+        const j = ny * w + nx;
+        if (kind[j] === 2) { kind[j] = 6; dist[j] = dist[k] + 1; leaves.push(j); }
+      }
+    }
+    // What fell: it drops as one piece (away from a blast, or the way the plant leans), turning a
+    // little as it goes - the higher the faster - and lands as wood rubble with its leaves.
+    let fell = 0, held = 0;
+    const side = from ? (record.anchorX >= from.x ? 1 : -1) : (PW.hash2(record.anchorX, record.row) & 1 ? 1 : -1);
+    for (let k = 0; k < n; k += 1) {
+      // (what stands counts only above its stump: roots and a stump alone are a felled tree)
+      if (kind[k] === 5 || kind[k] === 6) { if (top + ((k / w) | 0) < record.row - 8) held += 1; continue; }
+      if (!kind[k]) continue;
+      const wx = left + (k % w), wy = top + ((k / w) | 0);
+      const color = PW.getLayer(world, 'deco', wx, wy);
+      const r = (PW.hash3(wx, wy, 7) & 255) / 255 - 0.5, up = Math.max(0, record.row - wy);
+      if (particles) shed(particles, wx, wy, color, side * (8 + up * 0.25) + r * 14, -4 - (PW.hash3(wx, wy, 9) & 7), false, world);
+      PW.setLayer(world, 'deco', wx, wy, 0);
+      PW.setFlag(world, wx, wy, PW.FLAG.FLORA | PW.FLAG.CHARRED, false);
+      fell += 1;
+    }
+    if (!held) record.felled = true;
+    return fell;
+  }
+  // Something strikes a plant at (x, y) with `power` (about 1 for a fast lump of debris, more for
+  // a heavy piece of a building): leaves there are knocked off; wood breaks where it is struck if
+  // the blow is enough for its thickness (a twig easily, a trunk only to a heavy blow), and
+  // charred wood far more easily, crumbling to ash and dust. What lost its hold falls next tick.
+  function strike(world, particles, x, y, power = 1) {
+    const record = recordAt(world, x, y);
+    if (!record) return false;
+    const F = PW.PARTICLE;
+    const here = PW.getLayer(world, 'deco', x, y), flags = PW.getFlags(world, x, y);
+    const charred = (flags & PW.FLAG.CHARRED) !== 0;
+    const take = (cx, cy, vx, vy) => {
+      const color = PW.getLayer(world, 'deco', cx, cy);
+      if (!color || !(PW.getFlags(world, cx, cy) & PW.FLAG.FLORA)) return;
+      if (particles) shed(particles, cx, cy, color, vx, vy, false, world);
+      PW.setLayer(world, 'deco', cx, cy, 0);
+      PW.setFlag(world, cx, cy, PW.FLAG.FLORA | PW.FLAG.CHARRED, false);
+    };
+    const jitter = (cx, cy) => ((PW.hash3(cx, cy, 3) & 63) - 32);
+    if (!charred && leafy(here)) {
+      const r = 1 + Math.min(3, Math.round(power));
+      for (let dy = -r; dy <= r; dy += 1) for (let dx = -r; dx <= r; dx += 1) {
+        if (dx * dx + dy * dy > r * r || !leafy(PW.getLayer(world, 'deco', x + dx, y + dy))) continue;
+        take(x + dx, y + dy, jitter(x + dx, y + dy), -10);
+      }
+    } else {
+      // The wood's thickness here: the run of wood across the row.
+      let t = 1;
+      for (const d of [-1, 1]) for (let k = 1; k < 10; k += 1) {
+        const c = PW.getLayer(world, 'deco', x + d * k, y);
+        if (!c || !(PW.getFlags(world, x + d * k, y) & PW.FLAG.FLORA) || (leafy(c) && !(PW.getFlags(world, x + d * k, y) & PW.FLAG.CHARRED))) break;
+        t += 1;
+      }
+      const strength = t * (charred ? 0.3 : 0.5);
+      if (power >= strength) {
+        // Broken through: a band across the wood where it was struck.
+        const r = charred ? 2 : 1;
+        for (let dy = -r; dy <= r; dy += 1) for (let dx = -t; dx <= t; dx += 1) take(x + dx, y + dy, jitter(x + dx, y + dy) * 0.5, -6);
+      } else take(x, y, jitter(x, y) * 0.3, -4);   // a chip of bark
+    }
+    (world.floraDirty || (world.floraDirty = new Set())).add(record);
+    if (F) void F;
+    return true;
+  }
+  // The plants struck or shaken lately settle (a couple of milliseconds' worth a tick).
+  function step(world, particles) {
+    const dirty = world.floraDirty;
+    if (!dirty || !dirty.size) return 0;
+    let n = 0, felled = 0;
+    const t0 = performance.now();
+    for (const record of dirty) {
+      dirty.delete(record);
+      settle(world, particles, record, record.from || null);
+      record.from = null;
+      if (record.felled) felled += 1;
+      n += 1;
+      if (performance.now() - t0 > 2) break;
+    }
+    if (felled) { world.flora = world.flora.filter((r) => !r.felled); world.floraIndex = null; }
+    return n;
+  }
+  // The plant drawn at (x, y), found through a coarse index of their boxes.
+  function recordAt(world, x, y) {
+    if (!world.flora || !(PW.getFlags(world, x, y) & PW.FLAG.FLORA)) return null;
+    if (!world.floraIndex || world.floraIndex.count !== world.flora.length) {
+      const index = new Map();
+      for (const r of world.flora) for (let b = r.x >> 7; b <= (r.x + r.width) >> 7; b += 1) { let list = index.get(b); if (!list) index.set(b, list = []); list.push(r); }
+      index.count = world.flora.length;
+      world.floraIndex = index;
+    }
+    for (const r of world.floraIndex.get(x >> 7) || []) {
+      if (!r.felled && x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height) return r;
+    }
+    return null;
+  }
+  // After a blast or a slide: the plants it reached settle - whatever lost its footing or was cut
+  // off comes down with the ground. Grass and flowers left in the air drop too.
   function afterBlast(world, particles, box, from = null) {
     if (!world.flora) return 0;
     let felled = 0;
@@ -547,29 +701,29 @@
     dropTufts(world, particles, box);
     for (const record of world.flora) {
       if (record.x > box.x1 || record.x + record.width < box.x0 || record.y > box.y1 || record.y + record.height < box.y0) continue;
-      let footed = 0, lost = 0;
-      if (record.foot) {
-        for (let k = 0; k < record.foot.length; k += 1) {
-          const y = record.foot[k];
-          if (y < 0) continue;
-          footed += 1;
-          if (!solid(record.footX0 + k, y + 1)) lost += 1;
-        }
+      // (only a plant that was hit, or whose footing or trunk is gone, needs looking at closely)
+      let shaken = record.hit;
+      if (!shaken && record.foot) {
+        for (let k = 0; k < record.foot.length && !shaken; k += 1) if (record.foot[k] >= 0 && !solid(record.footX0 + k, record.foot[k] + 1)) shaken = true;
       }
-      let cut = false;
-      if (record.trunk) {
+      if (!shaken && record.trunk) {
         const { x0, y0, x1, y1 } = record.trunk;
         const steps = Math.max(2, Math.round(Math.abs(y1 - y0) / 3));
-        // A trunk is cut where its centre line and both neighbours are open air with nothing drawn.
         const open = (x, y) => (mat[y * W + x] & ID_MASK) === M.AIR && !PW.getLayer(world, 'deco', x, y);
-        for (let s = 0; s <= steps && !cut; s += 1) {
+        for (let s = 0; s <= steps && !shaken; s += 1) {
           const x = Math.round(x0 + (x1 - x0) * s / steps), y = Math.round(y0 + (y1 - y0) * s / steps);
-          if (open(x, y) && open(x - 1, y) && open(x + 1, y)) cut = true;
+          if (open(x, y) && open(x - 1, y) && open(x + 1, y)) shaken = true;
         }
       }
-      if (cut || (footed && lost / footed > 0.4)) { fell(world, particles, record, from); felled += 1; }
+      if (!shaken) continue;
+      record.hit = false;
+      // (a blast's at once; a slide's over the next few ticks - it can shake a whole forested
+      // flank at once)
+      if (!particles || from) { settle(world, particles, record, from); if (record.felled) felled += 1; continue; }
+      record.from = from;
+      (world.floraDirty || (world.floraDirty = new Set())).add(record);
     }
-    if (felled) world.flora = world.flora.filter((record) => !record.felled);
+    if (felled) { world.flora = world.flora.filter((record) => !record.felled); world.floraIndex = null; }
     return felled;
   }
   // Grass blades and flowers whose ground is gone (no plant cell or solid ground under them, and
@@ -690,13 +844,14 @@
       while (x < W - 80 && blocked[x]) x += 1;
       if (x >= W - 80) continue;
       stats.candidates += 1;
-      if (nearWater(x, 30)) { stats.water += 1; continue; }
+      if (nearWater(x, 46)) { stats.water += 1; continue; }
       const slope = slopeAt(x);
       // Old scree is colonised by pioneers: here and there a conifer, a birch or a bush where the
       // apron has eased off; the rest of it stays bare.
       const pioneer = topId(x) === M.GRAVEL && slope < 1.2 && random() < 0.55;
       if (!soil(x) && !pioneer) { stats.ground += 1; stats.tops[PW.mat.names[topId(x)]] = (stats.tops[PW.mat.names[topId(x)]] || 0) + 1; continue; }
-      const altitude = layout.baseY - world.groundTop[x];
+      // (high on a mountain only conifers and dead snags hold on, near the tree line)
+      const altitude = Math.max(layout.baseY - world.groundTop[x], layout.relief && layout.relief[x] > 0.5 ? 540 : 0);
       const roll = random();
       let type, size;
       if (pioneer) { type = roll < 0.55 ? 'conifer' : roll < 0.75 ? 'birch' : 'bush'; size = type === 'bush' ? random.range(12, 22) : random.range(90, 170); }
@@ -717,7 +872,7 @@
       if (random() < 0.6) {
         const bx = x + random.int(-60, 60);
         const bushSize = random.range(14, 30);
-        if (bx > 40 && bx < W - 40 && soil(bx) && slopeAt(bx) < 1.6 && !nearWater(bx, 20) && clearOf(bx, bushSize * 1.6) && footClear(bx, bushSize * 1.6)) {
+        if (bx > 40 && bx < W - 40 && soil(bx) && slopeAt(bx) < 1.6 && !nearWater(bx, 40) && clearOf(bx, bushSize * 1.6) && footClear(bx, bushSize * 1.6)) {
           grow('bush', bx, bushSize);
         }
       }
@@ -727,7 +882,7 @@
       const x = random.int(80, W - 80);
       const scree = topId(x) === M.GRAVEL, slope = slopeAt(x);
       // (conifers hold on to mountainsides up to about 56°; broadleaves want gentler ground)
-      if (blocked[x] || !(soil(x) || scree) || nearWater(x, 30) || slope > 1.5) continue;
+      if (blocked[x] || !(soil(x) || scree) || nearWater(x, 46) || slope > 1.5) continue;
       const type = scree || slope > 1 || layout.baseY - world.groundTop[x] > 260 ? 'conifer' : random() < 0.6 ? 'broadleaf' : 'birch';
       const size = type === 'conifer' ? random.range(140, 240) : random.range(110, 190);
       const half = type === 'conifer' ? size * 0.3 : size * 0.55;
@@ -746,9 +901,18 @@
       if (record) markFeet(record.x0, record.x1, 4);
       return !!record;
     };
+    // Rocks gather where mountains shed them: thick near the summits and on the talus at their
+    // feet, few out on the flats.
+    const talus = layout.talus || [];
+    const rockiness = (x) => {
+      const high = layout.relief ? Math.max(0, Math.min(1, (layout.relief[x] - 0.55) / 0.3)) : 0;
+      const foot = talus.some((a) => x >= a.x0 - 30 && x <= a.x1 + 30) ? 1 : 0;
+      return 0.18 + 0.82 * Math.max(high, foot);
+    };
     let cover = 0;
-    for (let i = 0; i < 480; i += 1) {
+    for (let i = 0, n = Math.round(1100 * W / 16384); i < n; i += 1) {
       const x = random.int(60, W - 60);
+      if (random() > rockiness(x)) continue;
       if (blocked[x] || !rocky(x) || nearWater(x, 8)) continue;
       const altitude = layout.baseY - world.groundTop[x];
       let size = random.range(8, altitude > 300 ? 26 : 20);
@@ -806,19 +970,7 @@
   }
 
   PW.generateVegetation = generateVegetation;
-  // Something heavy (falling debris, a toppling building) strikes the plant drawn at (x, y): it is
-  // knocked down. Returns true if a plant was felled.
-  function strike(world, particles, x, y) {
-    if (!world.flora || !(PW.getFlags(world, x, y) & PW.FLAG.FLORA)) return false;
-    for (const record of world.flora) {
-      if (record.felled || x < record.x || x >= record.x + record.width || y < record.y || y >= record.y + record.height) continue;
-      fell(world, particles, record);
-      world.flora = world.flora.filter((r) => !r.felled);
-      return true;
-    }
-    return false;
-  }
 
-  PW.flora = { plant, fell, regenerate, afterBlast, strike, shed, makeGround, frozenGround, FLAT, tuft };
+  PW.flora = { plant, fell, regenerate, afterBlast, strike, settle, step, recordAt, shed, makeGround, frozenGround, FLAT, tuft };
   PW.vegetation = { broadleaf, conifer, birch, bush, deadTree, boulder, reeds, stamp, createSprite, foliage, limb, trim, spanDrop, spanRise };
 })();

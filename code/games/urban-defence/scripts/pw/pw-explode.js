@@ -9,6 +9,51 @@
   // Rock laid bare behind a blasted-away tunnel or shaft wall: dark and blackened.
   const BLASTED_ROCK = [[46, 38, 32], [38, 32, 27], [52, 43, 36], [34, 29, 25]].map((c) => PW.abgr(c[0], c[1], c[2]));
 
+  // Soot and scorch on the buildings round a blast: the faces it reached - walls and floors a
+  // couple of cells deep, and back walls in the open - are darkened, deepest by the hole and
+  // thinning out raggedly to nothing; what lies behind a wall is shielded. A building keeps its
+  // scorch until it is repaired.
+  function scorchBuildings(world, cx, cy, r, power) {
+    const { mat, width: W, height: H } = world;
+    const { structural, open, palettes } = PW.mat;
+    const reach = r * (1.35 + 0.25 * Math.min(1, power)), x0 = Math.max(1, Math.floor(cx - reach)), x1 = Math.min(W - 2, Math.ceil(cx + reach));
+    const y0 = Math.max(1, Math.floor(cy - reach)), y1 = Math.min(H - 2, Math.ceil(cy + reach * 0.8));
+    // (solid cells between the blast and (x, y), not counting (x, y) itself)
+    const between = (x, y, most) => {
+      const dx = x - cx, dy = y - cy, n = Math.ceil(Math.max(Math.abs(dx), Math.abs(dy)));
+      let hit = 0;
+      for (let s = 1; s < n; s += 1) {
+        const px = Math.round(cx + dx * s / n), py = Math.round(cy + dy * s / n);
+        if (!open[mat[py * W + px] & ID_MASK] && (mat[py * W + px] & ID_MASK) !== M.WATER && (hit += 1) > most) return hit;
+      }
+      return hit;
+    };
+    const darken = (color, k) => { const c = PW.unpack(color); return PW.abgr(c[0] * k + 4, c[1] * k + 3, c[2] * k + 2); };
+    for (let y = y0; y <= y1; y += 1) {
+      for (let x = x0; x <= x1; x += 1) {
+        const d = Math.hypot(x - cx, y - cy) / reach;
+        if (d >= 1) continue;
+        // (a ragged edge: the soot thins out in patches)
+        const near = 1 - d;
+        if ((PW.hash2(x >> 1, y >> 1) & 255) / 255 > near * 2.4) continue;
+        const i = y * W + x, id = mat[i] & ID_MASK, owner = PW.getOwner(world, x, y);
+        const building = owner > 0 && owner < 50000;
+        const again = (PW.getFlags(world, x, y) & PW.FLAG.SCORCH) !== 0;
+        const k = again ? 0.9 : 1 - 0.58 * Math.min(1, near * 1.7);
+        if (id !== M.AIR && (structural[id] || building) && !PW.mat.terrain[id]) {
+          if (between(x, y, 2) > 2) continue;
+          const paint = PW.getLayer(world, 'paint', x, y) || palettes[id][((mat[i] >> 6) * 2 + (PW.hash2(x, y) & 1)) & 7];
+          PW.setLayer(world, 'paint', x, y, darken(paint, k));
+          PW.setFlag(world, x, y, PW.FLAG.SCORCH);
+        } else if (id === M.AIR && building && PW.getLayer(world, 'back', x, y)) {
+          if (between(x, y, 0) > 0) continue;
+          PW.setLayer(world, 'back', x, y, darken(PW.getLayer(world, 'back', x, y), k));
+          PW.setFlag(world, x, y, PW.FLAG.SCORCH);
+        }
+      }
+    }
+  }
+
   function explode(world, particles, spec) {
     const { x: cx, y: cy, radius: r, power = 1, owner = 0 } = spec;
     const random = world.random || PW.createRandom(PW.hash2(cx | 0, cy | 0));
@@ -57,8 +102,11 @@
           const decoOwner = PW.getOwner(world, x, y);
           if (decoOwner > 0 && decoOwner < 50000) damaged.set(decoOwner, damaged.get(decoOwner) || 0);
           if (PW.flora && (PW.getFlags(world, x, y) & PW.FLAG.FLORA)) {
+            const plant = PW.flora.recordAt(world, x, y);
+            if (plant) plant.hit = true;
             const [vx, vy] = fling(x, y, 220 * power, 140 * power);
-            PW.flora.shed(particles, x, y, deco, vx, vy);
+            PW.flora.shed(particles, x, y, deco, vx, vy, true, world);
+            PW.setFlag(world, x, y, PW.FLAG.FLORA | PW.FLAG.CHARRED, false);
           } else if (random() < 0.08) {
             const [vx, vy] = fling(x, y, 140 * power, 80);
             particles.spawn(x + 0.5, y + 0.5, vx, vy, 0, deco, F.LEAF, 2 + random() * 2);
@@ -94,6 +142,15 @@
             particles.spawn(x + 0.5, y + 0.5, vx, vy, M.DEBRIS, back, F.LAND | F.DAMAGE, 6, building ? backOwner : 0);
           }
         }
+        // A pipe fixed to the wall of a tunnel or a cave is torn off with it.
+        const wallPipe = strength > 0.3 ? PW.getLayer(world, 'pipe', x, y) : 0;
+        if (wallPipe) {
+          PW.setLayer(world, 'pipe', x, y, 0);
+          if (random() < 0.2) {
+            const [vx, vy] = fling(x, y, 280 * power, 160 * power);
+            particles.spawn(x + 0.5, y + 0.5, vx, vy, M.DEBRIS | PW.DEBRIS_KIND.METAL << 6, wallPipe, F.LAND, 6);
+          }
+        }
         if (id === M.AIR) continue;
         if (id !== M.WATER && strength < hardness[id]) continue;
         const paint = PW.getLayer(world, 'paint', x, y);
@@ -119,6 +176,7 @@
         if (PW.mat.terrain[id] && random() < 0.3) PW.set(world, x, y, M.DUST | (1 + (random() < 0.5 ? 1 : 0)) << 6, { quiet: true });
       }
     }
+    scorchBuildings(world, cx, cy, r, power);
     // Sparks (light), then the fireball's heat and the smoke it leaves: real cells, so the heat
     // can scorch and ignite, and the smoke rises, drifts with the wind and thins out.
     for (let k = 0; k < 40 + r * 2; k += 1) {

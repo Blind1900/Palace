@@ -111,23 +111,30 @@
 
     // Colour of one cell for the base layer (0 = transparent sky). waterDepth counts the water
     // cells from the surface down to this one (1 = the surface cell).
-    function baseColor(x, y, paintChunk, backChunk, waterDepth) {
+    // What is behind open air at a cell: the back wall, with a supply pipe fixed to it showing over
+    // the bare wall face but behind every fitting in front of it (timbers, lamps, ladders, rails);
+    // across a cave or a blast hole the pipe runs over the rock. 0 when nothing is.
+    function wallBehind(local, backChunk, pipeChunk, flagsChunk) {
+      const back = backChunk ? backChunk[local] : 0;
+      const pipe = pipeChunk ? pipeChunk[local] : 0;
+      if (pipe && !(back && flagsChunk && (flagsChunk[local] & PW.HIDES_PIPE))) return pipe;
+      return back;
+    }
+    function baseColor(x, y, paintChunk, backChunk, waterDepth, pipeChunk, flagsChunk) {
       const index = y * W + x;
       const m = mat[index];
       const id = m & ID_MASK;
       const local = (y & CHUNK_MASK) << CHUNK_SHIFT | x & CHUNK_MASK;
       if (id === M.AIR) {
-        if (backChunk) {
-          const back = backChunk[local];
-          if (back) return back;
-        }
+        const behind = wallBehind(local, backChunk, pipeChunk, flagsChunk);
+        if (behind) return behind;
         if (y < groundTop[x]) return 0;
         return toned(voidColor, grainOf(PW.hash2(x, y)) < 4 ? 218 : 256);
       }
       if (gasAlpha[id]) {
         // Gas is translucent: blend it over whatever is behind it (back wall, cave, or the sky,
         // which shows through the raster's alpha). Thicker gas (higher variant) is more opaque.
-        let under = backChunk ? backChunk[local] : 0;
+        let under = wallBehind(local, backChunk, pipeChunk, flagsChunk);
         if (!under && y >= groundTop[x]) under = toned(voidColor, 256);
         const h = PW.hash2(x, y);
         const a = Math.min(0.92, gasAlpha[id][m >> 6] * ((h & 7) === 0 ? 0.8 : 1));
@@ -329,7 +336,7 @@
       if (lod > 0) { lx0 = 0; ly0 = 0; lx1 = size - 1; ly1 = size - 1; }
       const w = lx1 - lx0 + 1, h = ly1 - ly0 + 1;
       const { image, pixels } = scratchImage(w, h);
-      const paintChunk = world.paint[c], backChunk = world.back[c];
+      const paintChunk = world.paint[c], backChunk = world.back[c], pipeChunk = world.pipe[c], flagsChunk = world.flags[c];
       const x0 = cx << CHUNK_SHIFT, y0 = cy << CHUNK_SHIFT;
       // Outlines are only drawn where cells are big enough to see them (1/2 scale and closer).
       const outline = lod <= 1 && buildProximity(x0 + lx0 * step, y0 + ly0 * step, x0 + lx1 * step + step - 1, y0 + ly1 * step + step - 1);
@@ -361,7 +368,7 @@
             run = y > 0 && OPEN[mat[(y - 1) * W + x] & ID_MASK] ? 1
               : Math.max(2, Math.round(depth[(y - depthY0) * depthW + (x - depthX0)] / 3));
           }
-          const color = baseColor(x, y, paintChunk, backChunk, run);
+          const color = baseColor(x, y, paintChunk, backChunk, run, pipeChunk, flagsChunk);
           pixels[i++] = outline && color ? outlineShade(color, x, y) : color;
         }
       }

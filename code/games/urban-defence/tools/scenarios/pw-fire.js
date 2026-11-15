@@ -35,6 +35,15 @@ for (let x = best.x; x < best.x + best.n; x += 1) {
   PW.setLayer(world, 'paint', x, g, 0);
   PW.flora.tuft(world, x, g, 2 + (PW.hash2(x, 77) % 3));   // (a wild meadow's 2-4 cells)
 }
+// Firebreaks of bare earth either side of it (the map's valley floors can run on as grassland for
+// a long way): the fire stops where its grass runs out.
+for (const [a, b] of [[best.x - 70, best.x - 30], [best.x + best.n + 30, best.x + best.n + 70]]) {
+  for (let x = a; x <= b; x += 1) {
+    const g = world.groundTop[x];
+    if ((PW.get(world, x, g) & 63) === M.GRASS) PW.set(world, x, g, M.SOIL | (PW.hash2(x, g) & 3) << 6, { quiet: true });
+    for (let y = g - 1; y > g - 8; y -= 1) if (PW.getFlags(world, x, y) & FLAG.FLORA) { PW.setLayer(world, 'deco', x, y, 0); PW.setFlag(world, x, y, FLAG.FLORA, false); }
+  }
+}
 const fx = best.x + (best.n >> 1), fy = world.groundTop[fx];
 const grassBefore = []; for (let x = fx - 300; x <= fx + 300; x += 1) grassBefore.push(top(x) === M.GRASS);
 heat.heatDisc(fx, fy - 2, 5, 900);

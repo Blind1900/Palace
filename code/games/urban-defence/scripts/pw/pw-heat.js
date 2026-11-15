@@ -50,13 +50,28 @@
       }
       if (open[id] && decoAt(x, y) && (PW.getFlags(world, x, y) & (FLAG.FLORA | FLAG.CHARRED)) === FLAG.FLORA) {
         const c = PW.unpack(decoAt(x, y));
-        const leaf = c[1] > c[0] + 8;   // green: leaves and grass; brown: bark and stems
-        burning.set(i, { fuel: leaf ? 1.2 + (PW.hash2(x, y) & 3) * 0.3 : 5 + (PW.hash2(x, y) & 7) * 0.5, deco: true, wood: !leaf, owner: 0 });
+        // green: leaves and grass; brown: bark and stems - a tree's trunk and boughs are wood that
+        // burns long; grass, flowers and a bush's twigs flare and are gone
+        const plant = PW.flora ? PW.flora.recordAt(world, x, y) : null;
+        const leaf = c[1] > c[0] + 8 || !plant;
+        const timber = !leaf && plant.kind === 'tree';
+        // Leaves flare up and are gone in a second or two; a tree's wood burns on for a long while
+        // (a trunk smoulders on after its crown has burnt off) before it is left as charcoal.
+        const h = PW.hash2(x, y);
+        burning.set(i, { fuel: timber ? 9 + (h & 15) * 0.33 : leaf ? 1.2 + (h & 3) * 0.3 : 2.5 + (h & 7) * 0.2, deco: true, wood: !leaf, owner: 0 });
+        stats.ignited += 1;
+        return true;
+      }
+      // Splintered wood from trees and timber, loose or packed into rubble, burns too, to ash.
+      if (woodRubble(i) && hasAir(i, x, y)) {
+        burning.set(i, { fuel: 6 + (PW.hash2(x, y) & 15) * 0.27, deco: false, rubble: true, owner: 0 });
         stats.ignited += 1;
         return true;
       }
       return false;
     }
+    const WOOD = PW.DEBRIS_KIND.WOOD;
+    const woodRubble = (i) => { const m = mat[i], id = m & ID_MASK; return (id === M.DEBRIS || id === M.RUBBLE) && (m >> 6) === WOOD; };
     function extinguish(i, x, y) {
       burning.delete(i);
       PW.setHeat(world, x, y, Math.min(PW.heatAt(world, x, y), 90));
@@ -79,6 +94,7 @@
         }
         return;
       }
+      if (b.rubble) { if (woodRubble(i)) PW.set(world, x, y, M.ASH | (PW.hash2(x, y) & 3) << 6); return; }
       const id = mat[i] & ID_MASK;
       const to = burnsTo[id];
       if (to === M.ASH) {
@@ -102,7 +118,7 @@
       for (const [i, b] of burning) {
         const x = i % W, y = (i / W) | 0;
         const id = mat[i] & ID_MASK;
-        if (b.deco ? !(open[id] && decoAt(x, y)) : !ignite[id]) { burning.delete(i); continue; }
+        if (b.deco ? !(open[id] && decoAt(x, y)) : b.rubble ? !woodRubble(i) : !ignite[id]) { burning.delete(i); continue; }
         if (nearWater(i, x, y)) { extinguish(i, x, y); continue; }
         // Starved of air (buried): it smoulders out.
         if (!b.deco && !hasAir(i, x, y)) { b.fuel -= DT * 3; if (b.fuel <= 0) burning.delete(i); continue; }

@@ -11,7 +11,8 @@
 
   const timings = {};
   let t = performance.now();
-  const world = PW.createWorld(16384, 4096);
+  // 2.2 times the first map's width (16384), in whole chunks: room for the towns to spread into.
+  const world = PW.createWorld(Number(params.get('width')) || 36096, 4096);
   world.random = PW.createRandom(seed + 99);
   world.effects = [];
   timings.allocate = performance.now() - t; t = performance.now();
@@ -238,6 +239,7 @@
       if (structure) structure.step(1.5);
       if (fragments) fragments.step(DT);
       if (PW.streetProps) PW.streetProps.step(world, particles);
+      if (PW.flora && PW.flora.step) PW.flora.step(world, particles);
       if (cores) cores.step();
       if (stability) stability.step();
       if (air) air.step();

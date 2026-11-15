@@ -8,7 +8,7 @@
   const { M, FLAG, ID_MASK } = PW;
 
   const COLUMNS_PER_TICK = 32;
-  const SPREAD = 0.35, SEED = 0.015, TUFT = 0.05, SCORCH_FADE = 0.06;
+  const SPREAD = 0.35, SEED = 0.015, TUFT = 0.05, SCORCH_FADE = 0.06, ASH_WEATHERS = 0.2;
   const CROP_EVERY = 600, CROP_STEP = 0.05;   // fields grow by 5% every 10 s
 
   function createLife(world) {
@@ -27,8 +27,11 @@
       if (y <= 0 || y >= world.height - 1) return;
       const id = topId(x);
       const flags = PW.getFlags(world, x, y);
-      // Scorch fades from the surface and the rock just under it.
+      // Scorch fades from the surface and the rock just under it. (A building keeps its scorch
+      // until it is repaired.)
       for (let d = 0; d < 4; d += 1) {
+        const owner = PW.getOwner(world, x, y + d);
+        if (owner > 0 && owner < 50000) continue;
         if ((PW.getFlags(world, x, y + d) & FLAG.SCORCH) && rnd(x, 11 + d) < SCORCH_FADE) {
           PW.setLayer(world, 'paint', x, y + d, 0);
           PW.setFlag(world, x, y + d, FLAG.SCORCH, false);
@@ -36,6 +39,15 @@
         }
       }
       if (flags & FLAG.ROAD || PW.getOwner(world, x, y)) return;
+      // Ash left by a fire weathers into the soil under it, and makes it rich.
+      if (id === M.ASH) {
+        const under = PW.get(world, x, y + 1) & ID_MASK;
+        if ((under === M.TOPSOIL || under === M.SOIL || under === M.GRASS || under === M.ASH) && rnd(x, 7) < ASH_WEATHERS) {
+          PW.set(world, x, y, M.TOPSOIL | (PW.hash2(x, y) & 3) << 6, { quiet: true });
+          stats.weathered = (stats.weathered || 0) + 1;
+        }
+        return;
+      }
       if ((id === M.TOPSOIL || id === M.SOIL) && !inField(x)) {
         // Grass creeps in from its neighbours, or seeds now and then.
         let near = false;
@@ -57,7 +69,8 @@
     }
     function step() {
       tick += 1;
-      for (let k = 0; k < COLUMNS_PER_TICK; k += 1) {
+      // (every column comes round as often on a wider map: about every 8.5 s)
+      for (let k = 0, n = Math.ceil(COLUMNS_PER_TICK * W / 16384); k < n; k += 1) {
         visit(cursor);
         cursor = (cursor + 1) % W;
       }

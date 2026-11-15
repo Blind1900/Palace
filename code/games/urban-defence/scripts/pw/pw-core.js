@@ -368,6 +368,9 @@
       paint: new Array(chunkCount).fill(null),
       back: new Array(chunkCount).fill(null),
       deco: new Array(chunkCount).fill(null),
+      // A supply pipe crossing open space underground (a tunnel, a shaft, a cave), fixed to the
+      // wall face: drawn over the bare wall, behind everything standing in front of it.
+      pipe: new Array(chunkCount).fill(null),
       // Sparse per-cell data: owning building/infrastructure id, and FLAG bits.
       owner: new Array(chunkCount).fill(null),
       flags: new Array(chunkCount).fill(null),
@@ -561,7 +564,18 @@
     RAW: 256, FIXTURE: 512, DEVELOPED: 1024, OVERBREAK: 2048,
     // FLORA: a deco cell that is part of a plant (it can burn); CHARRED: burnt, no fuel left.
     // FIELD: tilled farm ground (a surface like ROAD, never on the same cell as one); it yields SM.
-    FLORA: 4096, CHARRED: 8192, FIELD: 16384 });
+    FLORA: 4096, CHARRED: 8192, FIELD: 16384,
+    // FITTING: this back-wall cell is something standing in front of the wall face (a timber set,
+    // a lamp and its cable): a pipe along the wall passes behind it.
+    FITTING: 32768 });
+  // Does a pipe fixed to the wall show at open cell (x, y)? Over the bare wall face, or across a
+  // cave's rock; not behind a fitting, a ladder, a rail or belt, nor in a finished (developed)
+  // tunnel, where it is cased in behind the wall.
+  const HIDES_PIPE = FLAG.FITTING | FLAG.LADDER | FLAG.FIXTURE | FLAG.DEVELOPED;
+  function pipeShows(world, x, y) {
+    return getLayer(world, 'pipe', x, y) !== 0 && !(getLayer(world, 'back', x, y) && (getFlags(world, x, y) & HIDES_PIPE))
+      && !getLayer(world, 'deco', x, y);
+  }
   function getOwner(world, x, y) {
     if (x < 0 || y < 0 || x >= world.width || y >= world.height) return 0;
     const chunk = world.owner[chunkIndex(world, x, y)];
@@ -676,6 +690,8 @@
   PW.DIRTY_BASE = DIRTY_BASE;
   PW.DIRTY_DECO = DIRTY_DECO;
   PW.FLAG = FLAG;
+  PW.pipeShows = pipeShows;
+  PW.HIDES_PIPE = HIDES_PIPE;
   Object.assign(PW, {
     abgr, unpack, hash2, hash3, createRandom, createNoise1D, createNoise2D,
     createWorld, chunkIndex, inside, markDirty, markWaterDirty, wake, wakeCell, wakeArea, clearSimRect,

@@ -133,7 +133,12 @@
   }
 
   // ---- Raw and developed looks (per cell, so any order of painting gives the same picture) ----------
+  // (rawBack sets rawFit when the colour it gives belongs to a timber set, a lamp or its cable:
+  // things standing in front of the rock face, that a pipe along the wall passes behind)
+  let rawFit = false;
+  const fit = (c) => { rawFit = true; return c; };
   function rawBack(net, seg, x, y) {
+    rawFit = false;
     let c = RAW.rock;
     const patch = PW.hash2(x >> 2, y >> 2) & 7;
     if (patch < 2) c = RAW.dark; else if (patch === 7) c = RAW.light;
@@ -143,30 +148,35 @@
     let glow = 0;
     if (seg.kind === 'shaft') {
       const along = mod(y - net.root.y, SET_PITCH);
-      if (along < 3) return along === 0 ? RAW.postLight : along === 2 ? RAW.postDark : RAW.post;        // bearer across the shaft
-      if (x - seg.x0 < 2 || seg.x1 - x < 2) return x === seg.x0 || x === seg.x1 ? RAW.postDark : RAW.post;  // wall plates
+      if (along < 3) return fit(along === 0 ? RAW.postLight : along === 2 ? RAW.postDark : RAW.post);        // bearer across the shaft
+      if (x - seg.x0 < 2 || seg.x1 - x < 2) return fit(x === seg.x0 || x === seg.x1 ? RAW.postDark : RAW.post);  // wall plates
       const by = net.root.y + Math.round((y - net.root.y - SET_PITCH / 2) / (2 * SET_PITCH)) * 2 * SET_PITCH + SET_PITCH / 2;
       const bx = seg.x1 - 4;
-      if (x === bx && y === by) return RAW.bulb;
+      if (x === bx && y === by) return fit(RAW.bulb);
       glow = Math.max(0, 1 - Math.hypot(x - bx, y - by) / 22);
     } else {
       const top = seg.y0, bottom = seg.y1;
       const u = mod(x - net.root.x, SET_PITCH);
       const du = u <= SET_PITCH / 2 ? u - 1 : u - 1 - SET_PITCH;   // from the post's centre column
-      if (Math.abs(du) <= 1 && y > top + 2) return du < 0 ? RAW.postLight : du > 0 ? RAW.postDark : RAW.post;   // post
-      if (y - top < 3 && Math.abs(du) <= 7) return y === top + 2 ? RAW.postDark : RAW.post;                  // cap board
+      if (Math.abs(du) <= 1 && y > top + 2) return fit(du < 0 ? RAW.postLight : du > 0 ? RAW.postDark : RAW.post);   // post
+      if (y - top < 3 && Math.abs(du) <= 7) return fit(y === top + 2 ? RAW.postDark : RAW.post);                  // cap board
       const ky = y - (top + 3);
-      if (ky >= 0 && ky < 5 && Math.abs(du) >= 2 && (Math.abs(du) === 6 - ky || Math.abs(du) === 7 - ky)) return RAW.postDark;   // knee braces
-      if (y - top < 2) return x % 7 === 0 ? RAW.dark : y === top ? RAW.plank : tone(RAW.plank, 0.84);         // lagging
+      if (ky >= 0 && ky < 5 && Math.abs(du) >= 2 && (Math.abs(du) === 6 - ky || Math.abs(du) === 7 - ky)) return fit(RAW.postDark);   // knee braces
+      if (y - top < 2) return fit(x % 7 === 0 ? RAW.dark : y === top ? RAW.plank : tone(RAW.plank, 0.84));         // lagging
       // A bulb hangs from every second cap, midway between sets.
       const bx = net.root.x + Math.round((x - net.root.x - SET_PITCH / 2) / (2 * SET_PITCH)) * 2 * SET_PITCH + SET_PITCH / 2;
       const by = top + 4;
-      if (x === bx && (y === top + 2 || y === top + 3)) return RAW.cable;
-      if (Math.abs(x - bx) <= 1 && y === by) return RAW.bulb;
+      if (x === bx && (y === top + 2 || y === top + 3)) return fit(RAW.cable);
+      if (Math.abs(x - bx) <= 1 && y === by) return fit(RAW.bulb);
       glow = Math.max(0, 1 - Math.hypot(x - bx, (y - by) * 0.8) / 24);
       if (bottom - y < 2) c = mix(c, RAW.mud, 0.55);
     }
     return glow > 0 ? mix(c, RAW.bulb, glow * glow * 0.32) : c;
+  }
+  // Paint a raw tunnel cell's back wall, marking its fittings.
+  function paintRaw(world, net, seg, x, y) {
+    PW.setLayer(world, 'back', x, y, rgb(rawBack(net, seg, x, y)));
+    PW.setFlag(world, x, y, FLAG.FITTING, rawFit);
   }
   const RING = 20;          // concrete segment rings, 1.4 m
   const BULKHEAD = 160;     // steel bulkhead frames between sectors
@@ -465,7 +475,7 @@
         PW.setFlag(world, x, y, FLAG.TUNNEL | FLAG.CARVED | FLAG.RAW);
         PW.setFlag(world, x, y, FLAG.DEVELOPED, false);
         PW.setOwner(world, x, y, net.owner);
-        PW.setLayer(world, 'back', x, y, rgb(rawBack(net, seg, x, y)));
+        paintRaw(world, net, seg, x, y);
         fresh.push(i);
       }
     }
@@ -482,7 +492,7 @@
       setL(world, 'tunnelSeg', Uint16Array, x, y, seg.id);
       PW.setFlag(world, x, y, FLAG.TUNNEL | FLAG.CARVED | FLAG.RAW | FLAG.OVERBREAK);
       PW.setOwner(world, x, y, net.owner);
-      PW.setLayer(world, 'back', x, y, rgb(rawBack(net, seg, x, y)));
+      paintRaw(world, net, seg, x, y);
       fresh.push(y * W + x);
     };
     if (seg.kind === 'shaft') {
@@ -515,7 +525,7 @@
     PW.setFlag(world, x, y, FLAG.TUNNEL | FLAG.CARVED | FLAG.RAW);
     PW.setOwner(world, x, y, net.owner);
     PW.setLayer(world, 'deco', x, y, 0);
-    PW.setLayer(world, 'back', x, y, rgb(rawBack(net, seg, x, y)));
+    paintRaw(world, net, seg, x, y);
     net.cells += 1;
     schedule(world, net, [y * world.width + x]);
     return true;
@@ -580,11 +590,14 @@
     if ((flags & FLAG.OVERBREAK) && !insideAnyBox(world, net, x, y)) {
       // Rock that broke away past the profile is filled with concrete: the lining's face. A
       // fitting fixed there (a pipe along the wall) is cast into the concrete in a sleeve.
-      const fitting = flags & FLAG.FIXTURE ? PW.getLayer(world, 'back', x, y) : 0;
+      const pipe = PW.getLayer(world, 'pipe', x, y);
+      const fitting = pipe || (flags & FLAG.FIXTURE ? PW.getLayer(world, 'back', x, y) : 0);
       setL(world, 'tunnelNet', Uint16Array, x, y, 0);
       setL(world, 'tunnelSeg', Uint16Array, x, y, 0);
-      PW.setFlag(world, x, y, FLAG.TUNNEL | FLAG.CARVED | FLAG.RAW | FLAG.OVERBREAK, false);
+      PW.setFlag(world, x, y, FLAG.TUNNEL | FLAG.CARVED | FLAG.RAW | FLAG.OVERBREAK | FLAG.FITTING, false);
       PW.setLayer(world, 'back', x, y, 0);
+      PW.setLayer(world, 'pipe', x, y, 0);
+      if (pipe) PW.setFlag(world, x, y, FLAG.FIXTURE);   // (the pipe goes on in its sleeve)
       if (PW.mat.open[mat[i] & ID_MASK]) {
         const facing = y < seg.y0 ? 'ceiling' : y > seg.y1 ? 'floor' : 'wall';
         PW.set(world, x, y, M.REINFORCED, { quiet: true });
@@ -594,7 +607,7 @@
       net.developed += 1;
       return true;
     }
-    PW.setFlag(world, x, y, FLAG.RAW, false);
+    PW.setFlag(world, x, y, FLAG.RAW | FLAG.FITTING, false);
     PW.setFlag(world, x, y, FLAG.DEVELOPED);
     if (!(flags & FLAG.FIXTURE)) PW.setLayer(world, 'back', x, y, rgb(devBack(net, seg, x, y)));
     net.developed += 1;
@@ -676,14 +689,14 @@
         PW.setFlag(world, x, y, FLAG.TUNNEL | FLAG.CARVED | FLAG.RAW);
         PW.setFlag(world, x, y, FLAG.DEVELOPED, false);
         PW.setOwner(world, x, y, net.owner);
-        PW.setLayer(world, 'back', x, y, rgb(rawBack(net, box.seg, x, y)));
+        paintRaw(world, net, box.seg, x, y);
       } else {
         if (!PW.mat.open[id]) continue;
         setL(world, 'tunnelNet', Uint16Array, x, y, net.id);
         setL(world, 'tunnelSeg', Uint16Array, x, y, box.seg.id);
         PW.setFlag(world, x, y, FLAG.TUNNEL | FLAG.CARVED | FLAG.RAW | FLAG.OVERBREAK);
         PW.setOwner(world, x, y, net.owner);
-        PW.setLayer(world, 'back', x, y, rgb(rawBack(net, box.seg, x, y)));
+        paintRaw(world, net, box.seg, x, y);
       }
       fresh.push(i);
       T.repaired = (T.repaired || 0) + 1;

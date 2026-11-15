@@ -42,50 +42,73 @@
     sites[0].level = sites[4].level = baseY;
     const wilds = [];
     for (let i = 0; i < sites.length - 1; i += 1) wilds.push({ x0: sites[i].x1, x1: sites[i + 1].x0 });
-    // Each wild zone gets a mountain or a lake (or both); the outer zones always get a mountain.
-    const plans = ['mountain+lake', 'lake', 'lake+mountain', 'mountain'];
-    for (let i = plans.length - 1; i > 0; i -= 1) {
-      const j = Math.floor(random() * (i + 1));
-      [plans[i], plans[j]] = [plans[j], plans[i]];
-    }
-    const mountains = [], lakes = [];
-    // Each zone also keeps a pocket of flat land, a valley floor, between or beside its features
-    // (where by hash), taking a little more room than a mountain or a lake.
-    const pockets = [];
+    // Each wild zone is laid out as a run of landforms across it, after the nature refs: ranges of
+    // pyramid peaks with foothills at their feet; valley floors between them (flat ground for
+    // towns and farms); lakes; and broad river flats, where a braided river runs in shallow
+    // channels between gravel bars. Every zone has a range, a valley floor and water; a wide zone
+    // holds more. Mountains take the zone's ends beside the sites now and then, so a town may
+    // look out over a mountain wall or over open country.
+    const mountains = [], lakes = [], pockets = [];
     const roll = (a, b) => (PW.hash2(a, b) & 1023) / 1023;
+    const SHARE = { range: 1.7, peak: 0.95, valley: 1.15, lake: 0.85, river: 1.2 };
+    // A massif: a pyramid peak on a broad base (straight flanks of about 34-41 degrees), spurs on
+    // its flanks, and low rounded foothills easing it into the flat at its feet.
+    const massif = (center, room) => {
+      const height = random.range(560, 1050) * Math.min(1, 0.45 + room / 2600);
+      const half = Math.min(room * 0.56, height * random.range(1.15, 1.5));
+      const peaks = [{ x: center, height, left: half * random.range(0.85, 1.1), right: half * random.range(0.85, 1.1),
+        shape: random.range(1.0, 1.22), kind: 'pyramid' }];
+      for (let s = random.int(0, 2); s > 0; s -= 1) {
+        const side = random() < 0.5 ? -1 : 1, spread = half * random.range(0.34, 0.5);
+        peaks.push({ x: center + side * half * random.range(0.3, 0.55), height: height * random.range(0.42, 0.7),
+          left: spread, right: spread, shape: random.range(1.0, 1.2), kind: 'pyramid' });
+      }
+      for (const side of [-1, 1]) {
+        if (random() < 0.25) continue;
+        const spread = half * random.range(0.3, 0.45);
+        peaks.push({ x: center + side * half * random.range(0.78, 0.98), height: height * random.range(0.1, 0.2),
+          left: spread, right: spread, shape: random.range(1.2, 1.6), kind: 'hill' });
+      }
+      mountains.push({ x: center, half: half * 1.12, height, peaks, seed: random.int(1, 1e9),
+        mesa: random() < 0.12 ? random.range(0.78, 0.9) : 0 });
+    };
     wilds.forEach((zone, index) => {
-      const plan = index === 0 || index === 3 ? (random() < 0.5 ? 'mountain+lake' : 'lake+mountain') : plans[index];
       const width = zone.x1 - zone.x0;
-      const parts = plan.split('+');
-      parts.splice(Math.floor(roll(index, 3) * (parts.length + 1)), 0, 'pocket');
-      const weight = (part) => (part === 'pocket' ? 1.1 : 1), total = parts.reduce((sum, part) => sum + weight(part), 0);
+      const picked = ['range', 'valley', random() < 0.55 ? 'lake' : 'river'];
+      for (let room = width - 3600; room > 1200; room -= 1600) picked.push(random.pick(['range', 'peak', 'valley', 'lake', 'river']));
+      // Dry land in a shuffled row, each water in a gap of its own between (never two side by side).
+      const shuffle = (list) => { for (let i = list.length - 1; i > 0; i -= 1) { const j = Math.floor(random() * (i + 1)); [list[i], list[j]] = [list[j], list[i]]; } return list; };
+      const dry = shuffle(picked.filter((p) => p !== 'lake' && p !== 'river'));
+      const wet = picked.filter((p) => p === 'lake' || p === 'river');
+      const gaps = shuffle(Array.from({ length: dry.length + 1 }, (_, k) => k)).slice(0, wet.length).sort((a, b) => b - a);
+      const parts = dry.slice();
+      gaps.forEach((gap, k) => parts.splice(gap, 0, wet[k]));
+      const total = parts.reduce((sum, part) => sum + SHARE[part], 0);
       let at = zone.x0;
       parts.forEach((part) => {
-        const share = width * weight(part) / total, from = at;
+        const share = width * SHARE[part] / total, from = at, mid = from + share / 2;
         at += share;
-        if (part === 'pocket') {
-          const w = share * 0.82, mid = from + share / 2;
-          pockets.push({ kind: 'valley', x0: Math.round(mid - w / 2), x1: Math.round(mid + w / 2), shoulder: 110 });
-          return;
-        }
-        const center = from + share / 2 + random.range(-0.1, 0.1) * share;
-        if (part === 'mountain') {
-          // Asymmetric massif: a main peak plus shoulder peaks, each side with its own spread.
-          const half = Math.min(share * 0.62, random.range(520, 840));
-          const height = random.range(380, 760);
-          const peaks = [{ x: center, height, left: half * random.range(0.75, 1.1), right: half * random.range(0.75, 1.1),
-            shape: random.range(1.05, 1.7) }];
-          const shoulders = random.int(1, 3);
-          for (let s = 0; s < shoulders; s += 1) {
-            const side = random() < 0.5 ? -1 : 1;
-            peaks.push({ x: center + side * half * random.range(0.25, 0.6), height: height * random.range(0.3, 0.68),
-              left: half * random.range(0.3, 0.55), right: half * random.range(0.3, 0.55), shape: random.range(1.1, 1.9) });
+        if (part === 'valley') {
+          const w = share * 0.82;
+          pockets.push({ kind: 'valley', x0: Math.round(mid - w / 2), x1: Math.round(mid + w / 2), shoulder: 150 });
+        } else if (part === 'lake') {
+          // (its bowl and shore stay within its share of the zone, and well clear of the sites)
+          const x = mid + random.range(-0.08, 0.08) * share;
+          const room = Math.min(x - from, from + share - x, x - zone.x0 - 300, zone.x1 - 300 - x) / 1.3;
+          lakes.push({ x, half: Math.max(160, Math.min(room, random.range(320, 600))), depth: random.range(160, 280) });
+        } else if (part === 'river') {
+          // A broad flat valley floor with a braided river across its middle: shallow channels
+          // parting and rejoining round gravel bars.
+          const w = share * 0.84;
+          pockets.push({ kind: 'river', x0: Math.round(mid - w / 2), x1: Math.round(mid + w / 2), shoulder: 170 });
+          const n = random.int(3, 5), span = w * 0.55;
+          for (let k = 0; k < n; k += 1) {
+            lakes.push({ x: mid - span / 2 + span * (k + 0.5) / n + random.range(-0.2, 0.2) * span / n,
+              half: random.range(0.22, 0.34) * span / n, depth: random.range(14, 26), river: true });
           }
-          mountains.push({ x: center, half, height, peaks, seed: random.int(1, 1e9),
-            mesa: random() < 0.25 ? random.range(0.75, 0.88) : 0 });
         } else {
-          lakes.push({ x: center, half: Math.min(share * 0.42, random.range(300, 520)),
-            depth: random.range(150, 260) });
+          const count = part === 'peak' ? 1 : share > 2600 ? random.int(2, 3) : 2;
+          for (let k = 0; k < count; k += 1) massif(from + share * (k + 0.5) / count + random.range(-0.08, 0.08) * share / count, share / count);
         }
       });
     });
@@ -100,9 +123,11 @@
       const side = roll(index, 8) < 0.5 ? -1 : 1, mid = m.x + side * m.half * (0.45 + roll(index, 9) * 0.15), width = Math.min(320, m.half * (0.5 + roll(index, 10) * 0.2));
       pockets.push({ kind: 'bench', x0: Math.round(mid - width / 2), x1: Math.round(mid + width / 2), shoulder: 90 });
     });
-    // (a pocket keeps clear of every lake's shore, and of the sites)
+    // (a pocket keeps clear of every lake's shore - a river flat of all but its own channels - and
+    // of the sites)
     for (const p of pockets) {
-      for (const [a, b] of [...lakes.map((l) => [l.x - l.half * 1.25 - 40, l.x + l.half * 1.25 + 40]), ...sites.map((s) => [s.x0, s.x1])]) {
+      const wet = lakes.filter((l) => !(p.kind === 'river' && l.river && l.x > p.x0 && l.x < p.x1));
+      for (const [a, b] of [...wet.map((l) => [l.x - l.half * 1.25 - 40, l.x + l.half * 1.25 + 40]), ...sites.map((s) => [s.x0, s.x1])]) {
         if (b < p.x0 || a > p.x1) continue;
         if ((a + b) / 2 < (p.x0 + p.x1) / 2) p.x0 = Math.ceil(b); else p.x1 = Math.floor(a);
       }
@@ -119,7 +144,19 @@
       PW.createNoise1D(seed + 13, 260), PW.createNoise1D(seed + 14, 70), PW.createNoise1D(seed + 15, 22)];
     const ridge = PW.createNoise1D(seed + 21, 140);
     const ridgeFine = PW.createNoise1D(seed + 22, 36);
+    const crags = PW.createNoise1D(seed + 23, 26), bands = PW.createNoise1D(seed + 24, 300);
     const raw = new Float32Array(W);
+    // How far up its mountain each column stands (0 at the foot, 1 at the summit): bare rock and
+    // boulders gather near the tops (see fillStrata and the vegetation's rocks).
+    const relief = layout.relief = new Float32Array(W);
+    // (two peaks meet in a rounded saddle, not a notch: a smooth maximum, its rounding shrinking
+    // to nothing towards their feet)
+    const smax = (a, b) => {
+      const k = Math.min(70, 0.5 * Math.min(a, b));
+      if (k <= 0) return Math.max(a, b);
+      const h = Math.max(k - Math.abs(a - b), 0) / k;
+      return Math.max(a, b) + h * h * k / 4;
+    };
     for (let x = 0; x < W; x += 1) {
       let y = layout.baseY
         - hills[0](x) * 170 - hills[1](x) * 95 - hills[2](x) * 32 - hills[3](x) * 9 - hills[4](x) * 2.5;
@@ -129,13 +166,24 @@
           const spread = x < peak.x ? peak.left : peak.right;
           const t = Math.abs(x - peak.x) / spread;
           if (t >= 1) continue;
-          lift = Math.max(lift, peak.height * Math.pow(1 - smooth(t), peak.shape));
+          // A pyramid's flanks run straight (a little concave towards the foot); a foothill is
+          // rounded.
+          const f = peak.kind === 'pyramid' ? Math.pow(1 - t, peak.shape) : Math.pow(1 - smooth(t), peak.shape);
+          lift = smax(lift, peak.height * f);
         }
         if (!lift) continue;
-        // Mesas are cut flat near the top; ridges get rough, multi-scale edges.
+        // Mesas are cut flat near the top.
         if (m.mesa) lift = Math.min(lift, m.height * m.mesa + (lift - m.height * m.mesa) * 0.08);
-        const rough = 1 + ridge(x + m.seed) * 0.12 + ridgeFine(x - m.seed) * 0.045 + hills[4](x * 3 + m.seed) * 0.012;
+        // Cliff bands on the upper flanks: the harder beds stand out as ledges over steep risers.
+        const band = 34 + 12 * (bands(m.seed) + 1);
+        const q = lift / band, terraced = band * (Math.floor(q) + Math.pow(q - Math.floor(q), 2.2));
+        lift += (terraced - lift) * 0.5 * smooth((lift / m.height - 0.3) / 0.3);
+        // Rough, multi-scale edges; crags (sharp-crested knobs) more the higher up.
+        const c = 1 - Math.abs(crags(x + m.seed));
+        const rough = 1 + ridge(x + m.seed) * 0.1 + ridgeFine(x - m.seed) * 0.04 + hills[4](x * 3 + m.seed) * 0.012
+          + c * c * c * 0.05 * smooth(lift / m.height / 0.6);
         y -= lift * rough;
+        relief[x] = Math.max(relief[x], Math.min(1, lift / m.height));
       }
       // Edges of the map rise into hills.
       const edge = Math.min(x, W - 1 - x);
@@ -281,6 +329,8 @@
       // (forest still roots on a 45° mountainside; the soil only gives out on cliffs and summits)
       let keep = Math.min(1, Math.max(0.05, 1.3 - lie[x] * 0.6));
       keep *= 1 - Math.min(0.6, Math.max(0, altitude - 380) / 800);
+      // (the upper third of a mountain is bare rock)
+      if (layout.relief) keep = Math.max(0.03, keep * (1 - 0.92 * smooth((layout.relief[x] - 0.6) / 0.25)));
       if (lie[x] > 0.7) keep *= Math.min(1, Math.max(0.2, 0.9 + outcrops(x) * 0.5));
       keeps[x] = keep;
       const topsoil = Math.max(0, Math.round((14 + topsoilNoise(x) * 7 + foot(x) * 2.2) * keep));
@@ -288,7 +338,8 @@
       // (on a steep slope the turf breaks into patches with bare soil between, never column by column)
       const bare = slope > 1.4 && turf(x) < (slope - 1.4) * 4 - 0.5;
       const grass = topsoil < 2 || slope > 1.7 || altitude > 600 || bare ? 0 : 3 + (PW.hash2(x, 7) & 1);
-      const soil = Math.round((150 + soilNoise(x) * 70 + soilFine(x) * 16) * keep);
+      // (where almost nothing holds, nothing does: bare rock)
+      const soil = keep < 0.12 ? 0 : Math.round((150 + soilNoise(x) * 70 + soilFine(x) * 16) * keep);
       grassEnd[x] = surfaceRow + grass;
       topsoilEnd[x] = grassEnd[x] + topsoil;
       soilEnd[x] = topsoilEnd[x] + soil;
@@ -381,6 +432,55 @@
     return aprons;
   }
 
+  // Talus: at the foot of every mountain, where its flank meets the flat, the rock it has shed
+  // lies banked against the slope and spreads out over the ground below - coarse gravel with
+  // blocks of stone in it, thickest at the break of slope and thinning out to nothing at its toe
+  // (the mountains are rocky at their bases as well as at their tops). Returns the aprons.
+  function talus(world, layout, surface, top, seed) {
+    const { mat, width: W, height: H } = world;
+    const grain = PW.createNoise1D(seed + 63, 11);
+    const wild = (x) => layout.sites.every((s) => x < s.x0 - 320 || x > s.x1 + 320);
+    const wet = (x) => layout.lakes.some((l) => Math.abs(x - l.x) < l.half * 1.15);
+    const pocket = (x) => (layout.pockets || []).some((p) => x > p.x0 + 60 && x < p.x1 - 60);
+    const slope = (x) => Math.abs(surface[Math.min(W - 1, x + 6)] - surface[Math.max(0, x - 6)]) / 12;
+    const aprons = [];
+    for (const m of layout.mountains) for (const peak of m.peaks) {
+      if (peak.kind !== 'pyramid' || peak.height < 250) continue;
+      for (const side of [-1, 1]) {
+        const spread = side < 0 ? peak.left : peak.right;
+        // The break of slope: the first column past the middle of the flank where the ground
+        // flattens out.
+        let foot = -1;
+        for (let k = Math.round(spread * 0.55); k < spread * 1.35; k += 2) {
+          const x = Math.round(peak.x + side * k);
+          if (x < 8 || x > W - 9) break;
+          if (slope(x) < 0.32) { foot = x; break; }
+        }
+        if (foot < 0 || !wild(foot) || wet(foot)) continue;
+        const up = Math.min(70, spread * 0.12), out = Math.min(200, spread * 0.26);
+        const thick = Math.max(10, Math.min(34, peak.height * 0.04));
+        let x0 = foot, x1 = foot;
+        for (let k = -Math.round(up); k <= out; k += 1) {
+          const cx = foot + side * k;
+          if (cx < 2 || cx > W - 3 || !wild(cx) || wet(cx) || pocket(cx)) continue;
+          const t = k < 0 ? Math.pow(1 + k / up, 1.2) : Math.pow(1 - k / out, 1.6);
+          const h = Math.round(thick * t * (0.85 + 0.3 * (grain(cx) * 0.5 + 0.5)));
+          if (h < 1) continue;
+          const to = Math.round(surface[cx]), from = Math.max(4, to - h);
+          for (let y = from; y < to && y < H - 40; y += 1) {
+            const block = (PW.hash2(cx >> 2, y >> 2) & 7) === 0;
+            mat[y * W + cx] = (block ? M.STONE : M.GRAVEL) | (PW.hash2(cx, y) & 3) << 6;
+          }
+          for (let y = to; y < to + 5 && y < H - 40; y += 1) if ((mat[y * W + cx] & 63) === M.GRASS) mat[y * W + cx] = M.TOPSOIL | (mat[y * W + cx] & 0xc0);
+          surface[cx] = from; top[cx] = from;
+          x0 = Math.min(x0, cx); x1 = Math.max(x1, cx);
+        }
+        if (x1 > x0) aprons.push({ x0, x1, foot, dir: side });
+      }
+    }
+    return aprons;
+  }
+
   // Stamp an irregular blob of material (lenses, pockets, ore).
   function blob(world, cx, cy, radius, random, paint, squash = 0.6) {
     const lobes = Array.from({ length: 4 + random.int(0, 3) }, () => ({
@@ -403,7 +503,7 @@
   function addLenses(world, layout, top, random) {
     const { mat, width: W } = world;
     // Clay lenses and gravel pockets in the soil, stone outcrops deeper down.
-    for (let i = 0; i < 240; i += 1) {
+    for (let i = 0, n = Math.round(240 * W / 16384); i < n; i += 1) {
       const x = random.int(60, W - 60);
       const depth = random.range(60, 900);
       const y = top[x] + depth;
@@ -726,7 +826,9 @@
     // Depth bands, deepest (largest) first so they get their room.
     for (const spec of ORE_TIERS.slice().reverse()) {
       let placed = 0;
-      for (let attempt = 0; placed < spec.count && attempt < 2000; attempt += 1) {
+      // (as many to the column as on the first, narrower map)
+      const count = Math.round(spec.count * W / 16384);
+      for (let attempt = 0; placed < count && attempt < 4000; attempt += 1) {
         const x = random.range(200, W - 200);
         const y = top[Math.round(x)] + random.range(spec.depth[0], spec.depth[1]);
         if (y > world.height - 90 || tooClose(x, y, spec.spacing)) continue;
@@ -749,7 +851,7 @@
       return layout.sites.some((site) => x > site.x0 - 200 && x < site.x1 + 200 && depth < (site.kind === 'base' ? 760 : 560))
         || layout.lakes.some((lake) => Math.abs(x - lake.x) < lake.half + 100 && depth < 520);
     };
-    for (let i = 0; i < 16; i += 1) {
+    for (let i = 0, n = Math.round(16 * W / 16384); i < n; i += 1) {
       let x = random.range(400, W - 400);
       let y = top[Math.round(x)] + random.range(420, 1500);
       if (avoid(x, y)) continue;
@@ -887,6 +989,7 @@
     world.soil = soilProvinces(world, seed);
     const top = fillStrata(world, layout, surface, seed);
     layout.scree = scree(world, layout, surface, top, seed);
+    layout.talus = talus(world, layout, surface, top, seed);
     addLenses(world, layout, top, random);
     // Caves first: veins then run through the rock around them and show in the cave walls.
     layout.caves = carveCaves(world, layout, top, random);

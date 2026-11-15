@@ -21,6 +21,12 @@
   const CELLS_PER_TICK = 16000;   // cells of a look worked through per tick
   const BREAKS_PER_TICK = 600;    // cells broken loose per tick
   const GROW = 200;          // rows a look reaches higher when the slide goes on above its box
+  const GROW_SIDE = 160;     // columns it reaches further out when the slide goes on past its sides
+  // A cut face stands only so tall: a free face taller than FACE x the ground's cohesion (soil about
+  // a metre, rock four or five) fails - a wedge of it comes away, thicker the higher the face
+  // stood (WEDGE cells per cell of height over what it can hold), and pours down the slope; the face
+  // goes on failing until what fell banks against its foot and buttresses it.
+  const FACE = 4, WEDGE = 0.3, MAX_WEDGE = 60;
   const SHOCK_MIN = 6000;    // a shock weaker than this is felt by nothing (a few pebbles landing)
   const SLIDE_SPEED = 40;    // cells a second ground breaking loose comes down at, for its shock
   const SHOCK_EVERY = 6;     // ticks between gathering up the strikes of flying debris
@@ -47,6 +53,13 @@
     // loose rubble or earth, which slides out from under it.
     const holds = (i, x, y) => phase[mat[i] & ID_MASK] === PW.PHASE.SOLID
       || (y > world.groundTop[x] && open[mat[i] & ID_MASK] && (PW.getFlags(world, x, y) & PW.FLAG.TUNNEL) !== 0);
+    // Open sky a face of ground stands free against (a cave's walls and roof are held by the rock
+    // round them - see reach - and a tunnel's or a building's by their props).
+    const free = (x, y) => {
+      if (x < 1 || y < 1 || x >= W - 1 || y >= H - 1 || y >= world.groundTop[x] || !open[mat[y * W + x] & ID_MASK]) return false;
+      const o = PW.getOwner(world, x, y);
+      return !(o > 0 && o < 50000);
+    };
 
     // Work out, for every bearing cell in the box, how far it reaches out from where its load goes
     // straight down to the ground: 0 for a cell standing on a column of ground, k for a cell k
@@ -65,6 +78,7 @@
         const bw = x1 - x0 + 1, bh = y1 - y0 + 1;
         region.scan = { x0, x1, y0, y1, bw, bh, top, y: y1, reach: new Uint16Array(bw * bh).fill(FAR), out: [] };
       }
+      stats.stage = `scan ${region.scan.bw}x${region.scan.bh}`;
       const { x0, x1, y0, y1, bw, bh, reach, out } = region.scan;
       let budget = CELLS_PER_TICK;
       for (; region.scan.y >= y0 && budget > 0; region.scan.y -= 1, budget -= bw) {
@@ -100,10 +114,42 @@
         }
       }
       if (region.scan.y >= y0) return -1;
+      stats.stage = `faces ${bw}x${bh}`;
+      // Faces cut too tall fail (see FACE): a wedge comes away from each, thickest at the top.
+      if (region.scan.faceY === undefined) region.scan.faceY = y0;
+      if (region.scan.faceY < y1) {
+        let budget = CELLS_PER_TICK;
+        for (; region.scan.faceY < y1 && budget > 0; region.scan.faceY += 1, budget -= bw) {
+          const y = region.scan.faceY;
+          for (let x = x0 + 1; x < x1; x += 1) {
+            const k = (y - y0) * bw + x - x0, i = y * W + x;
+            if (reach[k] === FAR || !holds(i, x, y) || !breakable(i, x, y)) continue;
+            const hc = FACE * cohesion[mat[i] & ID_MASK];
+            for (const d of [-1, 1]) {
+              if (!free(x + d, y)) continue;
+              let depth = 0;
+              while (depth <= hc + MAX_WEDGE / WEDGE && free(x + d, y + 1 + depth)) depth += 1;
+              if (depth <= hc) continue;
+              const wedge = Math.min(MAX_WEDGE, 1 + Math.floor((depth - hc) * WEDGE));
+              for (let w = 0; w < wedge; w += 1) {
+                const wx = x - d * w, kk = k - d * w;
+                if (wx <= x0 || wx >= x1) break;
+                const j = y * W + wx;
+                if (reach[kk] === FAR || !holds(j, wx, y) || !breakable(j, wx, y)) break;
+                out.push(j); reach[kk] = FAR;
+                region.scan.faces = (region.scan.faces || 0) + 1;
+              }
+              break;
+            }
+          }
+        }
+        if (region.scan.faceY < y1) return -1;
+      }
       // Nothing is left hanging cut off: solid ground is followed out from what anchors it (the
       // ground under the box, ground carrying on past its sides, buildings, propped tunnels),
       // through solid ground only; any ground it does not reach - an island left by the slide, a
       // block resting on loose rubble - comes down too.
+      stats.stage = `link ${bw}x${bh}`;
       if (!region.scan.linked) {
         const linked = region.scan.linked = new Uint8Array(bw * bh), queue = region.scan.queue = [];
         for (let k = 0; k < bw * bh; k += 1) {
@@ -138,16 +184,26 @@
         return -1;
       }
       // (what broke loose comes away a share at a time, from the bottom up)
+      stats.stage = `break ${out.length}`;
       if (region.scan.done === undefined) { region.scan.done = 0; stats.looked += bw * bh; }
       const until = Math.min(out.length, region.scan.done + BREAKS_PER_TICK);
       for (; region.scan.done < until; region.scan.done += 1) { const i = out[region.scan.done]; breakLoose(i % W, (i / W) | 0, mat[i]); }
       if (region.scan.done < out.length) return -1;
-      // (a slide that reached the top of the box goes on above it: the next look reaches higher)
+      // (a slide that reached the top of the box goes on above it: the next look reaches higher;
+      // one running down the surface that reached a side reaches further out, so it never stops at
+      // a straight seam - a cave-in underground stays the chimney it is)
       if (out.some((i) => ((i / W) | 0) < y0 + 6) && y0 > region.scan.top) region.y0 -= GROW;
+      const surface = (i) => ((i / W) | 0) < world.groundTop[i % W] + 40;
+      if (region.atSurface && out.some((i) => i % W < x0 + 12 && surface(i))) region.x0 = Math.max(2, region.x0 - GROW_SIDE);
+      if (region.atSurface && out.some((i) => i % W > x1 - 12 && surface(i))) region.x1 = Math.min(W - 3, region.x1 + GROW_SIDE);
       // A slide shakes the ground around it in its turn: its mass coming down (the rock that rains
       // down adds its own strikes where it lands). Trees and plants on the ground that came away
       // come down with it, and so do boulders and cover that lost their footing.
+      stats.stage = `after ${out.length}`;
       if (out.length) {
+        // (the last few looks that broke ground, for the tests)
+        (stats.recent || (stats.recent = [])).push({ tick, box: [x0, y0, x1, y1], broke: out.length, faces: region.scan.faces || 0 });
+        if (stats.recent.length > 30) stats.recent.shift();
         let sx = 0, sy = 0, bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
         for (const i of out) {
           const x = i % W, y = (i / W) | 0;
@@ -167,11 +223,13 @@
       const paint = PW.getLayer(world, 'paint', x, y);
       let depth = 0;
       while (depth <= RAIN_DEPTH && y + depth + 1 < H - 1 && open[mat[(y + depth + 1) * W + x] & ID_MASK]) depth += 1;
+      // (on a free face it topples off outward, and pours down the slope below)
+      const side = free(x - 1, y) ? -1 : free(x + 1, y) ? 1 : 0;
       // (over a deep void it falls as a particle, and rolls off what it lands on)
-      if (depth > RAIN_DEPTH && particles && F) {
+      if ((depth > RAIN_DEPTH || side) && particles && F) {
         PW.set(world, x, y, M.AIR);
         PW.setLayer(world, 'paint', x, y, 0);
-        particles.spawn(x + 0.5, y + 0.5, (PW.hash3(x, y, 7) & 63) - 32, 0, loose, paint || 0, F.LAND, 8);
+        particles.spawn(x + 0.5, y + 0.5, (PW.hash3(x, y, 7) & 63) - 32 + side * (30 + (PW.hash3(x, y, 9) & 31)), side ? -8 : 0, loose, paint || 0, F.LAND, 8);
       } else {
         PW.set(world, x, y, loose | (m & 0xc0));
       }
@@ -181,7 +239,12 @@
     // Look at the ground in a box, and everything above it up to the surface, a moment from now.
     function disturb(x0, y0, x1, y1) {
       const pad = 24;   // (as far as any ground but bedrock reaches out, and more)
-      pending.push({ x0: Math.floor(x0) - pad, y0: Math.floor(y0), x1: Math.ceil(x1) + pad, y1: Math.ceil(y1), at: tick + SETTLE, rounds: 0 });
+      // (a disturbance at the surface may set off a slide that runs out along it; one deep
+      // underground only a cave-in)
+      let top = Infinity;
+      for (let x = Math.max(0, Math.floor(x0)); x <= Math.min(W - 1, Math.ceil(x1)); x += 4) top = Math.min(top, world.groundTop[x]);
+      pending.push({ x0: Math.floor(x0) - pad, y0: Math.floor(y0), x1: Math.ceil(x1) + pad, y1: Math.ceil(y1), at: tick + SETTLE, rounds: 0,
+        atSurface: y0 < top + 80 });
       stats.regions += 1;
     }
     // Vibration is the shock of things striking each other, as strong as the energy of the strike:
@@ -231,7 +294,7 @@
       const started = performance.now();
       const broke = look(region);
       stats.ms = performance.now() - started;
-      stats.maxMs = Math.max(stats.maxMs || 0, stats.ms);
+      if (stats.ms > (stats.maxMs || 0)) { stats.maxMs = stats.ms; stats.maxStage = stats.stage; }
       if (broke < 0) return;
       region.rounds += 1;
       region.quiet = broke ? 0 : (region.quiet || 0) + 1;

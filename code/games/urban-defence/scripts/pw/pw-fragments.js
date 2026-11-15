@@ -235,7 +235,8 @@
     }
 
     function sweep(x, y) {
-      if (PW.flora && PW.flora.strike(world, particles, x, y)) { stats.swept = (stats.swept || 0) + 1; return; }
+      // (a falling piece of a building is heavy: it breaks branches and trunks it passes through)
+      if (PW.flora && PW.flora.strike(world, particles, x, y, 8)) { stats.swept = (stats.swept || 0) + 1; return; }
       // (the fitting's building checks what is left of its fittings: a gate's beam without its posts)
       const owner = PW.getOwner(world, x, y);
       if (owner > 0 && owner < 50000 && world.onDamage) world.onDamage(owner, 0, x, y);
