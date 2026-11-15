@@ -20,6 +20,7 @@
     const life = new Float32Array(capacity), age = new Float32Array(capacity);
     const cell = new Uint8Array(capacity), flags = new Uint8Array(capacity);
     const color = new Uint32Array(capacity), owner = new Uint16Array(capacity);
+    const painted = new Uint8Array(capacity);   // carries its own colour (a piece of a building)
     let count = 0;
     const listeners = { chip: null, hitUnit: null };
     const stats = { count: 0, landed: 0, chipped: 0 };
@@ -27,12 +28,12 @@
     function spawn(x, y, svx, svy, byte, rgba, fl, lifeSeconds = 6, own = 0) {
       if (count >= capacity) {
         // Over capacity: settle land particles straight into the grid, drop cosmetic ones.
-        if (fl & (F.LAND | F.WATER)) deposit(x, y, byte, fl);
+        if (fl & (F.LAND | F.WATER)) deposit(x, y, byte, fl, rgba);
         return -1;
       }
       const i = count++;
       px[i] = x; py[i] = y; vx[i] = svx; vy[i] = svy;
-      cell[i] = byte; flags[i] = fl; color[i] = rgba || paletteColor(byte, x, y);
+      cell[i] = byte; flags[i] = fl; color[i] = rgba || paletteColor(byte, x, y); painted[i] = rgba ? 1 : 0;
       life[i] = lifeSeconds; age[i] = 0; owner[i] = own;
       return i;
     }
@@ -45,15 +46,39 @@
       if (i === last) return;
       px[i] = px[last]; py[i] = py[last]; vx[i] = vx[last]; vy[i] = vy[last];
       life[i] = life[last]; age[i] = age[last]; cell[i] = cell[last]; flags[i] = flags[last];
-      color[i] = color[last]; owner[i] = owner[last];
+      color[i] = color[last]; owner[i] = owner[last]; painted[i] = painted[last];
     }
     // Put a landed particle into the first open cell at or above (x, y).
-    function deposit(x, y, byte, fl) {
+    function deposit(x, y, byte, fl, paint = 0) {
       let cx = Math.max(1, Math.min(W - 2, Math.floor(x))), cy = Math.min(H - 1, Math.floor(y));
       for (let k = 0; k < 24 && cy >= 0; k += 1, cy -= 1) {
         const id = mat[cy * W + cx] & ID_MASK;
         if (OPEN[id] || ((fl & F.WATER) === 0 && id === M.WATER && k > 0)) {
+          // Rubble and earth landing on a heap roll off it, down its slope, so falling debris builds
+          // a heap spreading out wide rather than a column: earth settles at about 45°, building
+          // rubble flatter, about 1 in 2.
+          if (!(fl & F.WATER) && OPEN[id]) {
+            const first = (cx + cy) & 1 ? 1 : -1, reach = (byte & ID_MASK) === M.DEBRIS ? 2 : 1;
+            const free = (x, y) => x >= 1 && x < W - 1 && y < H - 1 && OPEN[mat[y * W + x] & ID_MASK];
+            for (let roll = 0; roll < 160; roll += 1) {
+              if (free(cx, cy + 1)) { cy += 1; continue; }
+              let moved = false;
+              for (const d of [first, -first]) {
+                for (let k = 1; k <= reach && !moved; k += 1) {
+                  if (!free(cx + d * k, cy)) break;
+                  if (free(cx + d * k, cy + 1)) { cx += d * k; cy += 1; moved = true; }
+                }
+                if (moved) break;
+              }
+              if (!moved) break;
+            }
+          }
           PW.set(world, cx, cy, byte);
+          // (a piece of a building keeps its colours as rubble, a little dulled with dust)
+          if (paint && (byte & ID_MASK) === M.DEBRIS) {
+            const c = PW.unpack(paint), k = 0.78 + (PW.hash2(cx, cy) & 15) / 100;
+            PW.setLayer(world, 'paint', cx, cy, PW.abgr(c[0] * k + 18, c[1] * k + 16, c[2] * k + 14));
+          }
           stats.landed += 1;
           return true;
         }
@@ -138,7 +163,7 @@
           const speed = Math.hypot(vx[i], vy[i]);
           if ((fl & F.DAMAGE) && speed > 90 && structural[id] && id !== M.CORE) chip(cx, cy, id, speed, i);   // (cores break only to blasts)
           if ((fl & F.WATER) || ((fl & F.LAND) && speed < 45)) {
-            if (deposit(x, y, cell[i], fl)) { kill(i); removed = true; break; }
+            if (deposit(x, y, cell[i], fl, painted[i] ? color[i] : 0)) { kill(i); removed = true; break; }
           }
           // Bounce: reflect the blocked component, keep some of the other.
           const blockedX = Math.floor(x + sx) !== Math.floor(x) && !open(mat[Math.floor(y) * W + cx] & ID_MASK, fl);
@@ -149,7 +174,7 @@
         if (removed) continue;
         px[i] = x; py[i] = y;
         if (life[i] <= 0) {
-          if (fl & (F.LAND | F.WATER)) deposit(x, y, cell[i], fl);
+          if (fl & (F.LAND | F.WATER)) deposit(x, y, cell[i], fl, painted[i] ? color[i] : 0);
           kill(i);
         }
       }

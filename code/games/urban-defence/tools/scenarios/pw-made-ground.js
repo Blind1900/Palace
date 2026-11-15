@@ -129,7 +129,7 @@ if (asian) {
     }
   }
   check(streets > 50 && built >= streets * 0.9, `town streets stand on a base course and sub-base (${built}/${streets} columns)`);
-  // A road laid with the road tool across open, level ground.
+  // A road laid across open, level ground (as a town lays one when it spreads).
   let rx = null;
   // (wild land: away from every site, natural turf or topsoil on top)
   const wild = (x) => pwApp.layout.sites.every((s) => x < s.x0 - 200 || x > s.x1 + 200);
@@ -142,7 +142,10 @@ if (asian) {
     if (ok) rx = x;
   }
   if (rx !== null) {
-    for (let x = rx - 30; x <= rx + 30; x += 1) pwApp.layRoad({ x, y: world.groundTop[x] });
+    // (as a growing town lays it: following the ground)
+    const tops = new Map();
+    for (let x = rx - 30; x <= rx + 30; x += 1) tops.set(x, world.groundTop[x]);
+    PW.settlementTools.paveStreet(world, rx - 30, rx + 30, (x) => tops.get(x), () => 'modern');
     let laid = 0;
     for (let x = rx - 28; x <= rx + 28; x += 1) if (coursed(x)) laid += 1;
     // (past the road's end, its base lies under the ground beside it)

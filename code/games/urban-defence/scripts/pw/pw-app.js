@@ -126,52 +126,7 @@
     }
     return result;
   }
-  // ROAD: lay road along the ground under the brush. Roads and fields never share ground, so a road
-  // drawn over a field replaces that part of it (its crop and its SM output); the cursor says so
-  // before you lay it.
-  const roadSpan = (p) => [Math.round(p.x - brush), Math.round(p.x + brush)];
-  const surfaceAt = (x) => {
-    let y = world.groundTop[x];
-    while (y > 1 && (PW.getFlags(world, x, y - 1) & PW.FLAG.FIELD)) y -= 1;
-    return y;
-  };
-  const fieldsAt = (x) => (world.buildings || []).flatMap((b) => [b.field, b.lotField].filter((f) => f && x >= f.x0 && x <= f.x1).map((f) => ({ b, f })));
-  function planRoad(p) {
-    const [x0, x1] = roadSpan(p);
-    let fieldCells = 0;
-    const hit = new Map();
-    for (let x = x0; x <= x1; x += 1) {
-      if (!(PW.getFlags(world, x, surfaceAt(x)) & PW.FLAG.FIELD)) continue;
-      fieldCells += 1;
-      for (const { b, f } of fieldsAt(x)) hit.set(b, (hit.get(b) || 0) + 1 / Math.max(1, [b.field, b.lotField].filter(Boolean).reduce((s, g) => s + g.columns, 0)));
-    }
-    const share = Math.max(0, ...hit.values()) * 100;
-    const note = fieldCells ? `Road here replaces wheat field: -${share < 1 ? share.toFixed(1) : Math.round(share)}% of that farm's SM production` : 'Lay road';
-    if (PW.notify) PW.notify.cursor(note, fieldCells ? 'bad' : '');
-    return { fieldCells, note };
-  }
-  function layRoad(p) {
-    const [x0, x1] = roadSpan(p);
-    const tools = PW.settlementTools;
-    if (!tools) return 0;
-    const near = (world.settlements || []).slice().sort((a, b) => Math.abs((a.streetLeft + a.streetRight) / 2 - p.x) - Math.abs((b.streetLeft + b.streetRight) / 2 - p.x))[0];
-    const style = near ? near.style : 'modern';
-    const changed = new Set();
-    let laid = 0;
-    for (let x = Math.max(1, x0); x <= Math.min(world.width - 2, x1); x += 1) {
-      const y = surfaceAt(x);
-      if (PW.getFlags(world, x, y) & PW.FLAG.ROAD) continue;
-      if (!PW.mat.ground[PW.id(world, x, y)] || PW.id(world, x, y) === M.WATER) continue;
-      // The field there goes: its crop is cut and its rows are no longer tilled.
-      for (let i = 1; i <= 36; i += 1) if (PW.getFlags(world, x, y - i) & PW.FLAG.FLORA) { PW.setLayer(world, 'deco', x, y - i, 0); PW.setFlag(world, x, y - i, PW.FLAG.FLORA, false); }
-      for (let r = 0; r < 3; r += 1) PW.setFlag(world, x, y + r, PW.FLAG.FIELD, false);
-      for (const { f } of fieldsAt(x)) changed.add(f);
-      tools.paveStreet(world, x, x, y, () => style);
-      laid += 1;
-    }
-    for (const f of changed) tools.recountField(world, f);
-    return laid;
-  }
+  // (roads are laid by the towns as they grow, never by hand)
   // Planning a dig with the DIG tools: what the tunnel at the cursor would do.
   const preview = { box: null, node: null, note: '', tone: '' };
   function planDig(side, p) {
@@ -213,7 +168,7 @@
       if (button.dataset.tool) {
         tool = button.dataset.tool;
         toolbar.querySelectorAll('[data-tool]').forEach((b) => b.classList.toggle('on', b === button));
-        if (tool !== 'digL' && tool !== 'digR') { preview.box = null; preview.node = null; if (PW.notify && tool !== 'road') PW.notify.clear(); }
+        if (tool !== 'digL' && tool !== 'digR') { preview.box = null; preview.node = null; if (PW.notify) PW.notify.clear(); }
       }
       if (button.dataset.action === 'pause') { paused = !paused; button.classList.toggle('on', paused); }
       if (button.dataset.action === 'develop') { devSpeed = devSpeed === 1 ? 20 : 1; button.classList.toggle('on', devSpeed > 1); }
@@ -244,14 +199,12 @@
       const spec = tools[tool];
       const p = toWorld(event);
       if (tool === 'digL' || tool === 'digR') dig(tool === 'digL' ? 'left' : 'right', Math.round(p.x - 30), Math.round(p.y - 18), Math.round(p.x + 30), Math.round(p.y + 18));
-      else if (tool === 'road') layRoad(p);
       else if (spec && typeof spec === 'object') explode(p.x, p.y, spec.radius, spec.power);
       else useTool(event);
     }
   });
   canvas.addEventListener('pointermove', (event) => {
     if (tool === 'digL' || tool === 'digR') planDig(tool === 'digL' ? 'left' : 'right', toWorld(event));
-    if (tool === 'road') { planRoad(toWorld(event)); if (drag.active && !drag.pan) layRoad(toWorld(event)); }
     if (!drag.active) return;
     if (drag.pan) renderer.panByDevice((event.clientX - drag.x) * renderer.view.dpr, (event.clientY - drag.y) * renderer.view.dpr);
     else if (typeof tools[tool] === 'function' || tool === 'torch') useTool(event);
@@ -332,7 +285,7 @@
   }
 
   window.pwApp = { world, layout, renderer, sim, particles, seed, timings, ready: true,
-    explode, dig, planDig, preview, pipes, setDevelopSpeed: (k) => { devSpeed = k; }, heat, life, structure, fragments, cores, planRoad, layRoad,
+    explode, dig, planDig, preview, pipes, setDevelopSpeed: (k) => { devSpeed = k; }, heat, life, structure, fragments, cores,
     setBrush: (b) => { brush = b; },
     paint: (x, y, radius, material) => paint(x, y, radius, () => material),
     stepWorld, countWater: () => sim.countWater(), simTimes,

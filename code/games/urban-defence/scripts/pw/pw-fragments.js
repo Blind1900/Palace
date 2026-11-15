@@ -336,18 +336,47 @@
     }
     // Break a set of cells up where they are: most heap as rubble in open cells, a share is thrown
     // off with the motion they had (and spread wide).
+    // A piece never stands as a block of debris in the air: only what lies on (or just above) what
+    // holds it up heaps where it is; everything higher pours down in a rain of debris that piles
+    // up on it, spreading a little as it falls.
+    const HEAP = 10;
+    // (a piece's colour as rubble: a little dulled with dust)
+    const rubbleTone = (color, x, y) => {
+      const c = PW.unpack(color), k = 0.78 + (PW.hash2(x, y) & 15) / 100;
+      return PW.abgr(c[0] * k + 18, c[1] * k + 16, c[2] * k + 14);
+    };
     function scatter(data, vx, vy, omega, cx, cy, thrown, p, c, s) {
-      for (let k = 0; k < data.x.length; k += 1) {
-        if (!data.solid[k]) { if ((k & 15) === 0) puff(data.x[k], data.y[k], 1); continue; }
+      const n = data.x.length, wxs = new Int32Array(n), wys = new Int32Array(n);
+      const lowest = new Map();
+      for (let k = 0; k < n; k += 1) {
         let x = data.x[k], y = data.y[k];
         if (p) { const [wx, wy] = toWorld(p, c, s, data.x[k] - p.ox0 + 0.5, data.y[k] - p.oy0 + 0.5); x = Math.floor(wx); y = Math.floor(wy); }
+        wxs[k] = x; wys[k] = y;
+        if (data.solid[k] && (!lowest.has(x) || y > lowest.get(x))) lowest.set(x, y);
+      }
+      // (the row each column's debris comes to rest on)
+      const support = new Map();
+      for (const [x, low] of lowest) {
+        let y = low + 1;
+        while (y < H - 1 && y < low + 400 && !blocking(x, y)) y += 1;
+        support.set(x, y);
+      }
+      for (let k = 0; k < n; k += 1) {
+        const x = wxs[k], y = wys[k];
+        if (!data.solid[k]) { if ((k & 15) === 0) puff(x, y, 1); continue; }
         const byte = debrisOf(data.byte[k]);
         if (random() < thrown) {
           const dx = x + 0.5 - cx, dy = y + 0.5 - cy;
           particles.spawn(x + 0.5, y - 0.5, vx * 0.5 - omega * dy * 0.5 + (random() - 0.5) * 160, -Math.abs(vy) * 0.3 - random() * 120 + omega * dx * 0.2, byte, 0, F.LAND | F.DAMAGE, 6);
-        } else if (x > 0 && y > 0 && x < W - 1 && y < H - 1 && !blocking(x, y)) {
+        } else if (x > 0 && y > 0 && x < W - 1 && y < H - 1 && !blocking(x, y) && support.get(x) - y <= HEAP) {
           PW.set(world, x, y, byte);
+          if (data.color[k] && (byte & ID_MASK) === M.DEBRIS) PW.setLayer(world, 'paint', x, y, rubbleTone(data.color[k], x, y));
           stats.debris += 1;
+        } else if (x > 0 && y > 0 && x < W - 1 && y < H - 1 && !blocking(x, y)) {
+          // (the higher it falls from, the wider it spreads)
+          const spread = 70 + (support.get(x) - y) * 0.45;
+          particles.spawn(x + 0.5, y + 0.5, vx * 0.2 + (random() - 0.5) * spread, 10 + random() * 40, byte, data.color[k] || 0, F.LAND, 6);
+          stats.rained = (stats.rained || 0) + 1;
         } else {
           particles.spawn(x + 0.5, y - 1.5, (random() - 0.5) * 60, -30 - random() * 40, byte, 0, F.LAND, 6);
         }

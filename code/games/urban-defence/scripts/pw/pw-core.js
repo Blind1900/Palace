@@ -401,6 +401,11 @@
     touchGroundTop(world, xj, yj, ai);
     if (ai === M.WATER || bi === M.WATER) { markWaterDirty(world, xi, yi); markWaterDirty(world, xj, yj); }
     else { markDirty(world, xi, yi); markDirty(world, xj, yj); }
+    // (rubble carries its colours with it as it slides and falls)
+    if (phase[ai] === PHASE.POWDER || phase[bi] === PHASE.POWDER) {
+      const pi = getLayer(world, 'paint', xi, yi), pj = getLayer(world, 'paint', xj, yj);
+      if (pi !== pj) { setLayer(world, 'paint', xi, yi, pj); setLayer(world, 'paint', xj, yj, pi); }
+    }
     const ci = chunkIndex(world, xi, yi), cj = chunkIndex(world, xj, yj);
     if (world.heat[ci] || world.heat[cj]) {
       const ta = heatAt(world, xi, yi), tb = heatAt(world, xj, yj);

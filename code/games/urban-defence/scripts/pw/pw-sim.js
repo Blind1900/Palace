@@ -19,7 +19,9 @@
   const COMPACT_TICKS = 600;     // 10 s at 60 Hz
   // Chance a resting powder slides off a slope each tick (debris rarely: irregular heaps).
   const SLIDE = new Float32Array(64);
-  SLIDE[M.SAND] = 1; SLIDE[M.LOOSE_SOIL] = 0.6; SLIDE[M.LOOSE_STONE] = 0.45; SLIDE[M.DEBRIS] = 0.3;
+  SLIDE[M.SAND] = 1; SLIDE[M.LOOSE_SOIL] = 0.6; SLIDE[M.LOOSE_STONE] = 0.45; SLIDE[M.DEBRIS] = 0.7;
+  const SPREADS = new Uint8Array(64);   // (spreads out flatter than its diagonal slide alone)
+  SPREADS[M.DEBRIS] = 1;
   const COMPACTS_TO = new Int16Array(64).fill(-1);
   COMPACTS_TO[M.DEBRIS] = M.RUBBLE; COMPACTS_TO[M.LOOSE_SOIL] = M.SOIL; COMPACTS_TO[M.LOOSE_STONE] = M.GRAVEL;
 
@@ -298,6 +300,15 @@
         const side = mat[i + d], diag = mat[i + W + d];
         if ((isAir(side) || isWater(side)) && (isAir(diag) || isWater(diag))) { move(i, x, y, i + W + d, nx, y + 1); return true; }
       }
+      // Building rubble spreads out flatter: it also slides a cell along a slope that falls away
+      // two cells out (a heap settles at about 1 in 2, not 45°).
+      if (SPREADS[id]) {
+        for (let k = 0; k < 2; k += 1) {
+          const d = k ? -dir : dir, nx = x + 2 * d;
+          if (nx < 0 || nx >= W) continue;
+          if (isAir(mat[i + d]) && isAir(mat[i + 2 * d]) && isAir(mat[i + W + 2 * d])) { move(i, x, y, i + d, x + d, y); return true; }
+        }
+      }
       return false;
     }
 
@@ -344,7 +355,17 @@
       const eddy = id === M.SMOKE ? ((PW.hash3(x >> 4, y >> 3, world.tick >> 6) & 1) ? 1 : -1) : 0;
       const side = r3 < Math.min(0.9, Math.abs(wind) / 40) ? Math.sign(wind)
         : eddy && r3 < 0.75 ? eddy : (r3 & 1 ? 1 : -1) * ((x + world.tick) & 1 ? 1 : -1);
-      const rise = id === M.SMOKE ? RISE[id] * (0.4 + 0.2 * density) : RISE[id];
+      // (and parcels of it rise at their own pace, so a cloud's underside is ragged, not a level
+      // floor)
+      const pace = 0.65 + 0.7 * ((PW.hash3(x >> 3, y >> 3, world.tick >> 5) & 255) / 255);
+      const rise = (id === M.SMOKE ? RISE[id] * (0.4 + 0.2 * density) : RISE[id]) * pace;
+      // Concentrated clumps pour like rain: in a scattering of columns (changing every second) the
+      // thickest gas falls through clear air in streaks hanging under the cloud, until it has
+      // thinned enough to rise again.
+      if (density === 3 && y < H - 2 && (PW.hash2(x, world.tick >> 6) & 7) === 0 && r2 < 0.45 && isEmpty(mat[i + W])) {
+        move(i, x, y, i + W, x, y + 1, 'gas');
+        return true;
+      }
       const vert = rise > 0 ? -W : W;
       // Up (or down for dust), through air; rising gas also bubbles up through water.
       if (r2 < Math.abs(rise) && y > 0 && y < H - 1) {

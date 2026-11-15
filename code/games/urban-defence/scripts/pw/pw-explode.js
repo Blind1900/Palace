@@ -6,6 +6,8 @@
   const PW = window.PW;
   const { M, ID_MASK } = PW;
   const { phase, structural, hardness, breaksTo, palettes } = PW.mat;
+  // Rock laid bare behind a blasted-away tunnel or shaft wall: dark and blackened.
+  const BLASTED_ROCK = [[46, 38, 32], [38, 32, 27], [52, 43, 36], [34, 29, 25]].map((c) => PW.abgr(c[0], c[1], c[2]));
 
   function explode(world, particles, spec) {
     const { x: cx, y: cy, radius: r, power = 1, owner = 0 } = spec;
@@ -51,18 +53,23 @@
           continue;
         }
         const strength = power * (1 - s) * 1.4 + (PW.hash2(x, y) & 255) / 255 * 0.2 - 0.1;
-        // A building's back walls break with it (a tunnel's back wall is the rock behind it).
+        // Back walls and everything fixed to them break in the blast: a building's walls (the
+        // building is told), a tunnel's or shaft's lining and timbering, ladders, rails, belts and
+        // pipes on the wall. Underground the rock behind shows through, blackened.
         const backOwner = PW.getOwner(world, x, y);
-        if (backOwner > 0 && backOwner < 50000 && strength > 0.3) {
-          const back = PW.getLayer(world, 'back', x, y);
-          if (back) {
-            PW.setLayer(world, 'back', x, y, 0);
+        const back = strength > 0.3 ? PW.getLayer(world, 'back', x, y) : 0;
+        if (back) {
+          const building = backOwner > 0 && backOwner < 50000;
+          const rock = !building && y > world.groundTop[x] ? BLASTED_ROCK[PW.hash2(x, y) & 3] : 0;
+          PW.setLayer(world, 'back', x, y, rock);
+          PW.setFlag(world, x, y, PW.FLAG.FIXTURE | PW.FLAG.LADDER, false);
+          if (building) {
             if (id === M.AIR) PW.setOwner(world, x, y, 0);
             damaged.set(backOwner, (damaged.get(backOwner) || 0) + 1);
-            if (random() < 0.15) {
-              const [vx, vy] = fling(x, y, 280 * power, 160 * power);
-              particles.spawn(x + 0.5, y + 0.5, vx, vy, M.DEBRIS, back, F.LAND | F.DAMAGE, 6, backOwner);
-            }
+          }
+          if (random() < 0.15) {
+            const [vx, vy] = fling(x, y, 280 * power, 160 * power);
+            particles.spawn(x + 0.5, y + 0.5, vx, vy, M.DEBRIS, back, F.LAND | F.DAMAGE, 6, building ? backOwner : 0);
           }
         }
         if (id === M.AIR) continue;
@@ -76,8 +83,10 @@
           particles.spawn(x + 0.5, y + 0.5, vx, vy, m, 0, F.WATER, 6);
         } else if (structural[id] || ownerId) {
           if (ownerId) damaged.set(ownerId, (damaged.get(ownerId) || 0) + 1);
-          if (random() < 0.6) {
-            const [vx, vy] = fling(x, y, 330 * power, 200 * power);
+          // A building's broken structure is thrown well back from the blast in a plume: most of
+          // it, fast, flung outward and up.
+          if (random() < 0.85) {
+            const [vx, vy] = fling(x, y, 480 * power, 300 * power);
             particles.spawn(x + 0.5, y + 0.5, vx, vy, breaksTo[id] || M.DEBRIS, paint || 0, F.LAND | F.DAMAGE, 7, ownerId);
           }
         } else if (phase[id] >= PW.PHASE.POWDER && random() < 0.25) {

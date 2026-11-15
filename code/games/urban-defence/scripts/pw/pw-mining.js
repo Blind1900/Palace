@@ -363,17 +363,20 @@
     const size = Math.max(1, Math.round(z));
     const vx0 = camera.x - 60, vx1 = camera.x + view.width / z + 60, vy0 = camera.y - 60, vy1 = camera.y + view.height / z + 60;
     const cell = (x, y, color) => { ctx.fillStyle = color; ctx.fillRect(Math.round((x - camera.x) * z), Math.round((y - camera.y) * z), size, size); };
+    // The belt runs along the back wall: its cleats and its load show only where nothing stands in
+    // front of it (crates, drums, sandbags and the like hide it).
+    const backCell = (x, y, color) => { if (PW.mat.open[PW.get(world, x, y) & ID_MASK]) cell(x, y, color); };
     for (const op of world.miningOps || []) {
       if (op.room.x1 + 200 < vx0 || op.room.x0 - 200 > vx1 || op.floor < vy0 || op.floor - ROOM_H > vy1) continue;
       // Belt: moving cleats on the rubber, and the ore lumps riding it.
       const { tail, head } = op.belt, d = Math.sign(head - tail) || 1;
       const shift = Math.floor(time * BELT_SPEED);
       for (let x = Math.min(tail, head); x <= Math.max(tail, head); x += 1) {
-        if ((((x - tail) * d - shift) % 6 + 6) % 6 === 0) cell(x, op.floor - 7, 'rgb(70,70,76)');
+        if ((((x - tail) * d - shift) % 6 + 6) % 6 === 0) backCell(x, op.floor - 7, 'rgb(70,70,76)');
       }
       for (const c of op.belt.cargo) {
         const x = Math.round(tail + d * c.s);
-        for (let dy = 0; dy < 2; dy += 1) for (let dx = -1; dx <= 1; dx += 1) cell(x + dx, op.floor - 8 - dy, dy ? 'rgb(176,112,226)' : `rgb(${ORE_LUMP})`);
+        for (let dy = 0; dy < 2; dy += 1) for (let dx = -1; dx <= 1; dx += 1) backCell(x + dx, op.floor - 8 - dy, dy ? 'rgb(176,112,226)' : `rgb(${ORE_LUMP})`);
       }
       // Miners, with their lamps and loads.
       for (const m of op.miners) {

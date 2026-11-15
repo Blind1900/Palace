@@ -38,31 +38,7 @@ for (const b of farms) for (const f of fieldsOf(b)) { f.growth = 0.9; PW.settlem
 const stalks = farms.flatMap((b) => fieldsOf(b).flatMap((f) => f.stalks));
 const tall = stalks.filter((s) => s.h >= 22).length;
 check(stalks.length > 100 && tall > stalks.length * 0.6, `grown maize stands taller than a trooper (${tall}/${stalks.length} stalks of 22 cells or more)`);
-// A road drawn over a field: the cursor warns, then the field there is gone, and its yield falls.
-const farm = farms.find((b) => b.field && b.field.columns > 60);
-const f = farm.field;
-const at = { x: Math.round((f.x0 + f.x1) / 2), y: fy(f, Math.round((f.x0 + f.x1) / 2)) - 5 };
-pwApp.setBrush(10);
-const plan = pwApp.planRoad(at);
-const noteEl = document.getElementById('cursor-note');
-check(plan.fieldCells > 0 && /SM production/.test(plan.note) && /SM production/.test(noteEl ? noteEl.textContent : ''),
-  `planning a road over a field warns that it replaces SM production ("${plan.note}")`);
-await view('fd-plan', at.x, at.y - 10, 6);
-const before = f.alive;
-const laid = pwApp.layRoad(at);
-let cropLeft = 0;
-for (let x = at.x - 10; x <= at.x + 10; x += 1) for (let i = 1; i <= 36; i += 1) if (PW.getFlags(world, x, fy(f, x) - i) & FLAG.FLORA) cropLeft += 1;
-check(laid > 0 && f.alive < before && cropLeft === 0, `the road replaces the field under it (${laid} columns paved, field ${before} -> ${f.alive} columns, ${cropLeft} crop cells left)`);
-let roadField = 0;
-for (let x = at.x - 10; x <= at.x + 10; x += 1) if ((PW.getFlags(world, x, fy(f, x)) & FLAG.ROAD) && (PW.getFlags(world, x, fy(f, x)) & FLAG.FIELD)) roadField += 1;
-check(roadField === 0, `the new road and the field still never share a cell (${roadField})`);
-// Off the field the cursor just offers the road.
-const town = world.settlements.find((s) => s.side === 'left');
-let streetX = Math.round((town.streetLeft + town.streetRight) / 2);
-const clearOfField = (x) => { for (let k = -12; k <= 12; k += 1) if (PW.getFlags(world, x + k, world.groundTop[x + k]) & FLAG.FIELD) return false; return true; };
-while (streetX < town.streetRight && !((PW.getFlags(world, streetX, town.padY) & FLAG.ROAD) && clearOfField(streetX))) streetX += 7;
-const plain = pwApp.planRoad({ x: streetX, y: town.padY - 4 });
-check(plain.fieldCells === 0 && !/SM production/.test(plain.note), `away from fields the road needs no warning ("${plain.note}")`);
-await view('fd-road', at.x, at.y - 10, 6);
+// (roads are laid by the towns as they grow, never by hand: there is no road tool)
+check(!document.querySelector('[data-tool="road"]') && !pwApp.layRoad, 'there is no hand-laid road tool');
 for (const b of farms.slice(0, 3)) await view(`fd-farm-${b.style}-${b.variant}`, (b.works[0] + b.works[1]) / 2, b.ground - 40, 4);
 return { checks, shots: shots.length };

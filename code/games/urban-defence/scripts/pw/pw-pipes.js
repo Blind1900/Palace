@@ -556,7 +556,8 @@
       for (let r = 1; r < BORE - 1; r += 1) {
         const id = mat[(y + r) * W + x] & ID_MASK;
         if (id === M.PIPE) return true;
-        if (id === M.AIR && isTunnel(x, y + r) && PW.getLayer(world, 'back', x, y + r)) return true;     // along a tunnel wall
+        // (along a tunnel wall: a fitting there, until a blast tears it off)
+        if (id === M.AIR && isTunnel(x, y + r) && (PW.getFlags(world, x, y + r) & FLAG.FIXTURE) && PW.getLayer(world, 'back', x, y + r)) return true;
         if ((id === M.REINFORCED || id === M.LINING) && (PW.getFlags(world, x, y + r) & FLAG.FIXTURE)) return true;   // in a sleeve
       }
       return false;
@@ -798,6 +799,9 @@
       const vx0 = camera.x - 4, vx1 = camera.x + view.width / z + 4, vy0 = camera.y - 4, vy1 = camera.y + view.height / z + 4;
       const cell = (x, y, c) => {
         if (x < vx0 || x > vx1 || y < vy0 || y > vy1) return;
+        // (in the pipe itself or its sleeve, or on a back wall where nothing stands in front of it)
+        const id = mat[y * W + x] & ID_MASK;
+        if (id !== M.PIPE && !PW.mat.open[id] && !(PW.getFlags(world, x, y) & FLAG.FIXTURE)) return;
         ctx.fillStyle = `rgb(${c[0] | 0},${c[1] | 0},${c[2] | 0})`;
         ctx.fillRect(Math.round((x - camera.x) * z), Math.round((y - camera.y) * z), size, size);
       };
