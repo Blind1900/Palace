@@ -568,10 +568,10 @@
     // FITTING: this back-wall cell is something standing in front of the wall face (a timber set,
     // a lamp and its cable): a pipe along the wall passes behind it.
     FITTING: 32768 });
-  // Does a pipe fixed to the wall show at open cell (x, y)? Over the bare wall face, or across a
-  // cave's rock; not behind a fitting, a ladder, a rail or belt, nor in a finished (developed)
-  // tunnel, where it is cased in behind the wall.
-  const HIDES_PIPE = FLAG.FITTING | FLAG.LADDER | FLAG.FIXTURE | FLAG.DEVELOPED;
+  // Does a pipe fixed to the wall show at open cell (x, y)? Over the wall face (a finished
+  // tunnel's too, clamped to it), or across a cave's rock; not behind a fitting, a ladder, a rail
+  // or a belt.
+  const HIDES_PIPE = FLAG.FITTING | FLAG.LADDER | FLAG.FIXTURE;
   function pipeShows(world, x, y) {
     return getLayer(world, 'pipe', x, y) !== 0 && !(getLayer(world, 'back', x, y) && (getFlags(world, x, y) & HIDES_PIPE))
       && !getLayer(world, 'deco', x, y);

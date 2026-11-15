@@ -114,11 +114,20 @@
     // What is behind open air at a cell: the back wall, with a supply pipe fixed to it showing over
     // the bare wall face but behind every fitting in front of it (timbers, lamps, ladders, rails);
     // across a cave or a blast hole the pipe runs over the rock. 0 when nothing is.
-    function wallBehind(local, backChunk, pipeChunk, flagsChunk) {
+    // In a finished (developed) tunnel the pipe is part of its fit-out: held to the wall by steel
+    // clamp bands every 18 cells along it.
+    const CLAMP = PW.abgr(118, 124, 130), CLAMP_EDGE = PW.abgr(78, 82, 88);
+    function wallBehind(x, y, local, backChunk, pipeChunk, flagsChunk) {
       const back = backChunk ? backChunk[local] : 0;
       const pipe = pipeChunk ? pipeChunk[local] : 0;
-      if (pipe && !(back && flagsChunk && (flagsChunk[local] & PW.HIDES_PIPE))) return pipe;
-      return back;
+      if (!pipe) return back;
+      const flags = flagsChunk ? flagsChunk[local] : 0;
+      if (back && (flags & PW.HIDES_PIPE)) return back;
+      if (!(flags & PW.FLAG.DEVELOPED)) return pipe;
+      // (along a run: clamps across it; up a riser: clamps round it)
+      const along = PW.getLayer(world, 'pipe', x - 3, y) && PW.getLayer(world, 'pipe', x + 3, y) ? x : y;
+      const k = ((along % 18) + 18) % 18;
+      return k === 0 ? CLAMP_EDGE : k === 1 ? CLAMP : pipe;
     }
     function baseColor(x, y, paintChunk, backChunk, waterDepth, pipeChunk, flagsChunk) {
       const index = y * W + x;
@@ -126,7 +135,7 @@
       const id = m & ID_MASK;
       const local = (y & CHUNK_MASK) << CHUNK_SHIFT | x & CHUNK_MASK;
       if (id === M.AIR) {
-        const behind = wallBehind(local, backChunk, pipeChunk, flagsChunk);
+        const behind = wallBehind(x, y, local, backChunk, pipeChunk, flagsChunk);
         if (behind) return behind;
         if (y < groundTop[x]) return 0;
         return toned(voidColor, grainOf(PW.hash2(x, y)) < 4 ? 218 : 256);
@@ -134,7 +143,7 @@
       if (gasAlpha[id]) {
         // Gas is translucent: blend it over whatever is behind it (back wall, cave, or the sky,
         // which shows through the raster's alpha). Thicker gas (higher variant) is more opaque.
-        let under = wallBehind(local, backChunk, pipeChunk, flagsChunk);
+        let under = wallBehind(x, y, local, backChunk, pipeChunk, flagsChunk);
         if (!under && y >= groundTop[x]) under = toned(voidColor, 256);
         const h = PW.hash2(x, y);
         const a = Math.min(0.92, gasAlpha[id][m >> 6] * ((h & 7) === 0 ? 0.8 : 1));

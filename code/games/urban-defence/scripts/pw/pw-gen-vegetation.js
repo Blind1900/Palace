@@ -452,6 +452,9 @@
     const base = sprite.base;
     const footX0 = base ? x + base.from : 0;
     const foot = base ? new Int32Array(base.to - base.from + 1).fill(-1) : null;
+    // (which cells of its box the plant was drawn into, a bit each: what a blow or a fire later
+    // takes from it is worked out from these, without drawing the plant again)
+    const mask = new Uint8Array((sprite.width * sprite.height + 7) >> 3);
     for (let sy = 0; sy < sprite.height; sy += 1) {
       const wy = top + sy;
       if (wy < 0 || wy >= H) continue;
@@ -465,6 +468,8 @@
         if (id === M.AIR && PW.getLayer(world, 'back', wx, wy)) continue;
         PW.setLayer(world, 'deco', wx, wy, color);
         PW.setFlag(world, wx, wy, PW.FLAG.FLORA);   // plant matter: it can burn
+        const k = sy * sprite.width + sx;
+        mask[k >> 3] |= 1 << (k & 7);
         if (foot) {
           const k = wx - footX0;
           if (k >= 0 && k < foot.length && wy > foot[k]) foot[k] = wy;
@@ -475,7 +480,7 @@
       const rooted = new Set(base.roots);
       for (let k = 0; k < foot.length; k += 1) if (!rooted.has(base.from + k)) foot[k] = -1;
     }
-    return { x: left, y: top, width: sprite.width, height: sprite.height, foot, footX0 };
+    return { x: left, y: top, width: sprite.width, height: sprite.height, foot, footX0, mask };
   }
 
   // Generate a plant against the ground at column x, stamp it and keep a record (with the ground
@@ -491,7 +496,7 @@
     const placed = stamp(world, sprite, x, row, { water: wet });
     const record = { kind: CATEGORY[type], type, anchorX: x, row, seed, size, look: options.look || null,
       profile: ground.freeze(), x: placed.x, y: placed.y, width: placed.width, height: placed.height,
-      foot: placed.foot, footX0: placed.footX0,
+      foot: placed.foot, footX0: placed.footX0, mask: placed.mask,
       trunk: sprite.trunk ? { x0: x, y0: row - 3, x1: Math.round(x + sprite.trunk.dx), y1: Math.round(row + sprite.trunk.dy) } : null };
     (world.flora || (world.flora = [])).push(record);
     return record;
@@ -527,13 +532,15 @@
   // blast (or to the side it leans), every cell of it thrown as leaves and splintered wood that
   // spreads further the higher it was, and lands as wood rubble.
   function fell(world, particles, record, from = null) {
-    const sprite = regenerate(record);
-    const left = Math.round(record.anchorX - sprite.anchorX), top = Math.round(record.row - sprite.anchorY);
+    const { mask } = record, sprite = mask ? null : regenerate(record);
+    const left = mask ? record.x : Math.round(record.anchorX - sprite.anchorX), top = mask ? record.y : Math.round(record.row - sprite.anchorY);
+    const w = mask ? record.width : sprite.width, h = mask ? record.height : sprite.height;
     const side = from ? (record.anchorX >= from.x ? 1 : -1) : (PW.hash2(record.anchorX, record.row) & 1 ? 1 : -1);
     let n = 0;
-    for (let sy = 0; sy < sprite.height; sy += 1) {
-      for (let sx = 0; sx < sprite.width; sx += 1) {
-        if (!sprite.pixels[sy * sprite.width + sx]) continue;
+    for (let sy = 0; sy < h; sy += 1) {
+      for (let sx = 0; sx < w; sx += 1) {
+        const k = sy * w + sx;
+        if (mask ? !(mask[k >> 3] >> (k & 7) & 1) : !sprite.pixels[k]) continue;
         const wx = left + sx, wy = top + sy;
         // (what is left of it there, burnt or not)
         const color = PW.getLayer(world, 'deco', wx, wy);
@@ -558,15 +565,15 @@
   // hurt what they land on (so one tree coming down does not set off the next).
   function settle(world, particles, record, from = null) {
     if (record.felled) return 0;
-    const sprite = regenerate(record);
-    const left = Math.round(record.anchorX - sprite.anchorX), top = Math.round(record.row - sprite.anchorY);
-    const w = sprite.width, h = sprite.height, n = w * h;
+    const { mask } = record, sprite = mask ? null : regenerate(record);
+    const left = mask ? record.x : Math.round(record.anchorX - sprite.anchorX), top = mask ? record.y : Math.round(record.row - sprite.anchorY);
+    const w = mask ? record.width : sprite.width, h = mask ? record.height : sprite.height, n = w * h;
     const kind = new Uint8Array(n);       // 1 wood, 2 leaf
     const solid = (x, y) => PW.mat.phase[PW.get(world, x, y) & ID_MASK] === PW.PHASE.SOLID;
     const queue = [];
     let cells = 0;
     for (let k = 0; k < n; k += 1) {
-      if (!sprite.pixels[k]) continue;
+      if (mask ? !(mask[k >> 3] >> (k & 7) & 1) : !sprite.pixels[k]) continue;
       const wx = left + (k % w), wy = top + ((k / w) | 0);
       const color = PW.getLayer(world, 'deco', wx, wy), flags = PW.getFlags(world, wx, wy);
       if (!color || !(flags & PW.FLAG.FLORA)) continue;
