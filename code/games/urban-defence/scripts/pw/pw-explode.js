@@ -94,14 +94,20 @@
         if (s > 1.35) continue;
         const i = y * W + x;
         const m = mat[i], id = m & ID_MASK;
-        // Vegetation and props in the blast are torn apart: trees and bushes are blown to pieces,
-        // their leaves flung off and their wood thrown out as splinters that land as wood rubble.
+        // Vegetation and props in the blast: what is in the heart of it is torn to pieces (leaves
+        // flung off, wood thrown out as splinters that land as wood rubble); a plant the blast
+        // only reached is knocked over or broken up after the blast (see PW.flora.afterBlast).
         const deco = PW.getLayer(world, 'deco', x, y);
-        if (deco && s <= 1.1) {
+        const flora = deco && PW.flora && (PW.getFlags(world, x, y) & PW.FLAG.FLORA);
+        if (flora && s <= 1.1) {
+          const plant = PW.flora.recordAt(world, x, y);
+          if (plant) plant.blasted = true;
+        }
+        if (deco && s <= (flora ? 0.45 * Math.min(1.2, power) : 1.1)) {
           PW.setLayer(world, 'deco', x, y, 0);
           const decoOwner = PW.getOwner(world, x, y);
           if (decoOwner > 0 && decoOwner < 50000) damaged.set(decoOwner, damaged.get(decoOwner) || 0);
-          if (PW.flora && (PW.getFlags(world, x, y) & PW.FLAG.FLORA)) {
+          if (flora) {
             const plant = PW.flora.recordAt(world, x, y);
             if (plant) plant.hit = true;
             const [vx, vy] = fling(x, y, 220 * power, 140 * power);
@@ -199,7 +205,7 @@
     // Plants that lost their footing or trunk fall; cover that lost its support or most of
     // itself breaks apart. Nothing is left floating over the crater.
     const box = { x0: x0 - 4, y0: y0 - 4, x1: x1 + 4, y1: y1 + 4 };
-    if (PW.flora) PW.flora.afterBlast(world, particles, box, { x: cx, y: cy });
+    if (PW.flora) PW.flora.afterBlast(world, particles, { x0: box.x0 - r, y0: box.y0 - r, x1: box.x1 + r, y1: box.y1 }, { x: cx, y: cy, r, power });
     // Tunnels it reached are dug out and re-lined by their crews.
     if (PW.tunnels && PW.tunnels.damaged) PW.tunnels.damaged(world, box.x0 - 10, box.y0 - 10, box.x1 + 10, box.y1 + 10);
     if (PW.props) PW.props.afterBlast(world, particles, box);

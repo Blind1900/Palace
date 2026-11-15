@@ -187,7 +187,9 @@
       stats.stage = `break ${out.length}`;
       if (region.scan.done === undefined) { region.scan.done = 0; stats.looked += bw * bh; }
       const until = Math.min(out.length, region.scan.done + BREAKS_PER_TICK);
-      for (; region.scan.done < until; region.scan.done += 1) { const i = out[region.scan.done]; breakLoose(i % W, (i / W) | 0, mat[i]); }
+      // (still ground that can break: something else - a rising core, a landing piece - may have
+      // taken the cell since it was looked at)
+      for (; region.scan.done < until; region.scan.done += 1) { const i = out[region.scan.done], x = i % W, y = (i / W) | 0; if (breakable(i, x, y)) breakLoose(x, y, mat[i]); }
       if (region.scan.done < out.length) return -1;
       // (a slide that reached the top of the box goes on above it: the next look reaches higher;
       // one running down the surface that reached a side reaches further out, so it never stops at

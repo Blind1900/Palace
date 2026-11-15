@@ -11,7 +11,8 @@
   const { M, ID_MASK } = PW;
 
   const LOOSE = new Uint8Array(64);
-  for (const id of [M.DEBRIS, M.RUBBLE, M.LOOSE_SOIL, M.LOOSE_STONE, M.SAND, M.ASH]) LOOSE[id] = 1;
+  // (a ruin - a piece of the building come to rest whole - it shoulders aside too)
+  for (const id of [M.DEBRIS, M.RUBBLE, M.LOOSE_SOIL, M.LOOSE_STONE, M.SAND, M.ASH, M.RUIN]) LOOSE[id] = 1;
   const SETTLE = 60;        // ticks after the gratings blow before the cores start to rise (1 s)
   const RISE_EVERY = 1;     // ticks per row risen (60 rows a second: up through a tower's heap in seconds)
   const SWEEP_EVERY = 6;    // ticks between sweeps once a core stands in the open
@@ -93,8 +94,10 @@
           // (gas, water and rubble give way)
           if (PW.mat.phase[PW.get(world, x, y) & ID_MASK] < PW.PHASE.SOLID || own(x, y)) continue;
           const m = PW.get(world, x, y), id = m & ID_MASK;
-          if (PW.getOwner(world, x, y) === b.id && PW.mat.structural[id] && PW.mat.breaksTo[id]) {
-            PW.set(world, x, y, PW.mat.breaksTo[id]);
+          // (a remnant of the fallen building - still its own, or come to rest as a ruin or
+          // packed rubble - is shattered by the core's field)
+          if ((PW.getOwner(world, x, y) === b.id && PW.mat.structural[id] && PW.mat.breaksTo[id]) || id === M.RUIN || id === M.RUBBLE) {
+            PW.set(world, x, y, PW.mat.breaksTo[id] || M.DEBRIS);
             PW.setOwner(world, x, y, 0);
             continue;
           }

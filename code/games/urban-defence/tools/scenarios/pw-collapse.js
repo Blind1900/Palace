@@ -32,8 +32,10 @@ run(1.2);
 await view('co-implode', (A.body.left + A.body.right) / 2, A.ground - heightOf(A) * 0.5, 3);
 await view('co-tip', (B.body.left + B.body.right) / 2, B.ground - heightOf(B) * 0.5, 3);
 run(8.8);
-const dust10 = countIn(A.body.left - 400, A.body.right + 400, A.ground - 600, A.ground, [M.DUST])
-  + countIn(B.body.left - 400, B.body.right + 400, B.ground - 600, B.ground, [M.DUST]);
+// (a falling building drives the air out ahead of it and from under it: its dust is carried well
+// out from where it came down)
+const dust10 = countIn(A.body.left - 900, A.body.right + 900, A.ground - 900, A.ground, [M.DUST])
+  + countIn(B.body.left - 900, B.body.right + 900, B.ground - 900, B.ground, [M.DUST]);
 run(20);
 
 check(A.health < 0.25 && (A.failures || []).some((r) => r === 'pancake' || r === 'drop'), `a tower that loses its whole ground floor comes straight down (health ${A.health.toFixed(2)}, failures ${JSON.stringify(A.failures)})`);
@@ -49,15 +51,19 @@ let detached = 0, orphans = 0;
 for (const b of damaged) { const r = structure.analyse(b); detached += r ? r.detached : 0; orphans += r ? r.orphans : 0; }
 check(detached === 0 && orphans === 0, `nothing is left floating (${damaged.length} damaged buildings: ${detached} loose structure cells, ${orphans} loose back-wall or fitting cells)`);
 // The rubble stays: the fallen building lies as debris and rubble on and around its lot.
-const pile = (b) => countIn(b.body.left - heightOf(b), b.body.right + heightOf(b), b.ground - heightOf(b), b.ground + 4, [M.DEBRIS, M.RUBBLE, M.LOOSE_STONE]);
+const WRECK = [M.DEBRIS, M.RUBBLE, M.LOOSE_STONE, M.RUIN];
+const pile = (b) => countIn(b.body.left - heightOf(b), b.body.right + heightOf(b), b.ground - heightOf(b), b.ground + 4, WRECK);
 const pileA = pile(A), pileB = pile(B);
-check(pileA > 4000 && pileB > 4000, `the fallen towers lie as rubble (${pileA} and ${pileB} cells)`);
+check(pileA > 4000 && pileB > 4000, `the fallen towers lie as rubble and ruins (${pileA} and ${pileB} cells)`);
+// Some of each comes to rest whole: pieces of the building, misplaced, as ruins.
+const ruins = (world.ruins || []).filter((r) => r.from === A.id || r.from === B.id);
+check(ruins.length >= 2, `whole pieces of the fallen towers lie about as ruins (${ruins.length} ruins, ${ruins.reduce((n, r) => n + r.cells, 0)} cells)`);
 // The tipped tower's rubble spreads out to the side it fell.
 const spread = (b, dir) => {
   let far = 0;
   for (let k = 0; k < heightOf(b) * 1.5; k += 1) {
     const x = dir < 0 ? b.body.left - k : b.body.right + k;
-    for (let y = b.ground - 120; y < b.ground; y += 1) if ([M.DEBRIS, M.RUBBLE, M.LOOSE_STONE].includes(id(x, y))) { far = k; break; }
+    for (let y = b.ground - 120; y < b.ground; y += 1) if (WRECK.includes(id(x, y))) { far = k; break; }
   }
   return far;
 };

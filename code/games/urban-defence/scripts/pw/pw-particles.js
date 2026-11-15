@@ -78,7 +78,7 @@
           // Rubble and earth landing on a heap roll off it, down its slope, so falling debris builds
           // a heap spreading out wide rather than a column: earth settles at about 45°, building
           // rubble flatter, about 1 in 2.
-          if (!(fl & F.WATER) && OPEN[id]) {
+          if (!(fl & F.WATER) && OPEN[id] && phase[byte & ID_MASK] !== PW.PHASE.GAS) {
             const first = (cx + cy) & 1 ? 1 : -1, reach = (byte & ID_MASK) === M.DEBRIS ? 2 : 1;
             const free = (x, y) => x >= 1 && x < W - 1 && y < H - 1 && OPEN[mat[y * W + x] & ID_MASK];
             for (let roll = 0; roll < 160; roll += 1) {
@@ -93,6 +93,11 @@
               }
               if (!moved) break;
             }
+          }
+          // (smoke or dust lying there is pushed up out of its way, not lost)
+          const there = mat[cy * W + cx];
+          if (phase[there & ID_MASK] === PW.PHASE.GAS && phase[byte & ID_MASK] !== PW.PHASE.GAS) {
+            for (let up = cy - 1; up > 0 && cy - up <= 16; up -= 1) if ((mat[up * W + cx] & ID_MASK) === M.AIR) { PW.set(world, cx, up, there, { quiet: true }); break; }
           }
           PW.set(world, cx, cy, byte);
           // (a piece of a building keeps its colours as rubble, a little dulled with dust)

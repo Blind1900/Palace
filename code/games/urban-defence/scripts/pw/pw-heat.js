@@ -23,6 +23,8 @@
   function createHeat(world) {
     const { mat, width: W, height: H, chunksX } = world;
     const burning = new Map();      // flat index -> { fuel (s), deco (bool), wood (bool), owner }
+    const charredAt = new Map();    // flat index -> tick a plant's wood there was charred
+    const CHAR_COOL = 60 * 60;      // ticks before charcoal can catch again (a later fire, not this one)
     const rects = new Map();        // chunk -> [x0, y0, x1, y1] local rectangle holding heat
     const stats = { ms: 0, chunks: 0, burning: 0, ignited: 0, burnedOut: 0, boiled: 0 };
     let tick = 0;
@@ -45,6 +47,15 @@
       const id = mat[i] & ID_MASK;
       if (ignite[id] && hasAir(i, x, y)) {
         burning.set(i, { fuel: burnTime[id] * (0.8 + (PW.hash2(x, y) & 7) / 20), deco: false, owner: PW.getOwner(world, x, y) });
+        stats.ignited += 1;
+        return true;
+      }
+      // A charred snag catches again in a later fire (it is charcoal: it burns a while, and the thin
+      // of it goes).
+      if (open[id] && decoAt(x, y) && (PW.getFlags(world, x, y) & (FLAG.FLORA | FLAG.CHARRED)) === (FLAG.FLORA | FLAG.CHARRED)) {
+        // (not in the fire that charred it: only once it has gone cold)
+        if (tick - (charredAt.get(i) ?? -Infinity) < CHAR_COOL) return false;
+        burning.set(i, { fuel: 4 + (PW.hash2(x, y) & 7) * 0.4, deco: true, wood: true, charred: true, owner: 0 });
         stats.ignited += 1;
         return true;
       }
@@ -80,17 +91,43 @@
       const c = PW.unpack(color);
       return PW.abgr(c[0] * k + 6, c[1] * k + 4, c[2] * k + 2);
     }
+    // How thick the wood is at (x, y): the narrower of its runs across and up (a trunk's width, a
+    // bough's depth, a twig's one or two cells). Leaves do not count; charcoal does.
+    const isWood = (x, y) => {
+      const d = decoAt(x, y);
+      if (!d || !(PW.getFlags(world, x, y) & FLAG.FLORA)) return false;
+      if (PW.getFlags(world, x, y) & FLAG.CHARRED) return true;
+      const c = PW.unpack(d);
+      return !(c[1] > c[0] + 8);
+    };
+    function woodThickness(x, y) {
+      let h = 1, v = 1;
+      for (const d of [-1, 1]) {
+        for (let k = 1; k < 8 && isWood(x + d * k, y); k += 1) h += 1;
+        for (let k = 1; k < 8 && isWood(x, y + d * k); k += 1) v += 1;
+      }
+      return Math.min(h, v);
+    }
     function burnOut(i, x, y, b) {
       burning.delete(i);
       stats.burnedOut += 1;
       if (b.deco) {
-        if (!b.wood) {
+        // Leaves and twigs burn away; a tree's trunk and its thickest boughs are left standing as
+        // charcoal (a black, leafless snag) until another fire takes more of it - charcoal that
+        // burns again goes unless it is thick.
+        const thin = b.wood && woodThickness(x, y) < (b.charred ? 5 : 3);
+        if (!b.wood || thin) {
+          const plant = thin && PW.flora ? PW.flora.recordAt(world, x, y) : null;
           PW.setLayer(world, 'deco', x, y, 0);
-          PW.setFlag(world, x, y, FLAG.FLORA, false);
+          PW.setFlag(world, x, y, FLAG.FLORA | FLAG.CHARRED, false);
+          // (what that held up may have lost its hold)
+          if (plant) (world.floraDirty || (world.floraDirty = new Set())).add(plant);
         } else {
           const k = 0.22 + (PW.hash2(x, y) & 3) * 0.05;
           PW.setLayer(world, 'deco', x, y, PW.abgr(52 * k + 20, 44 * k + 18, 40 * k + 16));
           PW.setFlag(world, x, y, FLAG.CHARRED);
+          charredAt.set(i, tick);
+          if (charredAt.size > 60000) for (const [j, t] of charredAt) if (tick - t > CHAR_COOL) charredAt.delete(j);
         }
         return;
       }

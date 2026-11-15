@@ -84,6 +84,26 @@
       const scale = power * 9 * all / open;
       for (let k = 0; k < cells.length; k += 2) p[cells[k]] = clamp(p[cells[k]] + cells[k + 1] * scale);
     }
+    // A gust: the open air within `radius` of (x, y) is set going at (wx, wy) cells a second, most
+    // at the middle. Something big moving through the air drives it along: a falling building
+    // pushes the air ahead of it, and a floor coming down drives the air out from under it.
+    function gust(x, y, radius, wx, wy) {
+      const ar = Math.max(1, radius / S), acx = x / S, acy = y / S;
+      for (let ty = Math.floor((acy - ar) / TILE); ty <= Math.floor((acy + ar) / TILE); ty += 1) {
+        for (let tx = Math.floor((acx - ar) / TILE); tx <= Math.floor((acx + ar) / TILE); tx += 1) wake(tx, ty);
+      }
+      const ux = wx / (S * 6), uy = wy / (S * 6);
+      for (let ay = Math.floor(acy - ar); ay <= Math.ceil(acy + ar); ay += 1) for (let ax = Math.floor(acx - ar); ax <= Math.ceil(acx + ar); ax += 1) {
+        if (ax < 0 || ay < 0 || ax >= AW || ay >= AH) continue;
+        const d = Math.hypot(ax + 0.5 - acx, ay + 0.5 - acy) / ar;
+        const i = ay * AW + ax;
+        if (d >= 1 || wall[i] || !active.has(((ay / TILE) | 0) * TW + ((ax / TILE) | 0))) continue;
+        const k = 1 - d * d;
+        // (it does not slow air already going faster that way)
+        if (ux && (Math.abs(vx[i]) < Math.abs(ux) * k || Math.sign(vx[i]) !== Math.sign(ux))) vx[i] = clamp(vx[i] + (ux * k - vx[i]) * 0.8);
+        if (uy && (Math.abs(vy[i]) < Math.abs(uy) * k || Math.sign(vy[i]) !== Math.sign(uy))) vy[i] = clamp(vy[i] + (uy * k - vy[i]) * 0.8);
+      }
+    }
     function step() {
       if (!active.size) { stats.tiles = 0; return; }
       const t0 = performance.now();
@@ -199,7 +219,7 @@
       return OUT;
     }
     const ZERO = [0, 0, 0], OUT = [0, 0, 0];
-    return { blast, step, at, stats, busy: () => active.size > 0, S };
+    return { blast, gust, step, at, stats, busy: () => active.size > 0, S };
   }
 
   PW.createAir = createAir;

@@ -33,6 +33,9 @@
     FILL: 37, SLAB: 38, COURSE: 39,
     // Gases (variant bits = density 0-3) and the ash left by fire.
     SMOKE: 40, STEAM: 41, DUST: 42, ASH: 43,
+    // A piece of a wrecked building that came to rest whole: part of the ground now (it can slide
+    // and break loose), keeping the building's colours, until a town's builders clear it for HM.
+    RUIN: 44,
   });
   // Gases sit between air and liquids: anything heavier moves through them as through air.
   const PHASE = Object.freeze({ AIR: 0, GAS: 1, LIQUID: 2, POWDER: 3, SOLID: 4 });
@@ -176,6 +179,9 @@
   define(M.ASH, 'ash', { phase: PHASE.POWDER, ground: true, hardness: 0.03 },
     [[96, 94, 90], [82, 80, 77], [108, 106, 101], [74, 72, 70], [100, 98, 93], [88, 86, 82], [70, 68, 66], [92, 90, 86]]);
   skyline[M.ASH] = 1; terrain[M.ASH] = 1;
+  define(M.RUIN, 'ruin', { ground: true, hardness: 0.35, breaksTo: M.DEBRIS },
+    [[128, 126, 120], [112, 110, 105], [140, 132, 122], [104, 98, 92], [120, 114, 106], [96, 92, 88], [134, 128, 118], [108, 104, 98]]);
+  skyline[M.RUIN] = 1; terrain[M.RUIN] = 1;
   for (const id of [M.SMOKE, M.STEAM, M.DUST]) passable[id] = 1;
   open[M.AIR] = 1; open[M.SMOKE] = 1; open[M.STEAM] = 1; open[M.DUST] = 1;
   for (let id = 1; id < 64; id += 1) if (names[id] && phase[id] >= PHASE.POWDER && id !== M.GLASS) stopsShots[id] = 1;
@@ -245,6 +251,7 @@
   physics([M.CLAY], { resist: 0.02, cohesion: 6 });
   physics([M.GRAVEL], { resist: 0.02, cohesion: 2 });
   physics([M.RUBBLE], { resist: 0.012, cohesion: 2 });
+  physics([M.RUIN], { resist: 0.025, cohesion: 4, shake: 0.12 });
   physics([M.STONE], { resist: 0.045, cohesion: 16 });
   physics([M.ORE], { resist: 0.05, cohesion: 20 });
   physics([M.BEDROCK], { resist: 1, cohesion: 255 });
@@ -289,7 +296,7 @@
   physics([M.SMOKE], { buoyancy: 0.55, fade: 1 / 150 });
   physics([M.STEAM], { buoyancy: 0.8 });
   // (dust from blasts and collapses hangs in the air a long while, settling slowly)
-  physics([M.DUST], { buoyancy: -0.12, fade: 1 / 350 });
+  physics([M.DUST], { buoyancy: -0.12, fade: 1 / 900 });
 
   // ---- Hashing and random numbers ------------------------------------------------------------
   function hash2(x, y) {
@@ -569,9 +576,9 @@
     // a lamp and its cable): a pipe along the wall passes behind it.
     FITTING: 32768 });
   // Does a pipe fixed to the wall show at open cell (x, y)? Over the wall face (a finished
-  // tunnel's too, clamped to it), or across a cave's rock; not behind a fitting, a ladder, a rail
-  // or a belt.
-  const HIDES_PIPE = FLAG.FITTING | FLAG.LADDER | FLAG.FIXTURE;
+  // tunnel's too, clamped to it), or across a cave's rock; not behind a fitting, a ladder's rails
+  // and rungs, a rail or a belt - but between a ladder's rungs, yes.
+  const HIDES_PIPE = FLAG.FITTING | FLAG.FIXTURE;
   function pipeShows(world, x, y) {
     return getLayer(world, 'pipe', x, y) !== 0 && !(getLayer(world, 'back', x, y) && (getFlags(world, x, y) & HIDES_PIPE))
       && !getLayer(world, 'deco', x, y);

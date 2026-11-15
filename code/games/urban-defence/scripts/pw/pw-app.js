@@ -62,6 +62,7 @@
   // structure is analysed and what fails falls as rigid pieces.
   const fragments = PW.createFragments ? PW.createFragments(world, particles) : null;
   const structure = fragments && PW.createStructure ? PW.createStructure(world, fragments) : null;
+  world.fragments = fragments;   // (trees and boughs that break off fall as rigid pieces too)
   if (structure) {
     world.onDamage = (id) => structure.notify(id);
     particles.listeners.chip = (owner) => { if (owner) structure.notify(owner); };

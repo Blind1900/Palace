@@ -198,7 +198,7 @@
       for (let y = wallTop - 6; y < G; y += 1) for (let d = 1; d <= 8; d += 1) {
         const x = ladderAt(G - y) - side * d;
         const isRail = d === 1 || d === 8, isRung = (y - wallTop) % 6 === 0;
-        if (isRail || isRung) PW.setLayer(world, 'back', x, y, rgb(isRail ? rail : rung));
+        if (isRail || isRung) { PW.setLayer(world, 'back', x, y, rgb(isRail ? rail : rung)); PW.setFlag(world, x, y, FLAG.FITTING); }
         PW.setFlag(world, x, y, FLAG.LADDER);
         if (owner) PW.setOwner(world, x, y, owner);
       }
@@ -437,7 +437,7 @@
           const x = out(d);
           for (let y = G - 6; y < p.natural(x); y += 1) {
             const isRail = d === 1 || d === 8, isRung = (y - G) % 6 === 0;
-            if (isRail || isRung) PW.setLayer(world, 'back', x, y, rgb(isRail ? rail : rung));
+            if (isRail || isRung) { PW.setLayer(world, 'back', x, y, rgb(isRail ? rail : rung)); PW.setFlag(world, x, y, FLAG.FITTING); }
             PW.setFlag(world, x, y, FLAG.LADDER);
             if (owner) PW.setOwner(world, x, y, owner);
           }

@@ -24,6 +24,7 @@
   const TOPPLE_MARGIN = 3;    // cells the centre of the load may overhang its supports
   const MIN_LOAD = 80;        // rows carrying less than this are not checked (roof ornaments...)
   const CRUMBLE_ONLY = 40;    // parts smaller than this crumble instead of falling whole
+  const SPAN = 60;            // cells (about 4 m) a floor spans unsupported before it sags in
   const REPEAT = 15;          // ticks between analyses of a building still being damaged
   const SOLID = 1, BACK = 2, FIT = 4, FRAME = SOLID | BACK;
 
@@ -83,26 +84,31 @@
       return { x0, y0, x1, y1, gw, gh, cls, at, count, fx0, fx1, fy0, fy1 };
     }
     // As built, from its canvas: per row above the floor, the load (frame above the row), the
-    // supporting columns (frame with frame on top) and their span, and whether the load sat over them.
+    // supporting columns (frame with frame on top), their span and centre, the widest gap between
+    // them, and whether the load sat over them.
     function blueprintOf(b) {
       if (b.blueprint) return b.blueprint;
       const c = b.canvas, rows = c.ground;
       const frame = (x, y) => (c.mat[y * c.width + x] && isStructure(c.mat[y * c.width + x] & ID_MASK)) || c.back[y * c.width + x] !== 0;
       const load = new Float32Array(rows), support = new Int32Array(rows), left = new Int32Array(rows).fill(1e9), right = new Int32Array(rows).fill(-1e9);
-      const balanced = new Uint8Array(rows);
+      const supportX = new Float64Array(rows), maxGap = new Int32Array(rows), balanced = new Uint8Array(rows);
       let total = 0, above = 0, aboveX = 0;
       for (let y = 0; y < rows; y += 1) {
         load[y] = above;
-        let rowX = 0, rowN = 0;
+        let rowX = 0, rowN = 0, last = -1;
         for (let x = 0; x < c.width; x += 1) {
           if (!frame(x, y)) continue;
           rowN += 1; rowX += x + b.ox + 0.5; total += 1;
-          if (y > 0 && frame(x, y - 1)) { support[y] += 1; left[y] = Math.min(left[y], x + b.ox); right[y] = Math.max(right[y], x + b.ox); }
+          if (y > 0 && frame(x, y - 1)) {
+            support[y] += 1; supportX[y] += x + b.ox + 0.5; left[y] = Math.min(left[y], x + b.ox); right[y] = Math.max(right[y], x + b.ox);
+            if (last >= 0) maxGap[y] = Math.max(maxGap[y], x - last - 1);
+            last = x;
+          }
         }
         if (above) { const centre = aboveX / above; balanced[y] = centre >= left[y] - TOPPLE_MARGIN && centre <= right[y] + 1 + TOPPLE_MARGIN ? 1 : 0; }
         above += rowN; aboveX += rowX;
       }
-      b.blueprint = { load, support, left, right, balanced, total };
+      b.blueprint = { load, support, supportX, maxGap, left, right, balanced, total };
       return b.blueprint;
     }
 
@@ -113,9 +119,23 @@
       if (!building(id) || due.has(id)) return;
       due.set(id, Math.max(tick + 2, (last.get(id) ?? -1e9) + REPEAT));
     }
+    let sweepAt = 0;
     function step(budgetMs = 1.5) {
       tick += 1;
       const t0 = performance.now();
+      // (now and then a damaged building is looked at again: what held a bit of it up can go
+      // without its knowing - rubble sliding off, a ruin that propped it crumbling, a risen core
+      // clearing the heap)
+      const all = world.buildings || [];
+      if (tick % 15 === 0 && all.length) {
+        for (let k = 0; k < all.length; k += 1) {
+          const b = all[(sweepAt + k) % all.length];
+          if (b.health === undefined || b.health >= 1 || due.has(b.id) || tick - (last.get(b.id) ?? -1e9) < 60) continue;
+          notify(b.id);
+          sweepAt = (sweepAt + k + 1) % all.length;
+          break;
+        }
+      }
       for (const [id, at] of due) {
         if (at > tick) continue;
         due.delete(id);
@@ -198,12 +218,16 @@
       let load = 0, loadX = 0, fail = null;
       for (let y = S.fy0; y <= Math.min(S.fy1, b.ground - 1); y += 1) {
         const r = y - b.oy;
-        let rowN = 0, rowX = 0, carried = 0, left = Infinity, right = -Infinity;
+        let rowN = 0, rowX = 0, carried = 0, carriedX = 0, left = Infinity, right = -Infinity, last = -1, gap = 0, gapAt = 0;
         for (let x = cx0; x <= cx1; x += 1) {
           const k = at(x, y);
           if (!state[k]) continue;
           rowN += 1; rowX += x + 0.5;
-          if (state[k - gw]) { carried += 1; if (x < left) left = x; if (x > right) right = x; }
+          if (state[k - gw]) {
+            carried += 1; carriedX += x + 0.5; if (x < left) left = x; if (x > right) right = x;
+            if (last >= 0 && x - last - 1 > gap) { gap = x - last - 1; gapAt = (x + last) >> 1; }
+            last = x;
+          }
         }
         const support = carried;
         if (r >= 0 && r < bp.load.length && load >= MIN_LOAD && bp.support[r] > 0) {
@@ -211,13 +235,19 @@
           const centreX = loadX / load;
           if (!support || load / support > FAIL_RATIO * Math.max(1, built)) {
             // Crushed: the side that lost more of its support drops, pivoting about the far edge;
-            // when it lost them evenly it comes straight down into its footprint.
+            // when it lost them evenly it comes straight down into its footprint. (Which side lost
+            // more: how far what still carries it has moved from where its supports stood as
+            // built - a sliver of wall left at a corner does not count as the side standing.)
             const span = bp.right[r] - bp.left[r] + 1;
-            const lostLeft = (support ? left : bp.right[r]) - bp.left[r], lostRight = bp.right[r] - (support ? right : bp.left[r]);
-            const dir = lostLeft >= lostRight ? -1 : 1;
-            const even = support < bp.support[r] * 0.2 || Math.abs(lostLeft - lostRight) < span * 0.3;
+            const shift = support ? (carriedX / support - bp.supportX[r] / bp.support[r]) / span : 0;
+            const dir = shift > 0 ? -1 : 1;
+            const even = support < bp.support[r] * 0.08 || Math.abs(shift) < 0.1;
             fail = { y, dir, pivotX: dir < 0 ? (support ? right + 1 : bp.right[r] + 1) : (support ? left : bp.left[r]),
-              reason: even ? 'pancake' : 'crushed', load, support, built };
+              reason: even ? 'pancake' : 'crushed', load, support, built, shift, row: r, builtSupport: bp.support[r] };
+          } else if (gap > Math.max(SPAN, bp.maxGap[r] * 1.5 + 12) && state[at(gapAt, y - 1)]) {
+            // Its walls blown out from under it: what is left of the row above spans a gap far
+            // wider than anything it spanned as built, and comes down into it.
+            fail = { y, dir: 1, pivotX: gapAt, reason: 'pancake', load, support, built, gap };
           } else if (bp.balanced[r] && (centreX < left - TOPPLE_MARGIN || centreX > right + 1 + TOPPLE_MARGIN)) {
             const dir = centreX < left ? -1 : 1;
             fail = { y, dir, pivotX: dir < 0 ? left : right + 1, reason: 'overhang', load, support, built };
@@ -228,6 +258,7 @@
       }
       if (fail) {
         report.failed = fail;
+        (b.failed || (b.failed = [])).push({ reason: fail.reason, y: fail.y, support: fail.support, built: fail.builtSupport, shift: fail.shift && +fail.shift.toFixed(3), row: fail.row });
         collapse(b, fail, S, state);
       }
       report.orphans = clearFittings(b, S, state);
