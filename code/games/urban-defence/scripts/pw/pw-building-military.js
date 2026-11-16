@@ -295,6 +295,9 @@
     // building's, at the scale of the base's heart).
     const floor = ground + pitDepth;
     const PLATE = [112, 118, 126], PLATE_LIT = [156, 162, 170], PLATE_DARK = [66, 70, 78], BUMP = [176, 182, 190];
+    // The dead god machine's colours: black and white, nothing else.
+    const INK = [8, 8, 10], INK_LIT = [46, 46, 50], INK_MID = [24, 24, 27];
+    const WHITE_CORE = [238, 242, 246], WHITE_DIM = [152, 158, 164];
     const tiers = [[18, 4], [15, 4], [12, 3], [8, 3]];
     let y = floor - 1;
     tiers.forEach(([half, rows], t) => {
@@ -303,18 +306,28 @@
         K.solid(c, x, y, M.STEEL, Math.abs(dx) === half || r === 0 ? PLATE_DARK : r === rows - 1 ? PLATE_LIT : bump ? BUMP : PLATE, ROLE.CRADLE);
       }
       if (t < tiers.length - 1) {
-        for (let dx = -half + 1; dx <= half - 1; dx += 1) K.solid(c, cx + dx, y, M.CORE, (dx + y) % 3 === 0 ? K.CORE_HOT : K.CORE_COLOR, ROLE.CORE);
+        for (let dx = -half + 1; dx <= half - 1; dx += 1) K.solid(c, cx + dx, y, M.CORE, (dx + y) % 3 === 0 ? WHITE_CORE : WHITE_DIM, ROLE.CORE);
         y -= 1;
       }
     });
+    // The main orb: a black sphere, lit faintly along its upper left, white light breaking out of
+    // it along thin cracks, one white eye at its heart - and the machine's own black tendrils
+    // wrapped over its lower half, a glint where they catch the light.
     const r = 17, orbY = y - r;
     for (let dy = -r; dy <= r; dy += 1) for (let dx = -r; dx <= r; dx += 1) {
       const d = Math.hypot(dx, dy);
       if (d > r + 0.3) continue;
-      const hot = Math.hypot(dx + r * 0.32, dy + r * 0.32) < r * 0.3;
-      const swirl = Math.abs(Math.sin(Math.atan2(dy, dx) * 3 + d * 0.45)) < 0.12 && d < r * 0.85;
-      const light = 1.25 - (dx + dy + 2 * r) / (4 * r) * 0.5 - Math.max(0, d / r - 0.5) * 0.7;
-      K.solid(c, cx + dx, orbY + dy, M.CORE, hot ? K.CORE_HOT : tone(K.CORE_COLOR, light * (swirl ? 1.18 : 1)), ROLE.CORE);
+      const a = Math.atan2(dy, dx);
+      const light = Math.max(0, -(dx + dy) / (2 * r)) * (1 - Math.max(0, d / r - 0.8) * 2);
+      let col = mix(INK_MID, INK_LIT, light * 1.6);
+      if (d > r - 1.4) col = (dx + dy) < 0 ? [70, 72, 76] : INK;
+      const crack = Math.abs(Math.sin(a * 2 + d * 0.55)) < 0.05 && d > 4 && d < r - 2;
+      if (crack) col = (d & 1) ? WHITE_CORE : WHITE_DIM;
+      const tendril = dy > -3 && d > 6 && Math.abs(Math.sin(a * 4 + d * 0.3)) < 0.14;
+      if (tendril) col = ((dx + dy) % 9 === 0) ? WHITE_DIM : INK;
+      const eye = Math.hypot(dx + 1, dy + 1);
+      if (eye < 2.2) col = WHITE_CORE; else if (eye < 3.4) col = mix(WHITE_DIM, col, 0.5);
+      K.solid(c, cx + dx, orbY + dy, M.CORE, col, ROLE.CORE);
     }
     // Clamp arms: from the pit floor out at the pedestal's foot up to the orb's flanks, claws in.
     // (each ends just off the orb's surface at height dy from its centre)
@@ -329,7 +342,7 @@
       for (let k = 0; k < 3; k += 1) K.solid(c, x1 - side * k, y1 - 1, M.STEEL, PLATE_DARK, ROLE.CRADLE);
     }
     c.cores.push({ x: cx, y: orbY, orb: true, kind: 'main', radius: r });
-    c.lamps.push({ x: cx, y: orbY, radius: 70, strength: 0.6, color: K.CORE_COLOR });
+    c.lamps.push({ x: cx, y: orbY, radius: 70, strength: 0.55, color: WHITE_CORE });
     // The armoured block stands on pillars. The main pillar grows out of the top of the core - its
     // translator turns HM into it - up through the pit to the block's underside, seamed with the
     // core's glow; a pair of secondary pillars stand beside the core on the pit floor, and another
@@ -340,7 +353,7 @@
     const mainHalf = 8, orbTop = orbY - r;
     for (let yy = by; yy <= orbTop + 2; yy += 1) for (let dx = -mainHalf; dx <= mainHalf; dx += 1) {
       const edge = Math.abs(dx) === mainHalf, seam = Math.abs(dx) === 2 && (yy & 7) < 5;
-      const color = seam ? K.CORE_COLOR : edge ? PLATE_DARK : Math.abs(dx) < 2 ? PLATE_LIT : (yy - by) % 12 === 0 ? PLATE_DARK : PLATE;
+      const color = seam ? WHITE_DIM : edge ? PLATE_DARK : Math.abs(dx) < 2 ? PLATE_LIT : (yy - by) % 12 === 0 ? PLATE_DARK : PLATE;
       K.solid(c, cx + dx, yy, M.STEEL, color, ROLE.WALL);
     }
     // (the collar where it meets the orb)
@@ -369,7 +382,7 @@
     }
     // Glow under the block.
     for (let dx = -blockWidth / 2 + 30; dx < blockWidth / 2 - 30; dx += 1) {
-      for (let dy = 0; dy < 6; dy += 1) if ((Math.round(dx) + dy) % 3 === 0) K.back(c, cx + Math.round(dx), by + dy, mix(K.CORE_COLOR, [20, 20, 24], 0.5 + dy * 0.08));
+      for (let dy = 0; dy < 6; dy += 1) if ((Math.round(dx) + dy) % 3 === 0) K.back(c, cx + Math.round(dx), by + dy, mix(WHITE_DIM, [20, 20, 24], 0.5 + dy * 0.08));
     }
     c.body ={ left: cx - pitWidth / 2, right: cx + pitWidth / 2, top: by - blockHeight, bottom: floor };
     K.bakeLights(c, style);
