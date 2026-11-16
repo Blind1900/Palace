@@ -24,6 +24,7 @@
   // formations.
   if (PW.generateSettlements && !gallery) {
     PW.generateSettlements(world, layout, seed);
+    if (PW.bunkers) PW.bunkers.generate(world, layout, seed);
     timings.settlements = performance.now() - t; t = performance.now();
   }
   if (PW.generateVegetation && !gallery) {

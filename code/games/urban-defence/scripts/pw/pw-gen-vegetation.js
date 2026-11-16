@@ -1064,11 +1064,12 @@
     return drawn;
   }
 
-  // Columns taken by settlements (streets, runways, fields, pumps, defences) plus a margin.
+  // Columns taken by settlements (streets, runways, fields, pumps, defences) and by the mountain
+  // outposts' and bunkers' works, plus a margin.
   function blockedColumns(world, margin = 24) {
     const blocked = new Uint8Array(world.width);
-    for (const settlement of world.settlements || []) {
-      for (const [a, b] of settlement.footprints || [[settlement.streetLeft, settlement.streetRight]]) {
+    for (const holding of [...(world.settlements || []), ...(world.outposts || []), ...(world.bunkers || [])]) {
+      for (const [a, b] of holding.footprints || [[holding.streetLeft, holding.streetRight]]) {
         for (let x = Math.max(0, Math.round(a) - margin); x <= Math.min(world.width - 1, Math.round(b) + margin); x += 1) blocked[x] = 1;
       }
     }

@@ -511,6 +511,68 @@
     return { plan: p, left, right, wall };
   }
 
+  // ---- Stepped rock foundations (military on mountains) ----------------------------------------------
+  // A mountain outpost does not perch on the peak: the summit is cut down to a bench, and under
+  // the bench's edges the rock is built up in solid stepped terraces of battered courses, down to
+  // the massif on either flank (the mountain-fortress ref). Each terrace is a flat tread a guard
+  // can stand on. Returns the span of the works and the treads, or null if the bench would need
+  // more build-up than a solid foundation can give.
+  const TREAD = 13, RISE = 14, STEPS_MAX = 7, BUILD_MAX = 110;
+  const UP_TREAD = 10, UP_RISE = 12, UP_MAX = 10;
+  const TERRACE_C = {
+    asian: { fill: [122, 118, 112], face: [104, 100, 96], cap: [146, 142, 132], joint: [62, 60, 58] },
+    gothic: { fill: [128, 124, 138], face: [106, 102, 116], cap: [150, 146, 160], joint: [76, 72, 86] },
+    modern: { fill: [158, 160, 156], face: [136, 138, 134], cap: [184, 186, 182], joint: [108, 110, 108] },
+  };
+  function rockTerrace(world, x0, x1, Y, style, owner) {
+    const col = TERRACE_C[style] || TERRACE_C.modern;
+    const reach = Math.max(STEPS_MAX * TREAD, UP_MAX * UP_TREAD);
+    // The ground as it is now, before any cutting (the works are measured against it).
+    const nat = [];
+    for (let x = x0 - reach; x <= x1 + reach; x += 1) nat[x - (x0 - reach)] = ground(world, x);
+    const natural = (x) => nat[Math.max(0, Math.min(nat.length - 1, x - (x0 - reach)))];
+    for (let x = x0; x <= x1; x += 1) if (natural(x) - Y > BUILD_MAX) return null;
+    // Where the flank falls away, the bench's edge is carried down on stepped terraces of solid
+    // fill; where the mountain rises on, the cut is benched instead - a back-wall of steps up to
+    // the natural ground, each face short enough to hold (never one sheer cut that sheds).
+    const uphill = { '-1': natural(x0 - 2) < Y - FLAT, 1: natural(x1 + 2) < Y - FLAT };
+    const target = (x) => {
+      const side = x < x0 ? -1 : x > x1 ? 1 : 0;
+      if (!side) return Y;
+      const out = side < 0 ? x0 - x : x - x1;
+      return uphill[side] ? Y - Math.min(UP_MAX, Math.ceil(out / UP_TREAD)) * UP_RISE
+        : Y + Math.min(STEPS_MAX, Math.ceil(out / TREAD)) * RISE;
+    };
+    const edge = { '-1': x0 - 1, 1: x1 + 1 };
+    for (const side of [-1, 1]) {
+      let x = side < 0 ? x0 : x1;
+      const works = (k) => uphill[side] ? target(k) > natural(k) : target(k) < natural(k);
+      while (Math.abs(x - (side < 0 ? x0 : x1)) < reach && works(x + side)) x += side;
+      // A back-wall that would still be mid-cliff after its last step cannot be benched: no works.
+      if (uphill[side] && works(x + side)) return null;
+      edge[side] = x;
+    }
+    const treads = [];
+    for (let x = edge[-1]; x <= edge[1]; x += 1) {
+      const T = target(x), g = natural(x);
+      // Clear plants over the works, cut the rock above the profile...
+      for (let y = Math.min(g, T) - 240; y < Math.min(g, T); y += 1) PW.setLayer(world, 'deco', x, y, 0);
+      for (let y = Math.min(g, T); y < T; y += 1) dig(world, x, y);
+      // ...and build the profile up to the rock below it in solid battered courses: coursed fill,
+      // a darker outer face on the risers, a lit cap along every tread (a benched back-wall gets
+      // the cap alone: its steps are cut rock, not fill).
+      const course = (y) => (y - Y) % 7 === 0 || (x + ((((y - Y) / 7) | 0) & 1) * 4) % 11 === 0;
+      const outward = x < x0 ? -1 : 1;
+      for (let y = T; y < T + 2; y += 1) put(world, x, y, M.FOUNDATION, col.cap, owner);
+      for (let y = T + 2; y < g + EMBED; y += 1) {
+        const riser = target(x + outward) !== T;   // column at a step's outer face
+        put(world, x, y, M.FOUNDATION, course(y) ? col.joint : riser ? col.face : col.fill, owner);
+      }
+      if (T > Y && T < g && target(x + outward) > T) treads.push({ x, y: T, side: outward });
+    }
+    return { x0: edge[-1], x1: edge[1], treads };
+  }
+
   // ---- Place a building with its base ------------------------------------------------------------------
   // Plans the floor, cuts and builds the base, stamps the canvas at the floor (with its core vaults
   // under it) and returns { stamp, plan }. null if the lot can't take it.
@@ -539,5 +601,5 @@
     return { stamp, plan: p, walls, under, cores, works: [extent.left, extent.right] };
   }
 
-  PW.foundations = { plan, measure, place, lie, allows, STEEP, STYLE, CUT_MAX, CUT_MAX_HANGAR };
+  PW.foundations = { plan, measure, place, lie, allows, rockTerrace, STEEP, STYLE, CUT_MAX, CUT_MAX_HANGAR };
 })();

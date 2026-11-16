@@ -1015,8 +1015,83 @@
       }
       world.settlements.push(settlement);
     }
+    mountainOutposts(world, layout, seed, styles);
     if (PW.generateDistricts) PW.generateDistricts(world, seed);
     return world.settlements;
+  }
+
+  // ---- Military on the mountains ---------------------------------------------------------------------
+  // Each base garrisons the high ground of its own half: the tallest massifs carry an outpost
+  // blockhouse on a bench cut into the summit, on stepped foundations down to the rock, with
+  // HESCO gabion walls on the terraces (the mountain-fortress and HESCO refs). The middle of the
+  // map belongs to no one, and its summits stay bare. Outposts are not settlements: no street, no
+  // pipes, no made ground - a garrison holds a rock.
+  function mountainOutposts(world, layout, seed, styles) {
+    const random = PW.createRandom(seed + 7171);
+    const W = world.width, centre = W / 2;
+    world.outposts = [];
+    const T = PW.buildingTypes;
+    const nearSite = (x) => layout.sites.some((s) => x > s.x0 - 500 && x < s.x1 + 500);
+    const candidates = layout.mountains
+      .filter((m) => m.height >= 430 && !nearSite(m.x) && Math.abs(m.x - centre) > W * 0.06)
+      .sort((a, b) => b.height - a.height);
+    for (const m of candidates) {
+      const side = m.x < centre ? 'left' : 'right';
+      // Tallest first, until each side holds two summits; a peak too sheer even for terraces is
+      // passed over for the next, and only built outposts keep others at a distance.
+      if (world.outposts.filter((p) => p.side === side).length >= 2) continue;
+      if (world.outposts.some((p) => Math.abs(p.summit - m.x) < 1600)) continue;
+      const style = styles[side];
+      const facing = side === 'left' ? 1 : -1;
+      const id = world.buildings.length + 1;
+      const canvas = T.military({ style, level: 3, variant: 'outpost', seed: seed + id * 613, facing, deviceFacing: facing });
+      // The summit itself (the massif's highest column near the main peak), cut down to a bench
+      // wide enough for the blockhouse and a walk around it.
+      let summit = Math.round(m.x);
+      const span = Math.max(60, Math.round(m.half * 0.3));
+      for (let x = Math.round(m.x) - span; x <= Math.round(m.x) + span; x += 1) {
+        if (x > 2 && x < W - 3 && world.groundTop[x] < world.groundTop[summit]) summit = x;
+      }
+      const half = Math.ceil((canvas.body.right - canvas.body.left) / 2) + 16;
+      // The bench is cut at least 44 into the summit - deeper on a sheer crag, so its edges need
+      // no more build-up than solid terraces can give; a peak that would need more than a 90-cell
+      // cut is left to the next candidate.
+      let benchMax = 0;
+      for (let x = summit - half; x <= summit + half; x += 1) benchMax = Math.max(benchMax, world.groundTop[x]);
+      const Y = Math.max(world.groundTop[summit] + 44, benchMax - 100);
+      if (Y - world.groundTop[summit] > 90) continue;
+      const terrace = PW.foundations.rockTerrace(world, summit - half, summit + half, Y, style, id);
+      if (!terrace) continue;
+      const canvasX = summit - Math.round((canvas.body.left + canvas.body.right) / 2);
+      const result = PW.foundations.place(world, canvas, canvasX, { style, owner: id });
+      if (!result) continue;
+      const record = PW.buildingRecord(world, result.stamp, { id, side, style, type: 'military', variant: 'outpost',
+        level: 3, facing, neutral: false, underConstruction: false, works: [terrace.x0, terrace.x1], plant: null,
+        base: { G: result.plan.G, walls: result.walls, under: result.under, cores: result.cores } });
+      world.buildings.push(record);
+      // HESCO gabions on the terraces: a basket on each tread past the first (clear of the walls
+      // and doors), so the steps carry a broken defensive wall down both flanks.
+      for (const tread of terrace.treads) if (Math.abs(tread.x - summit) > half + 20) hesco(world, tread, style, random);
+      world.outposts.push({ side, style, building: record, terrace, summit,
+        footprints: [[terrace.x0 - 10, terrace.x1 + 10]] });
+    }
+  }
+  // A HESCO gabion on a terrace tread: a wire basket of ballast, drawn as a sand-coloured block
+  // with the mesh as a dark grid over its face and a folded steel lip along the top. (Solid as a
+  // foundation: the mesh is what keeps a basket of sand standing.)
+  const HESCO_W = 12, HESCO_H = 12;
+  function hesco(world, tread, style, random) {
+    const x0 = tread.side > 0 ? tread.x - HESCO_W + 1 : tread.x;
+    const sandy = [172 - random.int(0, 14), 152 - random.int(0, 12), 110 - random.int(0, 10)];
+    for (let x = x0; x < x0 + HESCO_W; x += 1) {
+      for (let y = tread.y - HESCO_H; y < tread.y; y += 1) {
+        const mesh = (x - x0) % 4 === 0 || (tread.y - y) % 4 === 1;
+        const lip = y === tread.y - HESCO_H;
+        const c = lip ? [88, 92, 96] : mesh ? [96, 86, 62] : sandy;
+        PW.set(world, x, y, M.FOUNDATION, { quiet: true });
+        PW.setLayer(world, 'paint', x, y, rgb(c));
+      }
+    }
   }
 
   PW.generateSettlements = generateSettlements;
