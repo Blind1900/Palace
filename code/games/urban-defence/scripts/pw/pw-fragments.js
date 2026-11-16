@@ -221,9 +221,54 @@
       piece.footBand = Math.max(10, Math.min(80, gh * 0.2));
       piece.footV = v0 + gh - piece.footBand;
       piece.eaten = 0;
+      if (!parent) pushed(piece);
       list.push(piece);
       stats.spawned += 1;
       return piece;
+    }
+
+    // A blast throws back what it breaks loose: a piece that comes away within a moment of a blast
+    // near it - a building's top whose supports it blew out, a tree it felled - sets off already
+    // going away from it, the harder the nearer and the stronger the blast, and the lighter the
+    // piece (the push is the blast wave's on it, over its weight: a tree is thrown, a tower's top
+    // hardly stirred). A piece hinging on what is left of its foot is tipped over faster if the
+    // blast is on the side it is not falling to - it can only go over the way its pivot lets it.
+    // (The strongest of the blasts near it is what pushes it.)
+    const PUSH = 150;             // cells/s given to a light piece at the edge of a blast of power 1
+    const PUSH_MASS = 1500;       // a piece of more frame (or wood) than this is pushed the less, as its weight
+    const PUSH_TICKS = 90;        // a blast throws back what comes away up to this long after it
+    const PUSH_REACH = 4;         // ...out to this many times its radius
+    function pushed(p) {
+      const log = world.blastLog;
+      if (!log || !log.length) return;
+      const [cx, cy] = centre(p), now = world.tick || 0;
+      let px = 0, py = 0, best = 0;
+      for (const b of log) {
+        if (now - b.tick > PUSH_TICKS) continue;
+        const dx = cx - b.x, dy = cy - b.y, d = Math.hypot(dx, dy) || 1;
+        // (what lies within the blast's reach, from the near side of the piece)
+        const near = Math.max(b.r, d - Math.hypot(p.gw, p.gh) * 0.35);
+        if (near > b.r * PUSH_REACH) continue;
+        const v = PUSH * b.power * (b.r / near) * Math.min(1, PUSH_MASS / Math.max(1, p.mass));
+        if (v <= best) continue;
+        best = v;
+        // (it takes the blast wave over all its height: out from the blast, sideways, at least
+        // as much as up or down)
+        px = (Math.sign(dx) || 1) * v * Math.max(0.6, Math.abs(dx) / d);
+        py = dy / d * v;
+      }
+      if (!best) return;
+      if (p.mode === 'hinge') {
+        // (a push sideways on a top standing over its pivot tips it on over, the way it falls)
+        if (Math.sign(px) !== p.dir) return;
+        p.omega += px / Math.max(20, p.hy - cy);
+      } else {
+        // (free, it is thrown - and, pushed hardest high up where the wave meets the most of it,
+        // turned over away from the blast)
+        p.vx += px; p.vy += Math.min(py, 0) - Math.abs(px) * 0.15;
+        p.omega += px / Math.max(30, Math.hypot(p.gw, p.gh) * 0.5);
+      }
+      stats.pushed = (stats.pushed || 0) + 1;
     }
 
     // ---- Motion ---------------------------------------------------------------------------------
@@ -497,7 +542,7 @@
       const pts = p.points, faces = p.faces;
       const c0 = Math.cos(was.angle), s0 = Math.sin(was.angle);
       let crushed = 0, smashed = 0, n = 0, sx = 0, sy = 0, fx = 0, fy = 0, hs = 0, wet = 0;
-      let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
+      let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity, nb = 0;
       const [mid] = toWorld(p, c, s, p.gx, p.gy);   // (what it crushes is squeezed out away from this)
       for (let k = 0; k < pts.length; k += 2) {
         // (the storeys of it already crushed under its hinge are gone)
@@ -545,7 +590,11 @@
         if (p.mode === 'hinge' && PW.mat.terrain[mat[y * W + x] & ID_MASK] && y >= p.yf && Math.abs(x - p.hx) < 6) continue;   // seated on its pivot
         // (a building leaning over presses its foot into the ground: see eatFoot)
         if (p.mode === 'hinge' && !p.flora && pts[k + 1] > p.footV) { p.footTouch = true; continue; }
-        if (inside) continue;
+        // (bitten into it - already inside it, or deep in it - it grinds off there: see grind)
+        if (inside || (blocking(x - 1, y) && blocking(x + 1, y) && blocking(x, y - 1) && blocking(x, y + 1))) {
+          if (!p.flora && nb < OUTLINE_MAX) bites[nb++] = k;
+          continue;
+        }
         if (n < OUTLINE_MAX) { went[n * 2] = wx - ox; went[n * 2 + 1] = wy - oy; }
         n += 1; sx += wx; sy += wy; hs += hardness[mat[y * W + x] & ID_MASK];
         if (wx < bx0) bx0 = wx; if (wx > bx1) bx1 = wx; if (wy < by0) by0 = wy; if (wy > by1) by1 = wy;
@@ -571,9 +620,69 @@
         }
       }
       if (wet && !p.flora) soak(p, wet, pts.length / 2, h);
+      if (nb && grind(p, nb, c, s, mid)) return true;
       if (!n) { p.jam = 0; return false; }
       wentN = Math.min(n, OUTLINE_MAX);
       return strike(p, sx / n, sy / n, fx / n, fy / n, hs / n, Math.hypot(bx1 - bx0, by1 - by0));
+    }
+    // A piece does not slide on through what it has bitten into - the ground, another building:
+    // where it is moving into it, its own cells round each point that bit in are ground off,
+    // breaking away as rubble and dust thrown out along the surface. So the bottom of a falling
+    // top breaks apart against what it comes down on. (A hinging piece's are taken out of it where
+    // they are; a free one is made over from what is left every so often, so its outline follows
+    // what it has lost. True when it was made over.)
+    // (It grinds only where it is driving into what it bit - not sliding along it, nor resting on
+    // it - and wears away no more than a share of itself: what is left comes to rest whole, as a
+    // ruin.)
+    const GRIND = 1;              // cells round each point that bit in
+    const GRIND_SPEED = 12;       // cells/s into the surface: slower than this, it is only resting there
+    const GRIND_REMAKE = 24;      // cells ground off before a free piece is made over...
+    const GRIND_EVERY = 0.1;      // ...at most this often (s)
+    const GRIND_FLOOR = 400;      // frame cells: a smaller piece does not grind
+    const WEAR_MAX = 0.3;         // share of itself, at most, a piece wears away grinding
+    const bites = new Int32Array(OUTLINE_MAX);
+    function grind(p, nb, c, s, mid) {
+      const { grid, gw, gh, u0, v0, data, points } = p;
+      if (p.m0 === undefined) p.m0 = p.mass;
+      if (p.mass < GRIND_FLOOR || (p.worn || 0) >= p.m0 * WEAR_MAX) return false;
+      let lost = 0, n = 0;
+      for (let b = 0; b < nb; b += 1) {
+        const k = bites[b];
+        const [wx, wy] = toWorld(p, c, s, points[k], points[k + 1]);
+        const [vx, vy] = velocityAt(p, wx, wy);
+        const [nx, ny] = normalAt(Math.floor(wx), Math.floor(wy), vx, vy);
+        if (-(vx * nx + vy * ny) < GRIND_SPEED) continue;
+        const cu = Math.floor(points[k]), cv = Math.floor(points[k + 1]);
+        for (let v = cv - GRIND; v <= cv + GRIND; v += 1) for (let u = cu - GRIND; u <= cu + GRIND; u += 1) {
+          if (u < u0 || v < v0 || u >= u0 + gw || v >= v0 + gh) continue;
+          const gi = (v - v0) * gw + (u - u0), g = grid[gi];
+          if (!g) continue;
+          const q = g - 1;
+          const [x, y] = toWorld(p, c, s, u + 0.5, v + 0.5);
+          if (data.solid[q] && (n & 1) === 0 && rubbleFrom(data.solid[q], u, v)) {
+            const out = Math.sign(x - mid) || (random() < 0.5 ? -1 : 1);
+            particles.spawn(x, y - 1, vx * 0.35 + out * (20 + random() * 70) * SPILL * 0.6, -(10 + random() * 40) * LOFT, debrisOf(data.byte[q]), data.color[q] || 0, F.LAND, 6);
+          } else if ((n & 7) === 3) puff(x, y - 1, 1);
+          lost += weightOf(data.solid[q]);
+          grid[gi] = 0; data.solid[q] = 0; data.color[q] = 0;
+          n += 1;
+        }
+      }
+      if (!n) return false;
+      p.mass = Math.max(1, p.mass - lost);
+      p.worn = (p.worn || 0) + lost;
+      stats.ground = (stats.ground || 0) + n;
+      if (p.mode === 'hinge') { p.eaten += n; return false; }
+      p.grit = (p.grit || 0) + n;
+      if (p.grit < GRIND_REMAKE || time - (p.remadeAt ?? -1) < GRIND_EVERY) return false;
+      const before = list.length;
+      rebuild(p);
+      if (list.length > before) {
+        // (the same piece going on, less what it lost: its age, its rest and its wear go with it)
+        const q = list[list.length - 1];
+        Object.assign(q, { remadeAt: time, age: p.age, touched: p.touched, still: p.still, m0: p.m0, worn: p.worn, crumpled: p.crumpled });
+      }
+      return true;
     }
     // (how far each point that struck something moved this sub-step)
     const went = new Float32Array(OUTLINE_MAX * 2);
