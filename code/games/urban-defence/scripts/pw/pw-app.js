@@ -52,6 +52,7 @@
   world.simActive.fill(0);
   for (let c = 0; c < world.chunkCount; c += 1) PW.clearSimRect(world, c);
   const renderer = PW.createRenderer(canvas, world, { seed });
+  world.colorAt = renderer.colorAt;
   renderer.refreshOverview(Infinity);
   timings.overview = performance.now() - t;
   world.windSeed = seed;

@@ -81,7 +81,8 @@
           const heavy = phase[id] >= PW.PHASE.POWDER;
           const wall = !heavy && back !== 0 && spec.owner && owners && owners[l] === spec.owner;
           const solid = heavy || wall;
-          const paint = heavy ? ((paints && paints[l]) || palettes[id][(m >> 6) * 2 + (PW.hash2(x, y) & 1)]) : 0;
+          // (ground keeps the look it had in the world: its strata, its depth, its grain)
+          const paint = heavy ? ((paints && paints[l]) || (world.colorAt && PW.mat.terrain[id] ? world.colorAt(x, y) : palettes[id][(m >> 6) * 2 + (PW.hash2(x, y) & 1)])) : 0;
           const color = deco || paint || back;
           if (!color && !solid) continue;
           data.x[k] = x; data.y[k] = y; data.color[k] = color; data.byte[k] = wall ? M.DEBRIS : solid ? m : 0; data.solid[k] = heavy ? 1 : wall ? THIN : 0;
@@ -349,7 +350,7 @@
     const MEMBER = 6;             // a cell carries load down if the frame runs on this far beyond it
     const SELF_MAX = 0.4;         // the share of its own height a piece crushes of itself, at most
     function pancake(p, h) {
-      if (p.flora || p.mass < PANCAKE_MIN || p.pancaked) return;
+      if (p.flora || !p.owner || p.mass < PANCAKE_MIN || p.pancaked) return;
       p.vd = Math.max(0, p.vd + (G - (p.resist || 0)) * h);
       let go = p.vd * h;
       while (go > 1e-6) {

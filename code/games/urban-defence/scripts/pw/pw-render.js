@@ -827,6 +827,11 @@
       ctx.fillRect(left, top, extent, Math.max(1, Math.round((gy + size - camera.y) * camera.zoom) - top));
     }
     function invalidateAll() { for (const c of world.chunkVersion.keys()) world.chunkVersion[c] += 1; }
+    // The colour a cell is drawn in (a piece of ground lifted out of the world keeps its look).
+    function colorAt(x, y) {
+      const c = (y >> CHUNK_SHIFT) * world.chunksX + (x >> CHUNK_SHIFT);
+      return baseColor(x, y, world.paint[c], world.back[c], 2, world.pipe[c], world.flags[c]);
+    }
 
     resize(canvas.clientWidth || canvas.width, canvas.clientHeight || canvas.height);
     camera.zoomIndex = minZoomIndex();
@@ -837,7 +842,7 @@
       ctx, camera, view, ZOOM_STEPS,
       resize, setZoomIndex, focus, panByDevice, clampCamera, minZoomIndex,
       screenToWorld, screenToWorldDevice, worldToScreen, worldToDevice,
-      beginFrame, drawSky, drawBase, drawDeco, drawCells, fillCell, refreshOverview, invalidateAll,
+      beginFrame, drawSky, drawBase, drawDeco, drawCells, fillCell, refreshOverview, invalidateAll, colorAt,
       stats: () => ({ cached: cache.size, frame, zoom: camera.zoom, lod: lodForZoom() }),
       get frame() { return frame; },
     };
