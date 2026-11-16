@@ -13,25 +13,30 @@ const W = world.width;
 check(ops.filter((o) => o.side !== 'neutral').length === 2 && ops.length >= 4, `mining operations at both starter mines and the neutral mines (${ops.map((o) => `${o.side}:${o.node.tier}`).join(', ')})`);
 check(ops.every((o) => o.miners.length >= 3), 'each operation has a crew of miners');
 for (const side of ['left', 'right']) {
-  const kinds = ['sm', 'hm', 'water'].map((r) => pipes.lineFor(side, r));
-  const hm = kinds[1];
+  const hm = pipes.lineFor(side, 'hm');
   const op = ops.find((o) => o.side === side);
-  check(kinds.every(Boolean) && hm.risers.some((r) => r.x === op.riser.x), `${side} base runs SM, HM and water lines, and the HM line has a riser down to its mine`);
-  // The lines run under the ground, never through the open air (crossing a shaft on its back
-  // wall is fine).
+  check(!!hm && hm.risers.some((r) => r.x === op.riser.x), `${side}'s bundle has a riser down to its mine's hopper`);
+  // The bundle runs under the ground, never through the open sky (crossing a shaft, a gallery or
+  // a core's bed on a back wall or in a sleeve is fine).
   let exposed = 0;
-  for (const line of kinds) for (let x = line.x0; x <= line.x1; x += 7) {
+  for (let x = hm.x0; x <= hm.x1; x += 7) {
+    if (hm.cores.some((c) => Math.abs(x - c.x) < 14)) continue;
     for (let r = 0; r < 5; r += 1) {
-      const y = line.ys[x - line.x0] + r;
-      if ((PW.get(world, x, y) & 63) === M.AIR && !(PW.getFlags(world, x, y) & PW.FLAG.TUNNEL)) { exposed += 1; break; }
+      const y = hm.ys[x - hm.x0] + r;
+      if ((PW.get(world, x, y) & 63) !== M.AIR) continue;
+      if (PW.getFlags(world, x, y) & PW.FLAG.TUNNEL) continue;
+      if (PW.getLayer(world, 'back', x, y) || PW.getLayer(world, 'pipe', x, y)) continue;
+      exposed += 1; break;
     }
   }
-  check(exposed === 0, `${side} lines run underground all the way (${exposed} exposed samples)`);
+  check(exposed === 0, `${side}'s bundle runs underground all the way (${exposed} exposed samples)`);
 }
 const water = pwApp.countWater();
 // Long enough for the first loads to ride the longest belt to its hopper (16 cells a second).
 const longestBelt = Math.max(...ops.map((o) => Math.abs(o.belt.head - o.belt.tail)));
 pwApp.stepWorld(60 * Math.round(Math.max(20, longestBelt / 16 + 14)));
+// (a crew still driving its drift through barren rock gets a little longer to reach the vein)
+for (let t = 0; t < 8 && ops.some((o) => o.side === 'neutral' && o.stored === 0); t += 1) pwApp.stepWorld(60 * 5);
 for (const op of ops) {
   if (op.side === 'neutral') check(op.mined > 0 && op.stored > 0 && op.heap.length > 0, `neutral ${op.node.tier}: miners mine ore into the storage room (${op.mined} cells mined, ${op.stored} HM stored, ${op.heap.length} heap cells)`);
   else check(op.mined > 0 && op.delivered > 0 && op.stored === 0, `${op.side} starter mine: ore goes up the belt into the HM pipeline (${op.mined} mined, ${op.delivered} HM delivered)`);

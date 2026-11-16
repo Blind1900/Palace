@@ -13,7 +13,7 @@ const MADE = new Set([M.FILL, M.SLAB, M.COURSE]);
 const madeAt = (x, y) => MADE.has(PW.get(world, x, y) & 63) && !PW.getOwner(world, x, y);
 // (pipe beds and warning tapes are made ground too, but they are the lines', not the town's layers)
 const tone = (c, k) => PW.abgr(Math.min(255, c[0] * k) | 0, Math.min(255, c[1] * k) | 0, Math.min(255, c[2] * k) | 0);
-const lineGround = new Set([tone([170, 156, 118], 1), tone([170, 156, 118], 0.88), ...PW.PIPE_LINES.map((l) => tone(l.tape, 0.72))]);
+const lineGround = new Set([tone([170, 156, 118], 1), tone([170, 156, 118], 0.88)]);
 const layerAt = (x, y) => madeAt(x, y) && !lineGround.has(PW.getLayer(world, 'paint', x, y));
 
 for (const s of world.settlements) {

@@ -306,7 +306,9 @@
           m.timer = 0;
           const v = drillCell(world, op, m.x + op.dir * 12, op.floor - 10 - m.lane * 8);
           if (!v) { refreshFace(world, op); m.state = m.load ? 'toBelt' : 'toFace'; break; }
-          if (v < 0) break;   // drove through rock towards the vein: no ore this time
+          // Drove through rock towards the vein: no ore this time. A hauler-to-be does not grind
+          // on through barren rock while the stored heap waits: it dumps its part-load and goes.
+          if (v < 0) { if (hauler) m.state = m.load ? 'toBelt' : 'toStorage'; break; }
           m.load += 1; m.value += v;
           if (m.load >= LOAD) { refreshFace(world, op); m.state = 'toBelt'; }
         }

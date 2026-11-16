@@ -50,24 +50,30 @@ check(flooded > 0.5, `tunnel under the lake floods >50% within 5 s (${(flooded *
 await view('sb-flood', bottomX, tunnelTop - 40, 4);
 run(300);
 const after = totalWater();
-check(after === before, `water conserved through the flood (${before} -> ${after})`);
+// (a cut bundle spills its water packets as real water: that much gain is the pipes', not a leak)
+const spilledNow = world.pipes ? world.pipes.stats.spilled : 0;
+check(after >= before && after <= before + spilledNow, `water conserved through the flood (${before} -> ${after}, ${spilledNow} spilled from cut pipes)`);
 const times = pwApp.simTimes.slice(-240).sort((a, b) => a - b);
 const p95 = times[Math.floor(times.length * 0.95)];
 check(p95 < 6, `sim p95 during the flood ${p95.toFixed(2)} ms`);
 
-// 2. Blast into the lake: droplets fly but no water is lost.
+// 2. Blast into the lake: droplets fly but no water is lost (cut pipes may spill a little more in).
 const beforeBlast = totalWater();
+const spilledBefore = world.pipes ? world.pipes.stats.spilled : 0;
 pwApp.explode(lake.x, lake.level + 6, 40, 1.1);
 run(600);
-check(totalWater() === beforeBlast, `water conserved through a blast in the lake (${beforeBlast} -> ${totalWater()})`);
+const spillGain = (world.pipes ? world.pipes.stats.spilled : 0) - spilledBefore;
+check(totalWater() >= beforeBlast && totalWater() <= beforeBlast + spillGain, `water conserved through a blast in the lake (${beforeBlast} -> ${totalWater()}, ${spillGain} spilled from cut pipes)`);
 
 // 3. Crater on flat open ground: flat floor and steep walls. The flattest wild stretch is levelled
 // first, the way the game terraces a building pad, so the test always has flat ground to blast.
 let flatX = null, bestSpread = Infinity;
-// (wild ground: clear of the sites and of everything a town has built past them)
+// (wild ground: clear of the sites, of everything a town has built past them, and of the resource
+// bundle - a crater through its casing would terrace the walls being measured)
 const built = (x) => (world.settlements || []).some((s) => (s.footprints || []).some(([a, b]) => x > a - 150 && x < b + 150));
+const piped = (x) => world.pipes && world.pipes.lines.some((l) => x > l.x0 - 80 && x < l.x1 + 80);
 for (let x = 600; x < world.width - 600; x += 37) {
-  if (layout.sites.some((s) => x > s.x0 - 300 && x < s.x1 + 300) || built(x)) continue;
+  if (layout.sites.some((s) => x > s.x0 - 300 && x < s.x1 + 300) || built(x) || piped(x)) continue;
   if (layout.lakes.some((l) => Math.abs(x - l.x) < l.half + 300)) continue;
   let lo = Infinity, hi = -Infinity;
   for (let d = -120; d <= 120; d += 10) { lo = Math.min(lo, world.groundTop[x + d]); hi = Math.max(hi, world.groundTop[x + d]); }

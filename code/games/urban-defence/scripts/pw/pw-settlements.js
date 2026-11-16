@@ -738,8 +738,9 @@
         // (a neutral farm leads the cluster, so its field grows out to the left)
         const facing = lot.field ? (dir ? -dir : index === 0 ? -1 : 1) : (dir || mixed[index]);
         const canvas = make(lot, style, facing, neutral ? 0 : dir, index);
-        // (and the ground beside it where the machines its supply lines come up into stand)
-        const plantW = PW.PIPE_PLANT ? PW.PIPE_PLANT.width(lot.type) : 0;
+        // (a farm keeps open ground beside it for its yard and field to grow into; the machine
+        // rows of the old per-resource lines are gone - the bundle connects through the cores)
+        const plantW = lot.type === 'farm' ? 110 : 0;
         return { ...lot, facing, canvas, plantW, bodyWidth: canvas.body.right - canvas.body.left + 1 };
       });
       const gapFor = () => neutral ? random.int(8, 44) : random.int(24, 120);
@@ -852,15 +853,17 @@
         lots.forEach((lot, index) => {
           const { canvas } = lot;
           const last = index === lots.length - 1;
-          if (last) cursor += step * lot.plantW;
+          // A farm's open strip lies on the side its field grows towards (its facing), so a farm
+          // facing back into the row still has ground of its own; the last lot's lies before it.
+          const stripFirst = lot.plantW > 0 && (last || lot.facing !== step);
+          if (stripFirst) cursor += step * lot.plantW;
           const canvasX = step > 0 ? cursor - canvas.body.left : cursor - canvas.body.right;
           lot.canvasX = canvasX;
           lot.left = canvasX + canvas.body.left;
           lot.right = canvasX + canvas.body.right;
-          // (its machines: after it, towards the next lot; the last lot's before it)
           const far = step > 0 ? lot.right : lot.left, near = step > 0 ? lot.left : lot.right;
-          lot.plant = lot.plantW ? (last ? plantSpan(near, -step, lot.plantW) : plantSpan(far, step, lot.plantW)) : null;
-          cursor = far + step * ((last ? 0 : lot.plantW) + gapFor());
+          lot.plant = lot.plantW ? (stripFirst ? plantSpan(near, -step, lot.plantW) : plantSpan(far, step, lot.plantW)) : null;
+          cursor = far + step * ((stripFirst ? 0 : lot.plantW) + gapFor());
           placed.push(lot);
         });
       }
@@ -904,7 +907,9 @@
       // the street stops at a farm that ends the town, and leaves out a farm's lot inside it.
       const ends = settlement.buildings, first = ends[0], last = ends[ends.length - 1];
       const farms = settlement.buildings.filter((b) => b.type === 'farm');
-      const onFarm = (x) => farms.some((b) => x >= b.works[0] - 2 && x <= b.works[1] + 2);
+      // (a farm's ground is field, never road: its lot, and the open strip its field grows into)
+      const onFarm = (x) => farms.some((b) => (x >= b.works[0] - 2 && x <= b.works[1] + 2)
+        || (b.plant && x >= Math.min(b.plant.x0, b.plant.x1) - 2 && x <= Math.max(b.plant.x0, b.plant.x1) + 2));
       const streetLeft = settlement.streetLeft = first.type === 'farm' ? first.works[1] + 3 : first.works[0] - 50;
       const streetRight = settlement.streetRight = last.type === 'farm' ? last.works[0] - 3 : last.works[1] + 50;
       // Streets through the ground floors (style paving) and the runway. In a neutral town the
@@ -939,14 +944,15 @@
       const wetAt = (x) => layout.lakes.some((lake) => lake.left !== undefined && x > lake.left - 30 && x < lake.right + 30);
       for (const b of settlement.buildings.filter((item) => item.type === 'farm')) {
         const lot = placed.find((item) => item.canvas === b.canvas);
-        if (!lot || !lot.field) continue;
+        if (!lot) continue;
         const outward = b.facing;
         // (on a flat base the field carries straight on from the lot; on rolling ground it is its
         // own terrace a little way off)
         const gap = relief ? 14 : 1;
         const start = outward > 0 ? b.works[1] + gap : b.works[0] - gap;
-        // (the farm's own yard takes the first stretch of its land, before the field)
-        let length = neutral ? 110 : 150;
+        // (the farm's own yard takes the first stretch of its land, before the field; a farm
+        // without a leading field of its own still ploughs the open strip it was given)
+        let length = lot.field ? (neutral ? 110 : 150) : 90;
         for (let d = 0; d <= length; d += 1) {
           const x = start + outward * d;
           // (it stops short of the shore: the lake guards a town on that side)

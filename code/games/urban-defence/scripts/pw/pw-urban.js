@@ -263,13 +263,13 @@
         const top = mat[own * W + x] & ID_MASK;
         const covered = own > world.groundTop[x];     // something stands on the land here
         const paved = e > 0 && ((PW.getFlags(world, x, own) & FLAG.ROAD) || top === M.ASPHALT || top === M.ROADBED || top === M.FOUNDATION);
-        // Down to the bed of the deepest line here (the lines are the divider, however deep they
-        // dip); where no line runs, a full depth whose edge wanders and frays downwards.
-        let bottom = -1;
-        for (const line of lines) if (x >= line.x0 && x <= line.x1) bottom = Math.max(bottom, line.ys[x - line.x0] + bore - 1 + bed);
+        // The town's ground keeps its full depth (the cross-section refs): the bundle runs
+        // through its upper metre, and the made ground never ends above the bundle's bed.
+        let lineBed = -1;
+        for (const line of lines) if (x >= line.x0 && x <= line.x1) lineBed = Math.max(lineBed, line.ys[x - line.x0] + bore - 1 + bed);
         const soft = s + FULL + Math.round(wander(x + 4001) * 8);
         const start = covered ? own : e > 0 ? own + (paved ? PAVED : KEEP_SOIL) : Math.max(s + PAVED, own + KEEP_SOIL);
-        const last = bottom >= 0 ? bottom : soft + SINK;
+        const last = Math.max(lineBed, soft + SINK);
         // Past the face the layers bend with the land, more the further out they reach.
         const bend = Math.round(Math.min(1, Math.max(0, CUT - e) / SCATTER) * DRAPE * drape(x + ex * 0.5));
         for (let y = start; y <= last; y += 1) {
@@ -283,7 +283,7 @@
           const b = bandIndex[d];
           const across = (CUT + d * LEAN + wander(d * 2.5 + ex * 0.37) * WANDER - e) /
             (SCATTER * (0.35 + 0.65 * (PW.hash3(b, ex, 41) & 255) / 255));
-          const below = bottom >= 0 ? 0 : (y - soft) / SINK;
+          const below = (y - soft) / SINK;
           const t = Math.max(across, below);
           let fade = 0;
           if (t > 0) {
