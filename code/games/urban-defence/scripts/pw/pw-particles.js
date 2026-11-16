@@ -37,9 +37,9 @@
 
     // A chunk: a particle that is a clump of cells flying together (see breakage). Its cells are
     // kept as offsets from its anchor (its bottom row, in the middle), the particle's position.
-    const CHUNKS = 4096, CHUNK_CELLS = 64;
+    const CHUNKS = 2048, CHUNK_CELLS = 256;
     const chunkOf = new Int16Array(capacity).fill(-1);
-    const chunkN = new Uint8Array(CHUNKS);
+    const chunkN = new Uint16Array(CHUNKS);
     const chunkDx = new Int8Array(CHUNKS * CHUNK_CELLS), chunkDy = new Int8Array(CHUNKS * CHUNK_CELLS);
     const chunkColor = new Uint32Array(CHUNKS * CHUNK_CELLS), chunkByte = new Uint8Array(CHUNKS * CHUNK_CELLS);
     const freeChunks = [];
@@ -91,19 +91,59 @@
     kindTable[M.DEBRIS | PW.DEBRIS_KIND.METAL << 6] = KIND.METAL;
     kindTable[M.DEBRIS | PW.DEBRIS_KIND.WOOD << 6] = KIND.WOOD;
     const kindOf = (byte) => kindTable[byte & 255];
-    // Per kind: tile size (cells), share of tiles that hold together (the rest fall as grains),
-    // share of cells that go as dust, and share thrown off as shrapnel or splinters (faster grains).
+    // Per kind: how it breaks into tiles - blocks `big` cells across, each left whole (share
+    // `whole`), cut in two each way (`halves`) or in three, along lines as jagged as `jag` (cells) -
+    // so its chunks come in a range of sizes, concrete and rock from a few cells to a slab; the
+    // share of tiles that hold together (the rest fall as grains); the share of cells that go as
+    // dust, and thrown off as shrapnel or splinters (faster grains). And how hard a chunk of it
+    // strikes something and still comes to rest whole, as a lump (cells/s): see the step.
     const BREAK = [];
-    BREAK[KIND.EARTH] = { tile: 3, chunky: 0.1, dust: 0, shard: 0 };
-    BREAK[KIND.ROCK] = { tile: 5, chunky: 0.92, dust: 0.1, shard: 0.05 };
-    BREAK[KIND.MASONRY] = { tile: 6, chunky: 0.92, dust: 0.08, shard: 0.06 };
-    BREAK[KIND.METAL] = { tile: 4, chunky: 0.3, dust: 0, shard: 0.6 };
-    BREAK[KIND.WOOD] = { tile: 7, chunky: 0.92, dust: 0, shard: 0.1 };
+    BREAK[KIND.EARTH] = { big: 6, whole: 0.1, halves: 0.3, jag: 2, chunky: 0.1, dust: 0, shard: 0, lands: 60 };
+    BREAK[KIND.ROCK] = { big: 16, whole: 0.3, halves: 0.4, jag: 4, chunky: 0.92, dust: 0.1, shard: 0.05, lands: 170 };
+    BREAK[KIND.MASONRY] = { big: 16, whole: 0.3, halves: 0.4, jag: 3, chunky: 0.92, dust: 0.08, shard: 0.06, lands: 160 };
+    BREAK[KIND.METAL] = { big: 8, whole: 0.2, halves: 0.4, jag: 2, chunky: 0.3, dust: 0, shard: 0.6, lands: 200 };
+    BREAK[KIND.WOOD] = { big: 12, whole: 0.4, halves: 0.4, jag: 2, chunky: 0.92, dust: 0, shard: 0.1, lands: 150 };
+    const CRACK_MIN = 8;          // a chunk of this many cells or more cracks into chunks; smaller, into grains
     const PEND_MAX = 32768;
     const pend = { n: 0, x: new Float32Array(PEND_MAX), y: new Float32Array(PEND_MAX), vx: new Float32Array(PEND_MAX), vy: new Float32Array(PEND_MAX),
       byte: new Uint8Array(PEND_MAX), rgba: new Uint32Array(PEND_MAX), fl: new Uint8Array(PEND_MAX), life: new Float32Array(PEND_MAX), own: new Uint16Array(PEND_MAX) };
-    const jag = (a, b) => (PW.hash2(Math.floor(a / 2), b) & 3) - 1.5;
+    const jag = (a, b, amp) => ((PW.hash2(Math.floor(a / 3), b) & 7) / 7 - 0.5) * amp;
+    // (the jagged tile the cell (x, y) of a kind breaks off in: its block, cut as the block is cut)
+    function tileOf(x, y, kind, rule, out) {
+      const jx = x + jag(y, 7, rule.jag), jy = y + jag(x, 9, rule.jag);
+      const bx = Math.floor(jx / rule.big), by = Math.floor(jy / rule.big);
+      const h = (PW.hash3(bx, by, kind + 31) & 1023) / 1024;
+      const cuts = h < rule.whole ? 1 : h < rule.whole + rule.halves ? 2 : 3, size = rule.big / cuts;
+      out[0] = bx * 3 + Math.min(cuts - 1, Math.floor((jx - bx * rule.big) / size));
+      out[1] = by * 3 + Math.min(cuts - 1, Math.floor((jy - by * rule.big) / size));
+      return out;
+    }
+    const TILE = [0, 0];
+    // Debris broken off over a few ticks, piece by piece next to each other - a storey crushed row
+    // by row, the foot of a building ground away - is held back and let go together, so it goes as
+    // chunks too (slabs of its floors, lumps of its walls), not grain by grain.
+    const HOLD_TICKS = 4, HOLD_MAX = 16384;
+    const held = { n: 0, x: new Float32Array(HOLD_MAX), y: new Float32Array(HOLD_MAX), vx: new Float32Array(HOLD_MAX), vy: new Float32Array(HOLD_MAX),
+      byte: new Uint8Array(HOLD_MAX), rgba: new Uint32Array(HOLD_MAX), fl: new Uint8Array(HOLD_MAX), life: new Float32Array(HOLD_MAX), own: new Uint16Array(HOLD_MAX) };
+    let heldFor = 0;
+    function hold(x, y, svx, svy, byte, rgba, fl, lifeSeconds = 6, own = 0) {
+      if (held.n >= HOLD_MAX || !(fl & F.LAND) || kindOf(byte) === KIND.NONE) return spawn(x, y, svx, svy, byte, rgba, fl, lifeSeconds, own);
+      const k = held.n++;
+      held.x[k] = x; held.y[k] = y; held.vx[k] = svx; held.vy[k] = svy; held.byte[k] = byte;
+      held.rgba[k] = rgba || 0; held.fl[k] = fl; held.life[k] = lifeSeconds; held.own[k] = own;
+      return -1;
+    }
+    function release() {
+      for (let k = 0; k < held.n; k += 1) {
+        if (pend.n >= PEND_MAX) flushDebris();
+        const j = pend.n++;
+        pend.x[j] = held.x[k]; pend.y[j] = held.y[k]; pend.vx[j] = held.vx[k]; pend.vy[j] = held.vy[k]; pend.byte[j] = held.byte[k];
+        pend.rgba[j] = held.rgba[k]; pend.fl[j] = held.fl[k]; pend.life[j] = held.life[k]; pend.own[j] = held.own[k];
+      }
+      held.n = 0;
+    }
     function flushDebris() {
+      if (held.n && (heldFor += 1) >= HOLD_TICKS) { heldFor = 0; release(); }
       const n = pend.n;
       if (!n) return;
       pend.n = 0;
@@ -112,7 +152,7 @@
       for (let k = 0; k < n; k += 1) {
         const kind = kindOf(pend.byte[k]), rule = BREAK[kind];
         const x = Math.floor(pend.x[k]), y = Math.floor(pend.y[k]);
-        const tx = Math.floor((x + jag(y, 7)) / rule.tile), ty = Math.floor((y + jag(x, 9)) / rule.tile);
+        const [tx, ty] = tileOf(x, y, kind, rule, TILE);
         const key = (kind * 65536 + (ty & 65535)) * 65536 + (tx & 65535);
         let g = groups.get(key);
         if (!g) { g = []; g.tx = tx; g.ty = ty; groups.set(key, g); }
@@ -175,25 +215,67 @@
       if (i < 0) return;
       const c = freeChunks.pop(), base = c * CHUNK_CELLS;
       chunkOf[i] = c; chunkN[c] = m;
+      const cells = new Set();
       for (let q = 0; q < m; q += 1) {
         const k = keep[q];
         chunkDx[base + q] = Math.max(-127, Math.min(127, Math.floor(pend.x[k]) - ax));
         chunkDy[base + q] = Math.max(-127, Math.floor(pend.y[k]) - bottom);
         chunkByte[base + q] = pend.byte[k];
         chunkColor[base + q] = pend.rgba[k] || paletteColor(pend.byte[k], pend.x[k], pend.y[k]);
+        cells.add(chunkDy[base + q] * 256 + chunkDx[base + q]);
+      }
+      // (a lump of something: lit along its top and left edges, in shadow along its bottom and
+      // right - it reads as a solid lump, in the air and where it comes to rest)
+      if (m >= 4) {
+        for (let q = 0; q < m; q += 1) {
+          const dx = chunkDx[base + q], dy = chunkDy[base + q];
+          const top = !cells.has((dy - 1) * 256 + dx), lft = !cells.has(dy * 256 + dx - 1);
+          const bot = !cells.has((dy + 1) * 256 + dx), rgt = !cells.has(dy * 256 + dx + 1);
+          const k = top ? LUMP_LIT : bot ? LUMP_SHADE : lft ? (LUMP_LIT + 1) / 2 : rgt ? (LUMP_SHADE + 1) / 2 : 1;
+          if (k !== 1) chunkColor[base + q] = shade(chunkColor[base + q], k);
+        }
       }
       stats.chunks += 1;
       stats.chunkCells = (stats.chunkCells || 0) + m;
+      if (m >= 30) stats.bigChunks = (stats.bigChunks || 0) + 1;
+      stats.maxChunk = Math.max(stats.maxChunk || 0, m);
     }
+    const LUMP_LIT = 1.22, LUMP_SHADE = 0.68;
+    const shade = (rgba, k) => {
+      const c = PW.unpack(rgba);
+      return PW.abgr(Math.min(255, c[0] * k), Math.min(255, c[1] * k), Math.min(255, c[2] * k));
+    };
     // A chunk come to rest with its anchor at (x, y): its cells into the grid, from its bottom row
-    // up, settling on the heap as its stuff does (it breaks up where it lands).
+    // up. It lies there whole, a lump the shape it broke off in - each of its cells where it is,
+    // on what it came down on (held as loose stuff lying still is: see pw-sim) - but for what of
+    // it is inside something, which settles on the heap as its stuff does.
     function depositChunk(i, x, y) {
       const c = chunkOf[i], base = c * CHUNK_CELLS, m = chunkN[c];
       const order = [];
       for (let q = 0; q < m; q += 1) order.push(q);
       order.sort((a, b) => chunkDy[base + b] - chunkDy[base + a]);
-      for (const q of order) { const [gx, gy] = cellOf(c, q, x, y); deposit(gx, gy, chunkByte[base + q], flags[i], chunkColor[base + q]); }
+      for (const q of order) {
+        const gx = x + chunkDx[base + q], gy = y + chunkDy[base + q], byte = chunkByte[base + q];
+        if (gx >= 1 && gy >= 1 && gx < W - 1 && gy < H - 1 && (mat[gy * W + gx] & ID_MASK) === M.AIR) {
+          PW.set(world, gx, gy, byte);
+          // (keeping its look: a piece of a building its colours, dulled with dust; any lump its
+          // light and shadow - see launch)
+          if ((byte & ID_MASK) === M.DEBRIS) PW.setLayer(world, 'paint', gx, gy, rubbleTone(chunkColor[base + q], gx, gy));
+          else if (m >= 4) PW.setLayer(world, 'paint', gx, gy, chunkColor[base + q]);
+          stats.landed += 1;
+          continue;
+        }
+        const [cx, cy] = cellOf(c, q, x, y);
+        deposit(cx, cy, byte, flags[i], chunkColor[base + q]);
+      }
+      stats.lumps = (stats.lumps || 0) + 1;
+      stats.lumpCells = (stats.lumpCells || 0) + m;
     }
+    // (a piece of a building's colour as rubble: a little dulled with dust)
+    const rubbleTone = (paint, x, y) => {
+      const c = PW.unpack(paint), k = 0.78 + (PW.hash2(x, y) & 15) / 100;
+      return PW.abgr(c[0] * k + 18, c[1] * k + 16, c[2] * k + 14);
+    };
     function paletteColor(byte, x, y) {
       if (!byte) return PW.abgr(255, 255, 255);
       return palettes[byte & ID_MASK][(byte >> 6) * 2 + (PW.hash2(x | 0, y | 0) & 1)];
@@ -220,6 +302,44 @@
         spawnNow(gx + 0.5, gy + 0.5, vx[i] + jx, vy[i] + jy, chunkByte[base + q], chunkColor[base + q], (flags[i] | F.LOOSE) & ~F.DAMAGE, life[i], owner[i]);
       }
       stats.shattered = (stats.shattered || 0) + 1;
+    }
+    // Chunk i, at (x, y) going `speed`, struck hard: it cracks across - along a jagged line through
+    // its middle, at a slant - into two smaller chunks (a big one into three), crumbling a little
+    // as they come apart (see launch), each bouncing off what it struck the way the chunk was going,
+    // the parts thrown a little apart. (False if it cannot: then it shatters.)
+    function crack(i, x, y, speed, blockedX) {
+      const c = chunkOf[i], base = c * CHUNK_CELLS, m = chunkN[c], ax = Math.floor(x), ay = Math.floor(y);
+      if (pend.n + m > PEND_MAX || freeChunks.length < 3) return false;
+      const kind = kindOf(chunkByte[base]), rule = BREAK[kind];
+      const h = PW.hash3(ax, ay, m), a = (h & 1023) / 1024 * Math.PI, nx = Math.cos(a), ny = Math.sin(a);
+      const parts = m >= 60 ? 3 : 2;
+      // (off a wall it bounces back; off the ground, up)
+      const bvx = blockedX ? -vx[i] * 0.3 : vx[i] * 0.7, bvy = blockedX ? vy[i] * 0.7 : -Math.abs(vy[i]) * 0.3;
+      // (its cells, as pending debris after the last of the tick's: see flushDebris)
+      const k0 = pend.n, t = new Float32Array(m);
+      let mx = 0, my = 0;
+      for (let q = 0; q < m; q += 1) {
+        const [gx, gy] = cellOf(c, q, ax, ay), k = k0 + q;
+        pend.x[k] = gx + 0.5; pend.y[k] = gy + 0.5; pend.byte[k] = chunkByte[base + q]; pend.rgba[k] = chunkColor[base + q];
+        pend.fl[k] = flags[i] & ~F.DAMAGE; pend.life[k] = life[i]; pend.own[k] = owner[i];
+        mx += gx; my += gy;
+      }
+      mx /= m; my /= m;
+      let lo = Infinity, hi = -Infinity;
+      for (let q = 0; q < m; q += 1) {
+        const px0 = pend.x[k0 + q], py0 = pend.y[k0 + q];
+        t[q] = (px0 - mx) * nx + (py0 - my) * ny + jag(px0 + py0, 13, rule.jag);
+        if (t[q] < lo) lo = t[q]; if (t[q] > hi) hi = t[q];
+      }
+      const groups = Array.from({ length: parts }, () => []);
+      for (let q = 0; q < m; q += 1) groups[Math.min(parts - 1, Math.floor((t[q] - lo) / (hi - lo + 1e-6) * parts))].push(k0 + q);
+      groups.forEach((g, p) => {
+        const apart = (p - (parts - 1) / 2) * (15 + speed * 0.12);
+        for (const k of g) { pend.vx[k] = bvx + nx * apart; pend.vy[k] = bvy + ny * apart - 10; }
+        if (g.length) launch(g, kind, rule);
+      });
+      stats.cracked = (stats.cracked || 0) + 1;
+      return true;
     }
     // Where cell q of chunk c (anchored at ax, ay) is in the world - or, if it is inside something
     // solid (the chunk's anchor is what it struck with: the rest of it may have swung into a
@@ -429,14 +549,25 @@
             impacts.set(key, (impacts.get(key) || 0) + speed * speed * (PW.mat.weight[cell[i] & ID_MASK] / 80) / 40);
           }
           if ((fl & F.DAMAGE) && speed > 90 && structural[id] && id !== M.CORE) chip(cx, cy, id, speed, i);   // (cores break only to blasts)
+          const blockedX = Math.floor(x + sx) !== Math.floor(x) && !open(mat[Math.floor(y) * W + cx] & ID_MASK, fl);
+          // A chunk striking something gently enough for its stuff comes to rest whole, a lump;
+          // harder, it cracks into smaller chunks that bounce on; a small one shatters, its grains
+          // going on from where they were, tumbling on along what it struck (and running and
+          // settling as loose stuff does). (Whole or cracked, its shock is all its cells'.)
+          if (chunkOf[i] >= 0) {
+            const c = chunkOf[i], rule = BREAK[kindOf(chunkByte[c * CHUNK_CELLS])];
+            const shock = () => {
+              const key = (cy >> 4) * 4096 + (cx >> 4);
+              impacts.set(key, (impacts.get(key) || 0) + speed * speed * (PW.mat.weight[chunkByte[c * CHUNK_CELLS] & ID_MASK] / 80) / 40 * chunkN[c]);
+            };
+            if (speed < rule.lands) { if (speed > 40) shock(); if (land(i, x, y)) { kill(i); removed = true; break; } }
+            if (chunkN[c] >= CRACK_MIN) { shock(); if (crack(i, x, y, speed, blockedX)) { kill(i); removed = true; break; } }
+            shatter(i, x, y, speed); kill(i); removed = true; break;
+          }
           if ((fl & F.WATER) || ((fl & F.LAND) && speed < 45)) {
             if (land(i, x, y)) { kill(i); removed = true; break; }
           }
-          // A chunk striking something hard shatters: its grains go on from where they were,
-          // tumbling on along what it struck (and run and settle as loose stuff does).
-          if (chunkOf[i] >= 0) { shatter(i, x, y, speed); kill(i); removed = true; break; }
           // Bounce: reflect the blocked component, keep some of the other.
-          const blockedX = Math.floor(x + sx) !== Math.floor(x) && !open(mat[Math.floor(y) * W + cx] & ID_MASK, fl);
           // Rubble and earth striking a slope do not bounce: they run on down it, a stream of
           // rock and earth that keeps its speed on a steep slope, loses it on a gentle one and
           // spreads to a stop at the foot, throwing up dust as it goes.
@@ -527,7 +658,7 @@
         ctx.fill();
       }
     }
-    const api = { spawn, step, draw, drainImpacts, flush: flushDebris, F, stats, listeners, get count() { return count + pend.n; }, capacity, px, py, vx, vy, flags };
+    const api = { spawn, hold, step, draw, drainImpacts, flush: flushDebris, F, stats, listeners, get count() { return count + pend.n + held.n; }, capacity, px, py, vx, vy, flags };
     return api;
   }
 

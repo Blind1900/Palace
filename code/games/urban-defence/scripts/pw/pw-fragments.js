@@ -55,6 +55,11 @@
     // panels - whole patches of it, one in WALL_RUBBLE, breaking off as chunks with the building -
     // the rest goes up as a little dust)
     const rubbleFrom = (solid, x, y) => solid === 1 || (solid === THIN && (PW.hash2(((x | 0) + (Math.imul(y >> 1, 0x9e3779b1) >>> 30)) / 5 | 0, (y | 0) / 5 | 0) % WALL_RUBBLE) === 0);
+    // (of what is crushed or ground off, the half that bursts out as debris - rather than dropping
+    // where it was, or going to dust - is a block at a time, BURST_W x BURST_H cells, so it holds
+    // together as chunks)
+    const BURST_W = 8, BURST_H = 4;
+    const bursts = (x, y, salt) => (PW.hash3(Math.floor(x / BURST_W), Math.floor(y / BURST_H), salt) & 3) < 2;
     const debrisOf = (byte) => {
       const id = byte & ID_MASK;
       if (structural[id] || id === M.FOUNDATION) return breaksTo[id] || M.DEBRIS;
@@ -534,7 +539,9 @@
           let ty = y;
           while (ty > 1 && blocking(x, ty) && y - ty < 24) ty -= 1;
           const out = random() < 0.7 ? p.dir : -p.dir;
-          if ((eaten & 1) === 0 && rubbleFrom(data.solid[k], u, v)) particles.spawn(x + 0.5, ty + 0.5, out * (30 + random() * 140) * SPILL + (random() - 0.5) * 60, -(20 + random() * 60) * LOFT, debrisOf(data.byte[k]), data.color[k] || 0, F.LAND | F.DAMAGE, 6);
+          // (each cell as far over the surface as it was pressed under it: what bursts out together
+          // keeps its shape, and goes as chunks)
+          if (bursts(u, v, p.from) && rubbleFrom(data.solid[k], u, v)) particles.hold(x + 0.5, Math.max(1, ty - (y - ty)) + 0.5, out * (30 + random() * 140) * SPILL + (random() - 0.5) * 60, -(20 + random() * 60) * LOFT, debrisOf(data.byte[k]), data.color[k] || 0, F.LAND | F.DAMAGE, 6);
           else if ((eaten & 3) === 1) puff(x, ty - 2, 2, 5, 3);
           lost += weightOf(data.solid[k]);
           grid[gi] = 0; data.solid[k] = 0; data.color[k] = 0;
@@ -825,9 +832,9 @@
           if (!g) continue;
           const q = g - 1;
           const [x, y] = toWorld(p, c, s, u + 0.5, v + 0.5);
-          if (data.solid[q] && (n & 1) === 0 && rubbleFrom(data.solid[q], u, v)) {
+          if (data.solid[q] && bursts(u, v, p.from) && rubbleFrom(data.solid[q], u, v)) {
             const out = Math.sign(x - mid) || (random() < 0.5 ? -1 : 1);
-            particles.spawn(x, y - 1, vx * 0.35 + out * (20 + random() * 70) * SPILL * 0.6, -(10 + random() * 40) * LOFT, debrisOf(data.byte[q]), data.color[q] || 0, F.LAND, 6);
+            particles.hold(x, y - 1, vx * 0.35 + out * (20 + random() * 70) * SPILL * 0.6, -(10 + random() * 40) * LOFT, debrisOf(data.byte[q]), data.color[q] || 0, F.LAND, 6);
           } else if ((n & 7) === 3) puff(x, y - 1, 1);
           lost += weightOf(data.solid[q]);
           grid[gi] = 0; data.solid[q] = 0; data.color[q] = 0;
@@ -884,15 +891,17 @@
     }
     // A stump cell crushed under a swinging piece: it bursts into debris and dust.
     // (squeezed out from under the weight on it, away from `from` - the middle of what came down
-    // on it - low and wide; the rest drops where it was)
+    // on it - low and wide, in its own colours; the rest drops where it was. Which goes is decided
+    // a block at a time - see bursts - and it is let go with the rows crushed next to it, so it
+    // bursts out in chunks: slabs of its floors, lumps of its walls - see PW particles' hold.)
     function crush(x, y, owner, from = x) {
-      const m = mat[y * W + x];
+      const m = mat[y * W + x], paint = PW.getLayer(world, 'paint', x, y);
       PW.set(world, x, y, M.AIR);
       PW.setOwner(world, x, y, 0);
       stats.crushed += 1;
-      if ((PW.hash3(x, y, stats.crushed) & 3) < 2) {
+      if (bursts(x, y, owner)) {
         const out = Math.sign(x + 0.5 - from) || (random() < 0.5 ? -1 : 1);
-        particles.spawn(x + 0.5, y + 0.5, out * (40 + random() * 110) * SPILL, -(10 + random() * 60) * LOFT, debrisOf(m), 0, F.LAND, 5, owner);
+        particles.hold(x + 0.5, y + 0.5, out * (40 + random() * 110) * SPILL, -(10 + random() * 60) * LOFT, debrisOf(m), paint, F.LAND, 5, owner);
       } else if (y + 1 < H && !blocking(x, y + 1)) PW.set(world, x, y, debrisOf(m));
       if ((PW.hash3(x, y, 7) & 3) === 0) puff(x, y - 1, 1);
       if (world.onDamage && owner) world.onDamage(owner, 1, x, y);
