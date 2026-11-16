@@ -475,6 +475,29 @@
     }
   }
 
+  // Loose stuff at rest - rubble, earth, sand - holds where it lies, even in a straight-up stack,
+  // until something stirs it: a shake, a gust, grains landing on it or moving about it. Where it was
+  // stirred lately (by 16-cell tile, the tick until which it stays stirred) it slides and spreads to
+  // its angle of repose; once all has been still there a while it holds again.
+  const STIR_SHIFT = 4, STIR = 90;   // (ticks a stir lasts)
+  function stir(world, x0, y0, x1, y1, ticks = STIR) {
+    const tw = world.width >> STIR_SHIFT, th = world.height >> STIR_SHIFT;
+    const stirred = world.stirred || (world.stirred = new Uint32Array(tw * th));
+    const until = (world.tick || 0) + ticks;
+    const tx0 = Math.max(0, x0 >> STIR_SHIFT), tx1 = Math.min(tw - 1, x1 >> STIR_SHIFT);
+    const ty0 = Math.max(0, y0 >> STIR_SHIFT), ty1 = Math.min(th - 1, y1 >> STIR_SHIFT);
+    let any = false;
+    for (let ty = ty0; ty <= ty1; ty += 1) for (let tx = tx0; tx <= tx1; tx += 1) {
+      const k = ty * tw + tx;
+      if (stirred[k] < until) { if (stirred[k] < (world.tick || 0)) any = true; stirred[k] = until; }
+    }
+    // (what lay still there is looked at again)
+    if (any) wakeArea(world, tx0 << STIR_SHIFT, ty0 << STIR_SHIFT, ((tx1 + 1) << STIR_SHIFT) - 1, ((ty1 + 1) << STIR_SHIFT) - 1);
+  }
+  function stirred(world, x, y) {
+    const s = world.stirred;
+    return !!s && s[(y >> STIR_SHIFT) * (world.width >> STIR_SHIFT) + (x >> STIR_SHIFT)] >= (world.tick || 0);
+  }
   function get(world, x, y) {
     if (x < 0 || y < 0 || x >= world.width || y >= world.height) return M.BEDROCK;
     return world.mat[y * world.width + x];
@@ -757,7 +780,7 @@
   PW.HIDES_PIPE = HIDES_PIPE;
   Object.assign(PW, {
     abgr, unpack, hash2, hash3, createRandom, createNoise1D, createNoise2D,
-    createWorld, chunkIndex, inside, markDirty, markWaterDirty, wake, wakeCell, wakeArea, clearSimRect,
+    createWorld, chunkIndex, inside, markDirty, markWaterDirty, wake, wakeCell, wakeArea, clearSimRect, stir, stirred,
     get, id, set, swapCells, sinkColumn, touchGroundTop, refreshGroundTop, rebuildGroundTop,
     getLayer, setLayer, layerCell, clearPaintAt, isSolid, isOpen, groundBelow, supportBelow, traceShot,
     getOwner, setOwner, getFlags, setFlag, AMBIENT, heatAt, setHeat, addHeat, heatChunk,

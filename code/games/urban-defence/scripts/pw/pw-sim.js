@@ -284,6 +284,16 @@
       return false;
     }
 
+    // (a blast's wind at (x, y) strong enough to push a grain of `id` off where it lies: the
+    // heavier, the stronger it has to be - a gust of 60 cells/s moves building rubble)
+    const GUST_PUSH = 60 / 80;
+    function gusted(x, y, id) {
+      if (!world.air || !world.air.busy()) return false;
+      const a = world.air.at(x, y);
+      if (Math.hypot(a[0], a[1]) < GUST_PUSH * weight[id]) return false;
+      PW.stir(world, x, y, x, y);
+      return true;
+    }
     function stepPowder(i, x, y, id) {
       if (y + 1 >= H) return false;
       const below = mat[i + W];
@@ -294,6 +304,7 @@
         if (ny - y >= FLY_DROP && fly(i, x, y)) return true;
         if (ny - y > POWDER_FALL) { ny = y + POWDER_FALL; j = i + POWDER_FALL * W; }
         move(i, x, y, j, x, ny);
+        PW.stir(world, x, ny, x, ny);   // (coming down, it stirs the heap it lands on)
         return true;
       }
       // Heavier than the liquid under it: it sinks, and the liquid rises past it. Lighter than the
@@ -307,9 +318,13 @@
         return true;
       }
       // (it slides off only now and then - the looser it is, the more often - but a grain that has
-      // somewhere to slide stays awake until it does: a heap never freezes steeper than it stands)
+      // somewhere to slide stays awake until it does: a heap stirred never freezes steeper than it
+      // stands)
       const slides = rnd(x, y) < SLIDE[id];
       if (!SLIDE[id]) return false;
+      // At rest it holds, even standing straight up, until it is stirred (see PW.stir): shaken,
+      // landed on, moved about - or in water, or caught by a gust strong enough for its weight.
+      if (!PW.stirred(world, x, y) && !isLiquid(mat[i - W]) && !gusted(x, y, id)) return false;
       const dir = ((x * 7 + y + world.tick) & 1) ? 1 : -1;
       for (let k = 0; k < 2; k += 1) {
         const d = k ? -dir : dir, nx = x + d;
@@ -320,6 +335,7 @@
             // to - it runs on down with its own momentum: see run)
             if (y + 2 < H && isAir(mat[i + 2 * W + d]) && run(i, x, y, d, id)) return true;
             move(i, x, y, i + W + d, nx, y + 1);
+            PW.stir(world, nx, y + 1, nx, y + 1);
             return true;
           }
           PW.wakeCell(world, x, y);
@@ -335,7 +351,7 @@
           let open = true;
           for (let s = 1; s <= reach + 1 && open; s += 1) open = lighter(mat[i + s * d], id);
           if (open && lighter(mat[i + W + (reach + 1) * d], id)) {
-            if (slides) { move(i, x, y, i + d, x + d, y); return true; }
+            if (slides) { move(i, x, y, i + d, x + d, y); PW.stir(world, x + d, y, x + d, y); return true; }
             PW.wakeCell(world, x, y);
             return false;
           }

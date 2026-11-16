@@ -284,6 +284,8 @@
             stats.gasLost = (stats.gasLost || 0) + (moved ? 0 : 1);
           }
           PW.set(world, cx, cy, byte);
+          // (landing, it stirs the heap it lands on: the heap settles to its slope)
+          if (!(fl & F.WATER)) PW.stir(world, cx, cy, cx, cy);
           // (a piece of a building keeps its colours as rubble, a little dulled with dust)
           if (paint && (byte & ID_MASK) === M.DEBRIS) {
             const c = PW.unpack(paint), k = 0.78 + (PW.hash2(cx, cy) & 15) / 100;

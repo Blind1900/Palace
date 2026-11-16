@@ -222,6 +222,8 @@
     if (world.stability) {
       world.stability.shock(cx, cy, Math.pow(r * power, 3));
     }
+    // (and everything loose in and about the crater - underground too - is stirred by it)
+    PW.stir(world, cx - r * 2, cy - r * 2, cx + r * 2, cy + r * 2, 120);
     return { removed, damaged };
   }
 

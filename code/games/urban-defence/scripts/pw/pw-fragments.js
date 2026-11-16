@@ -1177,6 +1177,7 @@
     function put(x, y, byte) {
       if ((mat[y * W + x] & ID_MASK) === M.WATER) particles.spawn(x + 0.5, y + 0.5, 0, -30, M.WATER, 0, F.WATER, 6);
       PW.set(world, x, y, byte);
+      PW.stir(world, x, y, x, y);   // (rubble just come down settles to its slope)
     }
     // The piece's cells at their present places in the world, as data for a new piece.
     function place(p, part, c, s) {

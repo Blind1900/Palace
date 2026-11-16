@@ -63,6 +63,7 @@
   // the surface: it chokes (the fill goes in a share a tick).
   const CHOKE = 3, FILL_PER_TICK = 1500;
   const SHOCK_MIN = 6000;    // a shock weaker than this is felt by nothing (a few pebbles landing)
+  const STIR_FELT = 0.12;    // a shake felt this hard (times how loose the stuff is) stirs a heap
   const SLIDE_SPEED = 40;    // cells a second ground breaking loose comes down at, for its shock
   const SHOCK_EVERY = 6;     // ticks between gathering up the strikes of flying debris
   const FAR = 0xffff;
@@ -561,6 +562,7 @@
         particles.spawn(x + 0.5, y + 0.5, (PW.hash3(x, y, 7) & 63) - 32 + side * (30 + (PW.hash3(x, y, 9) & 31)), side ? -8 : 0, loose, paint || 0, F.LAND, 8);
       } else {
         PW.set(world, x, y, loose | (m & 0xc0));
+        PW.stir(world, x, y, x, y);   // (broken loose, it is moving: it slides off)
       }
       stats.broken += 1;
     }
@@ -599,8 +601,11 @@
         const g = world.groundTop[x], d = Math.hypot(x - cx, g - cy) / reach;
         if (d >= 1) continue;
         const felt = (1 - d) * Math.min(1.5, power);
-        // (loose heaps at the surface here are set moving)
-        if (PW.mat.shake[mat[g * W + x] & ID_MASK] > 0.2 && PW.wakeCell) PW.wakeCell(world, x, g);
+        // (loose heaps at the surface here are stirred - the looser and the harder shaken, the
+        // longer: a light shake leaves heavy rubble standing as it lay - and set moving)
+        const loose = PW.mat.shake[mat[g * W + x] & ID_MASK];
+        if (loose > 0.2 && PW.wakeCell) PW.wakeCell(world, x, g);
+        if ((x & 7) === 0 && felt * loose > STIR_FELT) PW.stir(world, x - 4, g - 12, x + 4, g + 24, Math.round(20 + felt * loose * 150));
         const slope = Math.abs(world.groundTop[x + 2] - world.groundTop[x - 2]) / 4;
         const depth = Math.round(felt * 7 * Math.min(1.6, slope));
         for (let y = g; y < g + depth; y += 1) {
