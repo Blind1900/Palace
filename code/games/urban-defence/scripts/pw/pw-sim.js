@@ -436,7 +436,8 @@
       // cells, changing every second) that each push one way, so a plume widens and wanders as it
       // rises instead of standing in a straight column; thin smoke, cooler, rises slower.
       const eddy = id === M.SMOKE ? ((PW.hash3(x >> 4, y >> 3, world.tick >> 6) & 1) ? 1 : -1) : 0;
-      const side = r3 < Math.min(0.9, Math.abs(wind) / 40) ? Math.sign(wind)
+      // (smoke, light and warm, goes with the wind more readily than the other gases)
+      const side = r3 < Math.min(0.9, Math.abs(wind) / (id === M.SMOKE ? 34 : 40)) ? Math.sign(wind)
         : eddy && r3 < 0.75 ? eddy : (r3 & 1 ? 1 : -1) * ((x + world.tick) & 1 ? 1 : -1);
       // (and parcels of it rise at their own pace, so a cloud's underside is ragged, not a level
       // floor)

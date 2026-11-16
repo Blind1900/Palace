@@ -34,6 +34,8 @@
     PW.props.decorateCaves(world, layout, PW.createRandom(seed + 313));
     timings.props = performance.now() - t; t = performance.now();
   }
+  // Drills left here and there in the tunnels, for troops to pick up.
+  if (PW.pickups && !gallery) PW.pickups.placeDrills(world, PW.createRandom(seed + 727));
   // Supply lines under each base, connecting its buildings, pump and mining operations.
   const pipes = PW.createPipes ? PW.createPipes(world) : null;
   if (pipes && !gallery) {
@@ -244,6 +246,7 @@
       if (cores) cores.step();
       if (stability) stability.step();
       if (air) air.step();
+      if (PW.stepSmokeBursts) PW.stepSmokeBursts(world, DT);
       if (PW.stepSmoulders) PW.stepSmoulders(world, DT);
       if (PW.mining) PW.mining.step(world, DT);
       if (pipes) pipes.step();

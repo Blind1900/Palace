@@ -102,6 +102,84 @@
       return toned(ORE_ZONES[variant], (grainTone(grainOf(h)) + 256) >> 1);
     }
 
+    // ---- Daylight in caves and hollows ------------------------------------------------------------
+    // Open air under the ground line is dark - a cave, a blasted hollow, the space under an
+    // overhang or a thin roof - but daylight gets in at its mouth and fades away into it smoothly,
+    // never in hard-edged blocks: further sideways than down, and least up under a ceiling (it
+    // falls in from the sky). It is the distance in from the open sky through open cells, weighted
+    // so (an anisotropic chamfer distance), worked out over each raster and a margin round it, so
+    // it carries on across chunks. How dark the air is there: 255 deep in, 0 at the mouth.
+    const LIGHT_REACH = 150;      // chamfer units it fades over (3 a cell sideways: 50 cells)
+    const LIGHT_PAD = 52;         // cells of margin round a raster that light can come in from
+    const L_SIDE = 3, L_DOWN = 4, L_UP = 6, L_DOWN_DIAG = 5, L_UP_DIAG = 7;
+    const passesLight = PW.mat.passesLight;
+    // (open air under the ground line with nothing behind it: drawn dark, as a cave)
+    const voidAt = (x, y) => (mat[y * W + x] & ID_MASK) !== M.AIR && !gasAlpha[mat[y * W + x] & ID_MASK] ? false
+      : y >= groundTop[x] && !PW.getLayer(world, 'back', x, y);
+    const dark = new Uint8Array(256);   // darkness by distance
+    for (let d = 0; d < 256; d += 1) { const t = Math.min(1, d / LIGHT_REACH); dark[d] = Math.round(255 * t * t * (3 - 2 * t)); }
+    // The field being drawn from: distances on a grid of samples `step` cells apart from (ox, oy)
+    // (a coarse raster's own sample grid), or a chunk's stored darkness (see chunkDark).
+    const field = { on: false, ox: 0, oy: 0, w: 0, h: 0, step: 1, d: null, blocked: null, stored: null, sx: 0, sy: 0 };
+    const chunkDark = new Map();        // chunk -> its cells' darkness, from its last full raster
+    // Work out the field for the raster [rx0..rx1] x [ry0..ry1] sampled every `step` cells (first
+    // sample at rx0 + step / 2). False when there is no dark air in it (nothing to light).
+    function buildLight(rx0, ry0, rx1, ry1, step) {
+      field.on = false; field.stored = null;
+      const half = step >> 1;
+      let any = false;
+      for (let y = ry0 + half; y <= ry1 && !any; y += step) for (let x = rx0 + half; x <= rx1; x += step) if (voidAt(x, y)) { any = true; break; }
+      if (!any) return false;
+      const pad = Math.ceil(LIGHT_PAD / step);
+      const ox = rx0 - pad * step, oy = ry0 - pad * step;
+      const w = Math.floor((rx1 - rx0) / step) + 1 + pad * 2, h = Math.floor((ry1 - ry0) / step) + 1 + pad * 2, n = w * h;
+      if (!field.d || field.d.length < n) { field.d = new Uint8Array(n); field.blocked = new Uint8Array(n); }
+      const { d, blocked } = field;
+      for (let j = 0, k = 0; j < h; j += 1) {
+        const y = oy + j * step + half;
+        for (let i = 0; i < w; i += 1, k += 1) {
+          const x = ox + i * step + half;
+          if (x < 0 || y < 0 || x >= W || y >= world.height) { d[k] = 255; blocked[k] = 1; continue; }
+          const pass = passesLight[mat[y * W + x] & ID_MASK];
+          blocked[k] = pass ? 0 : 1;
+          d[k] = pass && y < groundTop[x] ? 0 : 255;
+        }
+      }
+      const S = L_SIDE * step, D = L_DOWN * step, U = L_UP * step, DD = L_DOWN_DIAG * step, UD = L_UP_DIAG * step;
+      const relax = (k, j, cost) => { const v = d[j] + cost; if (v < d[k]) d[k] = v > 255 ? 255 : v; };
+      for (let round = 0; round < 2; round += 1) {
+        for (let j = 0; j < h; j += 1) for (let i = 0; i < w; i += 1) {
+          const k = j * w + i;
+          if (blocked[k] || d[k] === 0) continue;
+          if (i > 0 && !blocked[k - 1]) relax(k, k - 1, S);
+          if (j > 0) {
+            if (!blocked[k - w]) relax(k, k - w, D);
+            if (i > 0 && !blocked[k - w - 1]) relax(k, k - w - 1, DD);
+            if (i < w - 1 && !blocked[k - w + 1]) relax(k, k - w + 1, DD);
+          }
+        }
+        for (let j = h - 1; j >= 0; j -= 1) for (let i = w - 1; i >= 0; i -= 1) {
+          const k = j * w + i;
+          if (blocked[k] || d[k] === 0) continue;
+          if (i < w - 1 && !blocked[k + 1]) relax(k, k + 1, S);
+          if (j < h - 1) {
+            if (!blocked[k + w]) relax(k, k + w, U);
+            if (i < w - 1 && !blocked[k + w + 1]) relax(k, k + w + 1, UD);
+            if (i > 0 && !blocked[k + w - 1]) relax(k, k + w - 1, UD);
+          }
+        }
+      }
+      Object.assign(field, { on: true, ox, oy, w, h, step });
+      return true;
+    }
+    // How dark the open air at (x, y) is, 0-255 (255 with no field: deep underground).
+    function darknessAt(x, y) {
+      if (field.stored) return field.stored[((y - field.sy) << CHUNK_SHIFT) + (x - field.sx)];
+      if (!field.on) return 255;
+      const i = Math.floor((x - field.ox) / field.step), j = Math.floor((y - field.oy) / field.step);
+      return dark[field.d[j * field.w + i]];
+    }
+
     // Gas opacity by density (variant 0-3).
     const gasAlpha = new Array(64).fill(null);
     gasAlpha[M.SMOKE] = [0.28, 0.46, 0.62, 0.76];
@@ -129,6 +207,13 @@
       const k = ((along % 18) + 18) % 18;
       return k === 0 ? CLAMP_EDGE : k === 1 ? CLAMP : pipe;
     }
+    // The dark of a cave or hollow at (x, y), shading k, as dark as daylight leaves it there (the
+    // sky shows through where it is light; 0 where it is as light as the sky).
+    function voidColorAt(x, y, k) {
+      const a = darknessAt(x, y);
+      if (a < 6) return 0;
+      return (toned(voidColor, k) & 0x00ffffff | a << 24) >>> 0;
+    }
     function baseColor(x, y, paintChunk, backChunk, waterDepth, pipeChunk, flagsChunk) {
       const index = y * W + x;
       const m = mat[index];
@@ -138,21 +223,22 @@
         const behind = wallBehind(x, y, local, backChunk, pipeChunk, flagsChunk);
         if (behind) return behind;
         if (y < groundTop[x]) return 0;
-        return toned(voidColor, grainOf(PW.hash2(x, y)) < 4 ? 218 : 256);
+        return voidColorAt(x, y, grainOf(PW.hash2(x, y)) < 4 ? 218 : 256);
       }
       if (gasAlpha[id]) {
         // Gas is translucent: blend it over whatever is behind it (back wall, cave, or the sky,
         // which shows through the raster's alpha). Thicker gas (higher variant) is more opaque.
         let under = wallBehind(x, y, local, backChunk, pipeChunk, flagsChunk);
-        if (!under && y >= groundTop[x]) under = toned(voidColor, 256);
+        if (!under && y >= groundTop[x]) under = voidColorAt(x, y, 256);
         const h = PW.hash2(x, y);
         const a = Math.min(0.92, gasAlpha[id][m >> 6] * ((h & 7) === 0 ? 0.8 : 1));
         const gc = palettes[id][(m >> 6) * 2 + (h & 1)];
         if (!under) return (gc & 0x00ffffff | Math.round(a * 255) << 24) >>> 0;
-        const u = under, t = a;
-        const r = (u & 255) + ((gc & 255) - (u & 255)) * t, g = (u >>> 8 & 255) + ((gc >>> 8 & 255) - (u >>> 8 & 255)) * t;
-        const b = (u >>> 16 & 255) + ((gc >>> 16 & 255) - (u >>> 16 & 255)) * t;
-        return (0xff000000 | Math.round(b) << 16 | Math.round(g) << 8 | Math.round(r)) >>> 0;
+        // (over what is behind it, itself perhaps see-through - a hollow's dim mouth)
+        const ua = (under >>> 24) / 255, oa = a + ua * (1 - a), wu = ua * (1 - a) / oa, wg = a / oa;
+        const r = (under & 255) * wu + (gc & 255) * wg, g = (under >>> 8 & 255) * wu + (gc >>> 8 & 255) * wg;
+        const b = (under >>> 16 & 255) * wu + (gc >>> 16 & 255) * wg;
+        return (Math.round(oa * 255) << 24 | Math.round(b) << 16 | Math.round(g) << 8 | Math.round(r)) >>> 0;
       }
       if (paintChunk) {
         const paint = paintChunk[local];
@@ -349,6 +435,21 @@
       const x0 = cx << CHUNK_SHIFT, y0 = cy << CHUNK_SHIFT;
       // Outlines are only drawn where cells are big enough to see them (1/2 scale and closer).
       const outline = lod <= 1 && buildProximity(x0 + lx0 * step, y0 + ly0 * step, x0 + lx1 * step + step - 1, y0 + ly1 * step + step - 1);
+      // Daylight in its hollows: worked out for a whole chunk at full size and kept for redrawing
+      // parts of it (anything that changes the light there redraws it whole: see beginFrame); for
+      // a coarser raster, on its own samples.
+      if (lod > 0) buildLight(x0, y0, x0 + CHUNK - 1, y0 + CHUNK - 1, step);
+      else if (lx0 === 0 && ly0 === 0 && lx1 === CHUNK - 1 && ly1 === CHUNK - 1) {
+        if (buildLight(x0, y0, x0 + CHUNK - 1, y0 + CHUNK - 1, 1)) {
+          const stored = new Uint8Array(CHUNK * CHUNK);
+          for (let ly = 0; ly < CHUNK; ly += 1) for (let lx = 0; lx < CHUNK; lx += 1) stored[(ly << CHUNK_SHIFT) + lx] = darknessAt(x0 + lx, y0 + ly);
+          chunkDark.set(c, stored);
+          Object.assign(field, { stored, sx: x0, sy: y0 });
+        } else chunkDark.delete(c);
+      } else {
+        const stored = chunkDark.get(c) || null;
+        Object.assign(field, { on: !!stored, stored, sx: x0, sy: y0 });
+      }
       // Water depth above the first sampled row of each column (scan up to 40 cells).
       for (let tx = 0; tx < w; tx += 1) {
         const x = x0 + (lx0 + tx) * step + half;
@@ -662,9 +763,35 @@
       }
     }
 
+    // Where something opened up or closed off, the daylight in the hollows round about changes: a
+    // chunk with hollows in it, or near enough for the light to reach, is redrawn whole.
+    function relight() {
+      const list = world.shapeChanged, rect = world.dirtyRect;
+      for (const c of list) {
+        world.shapeFlag[c] = 0;
+        const cx = c % world.chunksX, cy = (c / world.chunksX) | 0;
+        for (let dy = -1; dy <= 1; dy += 1) for (let dx = -1; dx <= 1; dx += 1) {
+          const nx = cx + dx, ny = cy + dy;
+          if (nx < 0 || ny < 0 || nx >= world.chunksX || ny >= world.chunksY) continue;
+          const n = ny * world.chunksX + nx;
+          let lit = chunkDark.has(n);
+          if (!lit && n === c && rect[n * 4] >= 0) {
+            // (a hollow opened in it just now)
+            const x0 = (nx << CHUNK_SHIFT) + rect[n * 4], y0 = (ny << CHUNK_SHIFT) + rect[n * 4 + 1];
+            const x1 = (nx << CHUNK_SHIFT) + rect[n * 4 + 2], y1 = (ny << CHUNK_SHIFT) + rect[n * 4 + 3];
+            for (let y = y0; y <= y1 && !lit; y += 2) for (let x = x0; x <= x1; x += 2) if (voidAt(x, y)) { lit = true; break; }
+          }
+          if (!lit) continue;
+          if (n !== c) world.chunkVersion[n] += 1;
+          rect[n * 4] = -1;
+        }
+      }
+      list.length = 0;
+    }
     function beginFrame() {
       frame += 1;
       rastersThisFrame = 0;
+      relight();
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.imageSmoothingEnabled = false;
       // Keep the overview current in the background (a few chunks per frame).

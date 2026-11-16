@@ -184,6 +184,9 @@
   skyline[M.RUIN] = 1; terrain[M.RUIN] = 1;
   for (const id of [M.SMOKE, M.STEAM, M.DUST]) passable[id] = 1;
   open[M.AIR] = 1; open[M.SMOKE] = 1; open[M.STEAM] = 1; open[M.DUST] = 1;
+  // (daylight passes through what is open, and through water)
+  const passesLight = new Uint8Array(64);
+  for (let id = 0; id < 64; id += 1) passesLight[id] = open[id] || id === M.WATER ? 1 : 0;
   for (let id = 1; id < 64; id += 1) if (names[id] && phase[id] >= PHASE.POWDER && id !== M.GLASS) stopsShots[id] = 1;
   // Thermal table (temperatures in °C, ambient 20).
   const thermal = (ids, props) => { for (const id of ids) {
@@ -295,7 +298,7 @@
   physics([M.LOOSE_SOIL], { slide: 0.6, settlesTo: M.SOIL });
   physics([M.LOOSE_STONE], { slide: 0.45, settlesTo: M.GRAVEL });
   physics([M.DEBRIS], { slide: 0.7, spread: 1, settlesTo: M.RUBBLE });
-  physics([M.SMOKE], { buoyancy: 0.55, fade: 1 / 150 });
+  physics([M.SMOKE], { buoyancy: 0.65, fade: 1 / 150 });
   physics([M.STEAM], { buoyancy: 0.8 });
   // (dust from blasts and collapses hangs in the air a long while, settling slowly)
   physics([M.DUST], { buoyancy: -0.12, fade: 1 / 900 });
@@ -389,6 +392,10 @@
       chunkVersion: new Uint32Array(chunkCount),
       // Changed cell rectangle per chunk since the last full-resolution redraw (local coords).
       dirtyRect: new Int16Array(chunkCount * 4).fill(-1),
+      // Chunks where something opened up or closed off (daylight in caves and hollows round about
+      // changes with it), listed once each until the renderer takes them.
+      shapeFlag: new Uint8Array(chunkCount),
+      shapeChanged: [],
       // Simulation: chunks with moving cells, and the cell rectangle that may still move.
       simActive: new Uint8Array(chunkCount),
       simRect: new Int32Array(chunkCount * 4),
@@ -492,6 +499,11 @@
       y0 = end + 1;
     }
   }
+  // (cell (x, y) opened up or closed off)
+  function shapeChanged(world, x, y) {
+    const c = chunkIndex(world, x, y);
+    if (!world.shapeFlag[c]) { world.shapeFlag[c] = 1; world.shapeChanged.push(c); }
+  }
   // Set a cell's material. Keeps groundTop, render dirtiness and simulation activity in step.
   function set(world, x, y, value, options) {
     if (x < 0 || y < 0 || x >= world.width || y >= world.height) return;
@@ -501,6 +513,7 @@
     world.mat[index] = value;
     const before = previous & ID_MASK, after = value & ID_MASK;
     if (before !== after) touchGroundTop(world, x, y, after);
+    if (passesLight[before] !== passesLight[after]) shapeChanged(world, x, y);
     if (!options || !options.keepPaint) clearPaintAt(world, x, y);
     if (before === M.WATER || after === M.WATER) markWaterDirty(world, x, y);
     else markDirty(world, x, y);
@@ -518,6 +531,7 @@
     const ai = a & ID_MASK, bi = b & ID_MASK;
     touchGroundTop(world, xi, yi, bi);
     touchGroundTop(world, xj, yj, ai);
+    if (passesLight[ai] !== passesLight[bi]) { shapeChanged(world, xi, yi); shapeChanged(world, xj, yj); }
     if (ai === M.WATER || bi === M.WATER) { markWaterDirty(world, xi, yi); markWaterDirty(world, xj, yj); }
     else { markDirty(world, xi, yi); markDirty(world, xj, yj); }
     // (rubble carries its colours with it as it slides and falls)
@@ -693,7 +707,7 @@
   PW.ID_MASK = ID_MASK;
   PW.mat = { phase, structural, ground, skyline, hardness, breaksTo, passable, stopsShots, terrain, open,
     conduct, ignite, burnTime, burnsTo, palettes, names, weight, blastResist, cohesion, advection, shake,
-    slide, spread, settlesTo, buoyancy, fade };
+    slide, spread, settlesTo, buoyancy, fade, passesLight };
   PW.CHUNK = CHUNK;
   PW.CHUNK_SHIFT = CHUNK_SHIFT;
   PW.CHUNK_MASK = CHUNK_MASK;

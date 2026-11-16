@@ -191,7 +191,7 @@
       particles.spawn(cx, cy, Math.cos(a) * sp, Math.sin(a) * sp - 60, 0, PW.abgr(hot[0], hot[1], hot[2]), F.GLOW, 0.25 + random() * 0.5);
     }
     if (world.heatSystem) world.heatSystem.heatDisc(cx, cy, r * 1.15, 380 + 420 * power);
-    smokeBurst(world, particles, cx, cy, r, power, random);
+    smokeBurst(world, cx, cy, r, power, random);
     if (world.effects) world.effects.push({ kind: 'flash', x: cx, y: cy, radius: r * 2.2, age: 0, life: 0.35 });
     // A crater (not a blast in the open air) smoulders, feeding a smoke column for a while.
     if (removed > r) addSmoulder(world, cx, Math.min(H - 2, cy + below), 8 + r * 0.35 * power, r * 1.1);
@@ -217,36 +217,87 @@
     return { removed, damaged };
   }
 
-  // The blast's smoke: puffs thrown out from the fireball in every direction at once, fast, so the
-  // cloud races out as a near-round disc, a few tongues of it reaching further, that the air brakes
-  // (exponentially) until it drifts like any smoke. The ground and walls near the blast turn and
-  // stop it, which is all that shapes it.
-  function smokeBurst(world, particles, cx, cy, r, power, random) {
-    const F = PW.PARTICLE;
+  // The blast's smoke: a body of gas - as much as the blast made - driven out of the fireball into
+  // the open space round it, nearest first along the ways open to it: round corners, along tunnels,
+  // through rooms and out of their doors and broken windows, never through anything solid. It
+  // comes out fast and ever slower - the share of it out by time t is 1 - e^(-kt), k the air's
+  // brake on it - so in the open it races out as a near-round disc (a few tongues of it reaching
+  // further), and in a tunnel the same smoke, with nowhere else to go, shoots far along it. Where
+  // it has room it spreads thin and patchy; squeezed into a tunnel or a room it fills it, thick.
+  // Laid, it is ordinary smoke: it rises, drifts and thins.
+  const SMOKE_RATE = 2.36 + 5.31 * PW.mat.advection[M.SMOKE];   // k, per second
+  const SMOKE_REACH = 4;         // it goes at most this many times as far as it would in the open
+  const ROOMY = 0.7, CRAMPED = 0.45;   // (share of open-air room a ring of it had: see stepSmokeBursts)
+  function smokeBurst(world, cx, cy, r, power, random) {
+    const { mat, width: W, height: H } = world;
+    // (the tongues: a few directions in which it carries further)
     const lobes = [];
-    for (let k = 0, n = 4 + Math.floor(random() * 4); k < n; k += 1) {
-      lobes.push({ a: random() * Math.PI * 2, w: 0.08 + random() * 0.18, h: 0.25 + random() * 0.55 });
+    for (let k = 0, n = 4 + Math.floor(random() * 4); k < n; k += 1) lobes.push({ a: random() * Math.PI * 2, w: 0.08 + random() * 0.18, h: 0.25 + random() * 0.55 });
+    const reach = new Float32Array(256);
+    for (let q = 0; q < 256; q += 1) {
+      const a = q / 256 * Math.PI * 2;
+      reach[q] = 1;
+      for (const l of lobes) { const d = Math.abs(((a - l.a + Math.PI * 3) % (Math.PI * 2)) - Math.PI); reach[q] += l.h * Math.exp(-(d / l.w) * (d / l.w)); }
     }
-    const reach = (a) => {
-      let s = 1;
-      for (const l of lobes) {
-        const d = Math.abs(((a - l.a + Math.PI * 3) % (Math.PI * 2)) - Math.PI);
-        s += l.h * Math.exp(-(d / l.w) * (d / l.w));
+    const radius = r * (1.15 + 0.35 * Math.min(2, power));
+    // (where it starts: the fireball's middle, or the open cell nearest it)
+    let start = -1;
+    for (let d = 0; d <= 4 && start < 0; d += 1) for (let dy = -d; dy <= d && start < 0; dy += 1) for (let dx = -d; dx <= d; dx += 1) {
+      const x = Math.floor(cx) + dx, y = Math.floor(cy) + dy;
+      if (x > 0 && y > 0 && x < W - 1 && y < H - 1 && PW.mat.open[mat[y * W + x] & ID_MASK]) { start = y * W + x; break; }
+    }
+    if (start < 0) return;
+    (world.smokeBursts || (world.smokeBursts = [])).push({ cx, cy, reach, seed: PW.hash2(cx | 0, cy | 0),
+      volume: Math.PI * radius * radius * 2.4, used: 0, age: 0, maxD: radius * SMOKE_REACH,
+      buckets: [[start]], dist: new Map([[start, 0]]), b: 0 });
+  }
+  // Let out as much of each blast's smoke as is due by now: the next rings of open cells out from
+  // it (a ring: the cells the same distance out along the ways open to it), each laid when it is
+  // whole. How much room a ring had - its size against a ring as far out in the open - says how
+  // the smoke lies in it: roomy, thin and patchy; cramped, thick and filling it.
+  function stepSmokeBursts(world, dt) {
+    const list = world.smokeBursts;
+    if (!list || !list.length) return;
+    const { mat, width: W, height: H } = world;
+    const OPEN = PW.mat.open;
+    for (let k = list.length - 1; k >= 0; k -= 1) {
+      const s = list[k];
+      s.age += dt;
+      const due = s.volume * Math.min(1, (1 - Math.exp(-SMOKE_RATE * s.age)) * 1.04);
+      while (s.used < due && s.b < s.buckets.length && s.b <= s.maxD) {
+        const cells = s.buckets[s.b] || [];
+        s.buckets[s.b] = null;
+        const ring = [];
+        for (let q = 0; q < cells.length; q += 1) {
+          const i = cells[q];
+          if (!OPEN[mat[i] & ID_MASK]) continue;
+          ring.push(i);
+          const x = i % W, y = (i / W) | 0, d = s.dist.get(i);
+          for (let dy = -1; dy <= 1; dy += 1) for (let dx = -1; dx <= 1; dx += 1) {
+            if (!dx && !dy) continue;
+            const nx = x + dx, ny = y + dy, j = ny * W + nx;
+            if (nx < 1 || ny < 1 || nx >= W - 1 || ny >= H - 1 || s.dist.has(j) || !OPEN[mat[j] & ID_MASK]) continue;
+            const a = Math.atan2(ny - s.cy, nx - s.cx);
+            const nd = d + (dx && dy ? 1.414 : 1) / s.reach[((a / (Math.PI * 2) * 256) | 0) & 255];
+            s.dist.set(j, nd);
+            const nb = Math.floor(nd);
+            (s.buckets[nb] || (s.buckets[nb] = [])).push(j);
+          }
+        }
+        const room = Math.min(1, ring.length / Math.max(6, 2 * Math.PI * s.b));
+        for (const i of ring) {
+          const h = PW.hash2(i, s.seed);
+          if (room > ROOMY && (h & 1023) < 154) continue;          // (in the open: patchy)
+          const density = room < CRAMPED ? 3 : 2 + ((h >>> 10) & 1);
+          const m = mat[i], id = m & ID_MASK;
+          if (id === M.AIR) PW.set(world, i % W, (i / W) | 0, M.SMOKE | density << 6, { quiet: true });
+          else if (id === M.SMOKE && (m >> 6) < density) { mat[i] = M.SMOKE | density << 6; PW.markDirty(world, i % W, (i / W) | 0); }
+          else continue;
+          s.used += density;
+        }
+        s.b += 1;
       }
-      return s;
-    };
-    // (the distance a puff goes before it slows to a drift is (v0 - settle) / brake; spread out
-    // as the root of a uniform draw, where they stop fills the disc evenly)
-    const brake = PW.gasBrake(M.SMOKE), settle = PW.GAS_SETTLES;
-    const radius = r * (1.15 + 0.35 * Math.min(2, power)), core = r * 0.25;
-    const n = Math.min(3000, Math.round(200 + r * r * 0.3));
-    for (let k = 0; k < n; k += 1) {
-      const a = random() * Math.PI * 2, c = Math.cos(a), s = Math.sin(a);
-      const start = core * Math.sqrt(random());
-      const out = radius * reach(a) * Math.sqrt(random()) * (0.94 + random() * 0.12);
-      const v = Math.max(0, out - start) * brake + settle;
-      const byte = M.SMOKE | (2 + (random() < 0.5 ? 1 : 0)) << 6;
-      particles.spawn(cx + c * start, cy + s * start, c * v, s * v, byte, 0, F.GAS, 3, n);
+      if (s.used >= s.volume || s.b >= s.buckets.length || s.b > s.maxD) list.splice(k, 1);
     }
   }
 
@@ -313,4 +364,5 @@
   PW.drawEffects = drawEffects;
   PW.addSmoulder = addSmoulder;
   PW.stepSmoulders = stepSmoulders;
+  PW.stepSmokeBursts = stepSmokeBursts;
 })();
