@@ -1221,7 +1221,8 @@
       const x = data.x[j], wood = data.byte[j] !== 0;
       let y = data.y[j];
       if (!room(x, y, wood)) {
-        const reach = wood ? bendReach(data.girth ? data.girth[j] || 1 : 1) : LEAF_BEND;
+        // (any wood lies a cell or two up on what it came to rest pressed into: it stays whole)
+        const reach = wood ? Math.max(2, bendReach(data.girth ? data.girth[j] || 1 : 1)) : LEAF_BEND;
         let d = 1;
         while (d <= reach && !room(x, y - d, wood)) d += 1;
         if (d > reach) {
@@ -1250,8 +1251,10 @@
     const record = { kind: 'tree', type: 'fallen', fallen: true, anchorX: (x0 + x1) >> 1, row: y1, x: x0, y: y0, width, height, mask, foot: null, footX0: 0, trunk: null, rest: Int32Array.from(rest) };
     (world.flora || (world.flora = [])).push(record);
     world.floraIndex = null;
-    // (leaves it came down with whose wood was splintered off, lying on nothing, fall on)
+    // (leaves it came down with whose wood was splintered off, lying on nothing, fall on; and if
+    // none of its wood lies on anything, it is looked at again - see settle)
     looseAround(world, particles, record);
+    if (!rest.length) (world.floraDirty || (world.floraDirty = new Set())).add(record);
     void piece;
     return record;
   }

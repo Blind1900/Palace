@@ -971,8 +971,9 @@
         if (hit > 0 && (blow > WOOD_BLOW * g3 || p.mass * G / wentN > WOOD_LOAD * g3) && snapBranch(p, weakest)) return false;
       }
       // A toppling plant's roots hold its foot on its pivot: what its trunk or limbs come down on
-      // stops it turning there - it lies on it, its foot still on the edge.
-      if (p.flora && p.mode === 'hinge') {
+      // stops it turning there - it lies on it, its foot still on the edge - unless its weight is
+      // out beyond it: then it tips on over that, its foot lifting (free, below).
+      if (p.flora && p.mode === 'hinge' && (centre(p)[0] - wx) * p.dir <= 0) {
         // (only if it is coming down onto it: turning the other way, it lifts off it)
         if (p.omega * ((wx - p.hx) * fy - (wy - p.hy) * fx) < 0) { p.omega *= -0.05; p.touched = p.age; }
         return false;
