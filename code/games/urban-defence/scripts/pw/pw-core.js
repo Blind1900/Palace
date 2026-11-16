@@ -520,6 +520,43 @@
     if (!options || !options.quiet) wake(world, x, y);
     else if (before !== after && phase[after] >= PHASE.GAS && phase[after] <= PHASE.POWDER) wake(world, x, y);
   }
+  // Sink column x by one cell between rows yTop and yBottom: everything in rows yTop..yBottom-1
+  // moves down a row - its material, colours, back wall, pipe, owner, fittings and flags - into
+  // yBottom (the hollow it sinks into, or ground pressed out from under it), and yTop opens. A
+  // plant's cells stay where they are (plants are moved whole: see the sag in pw-stability).
+  const SINKS = ['paint', 'back', 'pipe', 'owner'];
+  function copyCell(layer, c, l, c2, l2, wide) {
+    const from = layer[c2], v = from ? from[l2] : 0;
+    let to = layer[c];
+    if (!to) { if (!v) return; to = layer[c] = wide ? new Uint32Array(CHUNK_CELLS) : new Uint16Array(CHUNK_CELLS); }
+    to[l] = v;
+  }
+  function sinkColumn(world, x, yTop, yBottom) {
+    if (yBottom <= yTop) return;
+    const { mat, width: W } = world;
+    const PLANT = FLAG.FLORA | FLAG.WOOD | FLAG.CHARRED;
+    const at = (y) => [chunkIndex(world, x, y), (y & CHUNK_MASK) << CHUNK_SHIFT | x & CHUNK_MASK];
+    const plantAt = (c, l) => world.flags[c] && (world.flags[c][l] & PLANT);
+    for (let y = yBottom; y > yTop; y -= 1) {
+      const [c, l] = at(y), [c2, l2] = at(y - 1);
+      mat[y * W + x] = mat[(y - 1) * W + x];
+      for (const name of SINKS) copyCell(world[name], c, l, c2, l2, name !== 'owner');
+      if (!plantAt(c, l) && !plantAt(c2, l2)) { copyCell(world.deco, c, l, c2, l2, true); copyCell(world.flags, c, l, c2, l2, true); }
+    }
+    const [c, l] = at(yTop);
+    mat[yTop * W + x] = M.AIR;
+    for (const name of SINKS) if (world[name][c]) world[name][c][l] = 0;
+    if (!plantAt(c, l)) { if (world.deco[c]) world.deco[c][l] = 0; if (world.flags[c]) world.flags[c][l] = 0; }
+    const top = world.groundTop[x];
+    if (top >= yTop && top <= yBottom) { refreshGroundTop(world, x, top); if (world.groundTop[x] !== top) groundTopMoved(world, x, top, world.groundTop[x]); }
+    for (let y0 = yTop; y0 <= yBottom;) {
+      const end = Math.min(yBottom, y0 | CHUNK_MASK);
+      markDirty(world, x, y0, DIRTY_BASE | DIRTY_DECO); markDirty(world, x, end, DIRTY_BASE | DIRTY_DECO);
+      y0 = end + 1;
+    }
+    shapeChanged(world, x, yTop); shapeChanged(world, x, yBottom);
+    wake(world, x, yTop); wake(world, x, yBottom);
+  }
   // Swap two cells by flat index (the cell automaton's move). Paint stays put: moving cells
   // (water, powders, gases) are coloured from their material palette. Temperature moves with the
   // material, so hot steam carries its heat as it rises.
@@ -721,7 +758,7 @@
   Object.assign(PW, {
     abgr, unpack, hash2, hash3, createRandom, createNoise1D, createNoise2D,
     createWorld, chunkIndex, inside, markDirty, markWaterDirty, wake, wakeCell, wakeArea, clearSimRect,
-    get, id, set, swapCells, touchGroundTop, refreshGroundTop, rebuildGroundTop,
+    get, id, set, swapCells, sinkColumn, touchGroundTop, refreshGroundTop, rebuildGroundTop,
     getLayer, setLayer, layerCell, clearPaintAt, isSolid, isOpen, groundBelow, supportBelow, traceShot,
     getOwner, setOwner, getFlags, setFlag, AMBIENT, heatAt, setHeat, addHeat, heatChunk,
   });

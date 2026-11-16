@@ -29,6 +29,25 @@
   // stood (WEDGE cells per cell of height over what it can hold), and pours down the slope; the face
   // goes on failing until what fell banks against its foot and buttresses it.
   const FACE = 4, WEDGE = 0.4, MAX_WEDGE = 80;
+  // Ground over a hollow - a cave or a blasted void shut in under a thick cover of ground - does not
+  // cave in as a chimney: it sags. The ground over it sinks into it column by column, the most over
+  // its middle, out to a bowl wider than the hollow by the angle of draw, with everything standing
+  // on it (buildings shear and may give way; trees go down with their foot). It sinks slowly at
+  // first, gathers pace and eases off. How far depends on the hollow's size: it sinks by the
+  // hollow's volume less what its broken rock bulks up to (BULK), so a great hollow leaves a deep
+  // bowl and a small one far down only fills with its own broken roof. A cover thinner than
+  // ROOF_THIN caves in instead, opening a sinkhole.
+  const ROOF_THIN = 10;      // cells of cover
+  const DRAW = 0.45;         // tan of the angle of draw (about 24 degrees off the vertical)
+  const BULK = 0.25;         // share of a hollow its broken rock fills up
+  const HOLLOW_REACH = 300;  // cells: a hollow reaching further than this from where it was found
+                             // is looked at as it is
+  const SAG_CELLS = 30000;   // cells moved per tick, at most, by all the sags under way
+  const HOLLOW_MAX = 30000;  // cells: a hollow bigger than this is looked at as it is
+  // Broken rock takes up about a third more room than it did whole, so a hollow under a cover
+  // more than CHOKE times its own height fills with its own broken roof before anything shows at
+  // the surface: it chokes (the fill goes in a share a tick).
+  const CHOKE = 3, FILL_PER_TICK = 1500;
   const SHOCK_MIN = 6000;    // a shock weaker than this is felt by nothing (a few pebbles landing)
   const SLIDE_SPEED = 40;    // cells a second ground breaking loose comes down at, for its shock
   const SHOCK_EVERY = 6;     // ticks between gathering up the strikes of flying debris
@@ -190,7 +209,15 @@
       }
       // (what broke loose comes away a share at a time, from the bottom up)
       stats.stage = `break ${out.length}`;
-      if (region.scan.done === undefined) { region.scan.done = 0; stats.looked += bw * bh; }
+      if (region.scan.done === undefined) {
+        region.scan.done = 0; stats.looked += bw * bh;
+        // (what would break over a hollow under a thick cover is left to it to sag - see ROOF_THIN)
+        if (out.length) {
+          const t0 = performance.now();
+          const kept = sagOver(out); out.length = 0; for (const i of kept) out.push(i);
+          stats.sagOverMax = Math.max(stats.sagOverMax || 0, performance.now() - t0);
+        }
+      }
       const until = Math.min(out.length, region.scan.done + BREAKS_PER_TICK);
       // (still ground that can break: something else - a rising core, a landing piece - may have
       // taken the cell since it was looked at)
@@ -224,6 +251,189 @@
       }
       region.scan = null;
       return out.length;
+    }
+    // ---- Sags (see ROOF_THIN) --------------------------------------------------------------------
+    const sags = [];
+    const inSag = (x, y) => sags.some((s) => x >= s.x0 && x <= s.x1 && y <= s.yBottom && y >= s.yTop);
+    const tunnelAt = (x, y) => (PW.getFlags(world, x, y) & PW.FLAG.TUNNEL) !== 0;
+    // Of the cells about to break, those over a hollow shut in under a thick cover are left to
+    // that hollow's sag (started here), as is whatever lies in a sag already under way. Returns the
+    // cells that break as they would.
+    const queue = new Int32Array(HOLLOW_MAX + 8);
+    function sagOver(out) {
+      let kept = out.filter((i) => !inSag(i % W, (i / W) | 0));
+      if (!kept.length) return kept;
+      // (one marker for every open space looked at here - the cells over a crater open to the sky
+      // are many, and each is looked at once - over the cells about to break and round them as far
+      // as a hollow may reach)
+      let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
+      for (const i of kept) { const x = i % W, y = (i / W) | 0; if (x < bx0) bx0 = x; if (x > bx1) bx1 = x; if (y < by0) by0 = y; if (y > by1) by1 = y; }
+      const box = { x0: Math.max(1, bx0 - HOLLOW_REACH), y0: Math.max(1, by0 - 2), x1: Math.min(W - 2, bx1 + HOLLOW_REACH), y1: Math.min(H - 2, by1 + HOLLOW_REACH) };
+      box.w = box.x1 - box.x0 + 1;
+      box.mark = new Uint8Array(box.w * (box.y1 - box.y0 + 1));
+      let started = false;
+      for (const i of kept) {
+        const x = i % W, y = (i / W) | 0, j = i + W;
+        if (y + 2 >= H || box.mark[(y + 1 - box.y0) * box.w + x - box.x0] || !open[mat[j] & ID_MASK] || y + 1 <= world.groundTop[x] || tunnelAt(x, y + 1)) continue;
+        const hollow = findHollow(x, y + 1, box);
+        if (!hollow.open && startSag(hollow)) started = true;
+      }
+      if (started) kept = kept.filter((i) => !inSag(i % W, (i / W) | 0));
+      return kept;
+    }
+    // The hollow open cell (x, y) is part of: the open cells joined to it under the ground line -
+    // not a tunnel (its timbering holds its roof up) nor a building's rooms. `open` when it opens
+    // to the sky (an overhang, a crater: that is the ordinary breaking's) or reaches too far.
+    function findHollow(sx, sy, box) {
+      const { mark, w, x0: ox, y0: oy, x1: ex, y1: ey } = box;
+      let n = 0, minX = sx, maxX = sx, maxY = sy, isOpen = false;
+      mark[(sy - oy) * w + sx - ox] = 1; queue[n++] = sy * W + sx;
+      const top = new Map();
+      const visit = (nx, ny) => {
+        if (nx < ox || ny < oy || nx > ex || ny > ey) { isOpen = true; return; }
+        const k = (ny - oy) * w + nx - ox;
+        if (mark[k]) return;
+        mark[k] = 1;
+        if (!open[mat[ny * W + nx] & ID_MASK]) return;
+        const o = PW.getOwner(world, nx, ny);
+        if (tunnelAt(nx, ny) || (o > 0 && o < 50000)) return;
+        if (n >= HOLLOW_MAX) { isOpen = true; return; }
+        queue[n++] = ny * W + nx;
+      };
+      for (let q = 0; q < n && !isOpen; q += 1) {
+        const i = queue[q], x = i % W, y = (i / W) | 0;
+        if (y <= world.groundTop[x]) { isOpen = true; break; }
+        const t = top.get(x);
+        if (t === undefined || y < t) top.set(x, y);
+        if (x < minX) minX = x; if (x > maxX) maxX = x; if (y > maxY) maxY = y;
+        visit(x + 1, y); visit(x - 1, y); visit(x, y + 1); visit(x, y - 1);
+      }
+      return { cells: isOpen ? null : Array.from(queue.subarray(0, n)), open: isOpen, minX, maxX, maxY, top };
+    }
+    // Set the ground over a hollow sagging into it - or, too small a hollow for it to show at the
+    // surface (see CHOKE), let it fill with its own broken roof. False for a cover thin enough to
+    // cave in.
+    function startSag(h) {
+      let cover = 0, slip = 0, roofTop = Infinity;
+      for (const [x, y] of h.top) { cover += y - world.groundTop[x]; slip += y; if (y < roofTop) roofTop = y; }
+      cover /= h.top.size; slip = Math.round(slip / h.top.size);
+      if (cover < ROOF_THIN) return false;
+      const xc = (h.minX + h.maxX) / 2, reach = (h.maxX - h.minX + 1) / 2 + cover * DRAW + 4;
+      // (what it fills with: the ground over it, broken and packed down under the weight on it -
+      // loose stone would hold nothing up)
+      const mx = Math.round(xc), roof = mat[((h.top.get(mx) ?? slip) - 1) * W + mx] & ID_MASK;
+      const loose = breaksTo[roof] || M.LOOSE_STONE, rubble = PW.mat.settlesTo[loose] || M.GRAVEL;
+      const fill = h.cells.sort((a, b) => b - a);   // (deepest first)
+      // (a bowl of cos^2 across 2 x reach holds reach cells of sinking per cell of its depth)
+      if (h.cells.length * (1 - BULK) / reach < 1.5 || cover > CHOKE * (h.maxY - roofTop + 1)) {
+        // (it chokes: the hollow is left to fill with its broken roof, a share a tick)
+        sags.push({ choke: true, x0: h.minX, x1: h.maxX, yTop: roofTop - 30, yBottom: h.maxY, fill, filled: 0, rubble });
+        stats.choked = (stats.choked || 0) + 1;
+        return true;
+      }
+      const x0 = Math.max(2, Math.floor(xc - reach)), x1 = Math.min(W - 3, Math.ceil(xc + reach));
+      // (a column with a tunnel in it is held up by the tunnel's timbering)
+      const segs = PW.tunnels ? PW.tunnels.state(world).segments.filter((g) => g.x1 >= x0 && g.x0 <= x1 && g.y0 <= h.maxY) : [];
+      const target = new Float32Array(x1 - x0 + 1);
+      let sum = 0;
+      for (let k = 0; k < target.length; k += 1) {
+        const x = x0 + k, d = Math.abs(x + 0.5 - xc) / reach;
+        const held = segs.some((g) => x >= g.x0 - 4 && x <= g.x1 + 4 && g.y1 + 4 >= world.groundTop[x] && g.y0 - 4 <= slip);
+        target[k] = d < 1 && !held ? Math.cos(d * Math.PI / 2) ** 2 : 0;
+        sum += target[k];
+      }
+      const depth = h.cells.length * (1 - BULK) / Math.max(1, sum);
+      for (let k = 0; k < target.length; k += 1) target[k] = Math.round(target[k] * depth);
+      const plants = (world.flora || []).filter((r) => r.anchorX >= x0 && r.anchorX <= x1 && !r.fallen);
+      const owners = (world.buildings || []).filter((b) => b.body.right >= x0 && b.body.left <= x1).map((b) => b.id);
+      sags.push({ x0, x1, yTop: -Infinity, yBottom: h.maxY, slip, target, done: new Int32Array(target.length), hollow: new Set(h.cells), fill, filled: 0,
+        rubble, age: 0, T: Math.min(9, 1.5 + depth / 10), plants, owners });
+      stats.sags = (stats.sags || 0) + 1;
+      return true;
+    }
+    // The sags under way sink a little further each tick, along a smooth curve (slow, faster, slow),
+    // as far as the budget lets them.
+    function stepSags(dt) {
+      let budget = SAG_CELLS;
+      // (the broken rock going into a hollow, a share a tick: true once it is full)
+      const fillIn = (s) => {
+        let left = FILL_PER_TICK;
+        while (s.filled < s.fill.length && left > 0) {
+          const i = s.fill[s.filled++];
+          if ((!s.hollow || s.hollow.has(i)) && open[mat[i] & ID_MASK]) { PW.set(world, i % W, (i / W) | 0, s.rubble); left -= 1; }
+        }
+        return s.filled >= s.fill.length;
+      };
+      for (let n = sags.length - 1; n >= 0; n -= 1) {
+        const s = sags[n];
+        if (s.choke) { if (fillIn(s)) sags.splice(n, 1); continue; }
+        s.age += dt;
+        const u = Math.min(1, s.age / s.T), f = (1 - Math.cos(Math.PI * u)) / 2;
+        let behind = false;
+        for (let k = 0; k < s.target.length && budget > 0; k += 1) {
+          const want = Math.round(s.target[k] * f);
+          while (s.done[k] < want && budget > 0) {
+            const cost = sinkOne(s, s.x0 + k);
+            if (cost < 0) { s.target[k] = s.done[k]; break; }
+            s.done[k] += 1; budget -= cost;
+          }
+          if (s.done[k] < s.target[k]) behind = true;
+        }
+        for (const r of s.plants) carryPlant(s, r);
+        if (s.owners.length && world.onDamage && (Math.floor(s.age * 2) !== Math.floor((s.age - dt) * 2) || (u >= 1 && !behind))) for (const id of s.owners) world.onDamage(id, 0);
+        if (u < 1 || behind) continue;
+        // Sunk as far as it goes: the rest of the hollow is the broken rock's, bulked up.
+        if (!fillIn(s)) continue;
+        sags.splice(n, 1);
+        // (the grass left in the air over it drops; the edges of the bowl are looked at)
+        if (PW.flora) PW.flora.afterBlast(world, particles, { x0: s.x0, y0: s.slip - 600, x1: s.x1, y1: s.yBottom }, null, { x0: s.x0, y0: s.slip - 600, x1: s.x1, y1: s.yBottom });
+        disturb(s.x0, s.slip - 200, s.x1, s.yBottom);
+      }
+    }
+    // Sink column x of sag s by a cell: everything in it from its top down sinks into the hollow
+    // under it, or - beside the hollow - presses the ground at the hollow's level out sideways into
+    // it. The cells moved; -1 when it cannot sink (nothing of the hollow left to take it).
+    function sinkOne(s, x) {
+      // (its top: the highest thing standing in it - the ground, a building, its walls, a fitting)
+      let top = world.groundTop[x];
+      for (let y = top - 1, empty = 0; y > 1 && empty < 16; y -= 1) {
+        const busy = (mat[y * W + x] & ID_MASK) !== M.AIR || PW.getLayer(world, 'back', x, y)
+          || (PW.getLayer(world, 'deco', x, y) && !(PW.getFlags(world, x, y) & PW.FLAG.FLORA));
+        if (busy) { top = y; empty = 0; } else empty += 1;
+      }
+      let bottom = -1;
+      for (let y = world.groundTop[x]; y <= s.yBottom; y += 1) if (s.hollow.has(y * W + x) && open[mat[y * W + x] & ID_MASK]) { bottom = y; break; }
+      if (bottom < 0) {
+        // (beside the hollow: the ground at its level is pressed out into it)
+        bottom = Math.max(world.groundTop[x] + 2, s.slip);
+        let into = -1;
+        while (s.filled < s.fill.length && into < 0) { const i = s.fill[s.filled++]; if (s.hollow.has(i) && open[mat[i] & ID_MASK]) into = i; }
+        if (into < 0) return -1;
+        s.hollow.delete(into);
+        PW.set(world, into % W, (into / W) | 0, s.rubble);
+      } else s.hollow.delete(bottom * W + x);
+      PW.sinkColumn(world, x, top, bottom);
+      return bottom - top + 1;
+    }
+    // A plant goes down with the ground at its foot, whole.
+    function carryPlant(s, r) {
+      const dy = s.done[r.anchorX - s.x0] - (r.sunk || 0);
+      if (dy <= 0 || r.fallen) return;
+      const PLANT = PW.FLAG.FLORA | PW.FLAG.WOOD | PW.FLAG.CHARRED;
+      for (let sy = r.height - 1; sy >= 0; sy -= 1) for (let sx = 0; sx < r.width; sx += 1) {
+        const k = sy * r.width + sx;
+        if (!(r.mask[k >> 3] & (1 << (k & 7)))) continue;
+        const x = r.x + sx, y = r.y + sy, deco = PW.getLayer(world, 'deco', x, y), flags = PW.getFlags(world, x, y) & PLANT;
+        if (!deco || !(flags & PW.FLAG.FLORA)) continue;
+        PW.setLayer(world, 'deco', x, y, 0);
+        PW.setFlag(world, x, y, PLANT, false);
+        if ((mat[(y + dy) * W + x] & ID_MASK) !== M.AIR || PW.getLayer(world, 'deco', x, y + dy)) continue;   // (crushed against the ground)
+        PW.setLayer(world, 'deco', x, y + dy, deco);
+        PW.setFlag(world, x, y + dy, flags);
+      }
+      r.y += dy; r.row += dy; r.sunk = (r.sunk || 0) + dy;
+      if (r.trunk) { r.trunk.y0 += dy; r.trunk.y1 += dy; }
+      if (r.foot) for (let k = 0; k < r.foot.length; k += 1) if (r.foot[k] >= 0) r.foot[k] += dy;
     }
     function breakLoose(x, y, m) {
       const id = m & ID_MASK, loose = breaksTo[id] || M.LOOSE_SOIL;
@@ -292,6 +502,7 @@
     }
     function step() {
       tick += 1;
+      if (sags.length) { const t0 = performance.now(); stepSags(1 / 60); stats.sagMs = performance.now() - t0; }
       // The strikes of flying debris, gathered tile by tile, each felt as one shock.
       if (tick % SHOCK_EVERY === 0 && particles && particles.drainImpacts) particles.drainImpacts(shock);
       // (one disturbance looked at at a time, a few rows a tick)
@@ -322,7 +533,7 @@
       }
       return false;
     }
-    return { step, disturb, shock, stats, busy: () => pending.length > 0 };
+    return { step, disturb, shock, stats, busy: () => pending.length > 0 || sags.length > 0 };
   }
 
   PW.createStability = createStability;
