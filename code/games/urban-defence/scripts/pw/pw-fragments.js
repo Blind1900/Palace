@@ -526,11 +526,12 @@
       return true;
     }
     // A piece come to rest: a big enough one lies where it is as a ruin, a small one heaps as
-    // rubble; a tree lies as it fell.
+    // rubble; a tree lies as it fell; a spire of rock that toppled lies broken, as talus that runs
+    // on down the slope and settles there.
     function finish(p) {
       const [c, s] = cosSin(p);
       if (p.flora) { if (PW.flora) PW.flora.land(world, particles, place(p, p.data, c, s), p); stats.landedPlants = (stats.landedPlants || 0) + 1; return; }
-      if (p.mass >= RUIN_MIN) ruin(p, c, s);
+      if (p.mass >= RUIN_MIN && (p.owner || p.from)) ruin(p, c, s);
       else settle(p.data, 0, 0, p);
     }
     // Test the piece's outline against the world. A hinging piece crushes the stump of its own
@@ -825,7 +826,7 @@
       const fwd = Math.sign(vt) || (random() < 0.5 ? 1 : -1);
       // A hollow piece - a building, mostly air - folds up where it lands, like a box (see crumple).
       if (p.hollow > HOLLOW && felt >= FOLD_SPEED && p.mass >= SPLIT_MIN && p.crumpled !== world.tick) {
-        blow(hx, hy, vx, vy, hit, j * hit, tx * fwd, ty * fwd, Math.abs(vt), hard);
+        blow(hx, hy, vx, vy, hit, j * hit, tx * fwd, ty * fwd, Math.abs(vt), hard, !p.owner && !p.from && !p.flora);
         if (crumple(p, wx, wy, nx, ny, felt, spread, vt)) return true;
       }
       const jt = Math.max(-FRICTION * j, Math.min(FRICTION * j, -vt / (invM + rt * rt * invI)));
@@ -837,7 +838,7 @@
       if (p.flora) { p.omega *= 0.7; p.vx *= 0.92; p.vy *= 0.92; return false; }
       if (felt < SNAP_SPEED) return false;
       // A blow: what it struck feels it, and the piece breaks where it took it.
-      if (felt >= CRUMBLE_SPEED && p.crumpled !== world.tick) blow(hx, hy, vx, vy, hit, j * hit, tx * fwd, ty * fwd, Math.abs(vt), hard);
+      if (felt >= CRUMBLE_SPEED && p.crumpled !== world.tick) blow(hx, hy, vx, vy, hit, j * hit, tx * fwd, ty * fwd, Math.abs(vt), hard, !p.owner && !p.from && !p.flora);
       return breaks(p, wx, wy, vx, vy, nx, ny, felt, hard, spread);
     }
     // A building is a box of thin floors and walls round open rooms. Where it lands hard, the rooms
@@ -908,8 +909,9 @@
     // What a piece strikes at (hx, hy) feels the blow (`energy`: the push times the speed it
     // stopped): the ground is dented and shaken, and looked at for what lost its footing; a struck
     // building gives way around the point of impact. Dust is driven out along the ground the way the
-    // piece was going (fx, fy, at `along`), and a big blow leaves the rubble smouldering.
-    function blow(hx, hy, vx, vy, hit, energy, fx, fy, along, hard = 0.5) {
+    // piece was going (fx, fy, at `along`), and a big blow leaves the rubble smouldering. (`rock`:
+    // the piece is of the ground itself - a column that toppled - and nothing topples for its blow.)
+    function blow(hx, hy, vx, vy, hit, energy, fx, fy, along, hard = 0.5, rock = false) {
       stats.shattered += 1;
       const speed = hit;
       // (soft ground takes the blow in a dent, its clods thrown up; rock hardly)
@@ -918,7 +920,7 @@
       // lost its footing.
       if (world.stability) {
         world.stability.shock(hx, hy, energy / 40);
-        world.stability.disturb(hx - 40, hy - 60, hx + 40, hy + 30);
+        world.stability.disturb(hx - 40, hy - 60, hx + 40, hy + 30, { noTopple: rock });
       }
       const rr = Math.min(10, 1 + Math.sqrt(energy) / 900);
       for (let y = Math.floor(hy - rr); y <= hy + rr; y += 1) for (let x = Math.floor(hx - rr); x <= hx + rr; x += 1) {

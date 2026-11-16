@@ -29,6 +29,20 @@
   // stood (WEDGE cells per cell of height over what it can hold), and pours down the slope; the face
   // goes on failing until what fell banks against its foot and buttresses it.
   const FACE = 4, WEDGE = 0.4, MAX_WEDGE = 80;
+  // A column of rock standing free - open air on both sides of it - stands only so tall for its
+  // width: under four times as tall as it is wide (1 + its cohesion / SLENDER, its cohesion that
+  // of the rock at its foot; bands of gravel or clay in it count in its height). A spire or a
+  // pillar the blasts round it left taller than that topples, as one solid piece that tips over its
+  // foot and breaks up where it lands. (A column standing on earth is the cut faces' business - see
+  // FACE. Not where a falling piece of rock landed, nor round what a topple left: one topple never
+  // sets off another.)
+  const SLENDER = 6;
+  const SLENDER_MIN = 10;     // rows: a column lower than this stands
+  const TOPPLE_PIECE = 300;   // cells: a column smaller than this is left to the rest of the rules
+  const SPIRE_MAX = 15000;    // cells: (a "column" bigger than this is no column)
+  const ROCK = new Uint8Array(64);
+  ROCK[M.STONE] = 1; ROCK[M.ORE] = 1;
+  const SLENDER_ABOVE = 300, SLENDER_SIDE = 40;   // how far round a disturbance columns are looked for
   // Ground over a hollow - a cave or a blasted void shut in under a thick cover of ground - does not
   // cave in as a chimney: it sags. The ground over it sinks into it column by column, the most over
   // its middle, out to a bowl wider than the hollow by the angle of draw, with everything standing
@@ -223,6 +237,57 @@
       // taken the cell since it was looked at)
       for (; region.scan.done < until; region.scan.done += 1) { const i = out[region.scan.done], x = i % W, y = (i / W) | 0; if (breakable(i, x, y)) breakLoose(x, y, mat[i]); }
       if (region.scan.done < out.length) return -1;
+      // Slender columns (see SLENDER), where ground just broke away - round it and up over it: row
+      // by row from the top, each run of natural ground with open air at both its ends stands as
+      // tall as the free run over it plus one; where one standing on rock stands taller than its
+      // width allows, what is over it comes down.
+      if (out.length && !region.noTopple && !region.scan.slenderDone) {
+        if (!region.scan.slender) {
+          let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
+          for (const i of out) { const x = i % W, y = (i / W) | 0; if (x < bx0) bx0 = x; if (x > bx1) bx1 = x; if (y < by0) by0 = y; if (y > by1) by1 = y; }
+          region.scan.slender = { y: Math.max(y0, by0 - SLENDER_ABOVE), sx0: Math.max(x0, bx0 - SLENDER_SIDE), sx1: Math.min(x1, bx1 + SLENDER_SIDE),
+            sy1: Math.min(y1, by1 + 2), prev: [], bases: new Map() };
+        }
+        const sl = region.scan.slender, { sx0, sx1 } = sl;
+        stats.stage = `slender ${sx1 - sx0 + 1}x${sl.sy1 - sl.y + 1}`;
+        let budget = CELLS_PER_TICK;
+        for (; sl.y <= sl.sy1 && budget > 0; sl.y += 1, budget -= sx1 - sx0 + 1) {
+          const y = sl.y, row = (y - y0) * bw, runs = [];
+          // (natural ground - a building's walls are its own business, and a ruin or a heap is what
+          // came down already - measured through its bands of gravel and clay; only a column
+          // standing on rock topples, earth's faces are the face rule's)
+          const stands = (x) => {
+            const i = y * W + x;
+            return reach[row + x - x0] !== FAR && (mat[i] & ID_MASK) !== M.RUIN && breakable(i, x, y);
+          };
+          for (let x = sx0; x <= sx1; x += 1) {
+            if (!stands(x)) continue;
+            const a = x;
+            while (x + 1 <= sx1 && stands(x + 1)) x += 1;
+            const b = x;
+            // (open at both ends: a heap of rubble banked against it holds nothing up)
+            const free = a > sx0 && b < sx1 && !holds(y * W + a - 1, a - 1, y) && !holds(y * W + b + 1, b + 1, y);
+            const run = { a, b, free, up: 1, key: y * W + a, capped: !free };
+            for (const r of sl.prev) {
+              if (r.b < a || r.a > b) continue;
+              if (!r.free || r.capped) run.capped = true;
+              else if (r.up + 1 > run.up) { run.up = r.up + 1; run.key = r.key; }
+            }
+            if (run.free && !run.capped && run.up >= SLENDER_MIN) {
+              const id = mat[y * W + ((a + b) >> 1)] & ID_MASK;
+              if (ROCK[id] && run.up > (1 + cohesion[id] / SLENDER) * (b - a + 1)) sl.bases.set(run.key, { y, a, b });
+            }
+            runs.push(run);
+          }
+          sl.prev = runs;
+        }
+        if (sl.y <= sl.sy1) return -1;
+        // (each column comes down from the lowest row it is too slender at - once for a
+        // disturbance: what is left of a column that went over is the slide's to settle)
+        for (const base of sl.bases.values()) topple(base, region.scan, region);
+        if (sl.bases.size) region.noTopple = true;
+        region.scan.slenderDone = true;
+      }
       // (a slide that reached the top of the box goes on above it: the next look reaches higher;
       // one running down the surface that reached a side reaches further out, so it never stops at
       // a straight seam - a cave-in underground stays the chimney it is)
@@ -252,6 +317,52 @@
       region.scan = null;
       return out.length;
     }
+    // ---- Slender columns (see SLENDER) -------------------------------------------------------------
+    // A column too slender for its ground, from the run [a..b] of row y up, goes over as one solid
+    // piece over the edge of its foot it leans towards - at the start of the next tick (lifting it
+    // out is the falling pieces' work, not this look's).
+    const toppling = [];
+    function topple(base, scan, region) {
+      const { x0, y0, bw, reach } = scan;
+      const seen = new Set(), cells = [], stack = [];
+      for (let x = base.a; x <= base.b; x += 1) { const i = base.y * W + x; seen.add(i); stack.push(i); }
+      while (stack.length && cells.length <= SPIRE_MAX) {
+        const i = stack.pop();
+        cells.push(i);
+        // (down too, short of its foot: a ledge of it may hang below a part of it)
+        for (const j of [i - W, i - 1, i + 1, i + W]) {
+          const jx = j % W, jy = (j / W) | 0;
+          if (seen.has(j) || jy > base.y || jy < y0 || jx < x0 || jx >= x0 + bw) continue;
+          seen.add(j);
+          if (reach[(jy - y0) * bw + jx - x0] !== FAR && (mat[j] & ID_MASK) !== M.RUIN && breakable(j, jx, jy)) stack.push(j);
+        }
+      }
+      if (cells.length > SPIRE_MAX || cells.length < TOPPLE_PIECE || !world.fragments) return;
+      for (const i of cells) reach[(((i / W) | 0) - y0) * bw + (i % W) - x0] = FAR;
+      let sx = 0;
+      for (const i of cells) sx += i % W;
+      const lean = sx / cells.length - (base.a + base.b) / 2;
+      const dir = Math.abs(lean) > 0.5 ? Math.sign(lean) : (PW.hash2(base.a, base.y) & 1 ? 1 : -1);
+      toppling.push({ cells, owner: 0, pivot: { x: dir > 0 ? base.b + 1 : base.a, y: base.y + 1 }, base: base.y + 1, dir, omega: dir * 0.05 });
+      stats.toppled = (stats.toppled || 0) + 1;
+      // (the last few, for the tests)
+      (stats.topples || (stats.topples = [])).push({ tick, x: base.a, y: base.y, w: base.b - base.a + 1, cells: cells.length, rounds: region.rounds });
+      if (stats.topples.length > 20) stats.topples.shift();
+    }
+    function goOver() {
+      const spire = toppling.shift();
+      spire.cells = spire.cells.filter((i) => (mat[i] & ID_MASK) !== M.RUIN && breakable(i, i % W, (i / W) | 0));
+      if (spire.cells.length < TOPPLE_PIECE) return;
+      let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
+      for (const i of spire.cells) { const x = i % W, y = (i / W) | 0; if (x < bx0) bx0 = x; if (x > bx1) bx1 = x; if (y < by0) by0 = y; if (y > by1) by1 = y; }
+      world.fragments.spawn(spire);
+      stats.broken += spire.cells.length;
+      // (what stood round its foot is looked at again - but nothing topples for it)
+      disturb(bx0, by0, bx1, by1 + 8, { noTopple: true });
+    }
+    // (a piece of rock is still coming down: the ground where it lands is yet to be looked at)
+    const stillFalling = () => !!world.fragments && world.fragments.list.some((p) => !p.owner && !p.flora);
+
     // ---- Sags (see ROOF_THIN) --------------------------------------------------------------------
     const sags = [];
     const inSag = (x, y) => sags.some((s) => x >= s.x0 && x <= s.x1 && y <= s.yBottom && y >= s.yTop);
@@ -385,9 +496,10 @@
         // Sunk as far as it goes: the rest of the hollow is the broken rock's, bulked up.
         if (!fillIn(s)) continue;
         sags.splice(n, 1);
-        // (the grass left in the air over it drops; the edges of the bowl are looked at)
+        // (the grass left in the air over it drops; the edges of the bowl are looked at - for what
+        // the sinking cut loose, not for columns: a sag settles the ground, it topples nothing)
         if (PW.flora) PW.flora.afterBlast(world, particles, { x0: s.x0, y0: s.slip - 600, x1: s.x1, y1: s.yBottom }, null, { x0: s.x0, y0: s.slip - 600, x1: s.x1, y1: s.yBottom });
-        disturb(s.x0, s.slip - 200, s.x1, s.yBottom);
+        disturb(s.x0, s.slip - 200, s.x1, s.yBottom, { noTopple: true });
       }
     }
     // Sink column x of sag s by a cell: everything in it from its top down sinks into the hollow
@@ -454,14 +566,16 @@
     }
 
     // Look at the ground in a box, and everything above it up to the surface, a moment from now.
-    function disturb(x0, y0, x1, y1) {
+    // (options.noTopple: nothing topples for it - where a piece of rock landed, or round what a
+    // column that toppled left)
+    function disturb(x0, y0, x1, y1, options) {
       const pad = 24;   // (as far as any ground but bedrock reaches out, and more)
       // (a disturbance at the surface - anywhere along it: at the foot of a cliff too - may set off
       // a slide that runs out along it; one deep underground only a cave-in)
       let low = -Infinity;
       for (let x = Math.max(0, Math.floor(x0) - pad); x <= Math.min(W - 1, Math.ceil(x1) + pad); x += 4) low = Math.max(low, world.groundTop[x]);
       pending.push({ x0: Math.floor(x0) - pad, y0: Math.floor(y0), x1: Math.ceil(x1) + pad, y1: Math.ceil(y1), at: tick + SETTLE, rounds: 0,
-        atSurface: y0 < low + 80 });
+        atSurface: y0 < low + 80, noTopple: !!(options && options.noTopple) });
       stats.regions += 1;
     }
     // Vibration is the shock of things striking each other, as strong as the energy of the strike:
@@ -503,6 +617,7 @@
     function step() {
       tick += 1;
       if (sags.length) { const t0 = performance.now(); stepSags(1 / 60); stats.sagMs = performance.now() - t0; }
+      if (toppling.length) goOver();
       // The strikes of flying debris, gathered tile by tile, each felt as one shock.
       if (tick % SHOCK_EVERY === 0 && particles && particles.drainImpacts) particles.drainImpacts(shock);
       // (one disturbance looked at at a time, a few rows a tick)
@@ -533,7 +648,7 @@
       }
       return false;
     }
-    return { step, disturb, shock, stats, busy: () => pending.length > 0 || sags.length > 0 };
+    return { step, disturb, shock, stats, busy: () => pending.length > 0 || sags.length > 0 || toppling.length > 0 || stillFalling() };
   }
 
   PW.createStability = createStability;
