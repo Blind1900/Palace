@@ -149,6 +149,10 @@
     // How far up its mountain each column stands (0 at the foot, 1 at the summit): bare rock and
     // boulders gather near the tops (see fillStrata and the vegetation's rocks).
     const relief = layout.relief = new Float32Array(W);
+    // How much mountain stands over each column: the massif's body runs from the surface down to
+    // the ground the mountain was raised on (its foot line). The rock in that body is one rock
+    // mass, not country strata (the renderer draws it as such).
+    const liftSum = new Float32Array(W);
     // (two peaks meet in a rounded saddle, not a notch: a smooth maximum, its rounding shrinking
     // to nothing towards their feet)
     const smax = (a, b) => {
@@ -183,6 +187,7 @@
         const rough = 1 + ridge(x + m.seed) * 0.1 + ridgeFine(x - m.seed) * 0.04 + hills[4](x * 3 + m.seed) * 0.012
           + c * c * c * 0.05 * smooth(lift / m.height / 0.6);
         y -= lift * rough;
+        liftSum[x] += lift * rough;
         relief[x] = Math.max(relief[x], Math.min(1, lift / m.height));
       }
       // Edges of the map rise into hills.
@@ -204,12 +209,12 @@
       for (const site of layout.sites) {
         const inside = Math.min(x - site.x0, site.x1 - x);
         const blend = smooth((inside + 260) / 260);
-        if (blend > 0) y = y + (site.level + hills[4](x) * 0.6 + siteRelief(site, x) - y) * blend;
+        if (blend > 0) { y = y + (site.level + hills[4](x) * 0.6 + siteRelief(site, x) - y) * blend; liftSum[x] *= 1 - blend; }
       }
       // (a pocket beside a site keeps its own level over the site's shoulder)
       for (const p of layout.pockets || []) {
         const blend = smooth((Math.min(x - p.x0, p.x1 - x) + p.shoulder) / p.shoulder);
-        if (blend > 0) y += (p.level + hills[4](x) * 0.6 - y) * blend;
+        if (blend > 0) { y += (p.level + hills[4](x) * 0.6 - y) * blend; liftSum[x] *= 1 - blend; }
       }
       for (const lake of layout.lakes) {
         const t = Math.abs(x - lake.x) / lake.half;
@@ -221,6 +226,10 @@
       }
       surface[x] = y;
     }
+    // The massif foot line: below it the ground is country strata again. (Lakes may carve into a
+    // massif's flank; their bowls stay inside the rock mass, so the foot line ignores them.)
+    const massifBottom = layout.massifBottom = new Int32Array(W);
+    for (let x = 0; x < W; x += 1) massifBottom[x] = Math.round(surface[x] + (liftSum[x] > 24 ? liftSum[x] : 0));
     return surface;
   }
 
@@ -257,13 +266,17 @@
   // each blending into the next over a few hundred columns. Kept as each column's tint of the
   // subsoil's colours (r g b in 1/256) and its loess and laterite shares.
   const LOESS = [1.3, 1.3, 1.24], LATERITE = [1.2, 0.88, 0.84];
-  function soilProvinces(world, seed) {
+  function soilProvinces(world, seed, layout) {
     const W = world.width, belt = PW.createNoise1D(seed + 51, 2200);
     const tint = new Uint16Array(W * 3), loess = new Float32Array(W), laterite = new Float32Array(W);
+    const relief = (layout && layout.relief) || null;
     for (let x = 0; x < W; x += 1) {
       const v = belt(x);
-      loess[x] = smooth((v - 0.18) / 0.3);
-      laterite[x] = smooth((-v - 0.18) / 0.3);
+      // The belts are lowland soils: they fade off a mountain's flanks (the thin soil up there is
+      // plain weathered rock earth, never a red or yellow stripe across the massif).
+      const lowland = relief ? 1 - smooth((relief[x] - 0.08) / 0.3) : 1;
+      loess[x] = smooth((v - 0.18) / 0.3) * lowland;
+      laterite[x] = smooth((-v - 0.18) / 0.3) * lowland;
       for (let c = 0; c < 3; c += 1) tint[x * 3 + c] = Math.round(256 * (1 + (LOESS[c] - 1) * loess[x] + (LATERITE[c] - 1) * laterite[x]));
     }
     return { tint, loess, laterite };
@@ -509,6 +522,8 @@
       const y = top[x] + depth;
       const kind = depth < 260 ? (random() < 0.6 ? M.CLAY : M.GRAVEL) : random() < 0.5 ? M.SOIL : M.CLAY;
       blob(world, x, y, random.range(14, 46), random, (px, py) => {
+        // (lenses are features of the lying strata: none in the body of a massif)
+        if (layout.massifBottom && py < layout.massifBottom[px]) return;
         const index = py * W + px;
         const id = mat[index] & 63;
         if (id === M.SOIL || id === M.STONE || id === M.CLAY || id === M.GRAVEL) mat[index] = kind | mat[index] & 0xc0;
@@ -986,7 +1001,7 @@
     const random = PW.createRandom(seed);
     const layout = planLayout(world, random);
     const surface = surfaceProfile(world, layout, seed);
-    world.soil = soilProvinces(world, seed);
+    world.soil = soilProvinces(world, seed, layout);
     const top = fillStrata(world, layout, surface, seed);
     layout.scree = scree(world, layout, surface, top, seed);
     layout.talus = talus(world, layout, surface, top, seed);
@@ -1008,6 +1023,7 @@
     }
     world.surface0 = shadeLine;
     world.terrainTop = top;
+    world.massifBottom = layout.massifBottom;
     world.layout = layout;
     PW.rebuildGroundTop(world);
     return layout;

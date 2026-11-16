@@ -55,9 +55,12 @@
     function soilShade(color, x, y, k) {
       const i = x * 3;
       if (soil.loess[x] > 0.5 && (PW.hash2(x, (y / 7) | 0) & 15) === 0) k = k * 230 >> 8;
-      const r = Math.min(255, ((color & 255) * soil.tint[i] >> 8) * k >> 8);
-      const g = Math.min(255, ((color >>> 8 & 255) * soil.tint[i + 1] >> 8) * k >> 8);
-      const b = Math.min(255, ((color >>> 16 & 255) * soil.tint[i + 2] >> 8) * k >> 8);
+      // The belt colours are weathering crusts: they fade back to plain earth with depth.
+      const fade = Math.max(0, 340 - Math.max(0, y - surface0[x]));
+      const t = (i3) => 256 + ((soil.tint[i3] - 256) * fade / 340 | 0);
+      const r = Math.min(255, ((color & 255) * t(i) >> 8) * k >> 8);
+      const g = Math.min(255, ((color >>> 8 & 255) * t(i + 1) >> 8) * k >> 8);
+      const b = Math.min(255, ((color >>> 16 & 255) * t(i + 2) >> 8) * k >> 8);
       return (0xff000000 | b << 16 | g << 8 | r) >>> 0;
     }
     // Grass roots: pale strands from the turf down into the dark topsoil, two to five cells long,
@@ -66,6 +69,34 @@
     function rootDepth(x, y) {
       for (let d = 1; d <= 5; d += 1) if ((mat[(y - d) * W + x] & ID_MASK) === M.GRASS) return d;
       return 0;
+    }
+    // Massif rock (pw-gen-terrain's foot line): the body of a mountain is one rock mass, not
+    // country strata. Grey granite parted by two wandering families of joints into blocky masses,
+    // each mass in a slightly different tone, with sparse rusty iron stains and a pale weathered
+    // crust along the open faces. Gravel in the massif (scree, talus) is the same rock broken
+    // small, so the walls and the rubble under them read as one stone.
+    const massifBottom = world.massifBottom || null;
+    const GRANITE_PAL = [[106, 104, 99], [100, 98, 94], [112, 110, 104], [96, 94, 90], [108, 106, 100], [102, 100, 96], [115, 113, 106], [98, 96, 92]];
+    const SCREE_PAL = [[118, 114, 106], [104, 101, 95], [126, 122, 113], [98, 95, 90], [121, 117, 108], [108, 105, 98], [130, 126, 116], [101, 98, 92]];
+    function rockColor(id, m, x, y, h, g, dk) {
+      // The joints wander, and most segments have healed shut, so the rock parts into uneven
+      // blocky masses rather than a laid wall of even courses.
+      const wob = bandWobble[x] * 0.5 + 4 * Math.sin(0.043 * x + 0.071 * y) + 2.5 * Math.sin(0.013 * x - 0.027 * y);
+      const u = 0.44 * x - 0.9 * y + wob, v = 0.9 * x + 0.44 * y + wob * 0.6;
+      const iu = Math.floor(u / 17), iv = Math.floor(v / 29);
+      let k = (230 + (PW.hash2(iu, iv ^ 0x9e37) & 3) * 13) * dk >> 8;
+      // Joint lines part the solid rock; broken rock (gravel) has no joints left to show.
+      if (id !== M.GRAVEL) {
+        const open = u - iu * 17 < 1.4 ? PW.hash2(iu * 3 + 1, iv) : v - iv * 29 < 1.4 ? PW.hash2(iu, iv * 5 + 2) : 0;
+        if (open && (open & 7) < 5) k = k * 192 >> 8;
+      }
+      k = k * grainTone(g) >> 8;
+      if ((h & 63) === 0) k = k * 204 >> 8;   // dark mineral flecks
+      if (y - groundTop[x] < 10) k = k * 272 >> 8;
+      const c = (id === M.GRAVEL ? SCREE_PAL : GRANITE_PAL)[(m >> 6) * 2 + (h & 1)];
+      // Rusty iron stains in patches, their edges frayed cell by cell.
+      if ((PW.hash2(x >> 4, (y >> 4) ^ 0x150) & 15) === 0 && (h >> 2 & 3) !== 0) return toned([c[0] * 1.2, c[1] * 0.94, c[2] * 0.72], k);
+      return toned(c, k);
     }
     const voidColor = [30, 24, 19];
     const waterTop = PW.abgr(128, 186, 236);
@@ -256,6 +287,12 @@
         const depth = Math.max(0, y - surface0[x]);
         const dk = depthTone[Math.min(depth, world.height)];
         if (banded[id]) {
+          // Inside a massif, stone and gravel are mountain rock (hash-dithered over the last 24
+          // cells above the foot line, so the two looks interlock instead of meeting at a seam).
+          if (massifBottom && (id === M.STONE || id === M.GRAVEL)) {
+            const mb = massifBottom[x] - y;
+            if (mb > 24 || (mb > 0 && (h >>> 5 & 31) * 24 < mb * 31)) return rockColor(id, m, x, y, h, g, dk);
+          }
           if ((h & 1023) === 0 || (h & 1023) === 1) return toned(pebble, dk * grainTone(g) >> 8);
           const band = ((((y + bandWobble[x]) / 27) | 0) % 3 + 3) % 3;
           const k = (BAND_TONES[band] * dk >> 8) * grainTone(g) >> 8;
