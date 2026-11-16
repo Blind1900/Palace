@@ -736,6 +736,74 @@
       networks: T.networks.map((n) => ({ id: n.id, side: n.side, cells: n.cells, developed: n.developed, lined: n.lined })) };
   }
 
+  // ---- Cave bases (step C) -----------------------------------------------------------------------
+  // When a tunnel breaks into a cave (step H wires the trigger), the cave's chamber can be made
+  // over into an underground base: the floor of its bowl is levelled and flagged, the lower walls
+  // are smoothed behind a faction lining band, lamps go up - and the rest of the cave, its domed
+  // roof, its formations and its pools, is kept as it was found (formations off the pad stay as
+  // decoration). A cave base is cheaper than a surface base: how many troops it deploys and how
+  // much POP it asks for follow from the size of the chamber it was built in.
+  const CB = {
+    modern: { floor: DEV.kerb, floorLit: [134, 136, 132], band: DEV.lining, bandDeep: DEV.deep, trim: DEV.stripe },
+    asian: { floor: ASIAN.flag, floorLit: ASIAN.flagLight, band: ASIAN.brick, bandDeep: ASIAN.brickDark, trim: ASIAN.lacquer },
+    gothic: { floor: GOTHIC.sett, floorLit: GOTHIC.settLit, band: GOTHIC.stone, bandDeep: GOTHIC.stoneDark, trim: GOTHIC.plinthLit },
+  };
+  const solidAt = (world, x, y) => { const id = PW.get(world, x, y) & ID_MASK; return id !== M.AIR && id !== M.WATER; };
+  function caveBase(world, chamber, side) {
+    const style = (world.styles && world.styles[side]) || 'modern';
+    const col = CB[style] || CB.modern;
+    const floorY = chamber.y + Math.round(chamber.halfH * 0.55);
+    let x0 = Math.round(chamber.x - chamber.halfW * 0.74), x1 = Math.round(chamber.x + chamber.halfW * 0.74);
+    // The pad keeps clear of the chamber's pool: it stops 6 short of standing water.
+    for (let x = Math.round(chamber.x); x >= x0; x -= 1) if ((PW.get(world, x, floorY + 1) & ID_MASK) === M.WATER) { x0 = x + 6; break; }
+    for (let x = Math.round(chamber.x); x <= x1; x += 1) if ((PW.get(world, x, floorY + 1) & ID_MASK) === M.WATER) { x1 = x - 6; break; }
+    if (x1 - x0 < 60) return null;
+    const mid0 = Math.round((x0 * 2 + x1) / 3), mid1 = Math.round((x0 + x1 * 2) / 3);
+    let padCells = 0;
+    for (let x = x0; x <= x1; x += 1) {
+      // The middle third is cleared to head height (formations there give way to the pad; the
+      // ones either side stay as the cave's own decoration).
+      if (x >= mid0 && x <= mid1) {
+        for (let y = floorY - 40; y < floorY; y += 1) if (solidAt(world, x, y)) { PW.set(world, x, y, M.AIR, { quiet: true }); PW.setLayer(world, 'deco', x, y, 0); }
+      }
+      // The floor: filled up from the bowl's rock in solid courses, flagged on top.
+      let depth = 0;
+      while (depth < 60 && !solidAt(world, x, floorY + depth)) depth += 1;
+      for (let d = 0; d < depth + 2; d += 1) {
+        const y = floorY + d;
+        let c = d === 0 ? ((x & 3) === 0 ? col.floorLit : col.floor) : d === 1 ? col.bandDeep : (y & 7) === 0 || (x + ((y >> 3) & 1) * 4) % 9 === 0 ? col.bandDeep : col.band;
+        // The fill fades towards the rock with depth: only the top courses read built.
+        if (d > 2) c = mix(c, RAW.rock, Math.min(0.75, (d - 2) * 0.06));
+        PW.set(world, x, y, M.FOUNDATION, { quiet: true });
+        PW.setLayer(world, 'paint', x, y, rgb(c));
+        PW.setLayer(world, 'deco', x, y, 0);
+      }
+      padCells += 1;
+      // The back of the base: a smoothed wall band over the pad, so it reads built and holds the
+      // lamplight; a thin trim line along its top.
+      let roof = floorY - 1;
+      while (roof > floorY - 44 && !solidAt(world, x, roof - 1)) roof -= 1;
+      for (let y = Math.max(roof, floorY - 34); y < floorY; y += 1) {
+        const band = y === Math.max(roof, floorY - 34) ? col.trim : mix(RAW.rock, col.band, 0.55 - (floorY - y) * 0.008);
+        if (!solidAt(world, x, y)) PW.setLayer(world, 'back', x, y, rgb(tone(band, 0.5)));
+      }
+      // The lower walls beside the pad: smoothed with the lining colour where the rock faces in.
+      for (let y = floorY - 26; y < floorY; y += 1) {
+        for (const dx of [-1, 1]) {
+          if (solidAt(world, x + dx, y) && !solidAt(world, x, y)) PW.setLayer(world, 'paint', x + dx, y, rgb(col.band));
+        }
+      }
+    }
+    PW.settlementTools.tunnelLamps(world, x0, x1, floorY - 30, 72);
+    // Cheaper than a surface base, sized by the cave: how many it deploys, what POP it needs.
+    const area = Math.round(Math.PI * chamber.halfW * chamber.halfH * 0.5);
+    const capacity = Math.max(2, Math.min(8, Math.round(area / 2600)));
+    const record = { side, style, x: Math.round(chamber.x), y: floorY, x0, x1, capacity, popNeed: capacity * 2,
+      area, padCells, chamber };
+    (world.caveBases = world.caveBases || []).push(record);
+    return record;
+  }
+
   PW.tunnels = { RATE, LINE, SET_PITCH, RIB_PITCH, createNetwork, digBox, claimCell, step, advanceTo, networkAt, networkOfOwner, stats, state, damaged,
-    netAt, devAtOf, rawBack, devBack };
+    netAt, devAtOf, rawBack, devBack, caveBase };
 })();
