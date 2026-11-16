@@ -17,7 +17,7 @@
   const RISE_EVERY = 1;     // ticks per row risen (60 rows a second: up through a tower's heap in seconds)
   const SWEEP_EVERY = 6;    // ticks between sweeps once a core stands in the open
   const PER_SWEEP = 80;     // cells a core throws off per sweep (a heap can rain down on it)
-  const REACH = 10;         // the core column and its clamps: 10 cells either side of its axis
+  const REACH = 13;         // the core unit with its connector sockets: 13 cells either side of its axis
 
   function createCores(world, particles) {
     const F = PW.PARTICLE;
@@ -55,8 +55,8 @@
         }
       }
     }
-    // The rows the core's column (and its clamps) takes: 30 rows, its orb 15 above the bottom.
-    const columnOf = (core) => ({ x0: core.x - REACH, x1: core.x + REACH, top: core.y - 14, bottom: core.y + 15 });
+    // The rows the core unit takes: from the translator's mouth down to its feet.
+    const columnOf = (core) => ({ x0: core.x - REACH, x1: core.x + REACH, top: core.y - 17, bottom: core.y + 15 });
     // (air, smoke and dust are open; rubble is pushed aside; anything else stands in the way)
     const open = (x, y) => PW.mat.phase[PW.get(world, x, y) & ID_MASK] <= PW.PHASE.GAS;
     const loose = (x, y) => LOOSE[PW.get(world, x, y) & ID_MASK] === 1;
@@ -160,4 +160,24 @@
   }
 
   PW.createCores = createCores;
+
+  // ---- The core hierarchy (step D) ---------------------------------------------------------------
+  // MAIN cores are each base's genesis (the orb in the core bunker's pit); DESCENDANT cores sit in
+  // vaults under every building a city grows; SUB cores come later, when level-ups widen a
+  // building (step H). The tree is read by the pipeline (E: the bundle runs core to core), repair
+  // (F: translators turn HM into repair pixels) and seeds (G: a dropped seed grows a new
+  // descendant). Built on demand from the buildings standing now.
+  function coreTree(world) {
+    const tree = { main: [], descendants: [], subs: [] };
+    for (const b of world.buildings || []) {
+      for (const core of b.cores || []) {
+        const entry = { x: core.x, y: core.y, building: b.id, side: b.side, core };
+        if (core.kind === 'main' || core.orb) tree.main.push(entry);
+        else if (core.kind === 'sub') tree.subs.push(entry);
+        else tree.descendants.push(entry);
+      }
+    }
+    return tree;
+  }
+  PW.coreTree = coreTree;
 })();

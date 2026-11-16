@@ -398,6 +398,82 @@
     c.lamps.push({ x: cx, y: oy, radius: 34, strength: 0.75, color: CORE_COLOR });
     return oy;
   }
+  // The core unit (the user's core-shape sketch, black-and-white rework): a perfect square of
+  // plate armour round a square dark heart, where the dead god machine's black tendrils writhe
+  // about one white point - the god machine's colours are black and white, nothing else. A pipe
+  // connector socket on either side (the resource bundle docks there in step E), the translator
+  // nozzle on top with a white slot (it grows the building's pillar in F2), the glyph etched in
+  // the plate, and black tendrils gripping the body from outside. Stands on the vault floor `b`;
+  // returns the heart's row.
+  const INK = [8, 8, 10], INK_DEEP = [40, 40, 44], WHITE_CORE = [238, 242, 246], WHITE_DIM = [152, 158, 164], GLYPH = [30, 30, 34];
+  function coreUnit(c, cx, b) {
+    const bodyTop = b - 22, oy = b - 12;   // a perfect square: 21 x 21, centred on (cx, oy)
+    // Feet, then the plated square (edges dark, top lit, rivet bumps).
+    for (const dx of [-8, -7, 7, 8]) for (let y = b - 1; y <= b; y += 1) solid(c, cx + dx, y, M.STEEL, PLATE_DARK, ROLE.CRADLE);
+    for (let y = bodyTop; y <= b - 2; y += 1) for (let dx = -10; dx <= 10; dx += 1) {
+      const x = cx + dx;
+      const edge = Math.abs(dx) === 10 || y === b - 2 || y === bodyTop;
+      const bump = ((x + y) & 3) === 0 && ((x - y) & 3) === 2;
+      solid(c, x, y, M.STEEL, edge ? PLATE_DARK : y === bodyTop + 1 ? PLATE_LIT : bump ? PLATE_BUMP : PLATE, ROLE.CRADLE);
+    }
+    // The heart: a perfect square cavity, near-black, the tendrils curling in from its corners
+    // to grip one white point at the centre; a few white glints along them where they catch it.
+    for (let dy = -6; dy <= 6; dy += 1) for (let dx = -6; dx <= 6; dx += 1) {
+      const rim = Math.abs(dx) === 6 || Math.abs(dy) === 6;
+      solid(c, cx + dx, oy + dy, M.CORE, rim ? ARMOUR : dy === -5 ? INK : INK_DEEP, ROLE.CORE);
+    }
+    for (let k = 0; k < 4; k += 1) {
+      const a0 = k * Math.PI / 2 + 0.78;
+      for (let t = 0; t <= 10; t += 1) {
+        const r = 7 - t * 0.56, a = a0 + t * 0.3;
+        const x = cx + Math.round(Math.cos(a) * r), y = oy + Math.round(Math.sin(a) * r * 0.92);
+        if (Math.abs(x - cx) > 5 || Math.abs(y - oy) > 5) continue;
+        solid(c, x, y, M.CORE, t === 8 ? WHITE_DIM : INK, ROLE.CORE);
+        // (each strand is two cells thick for most of its reach, so it reads as an arm, not grit)
+        if (t < 7) solid(c, x + (Math.abs(x + 1 - cx) <= 5 ? 1 : -1), y, M.CORE, INK, ROLE.CORE);
+      }
+    }
+    for (const [dx, dy] of [[0, 0], [1, 0], [0, 1], [1, 1]]) solid(c, cx + dx, oy + dy, M.CORE, WHITE_CORE, ROLE.CORE);
+    for (const [dx, dy] of [[-1, 0], [2, 0], [0, -1], [1, 2]]) solid(c, cx + dx, oy + dy, M.CORE, WHITE_DIM, ROLE.CORE);
+    // Connector sockets left and right: a dark mouth with a rim, a white port point.
+    for (const side of [-1, 1]) {
+      for (let dy = -4; dy <= 4; dy += 1) for (let d = 11; d <= 13; d += 1) {
+        const rim = Math.abs(dy) === 4 || d === 13;
+        solid(c, cx + side * d, oy + dy, M.STEEL, rim ? PLATE_DARK : ARMOUR, ROLE.CRADLE);
+      }
+      solid(c, cx + side * 12, oy, M.CORE, WHITE_DIM, ROLE.CORE);
+    }
+    // The translator on top: a nozzle with a white slot down its middle, its mouth rimmed dark
+    // (HM comes out of it as a pillar in F2 - the unit's business end).
+    for (let y = b - 28; y <= b - 23; y += 1) for (let dx = -6; dx <= 6; dx += 1) {
+      const slot = Math.abs(dx) <= 2 && y >= b - 27;
+      const mouth = y === b - 28;
+      solid(c, cx + dx, y, slot && !mouth ? M.CORE : M.STEEL,
+        slot && !mouth ? ((y + dx) & 1 ? WHITE_CORE : WHITE_DIM) : mouth ? (Math.abs(dx) <= 2 ? INK : PLATE_LIT) : Math.abs(dx) === 6 ? PLATE_DARK : PLATE,
+        slot && !mouth ? ROLE.CORE : ROLE.CRADLE);
+    }
+    // The glyph: the dead god machine's mark, etched dark in the lower plate, one white point.
+    const mark = ['00100', '01110', '10101', '00100', '10101'];
+    for (let gy = 0; gy < mark.length; gy += 1) for (let gx = 0; gx < 5; gx += 1) {
+      if (mark[gy][gx] !== '1') continue;
+      const x = cx + 5 + gx, y = b - 8 + gy;
+      if ((c.mat[y * c.width + x] & 63) === M.CORE) continue;
+      solid(c, x, y, M.STEEL, gy === 2 && gx === 2 ? WHITE_DIM : GLYPH, ROLE.CRADLE);
+    }
+    // Black tendrils gripping the body from outside, a white glint here and there.
+    for (const [x0, y0, x1, y1, bend] of [[-10, b, -6, bodyTop + 2, -4], [10, b - 3, 5, b - 26, 5]]) {
+      const n = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0));
+      for (let t = 0; t <= n; t += 1) {
+        const u = t / n;
+        const x = cx + Math.round(x0 + (x1 - x0) * u + bend * Math.sin(u * Math.PI));
+        const y = Math.round(y0 + (y1 - y0) * u);
+        solid(c, x, y, M.STEEL, t % 7 === 3 ? WHITE_DIM : INK, ROLE.CRADLE);
+        if (u < 0.5) solid(c, x + (x0 < 0 ? 1 : -1), y, M.STEEL, INK, ROLE.CRADLE);
+      }
+    }
+    c.lamps.push({ x: cx, y: oy, radius: 20, strength: 0.5, color: WHITE_CORE });
+    return oy;
+  }
   function core(c, cx, floor, options = {}) {
     if (options.standing) {
       const oy = coreColumn(c, cx, floor - 1);
@@ -418,30 +494,18 @@
     // The grating over it, flush with the floor: troops walk on it, and the core's glow comes up
     // through its slots.
     for (let x = cx - half; x <= cx + half; x += 1) {
-      solid(c, x, floor, M.PLATFORM, (x & 1) ? [92, 96, 104] : tone(CORE_COLOR, 0.62), ROLE.GRATE);
+      solid(c, x, floor, M.PLATFORM, (x & 1) ? [92, 96, 104] : tone(WHITE_CORE, 0.55), ROLE.GRATE);
       solid(c, x, floor + 1, M.PLATFORM, (x % 4 === 0) ? [70, 74, 82] : [104, 108, 116], ROLE.GRATE);
     }
-    const oy = coreColumn(c, cx, bottom);
-    // Clamp arms from the vault's upper corners to the orb's shoulders, each ending in a claw.
-    for (const side of [-1, 1]) {
-      const x0 = cx + side * (half - 1), y0 = top + 1, x1 = cx + side * 6, y1 = oy - 3;
-      const n = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0));
-      for (let t = 0; t <= n; t += 1) {
-        const x = Math.round(x0 + (x1 - x0) * t / n), y = Math.round(y0 + (y1 - y0) * t / n);
-        solid(c, x, y, M.STEEL, PLATE_LIT, ROLE.CRADLE);
-        solid(c, x, y + 1, M.STEEL, PLATE_DARK, ROLE.CRADLE);
-      }
-      solid(c, x1 - side, y1 + 2, M.STEEL, PLATE_DARK, ROLE.CRADLE);
-      solid(c, x1 - side, y1 + 3, M.STEEL, PLATE_LIT, ROLE.CRADLE);
-    }
-    c.cores.push({ x: cx, y: oy, vault: { x0: cx - half, x1: cx + half, top, bottom, lid: floor } });
+    const oy = coreUnit(c, cx, bottom);
+    c.cores.push({ x: cx, y: oy, kind: 'descendant', vault: { x0: cx - half, x1: cx + half, top, bottom, lid: floor } });
   }
 
   PW.buildingKit = {
     S, STYLES, ROLE, CORE_COLOR, CORE_SHADE, BEACON, SCREEN, GLASS_DARK, GLASS_SIDE, SHINE,
     tone, mix, pack, grain, clamp255,
     createCanvas, inside, solid, solidIfEmpty, clear, back, backIfEmpty, deco, isSolid, rect, bitmap,
-    wallColor, slabColor, backWallColor, backWindow, FURNITURE, ceilingLamp, bakeLights, core, coreColumn,
+    wallColor, slabColor, backWallColor, backWindow, FURNITURE, ceilingLamp, bakeLights, core, coreColumn, coreUnit,
     VAULT, VAULT_DEPTH, CORE_HOT,
   };
 })();

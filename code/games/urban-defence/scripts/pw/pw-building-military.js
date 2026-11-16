@@ -328,7 +328,7 @@
       }
       for (let k = 0; k < 3; k += 1) K.solid(c, x1 - side * k, y1 - 1, M.STEEL, PLATE_DARK, ROLE.CRADLE);
     }
-    c.cores.push({ x: cx, y: orbY, orb: true, radius: r });
+    c.cores.push({ x: cx, y: orbY, orb: true, kind: 'main', radius: r });
     c.lamps.push({ x: cx, y: orbY, radius: 70, strength: 0.6, color: K.CORE_COLOR });
     // The armoured block stands on pillars. The main pillar grows out of the top of the core - its
     // translator turns HM into it - up through the pit to the block's underside, seamed with the
