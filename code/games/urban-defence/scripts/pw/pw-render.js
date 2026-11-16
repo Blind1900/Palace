@@ -182,7 +182,7 @@
 
     // Gas opacity by density (variant 0-3).
     const gasAlpha = new Array(64).fill(null);
-    gasAlpha[M.SMOKE] = [0.28, 0.46, 0.62, 0.76];
+    gasAlpha[M.SMOKE] = [0.18, 0.3, 0.4, 0.49];
     gasAlpha[M.STEAM] = [0.18, 0.3, 0.42, 0.55];
     gasAlpha[M.DUST] = [0.24, 0.4, 0.55, 0.68];
     const OPEN = PW.mat.open;

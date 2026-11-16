@@ -77,9 +77,9 @@
         if (OPEN[id] || (sinks && displace(cx, cy))) {
           // Rubble and earth landing on a heap roll off it, down its slope, so falling debris builds
           // a heap spreading out wide rather than a column: earth settles at about 45°, building
-          // rubble flatter, about 1 in 2.
+          // rubble flatter, about 1 in 3.
           if (!(fl & F.WATER) && OPEN[id] && phase[byte & ID_MASK] !== PW.PHASE.GAS) {
-            const first = (cx + cy) & 1 ? 1 : -1, reach = (byte & ID_MASK) === M.DEBRIS ? 2 : 1;
+            const first = (cx + cy) & 1 ? 1 : -1, reach = (byte & ID_MASK) === M.DEBRIS ? 3 : 1;
             const free = (x, y) => x >= 1 && x < W - 1 && y < H - 1 && OPEN[mat[y * W + x] & ID_MASK];
             for (let roll = 0; roll < 160; roll += 1) {
               if (free(cx, cy + 1)) { cy += 1; continue; }
@@ -299,7 +299,7 @@
         if (flags[i] & F.SMOKE) {
           const fade = Math.max(0, Math.min(1, life[i] / 2));
           if (fade < 0.15 || ((i + (age[i] * 10 | 0)) & 3) === 0) continue;
-          c = c & 0x00ffffff | Math.round(150 * fade) << 24;
+          c = c & 0x00ffffff | Math.round(98 * fade) << 24;
         }
         let list = groups.get(c);
         if (!list) { list = []; groups.set(c, list); }

@@ -28,6 +28,10 @@
   // along with the frame, weighing THIN_WEIGHT of a frame cell, strikes nothing, and broken up only
   // one in WALL_RUBBLE of them leaves a grain of rubble (the rest goes to dust).
   const THIN = 2, THIN_WEIGHT = 0.1, WALL_RUBBLE = 4;
+  // A building coming down bursts outward: what gives way under its weight is squeezed out of its
+  // sides, low and wide, not thrown up. SPILL scales how far out (sideways speed) rubble from its
+  // crushed storeys and its breaking pieces is thrown; LOFT how much of it goes up.
+  const SPILL = 1.7, LOFT = 0.55;
   const weightOf = (solid) => (solid === 1 ? 1 : solid === THIN ? THIN_WEIGHT : 0);
 
   function createFragments(world, particles) {
@@ -311,6 +315,7 @@
     function eatFoot(p) {
       const [c, s] = cosSin(p);
       const { grid, gw, gh, u0, v0, data } = p;
+      const [mid] = centre(p);
       let eaten = 0, lost = 0;
       for (let v = Math.max(v0, Math.ceil(p.footV)); v < v0 + gh; v += 1) {
         for (let u = u0; u < u0 + gw; u += 1) {
@@ -320,12 +325,13 @@
           const x = Math.floor(wx), y = Math.floor(wy);
           if (!blocking(x, y)) continue;
           // (its own stump under it is crushed instead)
-          if (p.owner && y < p.base && PW.getOwner(world, x, y) === p.owner && (mat[y * W + x] & ID_MASK) !== M.CORE) { crush(x, y, p.owner); continue; }
+          if (p.owner && y < p.base && PW.getOwner(world, x, y) === p.owner && (mat[y * W + x] & ID_MASK) !== M.CORE) { crush(x, y, p.owner, mid); continue; }
           const k = g - 1;
-          // (out at the surface above it)
+          // (out at the surface above it, mostly the way it is going over, some the other way)
           let ty = y;
           while (ty > 1 && blocking(x, ty) && y - ty < 24) ty -= 1;
-          if ((eaten & 1) === 0 && rubbleFrom(data.solid[k], u, v)) particles.spawn(x + 0.5, ty + 0.5, p.dir * (30 + random() * 140) + (random() - 0.5) * 60, -20 - random() * 60, debrisOf(data.byte[k]), data.color[k] || 0, F.LAND | F.DAMAGE, 6);
+          const out = random() < 0.7 ? p.dir : -p.dir;
+          if ((eaten & 1) === 0 && rubbleFrom(data.solid[k], u, v)) particles.spawn(x + 0.5, ty + 0.5, out * (30 + random() * 140) * SPILL + (random() - 0.5) * 60, -(20 + random() * 60) * LOFT, debrisOf(data.byte[k]), data.color[k] || 0, F.LAND | F.DAMAGE, 6);
           else if ((eaten & 3) === 1) puff(x, ty - 2, 2, 5, 3);
           lost += weightOf(data.solid[k]);
           grid[gi] = 0; data.solid[k] = 0; data.color[k] = 0;
@@ -429,13 +435,14 @@
       let x0 = Infinity, x1 = -Infinity, y = 0, n = 0;
       if (row.xs) {
         y = row.y;
+        const [mid] = centre(p);
         for (const x of row.xs) {
           const id = mat[y * W + x] & ID_MASK;
-          if (structural[id] && !PW.mat.terrain[id]) crush(x, y, p.owner);
+          if (structural[id] && !PW.mat.terrain[id]) crush(x, y, p.owner, mid);
           else {
             const back = PW.getLayer(world, 'back', x, y);
             PW.setLayer(world, 'back', x, y, 0); PW.setLayer(world, 'deco', x, y, 0); PW.setOwner(world, x, y, 0);
-            if (back && (PW.hash2(x, y) % (WALL_RUBBLE * 2)) === 0) particles.spawn(x + 0.5, y + 0.5, (random() - 0.5) * 80, -20 - random() * 40, M.DEBRIS, back, F.LAND, 5);
+            if (back && (PW.hash2(x, y) % (WALL_RUBBLE * 2)) === 0) particles.spawn(x + 0.5, y + 0.5, (Math.sign(x + 0.5 - mid) || 1) * (20 + random() * 80) * SPILL, -(20 + random() * 40) * LOFT, M.DEBRIS, back, F.LAND, 5);
           }
           if (x < x0) x0 = x; if (x > x1) x1 = x;
           n += 1;
@@ -450,7 +457,7 @@
           const [wx, wy] = toWorld(p, c, s, u + 0.5, v + 0.5);
           const side = (u - p.gx) * c - (v - p.gy) * s > 0 ? 1 : -1;
           if (p.data.solid[k] && (n & 1) === 0 && rubbleFrom(p.data.solid[k], u, v)) {
-            particles.spawn(wx, wy, side * (40 + random() * 120) + (random() - 0.5) * 40, -20 - random() * 50, debrisOf(p.data.byte[k]), p.data.color[k] || 0, F.LAND | F.DAMAGE, 6);
+            particles.spawn(wx, wy, side * (40 + random() * 120) * SPILL + (random() - 0.5) * 40, -(20 + random() * 50) * LOFT, debrisOf(p.data.byte[k]), p.data.color[k] || 0, F.LAND | F.DAMAGE, 6);
           } else if ((n & 7) === 3) puff(wx, wy - 1, 1);
           lost += weightOf(p.data.solid[k]);
           p.grid[base + gu] = 0; p.data.solid[k] = 0; p.data.color[k] = 0;
@@ -490,6 +497,7 @@
       const c0 = Math.cos(was.angle), s0 = Math.sin(was.angle);
       let crushed = 0, smashed = 0, n = 0, sx = 0, sy = 0, fx = 0, fy = 0, hs = 0, wet = 0;
       let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
+      const [mid] = toWorld(p, c, s, p.gx, p.gy);   // (what it crushes is squeezed out away from this)
       for (let k = 0; k < pts.length; k += 2) {
         // (the storeys of it already crushed under its hinge are gone)
         if (p.stage === 'self' && p.mode === 'hinge' && pts[k + 1] >= -p.ry) continue;
@@ -521,7 +529,7 @@
         // (only above its building's floor: the cores and footings in the ground stay)
         const grinds = !p.flora && (p.mode === 'hinge' || p.mode === 'drop') && y < p.base && (mat[y * W + x] & ID_MASK) !== M.CORE;
         if (grinds && (own || (y >= p.yf - 1 && y <= p.yf + 8 && !PW.mat.terrain[mat[y * W + x] & ID_MASK]))) {
-          crush(x, y, p.owner);
+          crush(x, y, p.owner, mid);
           crushed += 1;
           continue;
         }
@@ -531,7 +539,7 @@
         const id = mat[y * W + x] & ID_MASK;
         if (!p.flora && structural[id] && !PW.mat.terrain[id] && id !== M.CORE && !inside) {
           const [vx, vy] = velocityAt(p, wx, wy);
-          if (hardness[id] < Math.hypot(vx, vy) / 300 * Math.min(1, p.mass / 3000)) { crush(x, y, PW.getOwner(world, x, y)); smashed += 1; continue; }
+          if (hardness[id] < Math.hypot(vx, vy) / 300 * Math.min(1, p.mass / 3000)) { crush(x, y, PW.getOwner(world, x, y), mid); smashed += 1; continue; }
         }
         if (p.mode === 'hinge' && PW.mat.terrain[mat[y * W + x] & ID_MASK] && y >= p.yf && Math.abs(x - p.hx) < 6) continue;   // seated on its pivot
         // (a building leaning over presses its foot into the ground: see eatFoot)
@@ -597,16 +605,19 @@
       stats.splashes = (stats.splashes || 0) + 1;
     }
     // A stump cell crushed under a swinging piece: it bursts into debris and dust.
-    function crush(x, y, owner) {
-      const m = mat[y * W + x], id = m & ID_MASK;
+    // (squeezed out from under the weight on it, away from `from` - the middle of what came down
+    // on it - low and wide; the rest drops where it was)
+    function crush(x, y, owner, from = x) {
+      const m = mat[y * W + x];
       PW.set(world, x, y, M.AIR);
       PW.setOwner(world, x, y, 0);
       stats.crushed += 1;
-      if ((PW.hash3(x, y, stats.crushed) & 3) === 0) particles.spawn(x + 0.5, y + 0.5, (random() - 0.5) * 120, -40 - random() * 60, debrisOf(m), 0, F.LAND, 5, owner);
-      else if (y + 1 < H && !blocking(x, y + 1)) PW.set(world, x, y, debrisOf(m));
+      if ((PW.hash3(x, y, stats.crushed) & 3) < 2) {
+        const out = Math.sign(x + 0.5 - from) || (random() < 0.5 ? -1 : 1);
+        particles.spawn(x + 0.5, y + 0.5, out * (40 + random() * 110) * SPILL, -(10 + random() * 60) * LOFT, debrisOf(m), 0, F.LAND, 5, owner);
+      } else if (y + 1 < H && !blocking(x, y + 1)) PW.set(world, x, y, debrisOf(m));
       if ((PW.hash3(x, y, 7) & 3) === 0) puff(x, y - 1, 1);
       if (world.onDamage && owner) world.onDamage(owner, 1, x, y);
-      void id;
     }
 
     function sweep(x, y, power = 8) {
@@ -751,7 +762,7 @@
         if (!rubbleFrom(d.solid[k], d.x[k], d.y[k])) { if ((k & 3) === 0) puff(x, y, 1); continue; }
         // (out of whichever side of the fold it is nearer, low along what it struck)
         const a = (x - wx) * tx + (y - wy) * ty, side = Math.sign(a) || (random() < 0.5 ? 1 : -1);
-        const out = side * go * (0.3 + random() * 0.9) + vt * 0.5, up = 15 + random() * 45;
+        const out = side * go * (0.3 + random() * 0.9) * SPILL + vt * 0.5, up = (15 + random() * 45) * LOFT;
         particles.spawn(x, y, tx * out + nx * up, ty * out + ny * up, debrisOf(d.byte[k]), d.color[k] || 0, F.LAND | F.DAMAGE, 6);
         stats.folded = (stats.folded || 0) + 1;
       }
@@ -857,8 +868,8 @@
         if (!gone[k]) continue;
         const [x, y] = toWorld(p, c, s, data.x[k] - p.ox0 + 0.5, data.y[k] - p.oy0 + 0.5);
         if (!rubbleFrom(data.solid[k], data.x[k], data.y[k])) { if ((k & 3) === 0) puff(x, y, 1); continue; }
-        const f = 0.4 + random() * 0.8, up = felt * kick * (0.1 + random() * 0.35);
-        const side = (random() - 0.5) * (40 + 120 * hard);
+        const f = 0.4 + random() * 0.8, up = felt * kick * (0.1 + random() * 0.35) * LOFT;
+        const side = (random() - 0.5) * (40 + 120 * hard) * SPILL;
         particles.spawn(x, y, tx * (vt * f + side) + nx * up, ty * (vt * f + side) + ny * up - random() * 20, debrisOf(data.byte[k]), data.color[k] || 0, F.LAND | F.DAMAGE, 6);
         stats.crumbled = (stats.crumbled || 0) + 1;
       }
@@ -884,7 +895,7 @@
         if (Math.abs(along - line) < 1.5 && d.solid[k]) {
           // (the crack itself crumbles)
           const [x, y] = toWorld(p, c, s, u + 0.5, v + 0.5);
-          if ((k & 1) === 0 && rubbleFrom(d.solid[k], d.x[k], d.y[k])) particles.spawn(x, y, (random() - 0.5) * 60, -20 - random() * 40, debrisOf(d.byte[k]), d.color[k] || 0, F.LAND, 6);
+          if ((k & 1) === 0 && rubbleFrom(d.solid[k], d.x[k], d.y[k])) particles.spawn(x, y, (random() - 0.5) * 60 * SPILL, -(20 + random() * 40) * LOFT, debrisOf(d.byte[k]), d.color[k] || 0, F.LAND, 6);
           else if ((k & 7) === 1) puff(x, y, 1);
           continue;
         }
@@ -917,7 +928,7 @@
       const crushedKs = [], restKs = [];
       for (let j = 0; j < placed.x.length; j += 1) (placed.y[j] >= lowest - band ? crushedKs : restKs).push(j);
       const [mid] = centre(p);
-      scatter(pick(placed, crushedKs), vx * 0.3, 0, 0, mid, wy, 0.45, undefined, undefined, undefined, Math.min(2.2, 0.6 + speed / 220));
+      scatter(pick(placed, crushedKs), vx * 0.3, 0, 0, mid, wy, 0.6, undefined, undefined, undefined, Math.min(1.6, 0.6 + speed / 220));
       let restMass = 0;
       for (const k of restKs) if (p.data.solid[k]) restMass += 1;
       if (restMass >= CHUNK_MIN) {
@@ -1035,7 +1046,7 @@
         const edge = !here.has(i - 1) || !here.has(i + 1) || !here.has(i - W) || !here.has(i + W);
         const room = !blocking(x, y);
         if ((byte & ID_MASK) === M.GLASS || !room || (edge && (PW.hash2(x, y) & 3) === 0)) {
-          if (rubbleFrom(data.solid[j], x, y)) particles.spawn(x + 0.5, y - 0.5, (random() - 0.5) * 60, -20 - random() * 40, debrisOf(byte), data.color[j] || 0, F.LAND, 6);
+          if (rubbleFrom(data.solid[j], x, y)) particles.spawn(x + 0.5, y - 0.5, (random() - 0.5) * 60 * SPILL, -(20 + random() * 40) * LOFT, debrisOf(byte), data.color[j] || 0, F.LAND, 6);
           else if ((q & 7) === 0) puff(x, y, 1);
           continue;
         }
@@ -1107,15 +1118,15 @@
         const byte = debrisOf(data.byte[k]);
         if (random() < thrown) {
           const dx = x + 0.5 - cx, dy = y + 0.5 - cy;
-          if (burst) particles.spawn(x + 0.5, y - 0.5, Math.sign(dx || random() - 0.5) * (60 + random() * 180) * burst + vx * 0.3, -10 - random() * 45 * burst, byte, data.color[k] || 0, F.LAND | F.DAMAGE, 6);
-          else particles.spawn(x + 0.5, y - 0.5, vx * 0.5 - omega * dy * 0.5 + (random() - 0.5) * 160, -Math.abs(vy) * 0.3 - random() * 120 + omega * dx * 0.2, byte, 0, F.LAND | F.DAMAGE, 6);
+          if (burst) particles.spawn(x + 0.5, y - 0.5, Math.sign(dx || random() - 0.5) * (60 + random() * 180) * burst * SPILL + vx * 0.3, -(10 + random() * 45 * burst) * LOFT, byte, data.color[k] || 0, F.LAND | F.DAMAGE, 6);
+          else particles.spawn(x + 0.5, y - 0.5, vx * 0.5 - omega * dy * 0.5 + (random() - 0.5) * 160 * SPILL, -Math.abs(vy) * 0.3 - random() * 120 * LOFT + omega * dx * 0.2, byte, 0, F.LAND | F.DAMAGE, 6);
         } else if (x > 0 && y > 0 && x < W - 1 && y < H - 1 && !blocking(x, y) && support.get(x) - y <= HEAP) {
           put(x, y, byte);
           if (data.color[k] && (byte & ID_MASK) === M.DEBRIS) PW.setLayer(world, 'paint', x, y, rubbleTone(data.color[k], x, y));
           stats.debris += 1;
         } else if (x > 0 && y > 0 && x < W - 1 && y < H - 1 && !blocking(x, y)) {
           // (the higher it falls from, the wider it spreads)
-          const spread = 70 + (support.get(x) - y) * 0.45;
+          const spread = (70 + (support.get(x) - y) * 0.45) * SPILL;
           particles.spawn(x + 0.5, y + 0.5, vx * 0.2 + (random() - 0.5) * spread, 10 + random() * 40, byte, data.color[k] || 0, F.LAND, 6);
           stats.rained = (stats.rained || 0) + 1;
         } else {
