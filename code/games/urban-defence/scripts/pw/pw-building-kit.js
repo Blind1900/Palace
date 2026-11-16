@@ -398,26 +398,20 @@
     c.lamps.push({ x: cx, y: oy, radius: 34, strength: 0.75, color: CORE_COLOR });
     return oy;
   }
-  // The core unit (the user's core-shape sketch, black-and-white rework): a perfect square of
-  // plate armour round a square dark heart, where the dead god machine's black tendrils writhe
-  // about one white point - the god machine's colours are black and white, nothing else. A pipe
-  // connector socket on either side (the resource bundle docks there in step E), the translator
-  // nozzle on top with a white slot (it grows the building's pillar in F2), the glyph etched in
-  // the plate, and black tendrils gripping the body from outside. Stands on the vault floor `b`;
-  // returns the heart's row.
-  const INK = [8, 8, 10], INK_DEEP = [40, 40, 44], WHITE_CORE = [238, 242, 246], WHITE_DIM = [152, 158, 164], GLYPH = [30, 30, 34];
+  // The core and its foundational bed (the user's design): two perfect squares, nothing fussy.
+  // The BED is the plain square frame that carries the machinery - the connector socket on either
+  // side (the resource bundle docks there in step E) and the translator nozzle on top (it grows
+  // the building's pillar in F2). The CORE is the perfect square set in its middle that powers
+  // it: the dead god machine's black tendrils curling about one white point - black and white,
+  // nothing else. Stands on the vault floor `b`; returns the core's centre row.
+  const INK = [8, 8, 10], INK_DEEP = [40, 40, 44], WHITE_CORE = [238, 242, 246], WHITE_DIM = [152, 158, 164];
   function coreUnit(c, cx, b) {
-    const bodyTop = b - 22, oy = b - 12;   // a perfect square: 21 x 21, centred on (cx, oy)
-    // Feet, then the plated square (edges dark, top lit, rivet bumps).
-    for (const dx of [-8, -7, 7, 8]) for (let y = b - 1; y <= b; y += 1) solid(c, cx + dx, y, M.STEEL, PLATE_DARK, ROLE.CRADLE);
-    for (let y = bodyTop; y <= b - 2; y += 1) for (let dx = -10; dx <= 10; dx += 1) {
-      const x = cx + dx;
-      const edge = Math.abs(dx) === 10 || y === b - 2 || y === bodyTop;
-      const bump = ((x + y) & 3) === 0 && ((x - y) & 3) === 2;
-      solid(c, x, y, M.STEEL, edge ? PLATE_DARK : y === bodyTop + 1 ? PLATE_LIT : bump ? PLATE_BUMP : PLATE, ROLE.CRADLE);
+    const oy = b - 10;   // the bed: a perfect square, 21 x 21, flush on the floor
+    for (let dy = -10; dy <= 10; dy += 1) for (let dx = -10; dx <= 10; dx += 1) {
+      const edge = Math.abs(dx) === 10 || Math.abs(dy) === 10;
+      solid(c, cx + dx, oy + dy, M.STEEL, edge ? PLATE_DARK : dy === -9 ? PLATE_LIT : PLATE, ROLE.CRADLE);
     }
-    // The heart: a perfect square cavity, near-black, the tendrils curling in from its corners
-    // to grip one white point at the centre; a few white glints along them where they catch it.
+    // The core: a perfect square set in the bed's middle, the tendrils gripping the white point.
     for (let dy = -6; dy <= 6; dy += 1) for (let dx = -6; dx <= 6; dx += 1) {
       const rim = Math.abs(dx) === 6 || Math.abs(dy) === 6;
       solid(c, cx + dx, oy + dy, M.CORE, rim ? ARMOUR : dy === -5 ? INK : INK_DEEP, ROLE.CORE);
@@ -435,41 +429,19 @@
     }
     for (const [dx, dy] of [[0, 0], [1, 0], [0, 1], [1, 1]]) solid(c, cx + dx, oy + dy, M.CORE, WHITE_CORE, ROLE.CORE);
     for (const [dx, dy] of [[-1, 0], [2, 0], [0, -1], [1, 2]]) solid(c, cx + dx, oy + dy, M.CORE, WHITE_DIM, ROLE.CORE);
-    // Connector sockets left and right: a dark mouth with a rim, a white port point.
+    // The bed's connectors, left and right: a plain socket with a white port point.
     for (const side of [-1, 1]) {
-      for (let dy = -4; dy <= 4; dy += 1) for (let d = 11; d <= 13; d += 1) {
-        const rim = Math.abs(dy) === 4 || d === 13;
-        solid(c, cx + side * d, oy + dy, M.STEEL, rim ? PLATE_DARK : ARMOUR, ROLE.CRADLE);
+      for (let dy = -3; dy <= 3; dy += 1) for (let d = 11; d <= 13; d += 1) {
+        solid(c, cx + side * d, oy + dy, M.STEEL, Math.abs(dy) === 3 || d === 13 ? PLATE_DARK : ARMOUR, ROLE.CRADLE);
       }
       solid(c, cx + side * 12, oy, M.CORE, WHITE_DIM, ROLE.CORE);
     }
-    // The translator on top: a nozzle with a white slot down its middle, its mouth rimmed dark
-    // (HM comes out of it as a pillar in F2 - the unit's business end).
-    for (let y = b - 28; y <= b - 23; y += 1) for (let dx = -6; dx <= 6; dx += 1) {
-      const slot = Math.abs(dx) <= 2 && y >= b - 27;
-      const mouth = y === b - 28;
-      solid(c, cx + dx, y, slot && !mouth ? M.CORE : M.STEEL,
-        slot && !mouth ? ((y + dx) & 1 ? WHITE_CORE : WHITE_DIM) : mouth ? (Math.abs(dx) <= 2 ? INK : PLATE_LIT) : Math.abs(dx) === 6 ? PLATE_DARK : PLATE,
-        slot && !mouth ? ROLE.CORE : ROLE.CRADLE);
-    }
-    // The glyph: the dead god machine's mark, etched dark in the lower plate, one white point.
-    const mark = ['00100', '01110', '10101', '00100', '10101'];
-    for (let gy = 0; gy < mark.length; gy += 1) for (let gx = 0; gx < 5; gx += 1) {
-      if (mark[gy][gx] !== '1') continue;
-      const x = cx + 5 + gx, y = b - 8 + gy;
-      if ((c.mat[y * c.width + x] & 63) === M.CORE) continue;
-      solid(c, x, y, M.STEEL, gy === 2 && gx === 2 ? WHITE_DIM : GLYPH, ROLE.CRADLE);
-    }
-    // Black tendrils gripping the body from outside, a white glint here and there.
-    for (const [x0, y0, x1, y1, bend] of [[-10, b, -6, bodyTop + 2, -4], [10, b - 3, 5, b - 26, 5]]) {
-      const n = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0));
-      for (let t = 0; t <= n; t += 1) {
-        const u = t / n;
-        const x = cx + Math.round(x0 + (x1 - x0) * u + bend * Math.sin(u * Math.PI));
-        const y = Math.round(y0 + (y1 - y0) * u);
-        solid(c, x, y, M.STEEL, t % 7 === 3 ? WHITE_DIM : INK, ROLE.CRADLE);
-        if (u < 0.5) solid(c, x + (x0 < 0 ? 1 : -1), y, M.STEEL, INK, ROLE.CRADLE);
-      }
+    // The bed's translator on top: a plain nozzle with a white slot down its middle.
+    for (let y = b - 25; y <= b - 21; y += 1) for (let dx = -5; dx <= 5; dx += 1) {
+      const slot = Math.abs(dx) <= 2 && y >= b - 24;
+      solid(c, cx + dx, y, slot ? M.CORE : M.STEEL,
+        slot ? ((y + dx) & 1 ? WHITE_CORE : WHITE_DIM) : y === b - 25 || Math.abs(dx) === 5 ? PLATE_DARK : PLATE,
+        slot ? ROLE.CORE : ROLE.CRADLE);
     }
     c.lamps.push({ x: cx, y: oy, radius: 20, strength: 0.5, color: WHITE_CORE });
     return oy;
