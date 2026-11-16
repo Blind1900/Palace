@@ -219,7 +219,18 @@
       return OUT;
     }
     const ZERO = [0, 0, 0], OUT = [0, 0, 0];
-    return { blast, gust, step, at, stats, busy: () => active.size > 0, S };
+    // All the wind at world cell (x, y), cells/s: the weather's (none underground, stronger with
+    // height over the ground - as the gases feel it) and, where a blast has stirred the air, its
+    // wind too.
+    function wind(x, y) {
+      const top = world.groundTop[Math.max(0, Math.min(W - 1, x | 0))];
+      const a = at(x, y);
+      WIND[0] = a[0] + (y < top ? (world.wind || 0) * Math.min(2.2, 1 + (top - y) / 300) : 0);
+      WIND[1] = a[1];
+      return WIND;
+    }
+    const WIND = [0, 0];
+    return { blast, gust, step, at, wind, stats, busy: () => active.size > 0, S };
   }
 
   PW.createAir = createAir;

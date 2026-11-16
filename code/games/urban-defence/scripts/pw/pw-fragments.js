@@ -15,6 +15,8 @@
   const { phase, structural, hardness, breaksTo, palettes } = PW.mat;
 
   const RELEASE = 0.95;       // a hinging piece swings free after this much rotation (radians)
+  const FLORA_RELEASE = 2.2;  // ...a tree only once past lying flat (its roots hold its foot on
+                              // the edge until then: over a drop, it goes on over)
   const SPLIT_MIN = 300;      // pieces at least this big can crack into chunks
   const CHUNK_MIN = 36;       // chunks smaller than this turn straight into debris
   const MAX_PIECES = 100;
@@ -104,7 +106,7 @@
           PW.markDirty(world, cx, cy, PW.DIRTY_BASE | PW.DIRTY_DECO);
           PW.markDirty(world, cx + e, cy + e, PW.DIRTY_BASE | PW.DIRTY_DECO);
         }
-        for (const key of ['x', 'y', 'color', 'byte', 'solid']) data[key] = data[key].slice(0, k);
+        for (const key of ['x', 'y', 'color', 'byte', 'solid', 'girth']) if (data[key]) data[key] = data[key].slice(0, k);
       }
       const n = data.x.length;
       // (its weight is in its frame: a back wall weighs little - see THIN)
@@ -221,10 +223,163 @@
       piece.footBand = Math.max(10, Math.min(80, gh * 0.2));
       piece.footV = v0 + gh - piece.footBand;
       piece.eaten = 0;
+      if (piece.flora) plantOf(piece);
       if (!parent) pushed(piece);
       list.push(piece);
       stats.spawned += 1;
       return piece;
+    }
+
+    // A falling plant's wood holds only as much as its girth lets it. Where it strikes something,
+    // the wood that took the blow - the thinnest it struck with - bears its share of it; if that is
+    // more than the wood can bear (its strength goes with the girth of the stem it hangs from,
+    // cubed: a twig hardly anything, a limb a good deal), that branch snaps off there, with its
+    // leaves, and falls on by itself (a twig comes apart: see spawn) - and the plant comes on down
+    // past it. Its trunk (a bough's thickest wood) never snaps. So a light bough rests on its
+    // twigs, but a whole tree crashing down breaks up the crown it lands on and comes to lie on its
+    // trunk and stoutest limbs, not standing propped on its branch tips. And the air takes hold of
+    // all of it, leaves and all (see airDrag).
+    // Kept per outline point: its cell in the piece's grid and the girth of its stem; and the
+    // plant's trunk girth, and its size and middle, all of it, for the air.
+    const RIGID = 0.65;           // wood this share of the plant's thickest (or 2 cells) never snaps
+    const WOOD_BLOW = 1500;       // the blow (weight x cells/s) wood a cell thick takes, x girth^3,
+    const WOOD_LOAD = 10000;      // ...and the weight (x cells/s^2) it bears
+    const SNAPS_PER_TICK = 3;     // branches a plant breaks off at most a tick
+    const WOOD_DEBRIS = M.DEBRIS | PW.DEBRIS_KIND.WOOD << 6;
+    const LEAF_REACH = 6;         // a branch that snaps off takes the leaves this near it,
+    const SNAP_REACH = 10, SNAP_REACH_GIRTH = 5;   // ...and its wood this far (+ per cell of girth)
+    const FLORA_SPIN = 2.5;       // rad/s: a plant striking something turns no faster than this,
+    const FLORA_DRAG = 1.5;       // ...and its turning slowed this much (per second) while it touches
+    function plantOf(p) {
+      const { data, grid, gw, u0, v0, points } = p, girth = data.girth;
+      const count = points.length / 2;
+      p.ptCell = new Int32Array(count); p.ptGirth = new Uint8Array(count);
+      let most = 1;
+      if (girth) {
+        // (its thickest wood: the girth a twentieth of its wood is at least - its trunk, not the
+        // flare of its roots)
+        const hist = new Int32Array(16);
+        let wood = 0;
+        for (let k = 0; k < p.n; k += 1) if (data.solid[k]) { hist[Math.min(15, girth[k])] += 1; wood += 1; }
+        for (let g = 15, sum = 0; g >= 1; g -= 1) { sum += hist[g]; if (sum >= wood * 0.05) { most = g; break; } }
+      }
+      p.rigidGirth = Math.min(most, Math.max(2, Math.ceil(most * RIGID)));
+      for (let j = 0; j < points.length; j += 2) {
+        const gi = (Math.floor(points[j + 1]) - v0) * gw + (Math.floor(points[j]) - u0);
+        p.ptCell[j >> 1] = gi;
+        p.ptGirth[j >> 1] = girth ? girth[grid[gi] - 1] || 1 : most;
+      }
+      let au = 0, av = 0;
+      for (let k = 0; k < p.n; k += 1) { au += data.x[k] - p.ox0 + 0.5; av += data.y[k] - p.oy0 + 0.5; }
+      p.area = p.n; p.au = au / p.n; p.av = av / p.n;
+    }
+    // The branch of a plant at outline point k snaps off: its wood out from there no thicker than
+    // it there, and its leaves (those near it, not nearer other wood), go on as a piece of their
+    // own, moving as they were; the plant goes on without them. (False if there was nothing to
+    // break off.)
+    function snapBranch(p, k) {
+      const { grid, gw, gh, data } = p, girth = data.girth;
+      if (p.snapTick !== world.tick) { p.snapTick = world.tick; p.snaps = 0; }
+      if (p.snaps >= SNAPS_PER_TICK) return false;
+      const start = p.ptCell[k >> 1];
+      if (!grid[start]) return false;
+      const g0 = girth[grid[start] - 1];
+      const mine = new Uint8Array(gw * gh), cells = [start];
+      mine[start] = 1;
+      const each = (gi, visit) => {
+        const gu = gi % gw, gv = (gi / gw) | 0;
+        for (let dv = -1; dv <= 1; dv += 1) {
+          for (let du = -1; du <= 1; du += 1) {
+            const nu = gu + du, nv = gv + dv;
+            if ((du || dv) && nu >= 0 && nv >= 0 && nu < gw && nv < gh) visit(nv * gw + nu);
+          }
+        }
+      };
+      // (the end of it that struck: what is joined to it out to a reach that goes with its girth -
+      // a crown's twigs all cross one another, so not all that is joined to it)
+      const su = start % gw, sv = (start / gw) | 0, reach2 = (SNAP_REACH + SNAP_REACH_GIRTH * g0) ** 2;
+      for (let q = 0; q < cells.length; q += 1) {
+        each(cells[q], (ni) => {
+          const c = grid[ni];
+          if (mine[ni] || !c || data.solid[c - 1] !== 1 || girth[c - 1] > g0) return;
+          if ((ni % gw - su) ** 2 + (((ni / gw) | 0) - sv) ** 2 > reach2) return;
+          mine[ni] = 1; cells.push(ni);
+        });
+      }
+      const wood = cells.length;
+      // (its leaves: out from its wood, a cell at a time, through leaves not touching other wood)
+      let ring = cells.slice();
+      for (let d = 0; d < LEAF_REACH && ring.length; d += 1) {
+        const next = [];
+        for (const gi of ring) {
+          each(gi, (ni) => {
+            const c = grid[ni];
+            if (mine[ni] || !c || data.solid[c - 1] || !data.color[c - 1]) return;
+            let other = false;
+            each(ni, (mi) => { const e = grid[mi]; if (e && data.solid[e - 1] === 1 && !mine[mi]) other = true; });
+            if (other) return;
+            mine[ni] = 1; next.push(ni); cells.push(ni);
+          });
+        }
+        ring = next;
+      }
+      // (crushed under the plant, it lies where it broke: see PW.flora.land; splinters fly from
+      // the break)
+      const ks = cells.map((gi) => grid[gi] - 1);
+      const [c, s] = cosSin(p);
+      if (PW.flora) PW.flora.land(world, particles, place(p, pick(data, ks), c, s), null);
+      const [bx, by] = toWorld(p, c, s, p.points[k], p.points[k + 1]), [vx] = velocityAt(p, bx, by);
+      for (let q = Math.min(6, 1 + (wood >> 3)); q > 0; q -= 1) {
+        const j = ks[Math.floor(random() * Math.min(wood, ks.length))];
+        particles.spawn(bx, by - 1, vx * 0.3 + (random() - 0.5) * 80, -30 - random() * 60, WOOD_DEBRIS, data.color[j] || 0, F.LAND, 6);
+      }
+      for (const gi of cells) { const q = grid[gi] - 1; data.solid[q] = 0; data.color[q] = 0; grid[gi] = 0; }
+      p.mass = Math.max(1, p.mass - wood);
+      p.snaps += 1;
+      p.reshape = true;
+      stats.snapped = (stats.snapped || 0) + 1;
+      return true;
+    }
+    // A plant that lost branches is made over from what is left at the end of the tick - its
+    // weight, its middle, its outline - going on just as it was (still swinging on its foot, if it
+    // was).
+    function remake(p) {
+      const ks = [];
+      for (let k = 0; k < p.data.x.length; k += 1) if (p.data.solid[k] || p.data.color[k]) ks.push(k);
+      if (!ks.length) return true;
+      const q = spawn({ data: pick(p.data, ks), parent: p, inherit: true, flora: true, generation: p.generation, dir: p.dir, base: p.base,
+        pivot: p.mode === 'hinge' ? { x: p.hx, y: p.hy } : null });
+      if (q) Object.assign(q, { age: p.age, touched: p.touched, still: p.still, snapTick: p.snapTick, snaps: p.snaps, rigidGirth: p.rigidGirth });
+      return true;
+    }
+    // The air on a falling plant drags on all of it against the way it goes through the air (the
+    // wind's way, less its own): a leafy twig flutters down slowly and is carried off on the wind, a
+    // whole tree falls nearly free. Dragging at the middle of all of it rather than of its weight
+    // (its wood), the air turns it as well - the leafy crown trails, the heavy wood leads - and
+    // slows its turning.
+    const SPIN_DRAG = 0.3;        // per second (spinning about its middle, which the drag on its
+                                  // middle does not slow)
+    const NO_WIND = [0, 0];
+    function airDrag(p, h) {
+      const [c, s] = cosSin(p);
+      const [ax, ay] = toWorld(p, c, s, p.au, p.av);
+      const [vx, vy] = velocityAt(p, ax, ay);
+      const wind = world.air && world.air.wind ? world.air.wind(Math.floor(ax), Math.floor(ay)) : NO_WIND;
+      const rx = wind[0] - vx, ry = wind[1] - vy, rel = Math.hypot(rx, ry);
+      if (rel > 1e-3) {
+        // (the push over its weight; never more than brings it to the air's speed in the step)
+        const k = Math.min(PW.flora.AIR_DRAG * p.area * rel / p.mass, 0.5 / h);
+        const fx = k * rx, fy = k * ry;
+        const [cx, cy] = centre(p);
+        if (p.mode === 'hinge') {
+          const r2 = (cx - p.hx) ** 2 + (cy - p.hy) ** 2;
+          p.omega += ((ax - p.hx) * fy - (ay - p.hy) * fx) / (p.inertia / p.mass + r2) * h;
+        } else {
+          p.vx += fx * h; p.vy += fy * h;
+          p.omega += ((ax - cx) * fy - (ay - cy) * fx) / Math.max(1, p.inertia / p.mass) * h;
+        }
+      }
+      p.omega *= Math.max(0, 1 - SPIN_DRAG * h);
     }
 
     // A blast throws back what it breaks loose: a piece that comes away within a moment of a blast
@@ -305,6 +460,7 @@
         let done = false;
         for (let s = 0; s < sub && !done; s += 1) {
           was.px = p.px; was.py = p.py; was.angle = p.angle;
+          if (p.flora) airDrag(p, h);
           if (p.mode === 'hinge') {
             // Its weight crushes what it stands on as it leans (see pancake); and gravity's turning
             // moment about the pivot, plus the lean towards the failed side, turns it over.
@@ -317,7 +473,7 @@
             const c = Math.cos(p.angle), sn = Math.sin(p.angle);
             p.px = p.hx + p.rx * c - p.ry * sn;
             p.py = p.hy + p.rx * sn + p.ry * c;
-            if (Math.abs(p.angle) > RELEASE) {
+            if (Math.abs(p.angle) > (p.flora ? FLORA_RELEASE : RELEASE)) {
               // (what is left of it, its foot crushed away, goes on free as a piece of its own)
               if (p.eaten) { done = rebuild(p); break; }
               const [wx, wy] = centre(p);
@@ -335,6 +491,7 @@
           }
           done = contact(p, h);
         }
+        if (!done && p.reshape) done = remake(p);
         if (!done && p.footTouch) { p.footTouch = false; if (p.mode === 'hinge') eatFoot(p); }
         if (!done) {
           // At rest on what it lies on (barely moving, and touching something lately) for a moment:
@@ -545,9 +702,12 @@
       let crushed = 0, smashed = 0, n = 0, sx = 0, sy = 0, fx = 0, fy = 0, hs = 0, wet = 0;
       let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity, nb = 0;
       const [mid] = toWorld(p, c, s, p.gx, p.gy);   // (what it crushes is squeezed out away from this)
+      weakest = -1;
       for (let k = 0; k < pts.length; k += 2) {
-        // (the storeys of it already crushed under its hinge are gone)
+        // (the storeys of it already crushed under its hinge are gone; a plant's branches snapped
+        // off it)
         if (p.stage === 'self' && p.mode === 'hinge' && pts[k + 1] >= -p.ry) continue;
+        if (p.flora && !p.grid[p.ptCell[k >> 1]]) continue;
         const [wx, wy] = toWorld(p, c, s, pts[k], pts[k + 1]);
         const x = Math.floor(wx), y = Math.floor(wy);
         if (!blocking(x, y)) {
@@ -555,8 +715,9 @@
           // (in water: see soak)
           if ((mat[y * W + x] & ID_MASK) === M.WATER) { if (wet < WET_MAX) { wetAt[wet * 2] = x; wetAt[wet * 2 + 1] = y; } wet += 1; }
           // Whatever stands in the open where it passes is swept away: trees and bushes are
-          // knocked down, lamps, railings and furniture smashed.
-          if (PW.getLayer(world, 'deco', x, y) && PW.getOwner(world, x, y) !== p.owner) sweep(x, y, p.flora ? 1 : 8);
+          // knocked down, lamps, railings and furniture smashed. (A falling plant breaks twigs
+          // and thin branches only with its trunk and stoutest limbs.)
+          if (PW.getLayer(world, 'deco', x, y) && PW.getOwner(world, x, y) !== p.owner && (!p.flora || p.ptGirth[k >> 1] >= p.rigidGirth)) sweep(x, y, p.flora ? 2 : 8);
           continue;
         }
         // (something it was in already before this sub-step - rubble come to lie where the piece
@@ -591,13 +752,16 @@
         if (p.mode === 'hinge' && PW.mat.terrain[mat[y * W + x] & ID_MASK] && y >= p.yf && Math.abs(x - p.hx) < 6) continue;   // seated on its pivot
         // (a building leaning over presses its foot into the ground: see eatFoot)
         if (p.mode === 'hinge' && !p.flora && pts[k + 1] > p.footV) { p.footTouch = true; continue; }
-        // (bitten into it - already inside it, or deep in it - it grinds off there: see grind)
-        if (inside || (blocking(x - 1, y) && blocking(x + 1, y) && blocking(x, y - 1) && blocking(x, y + 1))) {
-          if (!p.flora && nb < OUTLINE_MAX) bites[nb++] = k;
+        // (bitten into it - already inside it, or deep in it - it grinds off there: see grind. A
+        // plant does not grind: it is pushed back out like anything it strikes)
+        if (!p.flora && (inside || (blocking(x - 1, y) && blocking(x + 1, y) && blocking(x, y - 1) && blocking(x, y + 1)))) {
+          if (nb < OUTLINE_MAX) bites[nb++] = k;
           continue;
         }
         if (n < OUTLINE_MAX) { went[n * 2] = wx - ox; went[n * 2 + 1] = wy - oy; }
         n += 1; sx += wx; sy += wy; hs += hardness[mat[y * W + x] & ID_MASK];
+        // (a plant: the thinnest wood it struck with - see snapBranch)
+        if (p.flora && (weakest < 0 || p.ptGirth[k >> 1] < p.ptGirth[weakest >> 1])) weakest = k;
         if (wx < bx0) bx0 = wx; if (wx > bx1) bx1 = wx; if (wy < by0) by0 = wy; if (wy > by1) by1 = wy;
         // (which way the surface it struck faces there - out through its open sides - and, less,
         // the other way from the side of the piece that struck it)
@@ -624,6 +788,7 @@
       if (nb && grind(p, nb, c, s, mid)) return true;
       if (!n) { p.jam = 0; return false; }
       wentN = Math.min(n, OUTLINE_MAX);
+      stepH = h;
       return strike(p, sx / n, sy / n, fx / n, fy / n, hs / n, Math.hypot(bx1 - bx0, by1 - by0));
     }
     // A piece does not slide on through what it has bitten into - the ground, another building:
@@ -687,7 +852,9 @@
     }
     // (how far each point that struck something moved this sub-step)
     const went = new Float32Array(OUTLINE_MAX * 2);
-    let wentN = 0;
+    let wentN = 0, stepH = 1 / 60;
+    // (a plant: its outline point with the thinnest wood that struck something this sub-step)
+    let weakest = -1;
     // (where its outline is in water)
     const WET_MAX = 64, wetAt = new Int32Array(WET_MAX * 2);
     // In water a piece is held back by the water it pushes aside - the more of it is in, the more
@@ -792,6 +959,24 @@
       const [vx, vy] = velocityAt(p, wx, wy);
       // A big piece coming straight down into its own footprint sinks into it storey by storey.
       if (p.mode === 'drop' && p.mass >= SPLIT_MIN * 4 && Math.abs(vx) < Math.abs(vy) * 0.6 && Math.abs(p.angle) < 0.6) { sink(p, vx, vy, wx, wy, hx, hy); return true; }
+      // A plant: if the thinnest wood that took the blow cannot bear its share of it - of the blow
+      // that would stop it there, or of its weight resting there - that branch snaps off and the
+      // plant comes on past it (see snapBranch).
+      if (p.flora && weakest >= 0 && p.ptGirth[weakest >> 1] < p.rigidGirth) {
+        const fl = Math.hypot(fx, fy);
+        const [nx, ny] = fl > 0.3 ? [fx / fl, fy / fl] : normalAt(hx, hy, vx, vy);
+        const hit = -(vx * nx + vy * ny);
+        const [cx, cy] = centre(p), rn = (wx - cx) * ny - (wy - cy) * nx;
+        const blow = hit / (1 / p.mass + rn * rn / Math.max(1, p.inertia)) / wentN, g3 = p.ptGirth[weakest >> 1] ** 3;
+        if (hit > 0 && (blow > WOOD_BLOW * g3 || p.mass * G / wentN > WOOD_LOAD * g3) && snapBranch(p, weakest)) return false;
+      }
+      // A toppling plant's roots hold its foot on its pivot: what its trunk or limbs come down on
+      // stops it turning there - it lies on it, its foot still on the edge.
+      if (p.flora && p.mode === 'hinge') {
+        // (only if it is coming down onto it: turning the other way, it lifts off it)
+        if (p.omega * ((wx - p.hx) * fy - (wy - p.hy) * fx) < 0) { p.omega *= -0.05; p.touched = p.age; }
+        return false;
+      }
       // From now on it moves free, about whatever it rests on or strikes (made over first if its
       // foot was crushed away).
       if (p.mode === 'hinge') {
@@ -821,7 +1006,8 @@
       const invM = 1 / p.mass, invI = 1 / Math.max(1, p.inertia);
       const rn = rx * ny - ry * nx;
       const firm = 0.55 + hard, felt = hit * firm;
-      const j = (1 + (felt > CRUMBLE_SPEED ? BOUNCE * (0.4 + hard * 1.2) : 0)) * hit / (invM + rn * rn * invI);
+      // (a plant's wood and leaves take the blow up: it does not bounce)
+      const j = (1 + (felt > CRUMBLE_SPEED && !p.flora ? BOUNCE * (0.4 + hard * 1.2) : 0)) * hit / (invM + rn * rn * invI);
       const tx = -ny, ty = nx, vt = vx * tx + vy * ty, rt = rx * ty - ry * tx;
       const fwd = Math.sign(vt) || (random() < 0.5 ? 1 : -1);
       // A hollow piece - a building, mostly air - folds up where it lands, like a box (see crumple).
@@ -833,9 +1019,14 @@
       const ix = j * nx + jt * tx, iy = j * ny + jt * ty;
       p.vx += ix * invM; p.vy += iy * invM;
       p.omega += (rx * iy - ry * ix) * invI;
-      // (a falling tree or bough rolls and slides over what it strikes until it lies still - see
-      // finish - and breaks nothing: one tree coming down does not set off the next)
-      if (p.flora) { p.omega *= 0.7; p.vx *= 0.92; p.vy *= 0.92; return false; }
+      // (a falling tree or bough turns and slides over what it strikes until it lies still - see
+      // finish - never set spinning by it, and breaks nothing: one tree coming down does not set
+      // off the next)
+      if (p.flora) {
+        // (its branches drag on what it lies on: it does not roll on over it)
+        p.omega = Math.max(-FLORA_SPIN, Math.min(FLORA_SPIN, p.omega * Math.max(0, 1 - FLORA_DRAG * stepH)));
+        return false;
+      }
       if (felt < SNAP_SPEED) return false;
       // A blow: what it struck feels it, and the piece breaks where it took it.
       if (felt >= CRUMBLE_SPEED && p.crumpled !== world.tick) blow(hx, hy, vx, vy, hit, j * hit, tx * fwd, ty * fwd, Math.abs(vt), hard, !p.owner && !p.from && !p.flora);
@@ -1181,7 +1372,7 @@
     }
     // The piece's cells at their present places in the world, as data for a new piece.
     function place(p, part, c, s) {
-      const out = { x: new Int32Array(part.x.length), y: new Int32Array(part.x.length), color: part.color, byte: part.byte, solid: part.solid };
+      const out = { x: new Int32Array(part.x.length), y: new Int32Array(part.x.length), color: part.color, byte: part.byte, solid: part.solid, girth: part.girth };
       for (let j = 0; j < part.x.length; j += 1) {
         const u = part.x[j] - p.ox0 + 0.5, v = part.y[j] - p.oy0 + 0.5;
         const [wx, wy] = toWorld(p, c, s, u, v);
@@ -1193,6 +1384,7 @@
       const n = ks.length;
       const out = { x: new Int32Array(n), y: new Int32Array(n), color: new Uint32Array(n), byte: new Uint8Array(n), solid: new Uint8Array(n) };
       ks.forEach((k, j) => { out.x[j] = data.x[k]; out.y[j] = data.y[k]; out.color[j] = data.color[k]; out.byte[j] = data.byte[k]; out.solid[j] = data.solid[k]; });
+      if (data.girth) { out.girth = new Uint8Array(n); ks.forEach((k, j) => { out.girth[j] = data.girth[k]; }); }
       return out;
     }
     // Break a set of cells up where they are: most heap as rubble in open cells, a share is thrown

@@ -332,6 +332,15 @@
           if (here !== M.WATER || life[i] <= 0) kill(i);   // reached air: pop
           continue;
         }
+        // (a leaf lying on something - stopped dead there - stays till its time is up, unless what
+        // it lies on is gone)
+        if ((fl & F.LEAF) && vx[i] === 0 && vy[i] === 0) {
+          const cx = px[i] | 0, cy = (py[i] | 0) + 1;
+          if (cy >= H || cx < 1 || cx >= W - 1 || !open(mat[cy * W + cx] & ID_MASK, fl)) {
+            if (life[i] <= 0) kill(i);
+            continue;
+          }
+        }
         // What it is, and what it is flying through. In a liquid the weight of what it pushes
         // aside holds it up: a stone sinks slower, ash floats up (the element table's weights).
         const own = cell[i] & ID_MASK;
@@ -348,7 +357,14 @@
         // grit drift down, a stone flies on.
         const drag = inLiquid ? 3.5 : fl & F.LEAF ? 1.6 : own ? 0.12 + 2.5 * advection[own] : 0.12;
         vx[i] *= Math.max(0, 1 - drag * dt); vy[i] *= Math.max(0, 1 - drag * dt);
-        if (fl & F.LEAF) vx[i] += Math.sin(age[i] * 5 + i) * 30 * dt;
+        // A falling leaf sways as it sinks - with the leaves about it, in the same eddy - so a mass
+        // of them comes down together like a heavy gas, swirling and spreading a little as it
+        // settles; each flutters a little on its own as well.
+        if (fl & F.LEAF) {
+          const eddy = age[i] * 2.2 + px[i] * 0.045 + py[i] * 0.03;
+          vx[i] += (Math.sin(eddy) * 26 + Math.sin(age[i] * 6 + i * 1.7) * 8) * dt;
+          vy[i] += Math.cos(eddy * 1.3) * 14 * dt;
+        }
         // (sinking or floating through water, each grain is turned this way and that by the
         // eddies it makes, so a mass of them spreads out)
         else if (inLiquid && own) { vx[i] += Math.sin(age[i] * 4 + i * 1.7) * 40 * dt; vy[i] += Math.cos(age[i] * 3 + i * 2.3) * 25 * dt; }
@@ -439,6 +455,9 @@
             break;
           }
           if (blockedX) { vx[i] = -vx[i] * 0.25; vy[i] *= 0.75; } else { vy[i] = -vy[i] * 0.25; vx[i] *= 0.7; }
+          // (a leaf come down onto something lies on it a while - the rest of its life - before
+          // it is gone)
+          if ((fl & F.LEAF) && !blockedX && speed < 60) { vx[i] = 0; vy[i] = 0; life[i] = Math.max(life[i], 2 + (i & 3) * 0.5); break; }
           if (!(fl & (F.LAND | F.WATER)) && speed < 30) { kill(i); removed = true; }
           break;
         }
