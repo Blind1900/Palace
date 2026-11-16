@@ -358,7 +358,7 @@
       PW.wake(world, x, y - 1);
       const h = PW.hash3(x, y, world.tick), v = RUN_START * (0.8 + (h & 255) / 255 * 0.4);
       const F = PW.PARTICLE;
-      particles.spawn(x + d + 0.5, y + 0.5, d * v, v * 0.6, byte, paint, F.LAND | (weight[id] >= 80 ? F.DAMAGE : 0), 12);
+      particles.spawn(x + d + 0.5, y + 0.5, d * v, v * 0.6, byte, paint, F.LAND | F.LOOSE | (weight[id] >= 80 ? F.DAMAGE : 0), 12);
       stats.ran = (stats.ran || 0) + 1;
       // (where ground is running off, the slide is still going: the stability system keeps looking
       // there - the face it was banked against may stand free now, and fail in its turn)
@@ -378,7 +378,7 @@
       PW.wake(world, x, y - 1);
       // (no two grains leave quite alike, so a falling mass loosens and spreads as it goes)
       const h = PW.hash3(x, y, world.tick);
-      particles.spawn(x + 0.5, y + 0.5, ((h & 255) / 255 - 0.5) * 16, POWDER_FALL * 60 * (0.85 + (h >>> 8 & 255) / 255 * 0.3), byte, paint, PW.PARTICLE.LAND, 12);
+      particles.spawn(x + 0.5, y + 0.5, ((h & 255) / 255 - 0.5) * 16, POWDER_FALL * 60 * (0.85 + (h >>> 8 & 255) / 255 * 0.3), byte, paint, PW.PARTICLE.LAND | PW.PARTICLE.LOOSE, 12);
       stats.flown += 1;
       return true;
     }

@@ -204,7 +204,7 @@
         const m = mat[y * W + x], id = m & ID_MASK;
         if (phase[id] !== PW.PHASE.POWDER || gust * advection[id] * 20 < LIFT) continue;
         PW.set(world, x, y, M.AIR);
-        particles.spawn(x + 0.5, y - 0.5, vx[i] * S * 3, vy[i] * S * 3 - 30, m, 0, PW.PARTICLE.LAND, 5);
+        particles.spawn(x + 0.5, y - 0.5, vx[i] * S * 3, vy[i] * S * 3 - 30, m, 0, PW.PARTICLE.LAND | PW.PARTICLE.LOOSE, 5);
         stats.lifted += 1;
         n += 1;
       }

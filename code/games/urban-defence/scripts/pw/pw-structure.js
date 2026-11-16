@@ -330,7 +330,8 @@
         else {
           const back = PW.getLayer(world, 'back', x, y);
           PW.setLayer(world, 'back', x, y, 0);
-          if (world.particles && (PW.hash2(x, y) & 7) === 0) world.particles.spawn(x + 0.5, y + 0.5, 0, 0, M.DEBRIS, back, PW.PARTICLE.LAND, 6, 0);
+          // (in panels: whole patches of it come away as chunks, the rest to dust)
+          if (world.particles && (PW.hash2(Math.floor((x + (PW.hash2(y >> 1, 3) & 3)) / 5), Math.floor(y / 5)) % 3) === 0) world.particles.spawn(x + 0.5, y + 0.5, 0, 0, M.DEBRIS, back, PW.PARTICLE.LAND, 6, 0);
         }
         PW.setOwner(world, x, y, 0);
       }

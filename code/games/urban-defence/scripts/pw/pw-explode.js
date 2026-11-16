@@ -143,7 +143,9 @@
             if (id === M.AIR) PW.setOwner(world, x, y, 0);
             damaged.set(backOwner, (damaged.get(backOwner) || 0) + 1);
           }
-          if (random() < 0.15) {
+          // (a building's back wall is blown out in panels - whole patches of it, a third of them,
+          // flung off as chunks; the rest goes to dust)
+          if (building ? (PW.hash2(Math.floor((x + (PW.hash2(y >> 1, 3) & 3)) / 5), Math.floor(y / 5)) % 3) === 0 : random() < 0.15) {
             const [vx, vy] = fling(x, y, 280 * power, 160 * power);
             particles.spawn(x + 0.5, y + 0.5, vx, vy, M.DEBRIS, back, F.LAND | F.DAMAGE, 6, building ? backOwner : 0);
           }
@@ -174,7 +176,8 @@
             const [vx, vy] = fling(x, y, 480 * power, 300 * power);
             particles.spawn(x + 0.5, y + 0.5, vx, vy, breaksTo[id] || M.DEBRIS, paint || 0, F.LAND | F.DAMAGE, 7, ownerId);
           }
-        } else if (phase[id] >= PW.PHASE.POWDER && random() < 0.25) {
+        } else if (phase[id] >= PW.PHASE.POWDER && (random() < 0.06 || (PW.hash2(Math.floor((x + (PW.hash2(y >> 1, 5) & 3)) / 5), Math.floor((y + (PW.hash2(x >> 1, 6) & 3)) / 5)) & 1023) < 200)) {
+          // (ground blown out is thrown in lumps - whole patches of it, about a fifth - and grit)
           const [vx, vy] = fling(x, y, 260 * power, 170 * power);
           particles.spawn(x + 0.5, y + 0.5, vx, vy, breaksTo[id] || M.LOOSE_SOIL, 0, F.LAND, 6);
         }

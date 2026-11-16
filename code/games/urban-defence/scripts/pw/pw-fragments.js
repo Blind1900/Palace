@@ -27,11 +27,11 @@
   // walls; a cell of back wall (marked THIN in a piece) is a light panel behind its rooms: it goes
   // along with the frame, weighing THIN_WEIGHT of a frame cell, strikes nothing, and broken up only
   // one in WALL_RUBBLE of them leaves a grain of rubble (the rest goes to dust).
-  const THIN = 2, THIN_WEIGHT = 0.1, WALL_RUBBLE = 4;
+  const THIN = 2, THIN_WEIGHT = 0.1, WALL_RUBBLE = 3;
   // A building coming down bursts outward: what gives way under its weight is squeezed out of its
   // sides, low and wide, not thrown up. SPILL scales how far out (sideways speed) rubble from its
   // crushed storeys and its breaking pieces is thrown; LOFT how much of it goes up.
-  const SPILL = 1.7, LOFT = 0.55;
+  const SPILL = 2, LOFT = 0.55;
   const weightOf = (solid) => (solid === 1 ? 1 : solid === THIN ? THIN_WEIGHT : 0);
 
   function createFragments(world, particles) {
@@ -49,9 +49,10 @@
       if (y < 0) return false;
       return phase[mat[y * W + x] & ID_MASK] >= PW.PHASE.POWDER;
     };
-    // (a cell of a piece broken up: does it leave a grain of rubble? Structure does; back wall one
-    // in WALL_RUBBLE - the rest goes up as a little dust)
-    const rubbleFrom = (solid, x, y) => solid === 1 || (solid === THIN && (PW.hash2(x | 0, y | 0) % WALL_RUBBLE) === 0);
+    // (a cell of a piece broken up: does it leave rubble? Structure does; back wall comes away in
+    // panels - whole patches of it, one in WALL_RUBBLE, breaking off as chunks with the building -
+    // the rest goes up as a little dust)
+    const rubbleFrom = (solid, x, y) => solid === 1 || (solid === THIN && (PW.hash2(((x | 0) + (Math.imul(y >> 1, 0x9e3779b1) >>> 30)) / 5 | 0, (y | 0) / 5 | 0) % WALL_RUBBLE) === 0);
     const debrisOf = (byte) => {
       const id = byte & ID_MASK;
       if (structural[id] || id === M.FOUNDATION) return breaksTo[id] || M.DEBRIS;
@@ -442,7 +443,7 @@
           else {
             const back = PW.getLayer(world, 'back', x, y);
             PW.setLayer(world, 'back', x, y, 0); PW.setLayer(world, 'deco', x, y, 0); PW.setOwner(world, x, y, 0);
-            if (back && (PW.hash2(x, y) % (WALL_RUBBLE * 2)) === 0) particles.spawn(x + 0.5, y + 0.5, (Math.sign(x + 0.5 - mid) || 1) * (20 + random() * 80) * SPILL, -(20 + random() * 40) * LOFT, M.DEBRIS, back, F.LAND, 5);
+            if (back && rubbleFrom(THIN, x, y)) particles.spawn(x + 0.5, y + 0.5, (Math.sign(x + 0.5 - mid) || 1) * (20 + random() * 80) * SPILL, -(20 + random() * 40) * LOFT, M.DEBRIS, back, F.LAND, 5);
           }
           if (x < x0) x0 = x; if (x > x1) x1 = x;
           n += 1;
@@ -522,7 +523,7 @@
           const byte = mat[y * W + x];
           PW.set(world, x, y, M.AIR);
           const [vx, vy] = velocityAt(p, wx, wy);
-          particles.spawn(x + 0.5, y + 0.5, vx * 0.6 + (random() - 0.5) * 60, Math.min(vy, 0) * 0.4 - 20 - random() * 40, byte, 0, F.LAND, 5);
+          particles.spawn(x + 0.5, y + 0.5, vx * 0.6 + (random() - 0.5) * 60, Math.min(vy, 0) * 0.4 - 20 - random() * 40, byte, 0, F.LAND | F.LOOSE, 5);
           continue;
         }
         const own = p.owner && PW.getOwner(world, x, y) === p.owner;
