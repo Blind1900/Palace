@@ -175,6 +175,10 @@
       for (const [id, job] of jobs) {
         const b = (world.buildings || [])[id - 1];
         if (!b) { jobs.delete(id); continue; }
+        // While this job works the building is a construction site (b.growing): the structure
+        // system judges it by what stands, not against its blueprint, and it shrugs off light
+        // blows. Cleared the moment the work is done or stops.
+        b.growing = false;
         // A ruined building rebuilds only once its cores stand risen over the rubble; they remake
         // the bed and the frame first (classes up to the walls), and when enough frame stands the
         // building is no ruin any more - the cores sink home and the fine work follows.
@@ -193,11 +197,12 @@
         }
         if (job.scanCol < b.canvas.width) scan(b, job);
         if (!job.queue.length) {
-          if (job.scanCol >= b.canvas.width && (!job.held || !job.held.length)) jobs.delete(id);
+          if (job.scanCol >= b.canvas.width && (!job.held || !job.held.length)) { jobs.delete(id); b.growing = false; }
           continue;
         }
         const alive = coresAlive(b);
         if (!alive) continue;
+        b.growing = true;
         // The recyclers clear the site as fast as the translators build: wreckage lying against
         // the building's own cells melts away (during a resurrection that includes what the
         // remnant stands on - demolition comes before reconstruction).
