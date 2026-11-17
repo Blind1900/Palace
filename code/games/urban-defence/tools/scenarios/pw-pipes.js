@@ -143,4 +143,13 @@ for (let x = cutX - 90; x < cutX + 90; x += 1) {
 check(steep === 0 && stray === 0, `the re-laid bundle is one smooth run, the old pipe taken up (${steep} steep steps, ${stray} stray cells)`);
 check(pwApp.countWater() >= waterBefore - 1, `the spilled water is real water, none lost (${waterBefore} -> ${pwApp.countWater()} cells)`);
 await view('pp-repaired', cutX, cutY - 6, 6);
+
+// 5. A seed dropped in the wild plants a core, and the bundle grows out to thread it.
+const coresBefore = water.cores.length, endBefore = water.x1;
+const planted = PW.seeds && PW.seeds.drop(world, water.x1 + 260, 'left');
+pwApp.stepWorld(60 * 2);
+for (let s = 0; s < 40 && [...water.broken].some(Boolean); s += 1) pwApp.stepWorld(60);
+check(!!planted && water.cores.length === coresBefore + 1 && water.x1 > endBefore && ![...water.broken].some(Boolean),
+  `a planted seed core joins the bundle (${coresBefore} -> ${water.cores.length} cores, end ${endBefore} -> ${water.x1}, line whole)`);
+if (planted) await view('pp-seed', planted.x, planted.y - 4, 6);
 return { checks, stats: pipes.stats, stock: world.stock, shots: shots.length };

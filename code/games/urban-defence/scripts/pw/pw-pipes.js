@@ -452,6 +452,52 @@
         if (r.left > r.right) line.reroute = null;
       }
     }
+    // A core grown after the world was made - a dropped seed, a new building - joins its side's
+    // bundle: the line grows out to it if it must, or the span around it is taken up and re-laid
+    // through its connectors, and its taps go live.
+    function connectCore(x, y, side, taps, building) {
+      const line = lineFor(side);
+      if (!line) return null;
+      const core = { x, y, building: building || 0, type: taps ? 'building' : 'seed', taps: taps || { hm: 'in', sm: 'in', water: 'in' }, timer: 0 };
+      registerSpan(core, building || 0);
+      line.cores.push(core);
+      line.cores.sort((p, q) => p.x - q.x);
+      stats.cores += 1;
+      if (x - SPAN - 4 < line.x0 || x + SPAN + 4 > line.x1) {
+        // Beyond an end: the line runs on to it.
+        const x0 = Math.min(line.x0, x - SPAN - 4), x1 = Math.max(line.x1, x + SPAN + 4);
+        const fresh = contour(x0, x1, DEPTH);
+        snapToCores(fresh, x0, line.cores);
+        extendTo(line, x0, x1, (c) => fresh[c - x0]);
+        if (x0 < line.x0 + 1) capEnd(line, -1);
+        if (x1 > line.x1 - 1) capEnd(line, 1);
+        return core;
+      }
+      // Mid-run: the stretch around it is taken up and re-laid through its connectors.
+      const a = Math.max(0, x - (SPAN * 2 + RAMP + 6) - line.x0), bk = Math.min(line.ys.length - 1, x + SPAN * 2 + RAMP + 6 - line.x0);
+      const fresh = contour(line.x0 + a, line.x0 + bk, DEPTH);
+      snapToCores(fresh, line.x0 + a, line.cores.filter((c) => c.x >= line.x0 + a - SPAN && c.x <= line.x0 + bk + SPAN));
+      const ease = (t) => t * t * (3 - 2 * t);
+      for (let j = 0; j <= bk - a; j += 1) {
+        const k = a + j, old = line.ys[k];
+        const t = ease(Math.min(1, Math.min(k - a, bk - k) / RAMP));
+        const ny = Math.round(old + (fresh[j] - old) * t);
+        if (ny === old) continue;
+        // (take up the old pipe in this column, then lay it on the new row)
+        for (let r = -1; r <= BORE; r += 1) {
+          const yy = old + r, xx = line.x0 + k;
+          if ((mat[yy * W + xx] & ID_MASK) === M.PIPE && PW.getOwner(world, xx, yy) === line.owner) {
+            PW.set(world, xx, yy, M.FILL, { quiet: true });
+            PW.setLayer(world, 'paint', xx, yy, rgb(tone(SAND, 0.92)));
+            PW.setOwner(world, xx, yy, 0);
+          }
+          if (r >= 0 && r < BORE) PW.setLayer(world, 'pipe', xx, yy, 0);
+        }
+        line.ys[k] = ny;
+      }
+      for (let k = a; k <= bk; k += 1) layColumn(line, line.x0 + k);
+      return core;
+    }
     // Is the line carrying from (x) to the core? (no break between them)
     function flowing(line, x) {
       const a = Math.min(x, line.coreX), b = Math.max(x, line.coreX);
@@ -686,7 +732,7 @@
       }
     }
 
-    const api = { build, step, draw, attach, carry, lines, stats, flowing, lineFor, contour, BORE, BED, LANES, TAPS };
+    const api = { build, step, draw, attach, carry, connectCore, lines, stats, flowing, lineFor, contour, BORE, BED, LANES, TAPS };
     return api;
   }
 
