@@ -152,7 +152,7 @@
       const S = scan(b);
       const { cls, at, gw, gh } = S;
       const report = { id: b.id, frame: 0, anchored: 0, detached: 0, failed: null, orphans: 0 };
-      if (S.fx1 < S.fx0) { b.health = 0; b.ruined = true; return report; }
+      if (S.fx1 < S.fx0) { b.health = 0; b.ruined = true; loosePanels(b); return report; }
       // Anchored frame: joined to ground or to structure the building does not own (8-connected).
       const state = new Uint8Array(gw * gh);           // 1 anchored frame
       const queue = [];
@@ -265,8 +265,16 @@
       const standing = report.anchored - (fail ? fail.cells || 0 : 0);
       b.health = Math.max(0, Math.min(1, standing / Math.max(1, bp.total)));
       b.ruined = b.health < 0.25;
+      if (b.health < 1) loosePanels(b);
       stats.last = report;
       return report;
+    }
+    // (round a damaged building, the bits of its ruins and their panels stand only while something
+    // holds them: see pw-stability's loose)
+    function loosePanels(b) {
+      if (!world.stability || !world.stability.looseLater) return;
+      const A = areaOf(b);
+      world.stability.looseLater(A.x0 - 48, A.y0 - 120, A.x1 + 48, A.y1);
     }
     // Fittings in front that hang on a falling part (a sign on its wall, a lamp on its corner) go
     // with it: those joined to it through other fittings.

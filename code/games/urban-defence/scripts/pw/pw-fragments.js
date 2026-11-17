@@ -898,6 +898,8 @@
       const m = mat[y * W + x], paint = PW.getLayer(world, 'paint', x, y);
       PW.set(world, x, y, M.AIR);
       PW.setOwner(world, x, y, 0);
+      // (the wall behind it is crushed with it: never left standing in the air on its own)
+      if (PW.getLayer(world, 'back', x, y)) PW.setLayer(world, 'back', x, y, 0);
       stats.crushed += 1;
       if (bursts(x, y, owner)) {
         const out = Math.sign(x + 0.5 - from) || (random() < 0.5 ? -1 : 1);
@@ -1352,7 +1354,7 @@
         if (!data.solid[j]) { if ((q & 31) === 0) puff(x, y, 1); continue; }
         // (its rooms stay open: the back wall behind them stays as a wall, dulled with dust)
         if (data.solid[j] === THIN) {
-          if ((mat[i] & ID_MASK) === M.AIR && data.color[j]) PW.setLayer(world, 'back', x, y, ruinTone(data.color[j], x, y));
+          if ((mat[i] & ID_MASK) === M.AIR && data.color[j]) { PW.setLayer(world, 'back', x, y, ruinTone(data.color[j], x, y)); PW.setFlag(world, x, y, PW.FLAG.PANEL); }
           continue;
         }
         const byte = data.byte[j];

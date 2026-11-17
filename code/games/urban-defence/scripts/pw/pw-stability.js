@@ -315,6 +315,8 @@
         if (PW.flora) PW.flora.afterBlast(world, particles, box, null, { x0: box.x0, y0: by0 - 40, x1: box.x1, y1: box.y1 });
         if (PW.props) PW.props.afterBlast(world, particles, box);
       }
+      // (and the ruins in and over it, and their panels: see panels)
+      loose(x0, region.scan.top - PANEL_UP, x1, y1);
       region.scan = null;
       return out.length;
     }
@@ -619,8 +621,144 @@
         }
       }
     }
+    // ---- Panels ------------------------------------------------------------------------------------
+    // A panel of back wall a ruin came down with (FLAG.PANEL) is a thin wall: it stands only while
+    // solid holds it at its sides, touching it on two opposite sides (a wall between its pillars,
+    // or between floor and ceiling). Held on one side only, a ledge of it PANEL_NEAR deep stays;
+    // touching nothing, it comes down - its ruin shaken loose, blown away - a third of it in
+    // chunks, the rest as dust. (Only ruins' panels: walls standing on their own by design - a
+    // gate, a machine, a lantern drawn on the wall layer - are the props' own business. Looked at
+    // in a box after every look, round a damaged building when it is looked at, and now and then
+    // round each ruin, in case what held them went without a look.)
+    const PANEL_NEAR = 5, PANEL_UP = 300, PANEL_SIDE = 48, PANEL_EVERY = 10;
+    const solidAt = (x, y) => x >= 0 && y >= 0 && x < W && y < H && phase[mat[y * W + x] & ID_MASK] === PW.PHASE.SOLID;
+    function panels(x0, y0, x1, y1) {
+      x0 = Math.max(1, Math.floor(x0)); y0 = Math.max(1, Math.floor(y0)); x1 = Math.min(W - 2, Math.ceil(x1)); y1 = Math.min(H - 2, Math.ceil(y1));
+      if (x1 < x0 || y1 < y0) return 0;
+      const { CHUNK_SHIFT: S, CHUNK_MASK: K } = PW, PANEL = PW.FLAG.PANEL;
+      const w = x1 - x0 + 1, h = y1 - y0 + 1;
+      let mark = null, n = 0;
+      // (the loose walls in the box)
+      for (let cy = y0 >> S; cy <= y1 >> S; cy += 1) {
+        for (let cx = x0 >> S; cx <= x1 >> S; cx += 1) {
+          const c = cy * world.chunksX + cx, back = world.back[c];
+          if (!back) continue;
+          const flags = world.flags[c], owner = world.owner[c];
+          for (let y = Math.max(y0, cy << S); y <= Math.min(y1, (cy << S) + K); y += 1) {
+            for (let x = Math.max(x0, cx << S); x <= Math.min(x1, (cx << S) + K); x += 1) {
+              const l = (y & K) << S | (x & K);
+              if (!back[l] || !flags || !(flags[l] & PANEL)) continue;
+              // (a wall a building or something fixed to the ground took back: no longer a panel)
+              if (owner && owner[l]) { flags[l] &= ~PANEL; continue; }
+              (mark || (mark = new Uint8Array(w * h)))[(y - y0) * w + (x - x0)] = 1;
+              n += 1;
+            }
+          }
+        }
+      }
+      if (!n) return 0;
+      // (each clump of them: what holds it, where it touches solid)
+      const seen = new Uint8Array(w * h), dist = new Int16Array(w * h), drop = [];
+      for (let k0 = 0; k0 < w * h; k0 += 1) {
+        if (mark[k0] !== 1 || seen[k0]) continue;
+        const clump = [k0];
+        seen[k0] = 1;
+        let lt = false, rt = false, up = false, dn = false, edge = false;
+        for (let q = 0; q < clump.length; q += 1) {
+          const k = clump[q], x = x0 + (k % w), y = y0 + ((k / w) | 0);
+          if (solidAt(x - 1, y)) lt = true; if (solidAt(x + 1, y)) rt = true;
+          if (solidAt(x, y - 1)) up = true; if (solidAt(x, y + 1)) dn = true;
+          for (let dy = -1; dy <= 1; dy += 1) {
+            for (let dx = -1; dx <= 1; dx += 1) {
+              const nx = x + dx - x0, ny = y + dy - y0;
+              if (nx < 0 || ny < 0 || nx >= w || ny >= h) { edge = true; continue; }
+              const j = ny * w + nx;
+              if (mark[j] === 1 && !seen[j]) { seen[j] = 1; clump.push(j); }
+            }
+          }
+        }
+        // (running on out of the box: not known here - left for a look round it)
+        if (edge || (lt && rt) || (up && dn)) continue;
+        // (held on one side: only a ledge of it near where it touches, out through the clump)
+        const ring = [];
+        for (const k of clump) {
+          const x = x0 + (k % w), y = y0 + ((k / w) | 0);
+          dist[k] = solidAt(x - 1, y) || solidAt(x + 1, y) || solidAt(x, y - 1) || solidAt(x, y + 1) ? 1 : 0;
+          if (dist[k]) ring.push(k);
+        }
+        for (let q = 0; q < ring.length; q += 1) {
+          const k = ring[q];
+          if (dist[k] >= PANEL_NEAR) continue;
+          for (const j of [k - 1, k + 1, k - w, k + w]) if (j >= 0 && j < w * h && mark[j] === 1 && !dist[j] && Math.abs((j % w) - (k % w)) <= 1) { dist[j] = dist[k] + 1; ring.push(j); }
+        }
+        for (const k of clump) if (!dist[k]) drop.push(k);
+      }
+      // (down they come: in panels - whole patches of it come away as chunks, the rest to dust)
+      for (const k of drop) {
+        const x = x0 + (k % w), y = y0 + ((k / w) | 0);
+        const color = PW.getLayer(world, 'back', x, y);
+        PW.setLayer(world, 'back', x, y, 0);
+        PW.setFlag(world, x, y, PANEL, false);
+        if (particles && (PW.hash2(Math.floor((x + (PW.hash2(y >> 1, 3) & 3)) / 5), Math.floor(y / 5)) % 3) === 0) particles.spawn(x + 0.5, y + 0.5, 0, 0, M.DEBRIS, color, PW.PARTICLE.LAND, 6, 0);
+        else if ((PW.hash2(x, y) & 15) === 0 && (mat[y * W + x] & ID_MASK) === M.AIR) PW.set(world, x, y, M.DUST | 1 << 6, { quiet: true });
+      }
+      stats.panelsDropped = (stats.panelsDropped || 0) + drop.length;
+      return drop.length;
+    }
+    // A bit of a ruin left touching nothing that bears - the heap it lay on run off from under it,
+    // what it leaned on gone - breaks up and comes down as rubble. (Clumps of ruin in the box.)
+    function looseRuins(x0, y0, x1, y1) {
+      x0 = Math.max(1, x0); y0 = Math.max(1, y0); x1 = Math.min(W - 2, x1); y1 = Math.min(H - 2, y1);
+      const seen = new Set();
+      const isRuin = (i) => (mat[i] & ID_MASK) === M.RUIN;
+      // (what holds it: solid beside it, or anything heaped under it - a heap beside or on it holds
+      // nothing up)
+      const solidBy = (i) => !isRuin(i) && phase[mat[i] & ID_MASK] === PW.PHASE.SOLID;
+      const under = (i) => !isRuin(i) && phase[mat[i] & ID_MASK] >= PW.PHASE.POWDER;
+      let n = 0;
+      for (let y = y0; y <= y1; y += 1) {
+        for (let x = x0; x <= x1; x += 1) {
+          const i0 = y * W + x;
+          if (!isRuin(i0) || seen.has(i0)) continue;
+          const clump = [i0];
+          seen.add(i0);
+          let held = false;
+          for (let q = 0; q < clump.length && clump.length < 20000; q += 1) {
+            const i = clump[q];
+            if (!held && (under(i + W) || solidBy(i - 1) || solidBy(i + 1) || solidBy(i - W))) held = true;
+            for (const j of [i - W - 1, i - W, i - W + 1, i - 1, i + 1, i + W - 1, i + W, i + W + 1]) if (!seen.has(j) && isRuin(j)) { seen.add(j); clump.push(j); }
+          }
+          if (held) continue;
+          for (const i of clump) {
+            const keep = mat[i] & 0xc0, cx = i % W, cy = (i / W) | 0;
+            PW.set(world, cx, cy, (breaksTo[M.RUIN] || M.DEBRIS) | keep, { keepPaint: true });
+            PW.stir(world, cx, cy, cx, cy);
+          }
+          n += clump.length;
+        }
+      }
+      stats.ruinsLoosened = (stats.ruinsLoosened || 0) + n;
+      return n;
+    }
+    // (both, in a box: bits of ruin first - their panels may go with them)
+    function loose(x0, y0, x1, y1) { return looseRuins(Math.floor(x0), Math.floor(y0), Math.ceil(x1), Math.ceil(y1)) + panels(x0, y0, x1, y1); }
+    // (asked for by others - round a damaged building - and looked at here, one box a tick)
+    const looseQueue = [];
+    function looseLater(x0, y0, x1, y1) {
+      if (looseQueue.some((q) => q[0] === x0 && q[1] === y0 && q[2] === x1 && q[3] === y1)) return;
+      looseQueue.push([x0, y0, x1, y1]);
+    }
+    let ruinAt = 0;
     function step() {
       tick += 1;
+      if (looseQueue.length) loose(...looseQueue.shift());
+      // (now and then a ruin is looked at again - its panels and its bits: what held them may have
+      // gone without a look, the heap it lay on run off from under it)
+      const ruins = world.ruins;
+      if (ruins && ruins.length && tick % PANEL_EVERY === 0) {
+        const r = ruins[ruinAt = (ruinAt + 1) % ruins.length];
+        loose(r.x0 - PANEL_SIDE, r.y0 - PANEL_SIDE, r.x1 + PANEL_SIDE, r.y1 + PANEL_SIDE);
+      }
       if (sags.length) { const t0 = performance.now(); stepSags(1 / 60); stats.sagMs = performance.now() - t0; }
       if (toppling.length) goOver();
       // The strikes of flying debris, gathered tile by tile, each felt as one shock.
@@ -653,7 +791,7 @@
       }
       return false;
     }
-    return { step, disturb, shock, stats, busy: () => pending.length > 0 || sags.length > 0 || toppling.length > 0 || stillFalling() };
+    return { step, disturb, shock, panels, loose, looseLater, stats, busy:() => pending.length > 0 || sags.length > 0 || toppling.length > 0 || stillFalling() };
   }
 
   PW.createStability = createStability;

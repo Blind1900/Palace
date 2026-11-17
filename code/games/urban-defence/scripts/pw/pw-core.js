@@ -653,7 +653,10 @@
     FITTING: 32768,
     // WOOD: this plant cell is wood (trunk, bough, twig), whatever colour it shows - leaves grow in
     // front of the branches they are on, but the wood is still there behind them.
-    WOOD: 65536 });
+    WOOD: 65536,
+    // PANEL: this back-wall cell is a panel of wall a ruin came down with: it stands only while
+    // solid holds it (see pw-stability).
+    PANEL: 131072 });
   // Does a pipe fixed to the wall show at open cell (x, y)? Over the wall face (a finished
   // tunnel's too, clamped to it), or across a cave's rock; not behind a fitting, a ladder's rails
   // and rungs, a rail or a belt - but between a ladder's rungs, yes.
