@@ -1025,16 +1025,25 @@
 
   function generateTerrain(world, seed) {
     const random = PW.createRandom(seed);
+    // Stage timings, for the performance pass (step L).
+    const times = world.genTimings = {};
+    let t0 = performance.now();
+    const mark = (name) => { const t1 = performance.now(); times[name] = Math.round(t1 - t0); t0 = t1; };
     const layout = planLayout(world, random);
     const surface = surfaceProfile(world, layout, seed);
+    mark('profile');
     world.soil = soilProvinces(world, seed, layout);
     const top = fillStrata(world, layout, surface, seed);
+    mark('strata');
     layout.scree = scree(world, layout, surface, top, seed);
     layout.talus = talus(world, layout, surface, top, seed);
     addLenses(world, layout, top, random);
+    mark('scree');
     // Caves first: veins then run through the rock around them and show in the cave walls.
     layout.caves = carveCaves(world, layout, top, random);
+    mark('caves');
     layout.nodes = placeOreNodes(world, layout, top, random);
+    mark('ore');
     fillLakes(world, layout, surface);
     layout.surface = surface;
     // Depth shading is measured from a broadly smoothed ground line, so mountains keep the bright
