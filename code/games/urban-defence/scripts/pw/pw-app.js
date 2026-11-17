@@ -67,9 +67,11 @@
   const fragments = PW.createFragments ? PW.createFragments(world, particles) : null;
   const structure = fragments && PW.createStructure ? PW.createStructure(world, fragments) : null;
   world.fragments = fragments;   // (trees and boughs that break off fall as rigid pieces too)
+  // Repair through the cores: a damaged building rebuilds itself from its blueprint (step F).
+  const repair = world.repair = PW.createRepair ? PW.createRepair(world, particles) : null;
   if (structure) {
-    world.onDamage = (id) => structure.notify(id);
-    particles.listeners.chip = (owner) => { if (owner) structure.notify(owner); };
+    world.onDamage = (id) => { structure.notify(id); if (repair) repair.notify(id); };
+    particles.listeners.chip = (owner) => { if (owner) { structure.notify(owner); if (repair) repair.notify(owner); } };
   }
   // A ruined building's cores lie open in their vaults, kept clear of rubble.
   const cores = PW.createCores ? PW.createCores(world, particles) : null;
@@ -252,6 +254,7 @@
       if (PW.stepSmoulders) PW.stepSmoulders(world, DT);
       if (PW.mining) PW.mining.step(world, DT);
       if (pipes) pipes.step();
+      if (repair) repair.step(DT);
       life.step();
       simTimes.push(performance.now() - s);
       if (simTimes.length > 240) simTimes.shift();

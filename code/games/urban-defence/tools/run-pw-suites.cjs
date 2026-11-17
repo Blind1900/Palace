@@ -13,7 +13,7 @@ const args = Object.fromEntries(process.argv.slice(2).map((a) => a.replace(/^--/
 const jobs = Number(args.jobs || 2), seed = String(args.seed || 7), limit = Number(args.limit || 240);
 const SUITES = [
   { name: 'pw-grounding' }, { name: 'pw-settlements' }, { name: 'pw-tunnels' }, { name: 'pw-mining' },
-  { name: 'pw-pipes' }, { name: 'pw-made-ground' }, { name: 'pw-physics' }, { name: 'pw-ore' }, { name: 'pw-fields' }, { name: 'pw-styles' }, { name: 'pw-sandbox' }, { name: 'pw-views' },
+  { name: 'pw-pipes' }, { name: 'pw-made-ground' }, { name: 'pw-physics' }, { name: 'pw-ore' }, { name: 'pw-fields' }, { name: 'pw-styles' }, { name: 'pw-sandbox' }, { name: 'pw-views' }, { name: 'pw-repair' },
   { name: 'pw-slopes', params: 'gallery=slopes' }, { name: 'pw-mirror', params: 'gallery=mirror' },
   { name: 'pw-fire', alone: true }, { name: 'pw-collapse', alone: true },
 ].filter((s) => !args.only || args.only.split(',').includes(s.name));
