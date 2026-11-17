@@ -55,9 +55,23 @@
     const stats = { lines: 0, cells: 0, cores: 0, caps: 0, broken: 0, repaired: 0, repairHM: 0, packets: 0, spawned: 0, delivered: { sm: 0, hm: 0, water: 0 }, spilled: 0 };
     let tick = 0;
     // Every registered core span on the map: the bundle may pass through these (and only these)
-    // parts of a building, straight into the bed's connector sockets.
+    // parts of a building, straight into the bed's connector sockets. Indexed by column, so the
+    // routing's clearance scans pay for the spans actually there, not the whole list.
     const spans = [];
-    const spanAt = (x, y) => spans.some((s) => x >= s.x0 && x <= s.x1 && y >= s.y0 && y <= s.y1);
+    const spanMap = new Map();
+    const addSpan = (s) => {
+      spans.push(s);
+      for (let x = s.x0; x <= s.x1; x += 1) {
+        const list = spanMap.get(x);
+        if (list) list.push(s); else spanMap.set(x, [s]);
+      }
+    };
+    const spanAt = (x, y) => {
+      const list = spanMap.get(x);
+      if (!list) return false;
+      for (const s of list) if (y >= s.y0 && y <= s.y1) return true;
+      return false;
+    };
 
     // ---- Routing ----------------------------------------------------------------------------------
     const isTunnel = (x, y) => (PW.getFlags(world, x, y) & FLAG.TUNNEL) !== 0;
@@ -73,7 +87,7 @@
       const depthAt = typeof depth === 'function' ? depth : () => depth;
       const ys = new Int32Array(x1 - x0 + 1);
       const BRIDGE = 20;
-      const groundAt = (x) => {
+      const probe = (x) => {
         let g = world.groundTop[x];
         for (let n = 0; n < 600 && g < H - 1; n += 1) {
           const id = mat[g * W + x] & ID_MASK;
@@ -83,6 +97,11 @@
         if ((mat[g * W + x] & ID_MASK) === M.WATER) g = PW.supportBelow(world, x, g, true);
         return g;
       };
+      // The costly ground probe runs once per column; the bridge probes read the cache.
+      const C0 = Math.max(0, x0 - BRIDGE), C1 = Math.min(W - 1, x1 + BRIDGE);
+      const cache = new Int32Array(C1 - C0 + 1);
+      for (let x = C0; x <= C1; x += 1) cache[x - C0] = probe(x);
+      const groundAt = (x) => cache[Math.max(0, Math.min(C1 - C0, x - C0))];
       const grounds = new Int32Array(ys.length);
       const clear = (x, ground, y) => {
         for (let scan = ground; scan < y + BORE + 3 && scan < H - 40; scan += 1) if (blocked(x, scan)) y = Math.max(y, scan + 4);
@@ -268,7 +287,7 @@
       const reach = SPAN * 2 + RAMP + 2;
       // (the eased approach may ride up to `reach` rows below the connector row before it levels
       // out, so the licence covers that whole wedge; a sleeve only paints, it cuts nothing)
-      spans.push({ x0: core.x - reach, x1: core.x + reach, y0: core.y - 24, y1: core.y + reach + BORE, building });
+      addSpan({ x0: core.x - reach, x1: core.x + reach, y0: core.y - 24, y1: core.y + reach + BORE, building });
     }
     function coreEntry(core, b) {
       const taps = {};
@@ -294,7 +313,7 @@
           if (orb && b.pit) {
             // The main core: the bundle rises into the pit floor beside the pedestal.
             const rx = orb.x - 26, ry = b.ground + b.pit.depth - 1;
-            spans.push({ x0: rx - 3, x1: rx + 3, y0: ry - 2, y1: ry + 12, building: b.id });
+            addSpan({ x0: rx - 3, x1: rx + 3, y0: ry - 2, y1: ry + 12, building: b.id });
             anchors.push({ x: rx, y: ry, kind: 'core', resource: 'water', flow: 'in', building: b.id, main: true });
             mainCore = b;
           }
