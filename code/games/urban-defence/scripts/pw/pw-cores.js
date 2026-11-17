@@ -35,6 +35,7 @@
       if (world.onDamage) world.onDamage(b.id);
       for (const core of b.cores || []) {
         if (core.orb) continue;
+        if (core.homeY === undefined) core.homeY = core.y;   // where it sinks back to (F part 2)
         const c = columnOf(core);
         for (let y = c.top; y <= c.bottom; y += 1) for (let x = c.x0; x <= c.x1; x += 1) {
           const id = PW.get(world, x, y) & ID_MASK;
@@ -55,8 +56,9 @@
         }
       }
     }
-    // The rows the core unit takes: from the translator's mouth down to its feet.
-    const columnOf = (core) => ({ x0: core.x - REACH, x1: core.x + REACH, top: core.y - 17, bottom: core.y + 15 });
+    // The rows the core unit takes: from the translator's mouth down to its bed's underside (the
+    // vault floor below it is the building's, and stays behind when the core rises).
+    const columnOf = (core) => ({ x0: core.x - REACH, x1: core.x + REACH, top: core.y - 17, bottom: core.y + 11 });
     // (air, smoke and dust are open; rubble is pushed aside; anything else stands in the way)
     const open = (x, y) => PW.mat.phase[PW.get(world, x, y) & ID_MASK] <= PW.PHASE.GAS;
     const loose = (x, y) => LOOSE[PW.get(world, x, y) & ID_MASK] === 1;
@@ -114,6 +116,64 @@
       stats.risen += 1;
       return true;
     }
+    // Sink the core one row towards home: the mirror of rise(). In each of its columns, its cells
+    // move down one and the cell that was below goes up over them; loose grit gives way, anything
+    // solid stops it until the repair clears the way.
+    function sink(b, core) {
+      const s = spans(core);
+      if (!s.length) return false;
+      for (const [x, lo, hi] of s) {
+        for (let y = lo; y <= hi + 1; y += 1) {
+          // (its own cells, open air and loose grit all give way - grit rides down with it)
+          if (PW.mat.phase[PW.get(world, x, y) & ID_MASK] < PW.PHASE.SOLID || own(x, y) || loose(x, y)) continue;
+          return false;
+        }
+      }
+      for (const [x, lo, hi] of s) {
+        const displaced = cellAt(x, hi + 1);
+        for (let y = hi + 1; y > lo; y -= 1) put(x, y, cellAt(x, y - 1));
+        put(x, lo, displaced);
+      }
+      core.y += 1;
+      return true;
+    }
+    // Home again: whatever is left of the descent is snapped - the risen copy is taken apart and
+    // the unit redrawn from the blueprint in its vault, around the bundle's sockets (the pipe
+    // keeps its lanes through the connectors) - and the grating closes over it.
+    function settle(b, core) {
+      core.free = false;
+      const c = b.canvas;
+      if (c) {
+        // Take the risen copy apart (its unowned cells, wherever it stopped)...
+        const col = columnOf(core);
+        for (let y = col.top - 4; y <= col.bottom + 4; y += 1) for (let x = col.x0; x <= col.x1; x += 1) {
+          if (own(x, y)) { PW.set(world, x, y, M.AIR, { quiet: true }); PW.setLayer(world, 'paint', x, y, 0); }
+        }
+        core.y = core.homeY;
+        // ...and set the unit back in its bed from the blueprint, with the grating over it.
+        for (let ly = 0; ly < c.height; ly += 1) for (let lx = 0; lx < c.width; lx += 1) {
+          const i = ly * c.width + lx;
+          const role = c.role[i];
+          if (role !== 15 && role !== 8 && role !== 9) continue;   // GRATE, CORE, CRADLE
+          const x = b.ox + lx, y = b.oy + ly;
+          if (Math.abs(x - core.x) > REACH || y < core.homeY - 18 || y > core.homeY + 12) {
+            if (role !== 15 || Math.abs(x - core.x) > REACH) continue;
+          }
+          const id = PW.get(world, x, y) & ID_MASK;
+          if (id === M.PIPE) continue;   // the bundle's socket stays
+          if (id !== M.AIR && !LOOSE[id] && PW.getOwner(world, x, y) !== b.id && PW.getOwner(world, x, y) !== 0) continue;
+          PW.set(world, x, y, c.mat[i], { quiet: true });
+          PW.setLayer(world, 'paint', x, y, c.paint[i]);
+          PW.setOwner(world, x, y, b.id);
+        }
+      }
+      if ((b.cores || []).every((q) => q.orb || !q.free)) {
+        b.coresOpen = 0;
+        // (one more look over the whole blueprint: the work the corridors held back)
+        if (world.repair) world.repair.notify(b.id);
+      }
+      stats.settled = (stats.settled || 0) + 1;
+    }
     // Throw loose cells that land on a core that stands in the open off it, outward from the
     // building.
     function sweep(b, core) {
@@ -138,6 +198,19 @@
       for (const b of world.buildings || []) {
         if (!b.cores || !b.cores.length) continue;
         if (b.ruined && !b.coresOpen) expose(b);
+        // The ruin is over (the repair rebuilt enough frame): each risen core sinks back down
+        // into its rebuilt vault, and the grating closes over it.
+        if (!b.ruined && b.coresOpen) {
+          if (tick % 2 === 0) {
+            for (const core of b.cores) {
+              if (core.orb || !core.free) continue;
+              if (core.y >= core.homeY) { settle(b, core); continue; }
+              // Blocked within reach of home (the vault floor, the bundle's sockets): snap in.
+              if (!sink(b, core) && core.y >= core.homeY - 6) settle(b, core);
+            }
+          }
+          continue;
+        }
         if (!b.coresOpen || tick - b.coresOpen < SETTLE) continue;
         for (const core of b.cores) {
           if (core.orb) continue;   // (the base's main core already stands in its open pit)
