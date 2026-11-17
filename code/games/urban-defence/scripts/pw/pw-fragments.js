@@ -35,6 +35,9 @@
   // crushed storeys and its breaking pieces is thrown; LOFT how much of it goes up.
   const SPILL = 2, LOFT = 0.55;
   const weightOf = (solid) => (solid === 1 ? 1 : solid === THIN ? THIN_WEIGHT : 0);
+  // A building going up (b.growing: being built or repaired) holds against falling pieces lighter
+  // than this (frame cells) - rubble, a chunk of wall - but not against the top of a building.
+  const GROW_HEAVY = 3000;
 
   function createFragments(world, particles) {
     const { mat, width: W, height: H } = world;
@@ -742,7 +745,9 @@
         }
         const own = p.owner && PW.getOwner(world, x, y) === p.owner;
         // (only above its building's floor: the cores and footings in the ground stay)
-        const grinds = !p.flora && (p.mode === 'hinge' || p.mode === 'drop') && y < p.base && (mat[y * W + x] & ID_MASK) !== M.CORE;
+        // (another building going up holds against all but a heavy piece: see GROW_HEAVY)
+        const spared = !own && p.mass < GROW_HEAVY && PW.growing(world, x, y);
+        const grinds = !p.flora && !spared && (p.mode === 'hinge' || p.mode === 'drop') && y < p.base && (mat[y * W + x] & ID_MASK) !== M.CORE;
         if (grinds && (own || (y >= p.yf - 1 && y <= p.yf + 8 && !PW.mat.terrain[mat[y * W + x] & ID_MASK]))) {
           crush(x, y, p.owner, mid);
           crushed += 1;
@@ -752,7 +757,7 @@
         // weaker than the blow: they are crushed under it (a falling tower flattens the house it
         // falls on; a chunk of rubble only dents it).
         const id = mat[y * W + x] & ID_MASK;
-        if (!p.flora && structural[id] && !PW.mat.terrain[id] && id !== M.CORE && !inside) {
+        if (!p.flora && !spared && structural[id] && !PW.mat.terrain[id] && id !== M.CORE && !inside) {
           const [vx, vy] = velocityAt(p, wx, wy);
           if (hardness[id] < Math.hypot(vx, vy) / 300 * Math.min(1, p.mass / 3000)) { crush(x, y, PW.getOwner(world, x, y), mid); smashed += 1; continue; }
         }
@@ -1024,7 +1029,7 @@
       const fwd = Math.sign(vt) || (random() < 0.5 ? 1 : -1);
       // A hollow piece - a building, mostly air - folds up where it lands, like a box (see crumple).
       if (p.hollow > HOLLOW && felt >= FOLD_SPEED && p.mass >= SPLIT_MIN && p.crumpled !== world.tick) {
-        blow(hx, hy, vx, vy, hit, j * hit, tx * fwd, ty * fwd, Math.abs(vt), hard, !p.owner && !p.from && !p.flora);
+        blow(hx, hy, vx, vy, hit, j * hit, tx * fwd, ty * fwd, Math.abs(vt), hard, !p.owner && !p.from && !p.flora, p.mass >= GROW_HEAVY);
         if (crumple(p, wx, wy, nx, ny, felt, spread, vt)) return true;
       }
       const jt = Math.max(-FRICTION * j, Math.min(FRICTION * j, -vt / (invM + rt * rt * invI)));
@@ -1041,7 +1046,7 @@
       }
       if (felt < SNAP_SPEED) return false;
       // A blow: what it struck feels it, and the piece breaks where it took it.
-      if (felt >= CRUMBLE_SPEED && p.crumpled !== world.tick) blow(hx, hy, vx, vy, hit, j * hit, tx * fwd, ty * fwd, Math.abs(vt), hard, !p.owner && !p.from && !p.flora);
+      if (felt >= CRUMBLE_SPEED && p.crumpled !== world.tick) blow(hx, hy, vx, vy, hit, j * hit, tx * fwd, ty * fwd, Math.abs(vt), hard, !p.owner && !p.from && !p.flora, p.mass >= GROW_HEAVY);
       return breaks(p, wx, wy, vx, vy, nx, ny, felt, hard, spread);
     }
     // A building is a box of thin floors and walls round open rooms. Where it lands hard, the rooms
@@ -1114,7 +1119,8 @@
     // building gives way around the point of impact. Dust is driven out along the ground the way the
     // piece was going (fx, fy, at `along`), and a big blow leaves the rubble smouldering. (`rock`:
     // the piece is of the ground itself - a column that toppled - and nothing topples for its blow.)
-    function blow(hx, hy, vx, vy, hit, energy, fx, fy, along, hard = 0.5, rock = false) {
+    // (`heavy`: a piece heavy enough to break into a building going up - see GROW_HEAVY)
+    function blow(hx, hy, vx, vy, hit, energy, fx, fy, along, hard = 0.5, rock = false, heavy = true) {
       stats.shattered += 1;
       const speed = hit;
       // (soft ground takes the blow in a dent, its clods thrown up; rock hardly)
@@ -1130,6 +1136,7 @@
         if (x < 1 || y < 1 || x >= W - 1 || y >= H - 1 || (x - hx) ** 2 + (y - hy) ** 2 > rr * rr) continue;
         const m = mat[y * W + x], id = m & ID_MASK;
         if (!structural[id] || id === M.CORE || hardness[id] > 0.2 + speed / 300) continue;
+        if (!heavy && PW.growing(world, x, y)) continue;
         const owner = PW.getOwner(world, x, y);
         PW.set(world, x, y, M.AIR);
         particles.spawn(x + 0.5, y + 0.5, vx * 0.3 + (random() - 0.5) * 80, -Math.abs(vy) * 0.2 - 30, debrisOf(m), 0, F.LAND, 5, owner);

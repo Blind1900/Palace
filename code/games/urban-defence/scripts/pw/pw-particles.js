@@ -611,6 +611,8 @@
     function chip(cx, cy, id, speed, i) {
       const energy = speed / 400;
       if (energy < hardness[id] * (0.6 + (PW.hash2(cx, cy) & 255) / 640)) return;
+      // (a building going up shrugs off flying rubble: only a heavy blow breaks into it)
+      if (PW.growing(world, cx, cy)) return;
       const ownerId = PW.getOwner(world, cx, cy);
       PW.set(world, cx, cy, M.AIR);
       PW.clearPaintAt(world, cx, cy);

@@ -27,6 +27,11 @@
   const SPAN = 60;            // cells (about 4 m) a floor spans unsupported before it sags in
   const REPEAT = 15;          // ticks between analyses of a building still being damaged
   const SOLID = 1, BACK = 2, FIT = 4, FRAME = SOLID | BACK;
+  // A construction site (see analyse) is judged only once it has lost more than GROW_LOSS cells
+  // of its frame from the most it had (light blows do not break into it: only something heavy
+  // takes it away); its works hold its loose parts up while it was worked within SITE_IDLE ticks;
+  // it is a building like any other again once SITE_DONE of it stands and the work has stopped.
+  const GROW_LOSS = 60, SITE_IDLE = 1800, SITE_DONE = 0.9;
 
   function createStructure(world, fragments) {
     const { mat, width: W, height: H } = world;
@@ -123,6 +128,10 @@
     function step(budgetMs = 1.5) {
       tick += 1;
       const t0 = performance.now();
+      // (when each building was last being built - see PW.isGrowing - and so a site: see analyse)
+      // (it becomes one once it has been judged as it stands, and stands: what damage started the
+      // work is judged first)
+      for (const b of world.buildings || []) if (b.growing) { b.grewAt = world.tick || 0; if (!b.site) b.siteWanted = true; }
       // (now and then a damaged building is looked at again: what held a bit of it up can go
       // without its knowing - rubble sliding off, a ruin that propped it crumbling, a risen core
       // clearing the heap)
@@ -165,7 +174,9 @@
         const k = at(x, y);
         if (!(cls[k] & FRAME)) continue;
         report.frame += 1;
-        if (support(x, y + 1) || support(x + 1, y) || support(x - 1, y) || support(x, y - 1)) { state[k] = 1; queue.push(x, y); }
+        // (a core holds itself up by its field - risen out of the ruins too, hanging over the wreck
+        // - and whatever is built onto it)
+        if ((mat[y * W + x] & ID_MASK) === M.CORE || support(x, y + 1) || support(x + 1, y) || support(x - 1, y) || support(x, y - 1)) { state[k] = 1; queue.push(x, y); }
       }
       // The main base's armoured block floats over its pit, held up by its core's field for as
       // long as the core lives.
@@ -184,6 +195,19 @@
         }
       }
       report.anchored = queue.length / 2;
+      // A building going up - built or repaired cell by cell (b.growing) - is a construction site
+      // (b.site) from the first time it is worked until it is all but whole (SITE_DONE), even
+      // while the work pauses or stalls. What is being put up is not yet joined to what holds it -
+      // a lintel over a doorway before its jambs, a floor put up before the pillars under it, the
+      // heap or the risen core it was built against cleared away - so while the work goes on
+      // (within SITE_IDLE of it), a site's loose parts are held up by the works (scaffolded);
+      // abandoned, they come down as rubble where they are. Only once a site has lost much of
+      // its frame (`lost`: a blast, a heavy piece through it - frame destroyed, not just cut off)
+      // do its loose parts fall as any building's do. And a site is never judged against its
+      // blueprint (half built, every storey of it falls short of it), only by what stood (below).
+      const site = !!b.site, working = site && (world.tick || 0) - (b.grewAt ?? -1e9) <= SITE_IDLE;
+      const bp = blueprintOf(b);
+      const lost = site && !!b.asBuilt && report.frame < (b.grownFrame ?? 0) - GROW_LOSS;
       // Parts no longer joined to anything fall; small bits crumble.
       if (report.anchored < report.frame) {
         const seen = new Uint8Array(gw * gh);
@@ -201,6 +225,10 @@
               if ((cls[k] & FRAME) && !state[k] && !seen[k]) { seen[k] = 1; stack.push(px + dx, py + dy); }
             }
           }
+          if (site && !lost) {
+            if (working) { stats.scaffolded = (stats.scaffolded || 0) + part.length; continue; }
+            crumble(part); stats.crumbled += part.length; report.detached += part.length; continue;
+          }
           report.detached += part.length;
           if (part.length < CRUMBLE_ONLY) { crumble(part); stats.crumbled += part.length; continue; }
           // A big part drops into the footprint under it, grinding down; a small one tumbles.
@@ -209,11 +237,20 @@
             omega: big ? 0 : ((PW.hash2(x, y) % 7) - 3) * 0.05 });
           if (big) (b.failures || (b.failures = [])).push('drop');
           stats.detached += 1;
+          // (the last part that came away, for the tests: where, how big, how much of it wall)
+          let px0 = Infinity, py0 = Infinity, px1 = -Infinity, py1 = -Infinity, walls = 0;
+          for (const i of part) { const ix = i % W, iy = (i / W) | 0; if (ix < px0) px0 = ix; if (ix > px1) px1 = ix; if (iy < py0) py0 = iy; if (iy > py1) py1 = iy; if (cls[at(ix, iy)] === BACK) walls += 1; }
+          stats.lastDetached = { id: b.id, cells: part.length, walls, box: [px0, py0, px1, py1] };
         }
       }
       // Each row above the floor: load per support against the blueprint, and overhang (the
       // building's own columns only: a skybridge it owns rests on its neighbour, not on it).
-      const bp = blueprintOf(b);
+      // A site is judged so only once it has lost much of what stood - and then against what
+      // each row carried at its most (b.asBuilt), not against its blueprint; and no gap is too
+      // wide on a site (its floors go up ahead of their pillars).
+      const judge = !site || lost;
+      const ref = site ? b.asBuilt : bp;
+      const rows = bp.load.length, rowLoad = new Float32Array(rows), rowSup = new Int32Array(rows);
       const cx0 = Math.max(S.fx0, b.body.left - 2), cx1 = Math.min(S.fx1, b.body.right + 2);
       let load = 0, loadX = 0, fail = null;
       for (let y = S.fy0; y <= Math.min(S.fy1, b.ground - 1); y += 1) {
@@ -230,8 +267,9 @@
           }
         }
         const support = carried;
-        if (r >= 0 && r < bp.load.length && load >= MIN_LOAD && bp.support[r] > 0) {
-          const built = bp.load[r] / bp.support[r];
+        if (r >= 0 && r < rows) { rowLoad[r] = load; rowSup[r] = support; }
+        if (judge && r >= 0 && r < rows && load >= MIN_LOAD && ref.support[r] > 0 && bp.support[r] > 0) {
+          const built = ref.load[r] / ref.support[r];
           const centreX = loadX / load;
           if (!support || load / support > FAIL_RATIO * Math.max(1, built)) {
             // Crushed: the side that lost more of its support drops, pivoting about the far edge;
@@ -241,10 +279,10 @@
             const span = bp.right[r] - bp.left[r] + 1;
             const shift = support ? (carriedX / support - bp.supportX[r] / bp.support[r]) / span : 0;
             const dir = shift > 0 ? -1 : 1;
-            const even = support < bp.support[r] * 0.08 || Math.abs(shift) < 0.1;
+            const even = support < ref.support[r] * 0.08 || Math.abs(shift) < 0.1;
             fail = { y, dir, pivotX: dir < 0 ? (support ? right + 1 : bp.right[r] + 1) : (support ? left : bp.left[r]),
-              reason: even ? 'pancake' : 'crushed', load, support, built, shift, row: r, builtSupport: bp.support[r] };
-          } else if (gap > Math.max(SPAN, bp.maxGap[r] * 1.5 + 12) && state[at(gapAt, y - 1)]) {
+              reason: even ? 'pancake' : 'crushed', load, support, built, shift, row: r, builtSupport: ref.support[r] };
+          } else if (!site && gap > Math.max(SPAN, bp.maxGap[r] * 1.5 + 12) && state[at(gapAt, y - 1)]) {
             // Its walls blown out from under it: what is left of the row above spans a gap far
             // wider than anything it spanned as built, and comes down into it.
             fail = { y, dir: 1, pivotX: gapAt, reason: 'pancake', load, support, built, gap };
@@ -263,8 +301,22 @@
       }
       report.orphans = clearFittings(b, S, state);
       const standing = report.anchored - (fail ? fail.cells || 0 : 0);
+      // (a site: the most frame it had, the most that stood and what each row carried then;
+      // judged, what it has and what stands now - it is judged against that from here on)
+      if (site) {
+        b.grownFrame = lost ? report.frame - (fail ? fail.cells || 0 : 0) : Math.max(b.grownFrame ?? 0, report.frame);
+        if (!fail && (judge || standing >= (b.grownAnchored ?? 0))) { b.grownAnchored = standing; b.asBuilt = { load: rowLoad, support: rowSup }; }
+        else if (fail) b.grownAnchored = standing;
+      } else if (b.siteWanted && !fail) {
+        // (judged as it stands, and standing: a site from now on, as it is now)
+        b.site = true; b.siteWanted = false;
+        b.grownFrame = report.frame; b.grownAnchored = standing; b.asBuilt = { load: rowLoad, support: rowSup };
+      }
+      report.site = site;
       b.health = Math.max(0, Math.min(1, standing / Math.max(1, bp.total)));
       b.ruined = b.health < 0.25;
+      // (all but whole, and no longer being worked: a building like any other again)
+      if ((site || b.siteWanted) && b.health >= SITE_DONE && !PW.isGrowing(world, b)) { b.site = false; b.siteWanted = false; b.asBuilt = null; b.grownAnchored = undefined; b.grownFrame = undefined; }
       if (b.health < 1) loosePanels(b);
       stats.last = report;
       return report;

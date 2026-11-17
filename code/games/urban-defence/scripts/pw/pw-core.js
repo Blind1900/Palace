@@ -670,6 +670,22 @@
     const chunk = world.owner[chunkIndex(world, x, y)];
     return chunk ? chunk[(y & CHUNK_MASK) << CHUNK_SHIFT | x & CHUNK_MASK] : 0;
   }
+  // A building is being built (b.growing, set by whatever builds or repairs it) while the work
+  // touched it within GROW_HOLD ticks (b.grewAt: see pw-structure) - the work pauses between
+  // batches. (pw-structure makes it a construction site, judged by what stands.)
+  const GROW_HOLD = 120;
+  const isGrowing = (world, b) => !!b && (!!b.growing || (world.tick || 0) - (b.grewAt ?? -1e9) <= GROW_HOLD);
+  // Is the cell (x, y) part of a building going up - being built and still far from whole
+  // (under GROW_SHIELD of it standing: a ruin rising again, a seed growing, not a whole building
+  // having a wound patched)? Such a building shrugs off light blows (see pw-particles' chip and
+  // pw-fragments): only something heavy breaks into it.
+  const GROW_SHIELD = 0.9;
+  function growing(world, x, y) {
+    const owner = getOwner(world, x, y);
+    if (owner <= 0 || owner >= 50000 || !world.buildings) return false;
+    const b = world.buildings[owner - 1];
+    return isGrowing(world, b) && (b.health ?? 1) < GROW_SHIELD;
+  }
   function setOwner(world, x, y, id) {
     if (x < 0 || y < 0 || x >= world.width || y >= world.height) return;
     const c = chunkIndex(world, x, y);
@@ -786,6 +802,6 @@
     createWorld, chunkIndex, inside, markDirty, markWaterDirty, wake, wakeCell, wakeArea, clearSimRect, stir, stirred,
     get, id, set, swapCells, sinkColumn, touchGroundTop, refreshGroundTop, rebuildGroundTop,
     getLayer, setLayer, layerCell, clearPaintAt, isSolid, isOpen, groundBelow, supportBelow, traceShot,
-    getOwner, setOwner, getFlags, setFlag, AMBIENT, heatAt, setHeat, addHeat, heatChunk,
+    getOwner, setOwner, growing, isGrowing, getFlags, setFlag, AMBIENT, heatAt, setHeat, addHeat, heatChunk,
   });
 })();
