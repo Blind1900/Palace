@@ -66,6 +66,9 @@
     const log = world.blastLog || (world.blastLog = []);
     log.push({ x: cx, y: cy, r, power, tick: world.tick || 0 });
     while (log.length > 32 || (log.length && (world.tick || 0) - log[0].tick > 120)) log.shift();
+    // (and what is already falling or flying in its reach - a tree an earlier blast threw - is
+    // thrown back again and torn apart)
+    if (world.fragments && world.fragments.blast) world.fragments.blast(cx, cy, r, power);
     const below = r * 0.55;        // craters are wider than deep
     const x0 = Math.max(1, Math.floor(cx - r - 2)), x1 = Math.min(W - 2, Math.ceil(cx + r + 2));
     const y0 = Math.max(0, Math.floor(cy - r - 2)), y1 = Math.min(H - 1, Math.ceil(cy + below + 2));

@@ -33,6 +33,15 @@
   // crushed storeys and its breaking pieces is thrown; LOFT how much of it goes up.
   const SPILL = 2, LOFT = 0.55;
   const weightOf = (solid) => (solid === 1 ? 1 : solid === THIN ? THIN_WEIGHT : 0);
+  // (a plant's wood cells weighted by the girth of the stem each hangs from, over the mean, so
+  // they weigh as many cells in all)
+  function girthWeights(solid, girth) {
+    const n = solid.length, wt = new Float32Array(n);
+    let sum = 0, count = 0;
+    for (let k = 0; k < n; k += 1) if (solid[k]) { wt[k] = Math.max(1, girth[k]); sum += wt[k]; count += 1; }
+    if (sum) for (let k = 0; k < n; k += 1) wt[k] *= count / sum;
+    return wt;
+  }
   // A building going up (b.growing: being built or repaired) holds against falling pieces lighter
   // than this (frame cells) - rubble, a chunk of wall - but not against the top of a building.
   const GROW_HEAVY = 3000;
@@ -116,10 +125,15 @@
         for (const key of ['x', 'y', 'color', 'byte', 'solid', 'girth']) if (data[key]) data[key] = data[key].slice(0, k);
       }
       const n = data.x.length, X = data.x, Y = data.y, SOL = data.solid;
-      // (its weight is in its frame: a back wall weighs little - see THIN)
+      // (its weight is in its frame: a back wall weighs little - see THIN. A plant's is in its
+      // wood, the more the thicker the stem: a cell across a stem g thick stands for g of its
+      // round cross-section, so its trunk and foot weigh far more, cell for cell, than its twigs -
+      // in all as much as its wood cells, spread by girth)
+      const wt = spec.flora && data.girth ? girthWeights(SOL, data.girth) : null;
+      const wOf = wt ? (k) => wt[k] : (k) => weightOf(SOL[k]);
       let mass = 0, heavy = 0, thin = 0, sx = 0, sy = 0;
       for (let k = 0; k < n; k += 1) {
-        const w = weightOf(SOL[k]);
+        const w = wOf(k);
         if (!w) continue;
         mass += w; sx += (X[k] + 0.5) * w; sy += (Y[k] + 0.5) * w;
         if (SOL[k] === 1) heavy += 1; else thin += 1;
@@ -181,7 +195,7 @@
       let outers = 0, inners = 0, inertia = 0;
       const gcx = cx - ax, gcy = cy - ay;
       for (let k = 0; k < n; k += 1) {
-        const wgt = weightOf(SOL[k]);
+        const wgt = wOf(k);
         if (!wgt) continue;
         const u = X[k] - ax, v = Y[k] - ay;
         inertia += wgt * ((u + 0.5 - gcx) ** 2 + (v + 0.5 - gcy) ** 2);
@@ -402,18 +416,18 @@
     // piece (the push is the blast wave's on it, over its weight: a tree is thrown, a tower's top
     // hardly stirred). A piece hinging on what is left of its foot is tipped over faster if the
     // blast is on the side it is not falling to - it can only go over the way its pivot lets it.
-    // (The strongest of the blasts near it is what pushes it.)
+    // (The strongest of the blasts near it is what pushes it; `only`: just that blast, now.)
     const PUSH = 150;             // cells/s given to a light piece at the edge of a blast of power 1
     const PUSH_MASS = 1500;       // a piece of more frame (or wood) than this is pushed the less, as its weight
     const PUSH_TICKS = 90;        // a blast throws back what comes away up to this long after it
     const PUSH_REACH = 4;         // ...out to this many times its radius
-    function pushed(p) {
-      const log = world.blastLog;
+    function pushed(p, only = null) {
+      const log = only ? [only] : world.blastLog;
       if (!log || !log.length) return;
       const [cx, cy] = centre(p), now = world.tick || 0;
       let px = 0, py = 0, best = 0;
       for (const b of log) {
-        if (now - b.tick > PUSH_TICKS) continue;
+        if (!only && now - b.tick > PUSH_TICKS) continue;
         const dx = cx - b.x, dy = cy - b.y, d = Math.hypot(dx, dy) || 1;
         // (what lies within the blast's reach, from the near side of the piece)
         const near = Math.max(b.r, d - Math.hypot(p.gw, p.gh) * 0.35);
@@ -438,6 +452,69 @@
         p.omega += px / Math.max(30, Math.hypot(p.gw, p.gh) * 0.5);
       }
       stats.pushed = (stats.pushed || 0) + 1;
+    }
+    // A blast reaching pieces already falling or flying - a tree it or an earlier one threw, a
+    // chunk of a building on its way down - throws them back again, and tears into what it
+    // reaches: a plant loses most of the leaves in its reach and the wood in the heart of it, and
+    // comes apart into what still hangs together, and close to the blast by branch; a building's
+    // piece crumbles where the blast meets it and cracks into chunks. Each part is thrown by the
+    // blast as its own weight lets it (see pushed).
+    const TEAR = 1.2;             // a blast tears into a piece within this many radii of it
+    function blast(bx, by, r, power = 1) {
+      const b = { x: bx, y: by, r, power };
+      for (const p of list.slice()) {
+        const [cx, cy] = centre(p), d = Math.hypot(cx - bx, cy - by);
+        const near = Math.max(r * 0.3, d - Math.hypot(p.gw, p.gh) * 0.35);
+        if (near > r * PUSH_REACH) continue;
+        const parts = near < r * TEAR ? tear(p, b, near < r && power >= 0.5) : null;
+        for (const q of parts || [p]) pushed(q, b);
+      }
+    }
+    // (the parts it is torn into, going on as it was; null if it held together, untouched)
+    function tear(p, b, deep) {
+      const [c, s] = cosSin(p), { data, grid, gw, gh, ox0, oy0 } = p;
+      const n = data.x.length, gone = new Uint8Array(n);
+      const heart = b.r * 0.5 * Math.min(1.2, b.power);
+      let lost = 0;
+      for (let k = 0; k < n; k += 1) {
+        if (!data.solid[k] && !data.color[k]) continue;
+        const [x, y] = toWorld(p, c, s, data.x[k] - ox0 + 0.5, data.y[k] - oy0 + 0.5);
+        const e = Math.hypot(x - b.x, y - b.y), out = e || 1;
+        const v = Math.min(240, b.power * 9000 / (e + 40)), vx = (x - b.x) / out * v, vy = (y - b.y) / out * v * 0.6 - v * 0.2;
+        if (p.flora) {
+          // (most of the leaves it reaches, and its wood in the heart of it, as splinters)
+          const leaf = !data.solid[k];
+          const share = leaf ? Math.max(0, 0.95 - (e / b.r) * 0.3) : e < heart ? 1 : 0;
+          if (share <= 0 || (PW.hash3(data.x[k], data.y[k], 5) & 255) / 255 >= share) continue;
+          if (PW.flora) PW.flora.shed(particles, x, y, data.color[k], vx, vy, !leaf, null);
+        } else {
+          if (e >= heart || !data.solid[k]) continue;
+          if (rubbleFrom(data.solid[k], data.x[k], data.y[k])) particles.spawn(x, y, vx, vy, debrisOf(data.byte[k]), data.color[k] || 0, F.LAND | F.DAMAGE, 6);
+          else if ((k & 3) === 0) puff(x, y, 1);
+        }
+        gone[k] = 1; lost += 1;
+      }
+      const split = deep && list.length < MAX_PIECES - 8 && (p.flora || p.mass >= SPLIT_MIN);
+      if (!lost && !split) return null;
+      const before = list.length;
+      list.splice(list.indexOf(p), 1);
+      if (p.flora && PW.flora && PW.flora.splitPiece) {
+        const kind = new Uint8Array(gw * gh);
+        for (let g = 0; g < kind.length; g += 1) { const k = grid[g] - 1; if (k >= 0 && !gone[k] && (data.solid[k] || data.color[k])) kind[g] = data.solid[k] ? 1 : 2; }
+        const { parts, loose } = PW.flora.splitPiece(kind, gw, gh, split);
+        for (const g of loose) {
+          const k = grid[g] - 1, [x, y] = toWorld(p, c, s, data.x[k] - ox0 + 0.5, data.y[k] - oy0 + 0.5);
+          PW.flora.shed(particles, x, y, data.color[k], 0, 0, false, null);
+        }
+        for (const part of parts) spawn({ data: pick(data, part.map((g) => grid[g] - 1)), parent: p, inherit: true, flora: true, generation: p.generation + 1 });
+      } else {
+        const ks = [];
+        for (let k = 0; k < n; k += 1) if (!gone[k] && (data.solid[k] || data.color[k])) ks.push(k);
+        if (ks.length && split) breakUp(p, ks, Math.max(14, Math.min(64, Math.sqrt(p.mass) / 2.6)), 1.5);
+        else if (ks.length) spawn({ data: pick(data, ks), parent: p, inherit: true, owner: p.owner, from: p.from, generation: p.generation, h0: p.h0, floor: p.yf, base: p.base });
+      }
+      stats.torn = (stats.torn || 0) + 1;
+      return list.slice(before - 1);
     }
 
     // ---- Motion ---------------------------------------------------------------------------------
@@ -1521,7 +1598,7 @@
       }
     }
 
-    return { spawn, step, draw, list, stats, puff };
+    return { spawn, step, draw, blast, list, stats, puff };
   }
 
   PW.createFragments = createFragments;

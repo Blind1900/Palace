@@ -848,6 +848,41 @@
     }
     return [...out.values()];
   }
+  // A falling piece of a plant torn at again (see pw-fragments' blast): its cells in its own grid
+  // (`kind`, w x h: 1 wood, 2 leaf) come apart into what still hangs together, wood to wood, each
+  // with the leaves nearest it - and, `byBranch`, each of those by branch, from its thickest
+  // wood. ({ parts: [[grid index, ...], ...], loose: leaves no wood holds })
+  function splitPiece(kind, w, h, byBranch) {
+    const n = w * h, box = { w, h, n, kind }, label = new Int32Array(n), queue = [];
+    let next = 0;
+    for (let k0 = 0; k0 < n; k0 += 1) {
+      if (kind[k0] !== 1 || label[k0]) continue;
+      label[k0] = ++next;
+      for (let q = queue.push(k0) - 1; q < queue.length; q += 1) {
+        const k = queue[q], x = k % w, y = (k / w) | 0;
+        for (let dy = -1; dy <= 1; dy += 1) for (let dx = -1; dx <= 1; dx += 1) {
+          const nx = x + dx, ny = y + dy, j = ny * w + nx;
+          if (nx >= 0 && ny >= 0 && nx < w && ny < h && kind[j] === 1 && !label[j]) { label[j] = next; queue.push(j); }
+        }
+      }
+    }
+    // (leaves, nearest wood first)
+    for (let q = 0; q < queue.length; q += 1) {
+      const k = queue[q], x = k % w, y = (k / w) | 0;
+      for (let dy = -1; dy <= 1; dy += 1) for (let dx = -1; dx <= 1; dx += 1) {
+        const nx = x + dx, ny = y + dy, j = ny * w + nx;
+        if (nx >= 0 && ny >= 0 && nx < w && ny < h && kind[j] === 2 && !label[j]) { label[j] = label[k]; queue.push(j); }
+      }
+    }
+    const groups = Array.from({ length: next }, () => []), loose = [];
+    for (let k = 0; k < n; k += 1) if (kind[k]) (label[k] ? groups[label[k] - 1] : loose).push(k);
+    const parts = [];
+    for (const ks of groups) {
+      if (!byBranch) { parts.push(ks); continue; }
+      for (const part of branches(box, ks, thickest(box, ks))) parts.push(part.ks);
+    }
+    return { parts, loose };
+  }
   // Where a plant's weight bears down: the middle of its wood, moved over by the wind on its crown
   // (the wind's push on all of it, at the height of its middle over its foot, over its weight).
   function balance(world, record, cells) {
@@ -1594,6 +1629,6 @@
 
   PW.generateVegetation = generateVegetation;
 
-  PW.flora = { plant, fell, regenerate, afterBlast, strike, settle, step, recordAt, shed, land, cut, makeGround, frozenGround, FLAT, tuft, bendReach, AIR_DRAG, loose };
+  PW.flora = { plant, fell, regenerate, afterBlast, strike, settle, step, recordAt, shed, land, cut, makeGround, frozenGround, FLAT, tuft, bendReach, AIR_DRAG, loose, splitPiece };
   PW.vegetation = { broadleaf, conifer, birch, bush, deadTree, boulder, reeds, stamp, createSprite, foliage, limb, trim, spanDrop, spanRise };
 })();
