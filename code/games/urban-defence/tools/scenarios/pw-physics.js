@@ -127,8 +127,9 @@ check((stability.stats.maxMs || 0) < 8, `looking for ground that lost its footin
 
 // 3. Untouched ground stays put: natural caves and overhangs elsewhere do not fall in by themselves.
 // (what the tests above set going is let finish first: grains running off what was dropped have
-// the ground they ran off looked at again, and it may fail in its turn)
-for (let s = 0; s < 30 && stability.busy(); s += 1) pwApp.stepWorld(60);
+// the ground they ran off looked at again, and it may fail in its turn - and the powder sim keeps
+// to its few milliseconds a tick, so on a loaded machine the slide takes more ticks to run out)
+for (let s = 0; s < 75 && stability.busy(); s += 1) pwApp.stepWorld(60);
 const before = stability.stats.broken;
 pwApp.stepWorld(60 * 5);
 check(stability.stats.broken === before, `ground nobody disturbed stands (${stability.stats.broken - before} cells broke loose by themselves)`);
