@@ -15,15 +15,22 @@
   const CELLS_PER_HM = 8;         // repair pixels one HM buys (the translator turns HM into a burst)
   const HM_PER_DEBRIS = 0.2;      // what a recycled cell of debris is worth
   const SCAN_COLS = 8;            // canvas columns rescanned per damaged building per tick
-  // The F2 order, by the blueprint's role classes.
-  const PRIORITY = new Uint8Array(16).fill(4);
+  // The F2 order, by the blueprint's role classes (the user's support hierarchy): the cores'
+  // main pillars and frame first - the primary support - then the floors that tie pillar to
+  // pillar, then the back walls, then the side walls closing the building, the glass and the
+  // finery last. LEAD staggers the classes by storey: the pillars run about a storey ahead of
+  // the floors, and each secondary class trails the one before it down the build.
+  const PRIORITY = new Uint8Array(16).fill(5);
   const ROLES = { FRAME: 12, CRADLE: 9, VAULT: 11, SLAB: 2, ROOF: 4, STAIR: 3, WALL: 1, GLASS: 5, CORE: 8, GRATE: 15 };
   for (const r of [ROLES.FRAME, ROLES.CRADLE, ROLES.VAULT]) PRIORITY[r] = 0;
   for (const r of [ROLES.SLAB, ROLES.ROOF, ROLES.STAIR]) PRIORITY[r] = 1;
-  PRIORITY[ROLES.WALL] = 2;
-  PRIORITY[ROLES.GLASS] = 3;
+  PRIORITY[ROLES.WALL] = 3;                       // (back walls take 2: see the scan's queue push)
+  PRIORITY[ROLES.GLASS] = 4;
+  const LEAD = [48, 0, -8, -16, -24, -24];        // sort-row head start per priority class
   const LOOSE = new Uint8Array(64);
   for (const id of [M.DEBRIS, M.RUBBLE, M.LOOSE_SOIL, M.LOOSE_STONE, M.SAND, M.ASH, M.RUIN]) LOOSE[id] = 1;
+  // The resurrection is on: the structure side knows construction sites (b.growing) now.
+  if (PW.REBUILD_RUINS === undefined) PW.REBUILD_RUINS = true;
 
   function createRepair(world, particles) {
     const F = PW.PARTICLE;
@@ -49,7 +56,7 @@
     // a building's cores are out of their vaults, their whole descent corridor is left unscanned:
     // a risen core IS its own cells and brings them back down with it, and nothing may be rebuilt
     // across its way home. Once the cores settle, the corridor is scanned like everything else.
-    const inUnit = (b, x, y) => !!b.coresOpen && (b.cores || []).some((core) => !core.orb && Math.abs(x - core.x) <= 14
+    const inUnit = (b, x, y) => !!b.coresOpen && (b.cores || []).some((core) => !core.orb && !core.settled && Math.abs(x - core.x) <= 14
       && y >= Math.min(core.y, core.homeY ?? core.y) - 18 && y <= (core.homeY ?? core.y) + 11);
     function scan(b, job) {
       const c = b.canvas, W = c.width;
@@ -67,27 +74,29 @@
               job.queue.push({ x, y, i, back: false, p: PRIORITY[c.role[i]] });
             }
           } else if (!wanted && c.back[i]) {
-            if ((PW.get(world, x, y) & ID_MASK) === M.AIR && !PW.getLayer(world, 'back', x, y) && !job.seen.has(-i - 1)) {
+            // (a back layer that is there but not owned is a ruin's smeared panel, not the wall:
+            // it is re-laid and claimed like a missing one)
+            if ((PW.get(world, x, y) & ID_MASK) === M.AIR && (!PW.getLayer(world, 'back', x, y) || PW.getOwner(world, x, y) !== b.id) && !job.seen.has(-i - 1)) {
               job.seen.add(-i - 1);
-              job.queue.push({ x, y, i, back: true, p: 3 });
+              job.queue.push({ x, y, i, back: true, p: 2 });
             }
           }
         }
         stats.scanned += 1;
       }
       if (job.scanCol >= b.canvas.width && job.queue.length) {
-        // The build order (F2): from the bottom up, storey by storey - at the same height the
-        // frame and walls before the slabs, the glass and trimmings last - and each row grown
-        // from the middle outward, so the work never leans lopsided off its support and topples.
-        // (Work is taken from the END of the queue, so it is sorted with the first work last.)
+        // The build order (F2): from the bottom up, the cores' pillars running a storey ahead
+        // (LEAD), the floors tying them, back then side walls trailing, glass last - and each
+        // row grown from the middle outward, so the work never leans lopsided off its support
+        // and topples. (Work is taken from the END of the queue, so the first work sorts last.)
         const cx = (b.body.left + b.body.right) / 2;
-        job.queue.sort((a, q) => (a.y - q.y) || (q.p - a.p) || (Math.abs(q.x - cx) - Math.abs(a.x - cx)));
+        job.queue.sort((a, q) => ((a.y + LEAD[a.p]) - (q.y + LEAD[q.p])) || (q.p - a.p) || (Math.abs(q.x - cx) - Math.abs(a.x - cx)));
       }
     }
     // Restore one queued cell. Debris in the wound is swept into the recycler first - that is
-    // where the building's own HM comes from. `classCap` limits the work to the heavier classes
-    // (a ruined building's risen cores rebuild the bed and the frame before anything fine).
-    function restore(b, job, classCap = 9, bedTop) {
+    // where the building's own HM comes from. The sort already orders the work storey by storey
+    // with the frame ahead of the finery at each height, so every class builds in its turn.
+    function restore(b, job) {
       let deferred = 0;
       const drop = (cell) => { job.queue.pop(); job.seen.delete(cell.back ? -cell.i - 1 : cell.i); };
       const pay = () => {
@@ -100,11 +109,6 @@
       };
       while (job.queue.length && deferred <= job.queue.length) {
         const cell = job.queue[job.queue.length - 1];
-        // Work out of phase waits: trimmings for the sound building, everything above the bed
-        // while the risen cores still hang over it. Held aside, merged back when its phase comes.
-        if (cell.p > classCap || (bedTop !== undefined && cell.y < bedTop)) {
-          job.queue.pop(); (job.held || (job.held = [])).push(cell); continue;
-        }
         const c = b.canvas, i = cell.i;
         const now = PW.get(world, cell.x, cell.y) & ID_MASK;
         if (cell.back) {
@@ -114,10 +118,14 @@
             job.pool += HM_PER_DEBRIS;
             stats.recycled += 1;
             stats.hmFromDebris += HM_PER_DEBRIS;
-          } else if (now !== M.AIR || PW.getLayer(world, 'back', cell.x, cell.y)) { drop(cell); continue; }
+          } else if (now !== M.AIR || (PW.getLayer(world, 'back', cell.x, cell.y) && PW.getOwner(world, cell.x, cell.y) === b.id)) { drop(cell); continue; }
           if (!pay()) return false;
           PW.setLayer(world, 'back', cell.x, cell.y, c.back[i]);
+          // The wall is the building's again: the structure judge counts only owned cells, and
+          // stability stops treating an owned wall as a loose ruin panel.
+          PW.setOwner(world, cell.x, cell.y, b.id);
           stats.backRestored += 1;
+          job.passProgress = (job.passProgress || 0) + 1;
           drop(cell);
           return true;
         }
@@ -141,6 +149,7 @@
         PW.setOwner(world, cell.x, cell.y, b.id);
         if (c.deco[i]) PW.setLayer(world, 'deco', cell.x, cell.y, c.deco[i]);
         stats.restored += 1;
+        job.passProgress = (job.passProgress || 0) + 1;
         // The white fleck of the translator's work.
         if (particles && F && (stats.restored & 3) === 0) {
           particles.spawn(cell.x + 0.5, cell.y + 0.5, ((PW.hash2(cell.x, cell.y) & 63) - 32) * 0.6, -26, M.DEBRIS | 3 << 6, 0, 0, 3);
@@ -165,6 +174,7 @@
           if (!touching) continue;
           PW.set(world, x, y, M.AIR, { quiet: true });
           job.pool += HM_PER_DEBRIS;
+          job.passProgress = (job.passProgress || 0) + 1;
           stats.recycled += 1;
           stats.hmFromDebris += HM_PER_DEBRIS;
           if ((cells -= 1) <= 0) return;
@@ -179,25 +189,23 @@
         // system judges it by what stands, not against its blueprint, and it shrugs off light
         // blows. Cleared the moment the work is done or stops.
         b.growing = false;
-        // A ruined building rebuilds only once its cores stand risen over the rubble; they remake
-        // the bed and the frame first (classes up to the walls), and when enough frame stands the
-        // building is no ruin any more - the cores sink home and the fine work follows.
-        // The resurrection (F part 2): the risen cores hang over the wreck and rebuild it from
-        // the bottom up, their descent corridors kept open under them; when enough frame stands
-        // the ruin is over, the cores sink home and the fine work follows. GATED OFF until the
-        // structure system learns construction-site semantics: rebuilding cell by cell under
-        // live condemnation and a flowing rubble dune churns without converging (the fragments
-        // go up and are knocked down again). The machinery below is ready for the flip.
-        const risen = PW.REBUILD_RUINS && b.ruined && (b.cores || []).some((core) => core.free);
+        // The resurrection (F part 2): a ruined building rebuilds while its cores stand risen
+        // over the wreck, or have already gone home alive (each settles the moment its vault is
+        // rebuilt and clear, and works on from there); the descent corridors of the cores still
+        // out stay open under them. When enough stands the ruin is over, the vaults close and
+        // the fine work follows.
+        const risen = PW.REBUILD_RUINS && b.ruined && ((b.cores || []).some((core) => core.free || core.settled) || !!b.coresHome);
         if (b.ruined && !risen) continue;
-        if (job.held && job.held.length && !b.ruined) {
-          job.queue = job.queue.concat(job.held);
-          job.held = null;
-          job.queue.sort((a, q) => (a.y - q.y) || (q.p - a.p));
-        }
         if (job.scanCol < b.canvas.width) scan(b, job);
         if (!job.queue.length) {
-          if (job.scanCol >= b.canvas.width && (!job.held || !job.held.length)) { jobs.delete(id); b.growing = false; }
+          if (job.scanCol >= b.canvas.width) {
+            // A pass that built or cleared anything may have unblocked wounds that were dropped
+            // while debris or wreckage sat in them (and back walls hidden behind solids are not
+            // even seen until the cell clears) - look over the blueprint again. Only a pass that
+            // changed nothing ends the work.
+            if ((job.passProgress || 0) > 0) { job.passProgress = 0; job.scanCol = 0; }
+            else { jobs.delete(id); b.growing = false; }
+          }
           continue;
         }
         const alive = coresAlive(b);
@@ -206,14 +214,17 @@
         // The recyclers clear the site as fast as the translators build: wreckage lying against
         // the building's own cells melts away (during a resurrection that includes what the
         // remnant stands on - demolition comes before reconstruction).
-        const rate = risen ? alive * CELLS_PER_HM / RATE : (job.pool < 2 ? 5 : 0);
+        // A resurrected site keeps clearing at the translators' own pace after the ruin is over
+        // (b.coresHome): the fine work cannot close walls into heaps of its old wreck. An
+        // ordinary wounded building still only sips from the debris touching it.
+        const rate = risen || b.coresHome ? alive * CELLS_PER_HM / RATE : (job.pool < 2 ? 5 : 0);
         if (rate > 0) {
           job.recycleBudget = (job.recycleBudget || 0) + dt * rate;
           if (job.recycleBudget >= 1) { recycle(b, job, Math.floor(job.recycleBudget)); job.recycleBudget %= 1; }
         }
         job.budget = Math.min(alive * CELLS_PER_HM * 2, (job.budget || 0) + dt * alive * CELLS_PER_HM / RATE);
         while (job.budget >= 1) {
-          if (!restore(b, job, b.ruined ? 2 : 9)) break;
+          if (!restore(b, job)) break;
           job.budget -= 1;
         }
       }

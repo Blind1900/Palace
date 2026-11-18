@@ -31,10 +31,12 @@
     // ruin's collapse does not take it down with it), held up by its own field.
     function expose(b) {
       b.coresOpen = tick;
+      b.coresHome = 0;
       stats.opened += 1;
       if (world.onDamage) world.onDamage(b.id);
       for (const core of b.cores || []) {
         if (core.orb) continue;
+        core.settled = false;   // freed anew: managed by rise/sweep again
         if (core.homeY === undefined) core.homeY = core.y;   // where it sinks back to (F part 2)
         const c = columnOf(core);
         for (let y = c.top; y <= c.bottom; y += 1) for (let x = c.x0; x <= c.x1; x += 1) {
@@ -142,6 +144,9 @@
     // keeps its lanes through the connectors) - and the grating closes over it.
     function settle(b, core) {
       core.free = false;
+      // Home, redrawn and owned by its building again: no longer managed by rise/sweep (whose
+      // spans see only unowned cells, so they would mistake it for gone and free it again).
+      core.settled = true;
       const c = b.canvas;
       if (c) {
         // Take the risen copy apart (its unowned cells, wherever it stopped)...
@@ -167,11 +172,8 @@
           PW.setOwner(world, x, y, b.id);
         }
       }
-      if ((b.cores || []).every((q) => q.orb || !q.free)) {
-        b.coresOpen = 0;
-        // (one more look over the whole blueprint: the work the corridors held back)
-        if (world.repair) world.repair.notify(b.id);
-      }
+      // (its corridor is scannable again: one more look over the blueprint)
+      if (world.repair) world.repair.notify(b.id);
       stats.settled = (stats.settled || 0) + 1;
     }
     // Throw loose cells that land on a core that stands in the open off it, outward from the
@@ -193,27 +195,55 @@
       }
       stats.cleared += moved;
     }
+    // Is the core's home region rebuilt and clear - nothing foreign and nothing loose in the
+    // vault box it would occupy? (Its own building's cells and open air are what belong there.)
+    function homeOpen(b, core) {
+      for (let y = core.homeY - 16; y <= core.homeY + 11; y += 1) {
+        for (let x = core.x - 11; x <= core.x + 11; x += 1) {
+          const id = PW.get(world, x, y) & ID_MASK;
+          if (id === M.AIR || LOOSE[id]) continue;
+          if (PW.getOwner(world, x, y) === b.id) continue;
+          if (id === M.PIPE) continue;   // the bundle's sockets interlock with the bed
+          // Unowned core steel is the bed's own remains (expose() freed the whole column);
+          // settle() redraws straight over it.
+          if ((id === M.CORE || id === M.STEEL) && !PW.getOwner(world, x, y)) continue;
+          // Unowned ground (the made ground the bed is cut into) belongs beside the vault;
+          // only wreckage (unowned structural) and other buildings' cells bar the way home.
+          if (PW.mat.terrain[id] && !PW.getOwner(world, x, y)) continue;
+          return false;
+        }
+      }
+      return true;
+    }
     function step() {
       tick += 1;
       for (const b of world.buildings || []) {
         if (!b.cores || !b.cores.length) continue;
         if (b.ruined && !b.coresOpen) expose(b);
-        // The ruin is over (the repair rebuilt enough frame): each risen core sinks back down
-        // into its rebuilt vault, and the grating closes over it.
-        if (!b.ruined && b.coresOpen) {
-          if (tick % 2 === 0) {
-            for (const core of b.cores) {
-              if (core.orb || !core.free) continue;
-              if (core.y >= core.homeY) { settle(b, core); continue; }
-              // Blocked within reach of home (the vault floor, the bundle's sockets): snap in.
-              if (!sink(b, core) && core.y >= core.homeY - 6) settle(b, core);
-            }
+        // A free core goes home as soon as its vault region is rebuilt and clear - the repair
+        // works from the bottom up, so the bed is ready long before the ruin is over. Near home
+        // it sinks row by row; from high up, or where its own rebuilt storeys stand in the way,
+        // its field carries it home in one move (the settle snap).
+        if (b.coresOpen && tick % 2 === 0) {
+          for (const core of b.cores) {
+            if (core.orb || !core.free) continue;
+            if (core.y >= core.homeY) { settle(b, core); continue; }
+            if (core.homeY - core.y <= 30 && sink(b, core)) continue;
+            if (homeOpen(b, core)) settle(b, core);
           }
+        }
+        // The vaults close only once the ruin is over (while it stands, closing them would only
+        // re-trigger expose and blow the gratings off again); until then settled cores simply
+        // wait at home, part of the building again, while the rebuild climbs.
+        if (b.coresOpen && !b.ruined && (b.cores || []).every((q) => q.orb || q.settled)) {
+          b.coresOpen = 0;
+          b.coresHome = tick;   // home and alive: the fine work carries on from below
+          if (world.repair) world.repair.notify(b.id);
           continue;
         }
         if (!b.coresOpen || tick - b.coresOpen < SETTLE) continue;
         for (const core of b.cores) {
-          if (core.orb) continue;   // (the base's main core already stands in its open pit)
+          if (core.orb || core.settled) continue;   // (the base's main core already stands in its open pit; a settled core is the building's again)
           if (!core.free && tick % RISE_EVERY === 0) {
             if (exposed(core) || !rise(b, core)) {
               core.free = true;

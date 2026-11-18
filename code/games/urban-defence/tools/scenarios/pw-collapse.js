@@ -79,12 +79,15 @@ check((fragments.stats.swept || 0) + toppled > 0 && decoBefore(A) < decoA, `fall
 // where troops can reach them.
 check(coresUnder(A) === coresA && coresUnder(B) === coresB, `the cores survive the collapse (${coresUnder(A)}/${coresA}, ${coresUnder(B)}/${coresB} core cells)`);
 const ruined = [A, B].filter((b) => b.ruined);
-// (rubble may still be raining onto one: its field clears it within a few seconds)
-const allOut = () => ruined.every((b) => b.cores.every((c) => pwApp.cores.exposed(c)));
+// (rubble may still be raining onto one: its field clears it within a few seconds. A core whose
+// vault came through clear does not linger in the open: it settles straight home into its
+// rebuilt bed - that counts as safe too.)
+const safe = (c) => pwApp.cores.exposed(c) || (c.settled && c.y === c.homeY);
+const allOut = () => ruined.every((b) => b.cores.every(safe));
 for (let s = 0; s < 5 && !allOut(); s += 1) pwApp.stepWorld(60);
-const out = ruined.flatMap((b) => b.cores.filter((c) => pwApp.cores.exposed(c)));
+const out = ruined.flatMap((b) => b.cores.filter(safe));
 check(ruined.length > 0 && out.length === ruined.reduce((n, b) => n + b.cores.length, 0),
-  `a ruined building's cores stand in the open on its rubble (${out.length}/${ruined.reduce((n, b) => n + b.cores.length, 0)} cores of ${ruined.length} ruined buildings; ${ruined.flatMap((b) => b.cores.map((c) => `${c.x},${c.y}${c.free ? 'F' : ''}${c.stopped ? ':' + c.stopped : ''}`)).join(' ')})`);
+  `a ruined building's cores stand in the open on its rubble, or sit settled home in a rebuilt vault (${out.length}/${ruined.reduce((n, b) => n + b.cores.length, 0)} cores of ${ruined.length} ruined buildings; ${ruined.flatMap((b) => b.cores.map((c) => `${c.x},${c.y}${c.free ? 'F' : ''}${c.settled ? 'S' : ''}${c.stopped ? ':' + c.stopped : ''}`)).join(' ')})`);
 if (ruined.length) await view('co-cores-risen', ruined[0].cores[0].x, ruined[0].cores[0].y, 5);
 // Lasting smoke and dust.
 const smoke30 = countIn(A.body.left - 600, A.body.right + 600, A.ground - 900, A.ground, [M.SMOKE]);
