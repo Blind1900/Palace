@@ -75,6 +75,8 @@
   }
   // A ruined building's cores lie open in their vaults, kept clear of rubble.
   const cores = PW.createCores ? PW.createCores(world, particles) : null;
+  // The city grows by itself: seeds carried past the street's end, towers grown by repair (step H).
+  const growth = PW.createGrowth && !gallery ? PW.createGrowth(world) : null;
   // Ground that loses its footing breaks loose: cave-ins, landslides and avalanches.
   const stability = world.stability = PW.createStability ? PW.createStability(world, particles) : null;
   // Air pressure and wind, worked only where a blast has stirred it.
@@ -256,6 +258,7 @@
       if (PW.mining) PW.mining.step(world, DT);
       if (pipes) pipes.step();
       if (repair) repair.step(DT);
+      if (growth) growth.step(DT);
       life.step();
       simTimes.push(performance.now() - s);
       if (simTimes.length > 240) simTimes.shift();
