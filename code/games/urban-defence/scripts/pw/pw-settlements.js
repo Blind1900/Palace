@@ -6,7 +6,7 @@
   const PW = window.PW;
   const { M, FLAG } = PW;
   const K = PW.buildingKit;
-  const { tone, mix } = K;
+  const { tone, mix, S } = K;
   const rgb = (c) => PW.abgr(c[0], c[1], c[2]);
 
   // ---- Plans ---------------------------------------------------------------------------------------
@@ -1059,13 +1059,14 @@
         if (x > 2 && x < W - 3 && world.groundTop[x] < world.groundTop[summit]) summit = x;
       }
       const half = Math.ceil((canvas.body.right - canvas.body.left) / 2) + 16;
-      // The bench is cut at least 44 into the summit - deeper on a sheer crag, so its edges need
-      // no more build-up than solid terraces can give; a peak that would need more than a 90-cell
-      // cut is left to the next candidate.
+      // The bench is cut at least 56 into the summit (C2: the base sits IN the mountain, rock
+      // shoulders rising either side of it) - deeper on a sheer crag, so its edges need no more
+      // build-up than solid terraces can give; a peak that would need more than a 104-cell cut
+      // is left to the next candidate.
       let benchMax = 0;
       for (let x = summit - half; x <= summit + half; x += 1) benchMax = Math.max(benchMax, world.groundTop[x]);
-      const Y = Math.max(world.groundTop[summit] + 44, benchMax - 100);
-      if (Y - world.groundTop[summit] > 90) continue;
+      const Y = Math.max(world.groundTop[summit] + 56, benchMax - 100);
+      if (Y - world.groundTop[summit] > 104) continue;
       const terrace = PW.foundations.rockTerrace(world, summit - half, summit + half, Y, style, id);
       if (!terrace) continue;
       const canvasX = summit - Math.round((canvas.body.left + canvas.body.right) / 2);
@@ -1078,9 +1079,108 @@
       // HESCO gabions on the terraces: a basket on each tread past the first (clear of the walls
       // and doors), so the steps carry a broken defensive wall down both flanks.
       for (const tread of terrace.treads) if (Math.abs(tread.x - summit) > half + 20) hesco(world, tread, style, random);
+      const works = mountainWorks(world, summit, half, Y, id, facing);
       world.outposts.push({ side, style, building: record, terrace, summit,
-        footprints: [[terrace.x0 - 10, terrace.x1 + 10]] });
+        footprints: [[terrace.x0 - 10, terrace.x1 + 10], ...works.footprints] });
     }
+  }
+  // C2 (your update): the base is IN the mountain, not perched on it. Under the bench two
+  // galleries are carved into the massif, Maginot-fashion - command over stores - joined by a
+  // ladder shaft that runs on down to a junction stub for the tunnels (step H). A portal with a
+  // cast concrete frame opens on the home flank for resupply, embrasure slits look out over the
+  // enemy side, and the crown of the summit round the works is lined with reinforcement that
+  // follows the mountain's own shape.
+  const REINF = [96, 104, 100], REINF_DARK = [74, 80, 78], REINF_LIT = [122, 130, 124];
+  function mountainWorks(world, summit, half, Y, id, facing) {
+    const footprints = [];
+    const armour = (x, y, edge, stud) => {
+      PW.set(world, x, y, M.REINFORCED, { quiet: true });
+      PW.setLayer(world, 'paint', x, y, rgb(edge ? REINF_DARK : stud ? REINF_LIT : REINF));
+      PW.setLayer(world, 'deco', x, y, 0);
+      PW.setOwner(world, x, y, id);
+    };
+    const rock = (x, y) => { const d = PW.get(world, x, y) & 63; return d !== M.AIR && d !== M.WATER && PW.mat.ground[d]; };
+    // The two galleries inside the massif, and the reinforced shell round each. A gallery takes
+    // only the rock that is really there: its span is clamped to the columns with solid cover
+    // over the shell (a narrow crag pushes it deeper and narrower rather than poking its ring
+    // out of the mountainside).
+    const clamp = (g) => {
+      let x0 = g.x0, x1 = g.x1;
+      const covered = (x) => world.groundTop[x] <= g.y0 - 14;
+      while (x0 < x1 && !covered(x0)) x0 += 1;
+      while (x1 > x0 && !covered(x1)) x1 -= 1;
+      if (x1 - x0 < 50) return null;
+      return { x0, x1, y0: g.y0, y1: g.y1 };
+    };
+    const g1 = clamp({ x0: summit - half + 6, x1: summit + half - 6, y0: Y + 34, y1: Y + 74 })
+      || clamp({ x0: summit - half + 6, x1: summit + half - 6, y0: Y + 64, y1: Y + 104 });
+    if (!g1) return { footprints, galleries: [], shaft: null };
+    const g2 = clamp({ x0: summit - half + 16, x1: summit + half - 2, y0: g1.y1 + 26, y1: g1.y1 + 66 });
+    for (const g of [g1, g2]) {
+      if (!g) continue;
+      PW.bunkers.reinforce(world, g.x0 - 4, g.y0 - 4, g.x1 + 4, g.y1 + 4, id);
+      carveBox(world, g.x0, g.y0, g.x1, g.y1, id, 4);
+      tunnelLamps(world, g.x0, g.x1, g.y0 + 2, 48);
+    }
+    // The ladder shaft: bench to command, command to stores, and on down to the tunnels' stub.
+    const shaftX = summit - facing * Math.round(half * 0.45);
+    const shaftBottom = g2.y1 + 50;
+    for (let y = Y - S.DOOR_H; y <= shaftBottom; y += 1) {
+      for (let dx = -7; dx <= 7; dx += 1) {
+        if (PW.get(world, shaftX + dx, y) & 63) PW.set(world, shaftX + dx, y, M.AIR, { quiet: true });
+        PW.setLayer(world, 'back', shaftX + dx, y, rgb([22, 24, 26]));
+        PW.setLayer(world, 'deco', shaftX + dx, y, 0);
+      }
+    }
+    ladder(world, shaftX - 6, Y - S.DOOR_H + 4, shaftBottom - 2);
+    for (let y = shaftBottom + 1; y <= shaftBottom + 24; y += 1) {
+      for (let dx = -16; dx <= 16; dx += 1) {
+        if (PW.get(world, shaftX + dx, y) & 63) PW.set(world, shaftX + dx, y, M.AIR, { quiet: true });
+        PW.setLayer(world, 'back', shaftX + dx, y, rgb([22, 24, 26]));
+      }
+    }
+    PW.setFlag(world, shaftX, shaftBottom + 12, FLAG.TUNNEL);
+    // The portal on the home flank: cut from the command gallery out to daylight, then the cast
+    // concrete frame round the mouth (the Cheyenne portal of your refs).
+    const px = facing > 0 ? g1.x0 : g1.x1;
+    const portal = PW.bunkers.cutOpening(world, px - facing, g1.y1 - 16, -facing, 0, 15, 140, id);
+    if (portal) {
+      const mouth = facing > 0 ? portal.x0 : portal.x1;
+      for (let d = 0; d < 4; d += 1) {
+        const x = mouth - facing * d;
+        for (let k = -20; k <= 20; k += 1) {
+          const y = g1.y1 - 16 + k;
+          const rim = Math.abs(k) > 15;
+          if (!rim && d > 0) continue;
+          if (rock(x, y) || rim) armour(x, y, d === 3 || Math.abs(k) === 20, (k & 7) === 0);
+        }
+      }
+      footprints.push([Math.min(mouth, px) - 4, Math.max(mouth, px) + 4]);
+    }
+    // Embrasure slits climbing from the command gallery's enemy-side wall to the face.
+    for (const lift of [8, 22]) {
+      const sx = (facing > 0 ? g1.x1 : g1.x0) + facing * 5;
+      const cut = PW.bunkers.cutOpening(world, sx, g1.y0 + lift, facing, -1, 3, 90, id);
+      if (cut) footprints.push([cut.x0 - 2, cut.x1 + 2]);
+    }
+    // The crown armoured along the mountain's own shape: the rock face round the works, from
+    // shoulder to shoulder, lined five deep wherever it is not already the base's own work. At
+    // either end the lining tapers out and breaks up into the bare rock (no hard seam).
+    const a0 = summit - half - 24, a1 = summit + half + 24;
+    for (let x = a0; x <= a1; x += 1) {
+      const s = world.groundTop[x];
+      if (s >= g1.y0 - 2) continue;
+      if (PW.getOwner(world, x, s + 1)) continue;
+      const end = Math.min(x - a0, a1 - x);
+      const depth = end >= 16 ? 5 : 1 + ((end * 4 / 16) | 0);
+      for (let d = 1; d <= depth; d += 1) {
+        const y = s + d;
+        if (!rock(x, y) || PW.getOwner(world, x, y)) continue;
+        if (end < 16 && (PW.hash2(x, y) & 7) < 3) continue;   // ragged where it runs out
+        armour(x, y, d === depth, (x & 7) === 0 && (y & 7) === 0);
+      }
+    }
+    return { footprints, galleries: [g1, g2], shaft: { x: shaftX, top: Y, bottom: shaftBottom } };
   }
   // A HESCO gabion on a terrace tread: a wire basket of ballast, drawn as a sand-coloured block
   // with the mesh as a dark grid over its face and a folded steel lip along the top. (Solid as a
