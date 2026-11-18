@@ -34,12 +34,17 @@
     gothic: { bias: 0.5, supportMax: 130, stage: 10, deck: 5 },
     modern: { bias: 0.35, supportMax: 150, stage: 14, deck: 4 },
   };
+  // Every foundation is the dead machine god's own work (the user's lore: the cores are the
+  // DMG's gifts, given to build great, strong cities and armies) - so whatever FORM each style's
+  // base takes to meet the terrain (battered walls, stone stages, anchored concrete), its
+  // MATERIAL is the one gun-metal plate-and-concrete of the core beds and the gallery between
+  // them. The faction's own colours begin above the ground line.
   const C = {
-    asian: { post: [112, 82, 58], postLit: [140, 106, 76], postDark: [80, 58, 42], beam: [100, 72, 50], beamLit: [128, 96, 66],
-      boards: [128, 92, 60], stone: [[132, 128, 120], [114, 110, 104], [146, 142, 132], [104, 100, 94]], joint: [56, 54, 52], footing: [120, 116, 110] },
-    gothic: { stone: [128, 124, 138], stoneLit: [150, 146, 160], stoneDark: [96, 92, 106], joint: [76, 72, 86], vault: [44, 42, 52], rib: [64, 60, 74] },
-    modern: { concrete: [164, 166, 162], concreteLit: [184, 186, 182], concreteDark: [128, 130, 126], board: [148, 150, 146],
-      anchor: [84, 90, 98], bolt: [150, 156, 164], weep: [46, 48, 50], steel: [96, 140, 170], steelDark: [64, 96, 120], glass: [150, 200, 220] },
+    asian: { post: [86, 90, 98], postLit: [112, 118, 126], postDark: [58, 60, 66], beam: [74, 78, 86], beamLit: [104, 110, 118],
+      boards: [96, 100, 106], stone: [[104, 108, 114], [92, 96, 102], [118, 122, 128], [80, 84, 90]], joint: [48, 50, 56], footing: [96, 100, 106] },
+    gothic: { stone: [100, 104, 112], stoneLit: [122, 126, 134], stoneDark: [72, 76, 84], joint: [56, 58, 64], vault: [38, 40, 46], rib: [66, 70, 78] },
+    modern: { concrete: [108, 112, 118], concreteLit: [132, 136, 142], concreteDark: [84, 88, 94], board: [98, 102, 108],
+      anchor: [66, 70, 78], bolt: [150, 156, 164], weep: [42, 44, 48], steel: [96, 102, 110], steelDark: [62, 66, 74], glass: [140, 170, 180] },
   };
 
   // ---- Cells ----------------------------------------------------------------------------------------

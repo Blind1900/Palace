@@ -88,6 +88,7 @@
     c.slots.push({ x: X(rearLeft + 26), y: fRow, storey: 0, facing });
     // A pair of cores in vaults under the gallery floor.
     for (const cx of [40, width - 50]) K.core(c, X(cx), ground);
+    K.corePillars(c, style);
     K.bakeLights(c, style);
     c.body = { left: 0, right: width - 1, top: fRow - S.CLEAR - S.SLAB - 2, bottom: ground - 1 };
     return c;
@@ -234,5 +235,5 @@
     }
   }
 
-  PW.bunkers = { generate, bunkerCanvas };
+  PW.bunkers = { generate, bunkerCanvas, cutOpening, reinforce };
 })();

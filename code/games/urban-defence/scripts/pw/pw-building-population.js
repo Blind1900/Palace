@@ -251,6 +251,7 @@
       const cx = Math.round(margin + reach + (bodyWidth - 1 - 2 * reach) * (coreCount === 1 ? 0.5 : i / (coreCount - 1)));
       K.core(c, mx(cx), ground);
     }
+    K.corePillars(c, style);
     K.bakeLights(c, style);
     c.floors = spans.map((span) => ({ storey: span.k, y: floorRow(span.k), left: span.left + span.wall, right: span.right - span.wall }));
     c.body = { left: margin, right: margin + bodyWidth - 1, top: floorRow(storeys), bottom: ground - 1 };

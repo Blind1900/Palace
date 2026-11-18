@@ -473,11 +473,69 @@
     c.cores.push({ x: cx, y: oy, kind: 'descendant', vault: { x0: cx - half, x1: cx + half, top, bottom, lid: floor } });
   }
 
+  // F2 (the user's support hierarchy): each core's translator grows the building's MAIN PILLAR -
+  // the primary support that holds the structure up. Floors tie pillar to pillar; back and side
+  // walls are secondary. Stamped over the finished body: a 3-wide column rising from the vault's
+  // grating to the roof over it, filling the open cells of each storey and leaving every floor,
+  // stair, wall and fitting exactly as drawn (the pillar shows in the rooms, behind nothing).
+  function corePillars(c, style) {
+    const s = STYLES[style] || STYLES.modern;
+    for (const core of c.cores || []) {
+      if (core.standing || !core.vault) continue;
+      const lid = core.vault.lid;
+      // The roof over this pillar: walk up from the grating; past 8 open rows it is sky.
+      let top = lid;
+      for (let y = lid - 1; y >= 0 && top - y <= 8; y -= 1) {
+        for (let dx = -2; dx <= 2; dx += 1) if (isSolid(c, core.x + dx, y)) { top = y; break; }
+      }
+      if (top >= lid - 2) continue;   // nothing standing over this core
+      for (let y = top + 1; y < lid; y += 1) {
+        for (let dx = -1; dx <= 1; dx += 1) {
+          const x = core.x + dx;
+          if (isSolid(c, x, y)) continue;
+          // A capital and base where the pillar meets a slab; darker flutes at the edges.
+          const joint = isSolid(c, x, y - 1) || isSolid(c, x, y + 1);
+          const color = tone(dx === 0 ? s.frame : s.trim, (joint ? 1.18 : 1) * (grain(x, y) < 3 ? 0.9 : 1));
+          solid(c, x, y, M.PILLAR, color, ROLE.FRAME);
+        }
+      }
+    }
+    // The space between the cores is no bare earth: a reinforced concrete gallery ties bed to
+    // bed, military-grade - the vaults' hazard-banded rim runs on across it, poured concrete in
+    // shuttering courses below, bolted at the joints. The bundle sleeves through it (painted
+    // over the concrete), and in a collapse it breaks to concrete debris like any foundation.
+    const vaults = (c.cores || []).filter((k) => !k.standing && k.vault).sort((p, q) => p.x - q.x);
+    for (let i = 0; i + 1 < vaults.length; i += 1) {
+      const a = vaults[i].vault, b2 = vaults[i + 1].vault;
+      const x0 = a.x1 + VAULT.wall + 2, x1 = b2.x0 - VAULT.wall - 2;
+      if (x1 - x0 < 2 || a.lid !== b2.lid) continue;
+      const yTop = a.lid, yBot = Math.max(a.bottom, b2.bottom) + 10;
+      for (let y = yTop; y <= yBot; y += 1) {
+        for (let x = x0; x <= x1; x += 1) {
+          if (isSolid(c, x, y)) continue;
+          if (y <= yTop + 1) {
+            // the capping course: the vaults' rim carried across, hazard chevrons and all
+            const hazard = y === yTop && ((x + y) >> 1 & 1) === 0;
+            solid(c, x, y, M.STEEL, hazard ? HAZARD : [40, 40, 44], ROLE.CRADLE);
+            continue;
+          }
+          const course = (y - yTop) % 8 === 0, seam = ((x - x0) % 14) === 0;
+          const bolt = course && seam;
+          const color = bolt ? PLATE_LIT
+            : course ? [64, 67, 73]
+            : seam ? [78, 81, 87]
+            : tone([96, 100, 106], grain(x, y) < 3 ? 0.9 : 1);
+          solid(c, x, y, M.FOUNDATION, color, ROLE.VAULT);
+        }
+      }
+    }
+  }
+
   PW.buildingKit = {
     S, STYLES, ROLE, CORE_COLOR, CORE_SHADE, BEACON, SCREEN, GLASS_DARK, GLASS_SIDE, SHINE,
     tone, mix, pack, grain, clamp255,
     createCanvas, inside, solid, solidIfEmpty, clear, back, backIfEmpty, deco, isSolid, rect, bitmap,
-    wallColor, slabColor, backWallColor, backWindow, FURNITURE, ceilingLamp, bakeLights, core, coreColumn, coreUnit,
+    wallColor, slabColor, backWallColor, backWindow, FURNITURE, ceilingLamp, bakeLights, core, coreColumn, coreUnit, corePillars,
     VAULT, VAULT_DEPTH, CORE_HOT,
   };
 })();

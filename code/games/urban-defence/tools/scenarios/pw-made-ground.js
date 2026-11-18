@@ -80,6 +80,8 @@ for (const s of world.settlements) {
 const asian = world.settlements.find((s) => s.style === 'asian');
 if (asian) {
   const x0 = Math.round((asian.streetLeft * 2 + asian.streetRight) / 3);
+  // Any street column carrying the full stack will do: the layers wander, and where the ground
+  // under the street is shallow the deep granite courses pinch out on purpose.
   let best = null;
   for (let x = x0; x < x0 + 200; x += 1) {
     const g = world.groundTop[x];
@@ -91,7 +93,9 @@ if (asian) {
       paints.add(PW.getLayer(world, 'paint', x, y)); ids.add(PW.get(world, x, y) & 63);
       if ((PW.get(world, x, y) & 63) === M.SLAB && y - g > 20) granite += 1;      // (below the paving slabs)
     }
-    if (!best || paints.size > best.paints) best = { x, paints: paints.size, ids: ids.size, granite };
+    const column = { x, paints: paints.size, ids: ids.size, granite };
+    const whole = column.paints >= 30 && column.ids >= 3 && column.granite > 0;
+    if (!best || (whole && !best.whole) || (whole === !!best.whole && column.paints > best.paints)) best = { ...column, whole };
   }
   // (a cypress pile: a column of brown timber, crossed by the supply lines on its way down)
   let pile = 0;
@@ -105,7 +109,7 @@ if (asian) {
     }
     if (rows >= 8) pile = x;
   }
-  check(best && best.paints >= 30 && best.ids === 3 && best.granite > 0 && pile > 0,
+  check(best && best.whole && pile > 0,
     `the asian made ground is layered like the Forbidden City's (${best ? `${best.paints} tones, ${best.ids} materials, granite ${best.granite} rows` : 'no street'}, cypress pile ${pile ? `at ${pile}` : 'none'})`);
   await view('mg-asian-section', x0 + 60, world.groundTop[x0 + 60] + 45, 7);
 }

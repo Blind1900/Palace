@@ -260,6 +260,7 @@
     // Extra cores in vaults under the floor.
     const extraCores = level >= 4 ? 3 : 2;
     for (let i = 0; i < extraCores; i += 1) K.core(c, X(30 + i * Math.round((bodyWidth - 80) / Math.max(1, extraCores - 1))), ground);
+    K.corePillars(c, style);
     K.bakeLights(c, style);
     c.body = { left: margin, right: margin + bodyWidth - 1, top: hangar ? Math.min(floorRow(rearStoreys), wallTop - HANGAR.vaultRise) : floorRow(rearStoreys) - 34, bottom: ground - 1 };
     if (hangar) c.runway = { from: X(hangarRight) + facing, direction: facing, length: 380, y: ground };

@@ -457,6 +457,7 @@
       bodyRight = yard1;
     }
     K.core(c, X(30), ground);
+    K.corePillars(c, style);
     K.bakeLights(c, style);
     const [l, r] = xs(0, bodyRight);
     c.body = { left: l, right: r, top: 0, bottom: ground - 1 };
@@ -513,6 +514,7 @@
     // Shaft mouth (open to be dug down by the tunnel crews).
     c.shaft = { x: shaftX, top: ground };
     K.core(c, Math.round((h0 + h1) / 2), ground);
+    K.corePillars(c, style);
     c.body = { left: Math.min(h0, shaftX - 30), right: Math.max(h1, shaftX + 30), top: ground - towerH - 20, bottom: ground - 1 };
     K.bakeLights(c, style);
     return c;
