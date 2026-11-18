@@ -132,19 +132,24 @@ const queued = water.packets.filter((p) => p.stage === 1 && p.resource === 'wate
 check(queued > 8, `the stream queues at the break (${queued} water particles within 60 cells upstream)`);
 await view('pp-break', cutX - dir * 20, cutY - 6, 7);
 for (let s = 0; s < 40 && [...water.broken].some(Boolean); s += 1) pwApp.stepWorld(60);
-check(![...water.broken].some(Boolean), `the crew re-lays the bundle around the crater (${pipes.stats.repaired} cells, ${Math.round(pipes.stats.repairHM)} HM)`);
+check(![...water.broken].some(Boolean), `the broken ends regrow toward each other and reconnect (${pipes.stats.repaired} cells, ${Math.round(pipes.stats.repairHM)} HM)`);
+// The regrown run is smooth except where it genuinely changes level - and every level change
+// carries a well joining the two bores; the old pipe is taken up as the ends close (well
+// shafts are the line's own and stay).
 let steep = 0, stray = 0;
+const inWell = (x, y) => (water.wells || []).some((w) => Math.abs(x - w.x) <= 3 && (y === undefined || (y >= w.y0 && y <= w.y1)));
 for (let x = cutX - 90; x < cutX + 90; x += 1) {
   const k = x - water.x0;
   if (k < 1 || k >= water.ys.length) continue;
   if (water.cores.some((c) => Math.abs(x - c.x) < 40)) continue;
-  if (Math.abs(water.ys[k] - water.ys[k - 1]) > 1) steep += 1;
+  if (Math.abs(water.ys[k] - water.ys[k - 1]) > 2 && !inWell(x)) steep += 1;
   for (let y = water.ys[k] - 60; y < water.ys[k] + 70; y += 1) {
     if (y >= water.ys[k] - 1 && y <= water.ys[k] + BORE) continue;
+    if (inWell(x, y)) continue;
     if ((PW.get(world, x, y) & 63) === M.PIPE && PW.getOwner(world, x, y) === water.owner) stray += 1;
   }
 }
-check(steep === 0 && stray === 0, `the re-laid bundle is one smooth run, the old pipe taken up (${steep} steep steps, ${stray} stray cells)`);
+check(steep === 0 && stray === 0, `the regrown bundle is smooth, steps welled, the old pipe taken up (${steep} unwelled steps, ${stray} stray cells)`);
 check(pwApp.countWater() >= waterBefore - 1, `the spilled water is real water, none lost (${waterBefore} -> ${pwApp.countWater()} cells)`);
 await view('pp-repaired', cutX, cutY - 6, 6);
 
