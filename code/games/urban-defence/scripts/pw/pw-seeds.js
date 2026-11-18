@@ -1,11 +1,15 @@
 'use strict';
-// Seeds (step G groundwork). A seed dropped on open, gentle ground plants a core: the unit from
-// the user's sketch set bare into the earth about a metre down, its translator towards the
-// surface, and the side's bundle grows out (or re-lays its span) to thread the connectors. The
-// building that grows out of it comes with the construction-site semantics (F2 and G proper);
-// until then a planted core is a site: it is on the pipe, and it waits.
+// Seeds (step G). A seed dropped on open, gentle ground plants a core: the unit from the user's
+// sketch set bare into the earth about a metre down, its translator towards the surface, and the
+// side's bundle grows out (or re-lays its span) to thread the connectors. grow() then raises a
+// level-1 building out of it: the god's gift below the ground line - beds, vaults, the gallery
+// between them, the foundation - is set whole into the earth at once, but the body above is only
+// a blueprint. Repair builds it cell by cell in the F2 order (pillars first, floors tying them,
+// walls, glass), digging the lot's own ground out of the rooms as it goes; the structure system
+// judges it as a construction site by what stands.
 (function () {
   const PW = window.PW;
+  const { M } = PW;
 
   function drop(world, x, side) {
     const K = PW.buildingKit;
@@ -27,5 +31,71 @@
     return site;
   }
 
-  PW.seeds = { drop };
+  function grow(world, site, options = {}) {
+    const T = PW.buildingTypes;
+    if (!T || !T.population || !world.repair) return null;
+    const side = site.side;
+    const style = options.style || (world.styles && world.styles[side]) || 'modern';
+    const level = options.level || 1;
+    const facing = side === 'right' ? -1 : 1;
+    const canvas = T.population({ style, level, variant: 'slab', seed: ((site.x * 31 + 7) >>> 0) || 1, facing });
+    // The first vault core stands where the seed's unit was planted; the floor sits on the turf.
+    const c0 = canvas.cores.find((q) => q.vault) || canvas.cores[0];
+    const worldX = site.x - c0.x;
+    const bx0 = worldX + canvas.body.left, bx1 = worldX + canvas.body.right;
+    if (bx0 < 40 || bx1 > world.width - 40) return null;
+    // Gentle ground only: the lot must not bury whole storeys or leave the floor hanging.
+    let hi = -1e9, lo = 1e9, sum = 0;
+    for (let x = bx0; x <= bx1; x += 1) { const g = world.groundTop[x]; if (g > hi) hi = g; if (g < lo) lo = g; sum += g; }
+    if (hi - lo > 34) return null;
+    const G = Math.round(sum / (bx1 - bx0 + 1));
+    const oy = G - canvas.ground;
+    // The gift below the ground line is set whole: beds, vaults, gallery, foundation plinth.
+    // Everything above stays blueprint: repair raises it (and digs the lot out) cell by cell.
+    const id = world.buildings.length + 1;
+    for (let ly = 0; ly < canvas.height; ly += 1) {
+      const wy = oy + ly;
+      if (wy < G - 2 || wy < 1 || wy >= world.height - 1) continue;
+      for (let lx = 0; lx < canvas.width; lx += 1) {
+        const wx = worldX + lx;
+        if (wx < 1 || wx >= world.width - 1) continue;
+        const i = ly * canvas.width + lx;
+        if (!canvas.mat[i] && !canvas.back[i]) continue;
+        if (canvas.mat[i]) {
+          PW.set(world, wx, wy, canvas.mat[i], { quiet: true, keepPaint: true });
+          PW.setLayer(world, 'paint', wx, wy, canvas.paint[i]);
+        } else {
+          const current = PW.get(world, wx, wy) & 63;
+          if (current !== M.AIR && current !== M.WATER) PW.set(world, wx, wy, M.AIR, { quiet: true });
+        }
+        if (canvas.back[i]) PW.setLayer(world, 'back', wx, wy, canvas.back[i]);
+        PW.setLayer(world, 'deco', wx, wy, canvas.deco[i]);
+        PW.setOwner(world, wx, wy, id);
+      }
+    }
+    const record = PW.buildingRecord(world, { x: worldX, y: oy, width: canvas.width, height: canvas.height, canvas }, {
+      id, side, style, type: 'population', variant: 'slab', level, facing,
+      neutral: false, underConstruction: true, works: [bx0, bx1], plant: null,
+      base: { G, walls: [], under: null, cores: canvas.cores.map((q) => ({ x: worldX + q.x, y: oy + q.y })) },
+    });
+    // Born a construction site at nothing: the first judge takes it as it stands, and repair's
+    // work keeps it one until it is all but whole.
+    record.health = 0.02;
+    record.siteWanted = true;
+    record.growing = true;
+    record.grewAt = world.tick || 0;
+    world.buildings.push(record);
+    // The bundle threads every vault core of the newborn building.
+    if (world.pipes && world.pipes.connectCore) {
+      for (const core of record.cores) {
+        if (core.orb || core.standing || !core.vault) continue;
+        world.pipes.connectCore(core.x, core.y, side, world.pipes.TAPS && world.pipes.TAPS.population, record.id);
+      }
+    }
+    world.repair.notify(record.id);
+    site.building = record.id;
+    return record;
+  }
+
+  PW.seeds = { drop, grow };
 })();

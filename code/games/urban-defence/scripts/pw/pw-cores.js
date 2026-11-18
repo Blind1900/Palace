@@ -219,7 +219,10 @@
       tick += 1;
       for (const b of world.buildings || []) {
         if (!b.cores || !b.cores.length) continue;
-        if (b.ruined && !b.coresOpen) expose(b);
+        // (a building still going up for the first time is no ruin to expose - its cores are
+        // already home in fresh beds; the flag drops once it first stands all but whole)
+        if (b.underConstruction && (b.health || 0) >= 0.9) b.underConstruction = false;
+        if (b.ruined && !b.coresOpen && !b.underConstruction) expose(b);
         // A free core goes home as soon as its vault region is rebuilt and clear - the repair
         // works from the bottom up, so the bed is ready long before the ruin is over. Near home
         // it sinks row by row; from high up, or where its own rebuilt storeys stand in the way,

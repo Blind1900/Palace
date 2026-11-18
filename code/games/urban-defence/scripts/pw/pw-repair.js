@@ -75,8 +75,11 @@
             }
           } else if (!wanted && c.back[i]) {
             // (a back layer that is there but not owned is a ruin's smeared panel, not the wall:
-            // it is re-laid and claimed like a missing one)
-            if ((PW.get(world, x, y) & ID_MASK) === M.AIR && (!PW.getLayer(world, 'back', x, y) || PW.getOwner(world, x, y) !== b.id) && !job.seen.has(-i - 1)) {
+            // it is re-laid and claimed like a missing one; a room still full of unowned natural
+            // ground - a growing lot, a slide through the wound - is queued for digging out)
+            const now = PW.get(world, x, y) & ID_MASK;
+            const open = now === M.AIR && (!PW.getLayer(world, 'back', x, y) || PW.getOwner(world, x, y) !== b.id);
+            if ((open || diggable(now, x, y)) && !job.seen.has(-i - 1)) {
               job.seen.add(-i - 1);
               job.queue.push({ x, y, i, back: true, p: 2 });
             }
@@ -93,6 +96,9 @@
         job.queue.sort((a, q) => ((a.y + LEAD[a.p]) - (q.y + LEAD[q.p])) || (q.p - a.p) || (Math.abs(q.x - cx) - Math.abs(a.x - cx)));
       }
     }
+    // Unowned natural ground standing inside the blueprint is the builders' to dig: a growing
+    // lot's hillside, or the slide that filled a wound (A2.3b). Never ore and never bedrock.
+    const diggable = (now, x, y) => PW.mat.terrain[now] && now !== M.ORE && now !== M.BEDROCK && !PW.getOwner(world, x, y);
     // Restore one queued cell. Debris in the wound is swept into the recycler first - that is
     // where the building's own HM comes from. The sort already orders the work storey by storey
     // with the frame ahead of the finery at each height, so every class builds in its turn.
@@ -118,6 +124,11 @@
             job.pool += HM_PER_DEBRIS;
             stats.recycled += 1;
             stats.hmFromDebris += HM_PER_DEBRIS;
+          } else if (diggable(now, cell.x, cell.y)) {
+            // (the room is dug out of the hillside; the spoil is worth a little)
+            PW.set(world, cell.x, cell.y, M.AIR, { quiet: true });
+            job.pool += HM_PER_DEBRIS * 0.5;
+            stats.dug = (stats.dug || 0) + 1;
           } else if (now !== M.AIR || (PW.getLayer(world, 'back', cell.x, cell.y) && PW.getOwner(world, cell.x, cell.y) === b.id)) { drop(cell); continue; }
           if (!pay()) return false;
           PW.setLayer(world, 'back', cell.x, cell.y, c.back[i]);
@@ -136,12 +147,16 @@
         if (!openish && !LOOSE[now] && PW.getOwner(world, cell.x, cell.y) !== b.id) {
           // A risen core standing in the cell moves on later: the work waits its turn again.
           if (now === M.CORE || now === M.STEEL) { job.queue.pop(); job.queue.unshift(cell); deferred += 1; continue; }
-          drop(cell); continue;
+          if (!diggable(now, cell.x, cell.y)) { drop(cell); continue; }
         }
         if (LOOSE[now]) {
           job.pool += HM_PER_DEBRIS;
           stats.recycled += 1;
           stats.hmFromDebris += HM_PER_DEBRIS;
+        } else if (!openish && diggable(now, cell.x, cell.y)) {
+          // (dug, not found: the ground the blueprint grows through is worth half a heap cell)
+          job.pool += HM_PER_DEBRIS * 0.5;
+          stats.dug = (stats.dug || 0) + 1;
         }
         if (!pay()) return false;
         PW.set(world, cell.x, cell.y, c.mat[i], { quiet: true });
@@ -197,7 +212,10 @@
         // rebuilt and clear, and works on from there); the descent corridors of the cores still
         // out stay open under them. When enough stands the ruin is over, the vaults close and
         // the fine work follows.
-        const risen = PW.REBUILD_RUINS && b.ruined && ((b.cores || []).some((core) => core.free || core.settled) || !!b.coresHome);
+        // (a building going up for the first time counts too: its cores are already home in
+        // fresh beds, nothing ever rose - but below the ruin line it must still be worked)
+        const risen = PW.REBUILD_RUINS && b.ruined && (!!b.underConstruction
+          || (b.cores || []).some((core) => core.free || core.settled) || !!b.coresHome);
         if (b.ruined && !risen) continue;
         if (job.scanCol < b.canvas.width) scan(b, job);
         if (!job.queue.length) {
