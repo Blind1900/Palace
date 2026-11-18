@@ -200,6 +200,7 @@
     const p = toWorld(event);
     const spec = tools[tool];
     if (tool === 'torch') torch(p.x, p.y);
+    else if (tool === 'life') life.seed(p.x, p.y, Math.max(3, brush));
     else if (typeof spec === 'function') paint(p.x, p.y, brush, spec);
   }
   canvas.addEventListener('contextmenu', (event) => event.preventDefault());
@@ -219,7 +220,7 @@
     if (tool === 'digL' || tool === 'digR') planDig(tool === 'digL' ? 'left' : 'right', toWorld(event));
     if (!drag.active) return;
     if (drag.pan) renderer.panByDevice((event.clientX - drag.x) * renderer.view.dpr, (event.clientY - drag.y) * renderer.view.dpr);
-    else if (typeof tools[tool] === 'function' || tool === 'torch') useTool(event);
+    else if (typeof tools[tool] === 'function' || tool === 'torch' || tool === 'life') useTool(event);
     drag.x = event.clientX; drag.y = event.clientY;
   });
   const release = () => { drag.active = false; };
@@ -276,6 +277,7 @@
     heat.draw(renderer, now / 1000);
     drawPreview(now / 1000);
     particles.draw(renderer);
+    if (life.draw) life.draw(renderer);
     PW.drawEffects(world, renderer, (now - (frame.prev || now)) / 1000);
     frame.prev = now;
     frames += 1;

@@ -1073,6 +1073,19 @@
     }
     world.floraFooting = i;
   }
+  // Plants lost - felled, uprooted, blown away, fallen with their ground - are remembered where they
+  // stood (world.floraLost), so the ground can grow them back from the plants still standing round
+  // it (see pw-life). (A dead tree is remembered without its kind: what grows there is whatever
+  // grows round it.)
+  const LOST_MAX = 4000;
+  function noteLost(world) {
+    const lost = world.floraLost || (world.floraLost = []);
+    for (const r of world.flora) {
+      if (!r.felled || r.fallen || (r.kind !== 'tree' && r.kind !== 'bush')) continue;
+      lost.push({ x: r.anchorX, type: r.type === 'deadTree' ? null : r.type, size: r.grow ? r.grow.full : r.size, look: r.look || null, at: world.tick || 0 });
+    }
+    if (lost.length > LOST_MAX) lost.splice(0, lost.length - LOST_MAX);
+  }
   // The plants struck or shaken lately settle (a couple of milliseconds' worth a tick).
   function step(world, particles) {
     footing(world);
@@ -1088,7 +1101,7 @@
       n += 1;
       if (performance.now() - t0 > 2) break;
     }
-    if (felled) { world.flora = world.flora.filter((r) => !r.felled); world.floraIndex = null; }
+    if (felled) { noteLost(world); world.flora = world.flora.filter((r) => !r.felled); world.floraIndex = null; }
     return n;
   }
   // The plant drawn at (x, y), found through a coarse index of their boxes.
@@ -1147,7 +1160,7 @@
       record.from = from;
       (world.floraDirty || (world.floraDirty = new Set())).add(record);
     }
-    if (felled) { world.flora = world.flora.filter((record) => !record.felled); world.floraIndex = null; }
+    if (felled) { noteLost(world); world.flora = world.flora.filter((record) => !record.felled); world.floraIndex = null; }
     return felled;
   }
   // A blast of radius r and power p at (from.x, from.y) reached the plant. How hard it pushed it:

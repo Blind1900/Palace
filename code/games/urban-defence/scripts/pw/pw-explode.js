@@ -219,8 +219,10 @@
     if (world.stability) {
       world.stability.shock(cx, cy, Math.pow(r * power, 3));
     }
-    // (and everything loose in and about the crater - underground too - is stirred by it)
+    // (and everything loose in and about the crater - underground too - is stirred by it; the Game
+    // of Life's cells it reaches are blown away)
     PW.stir(world, cx - r * 2, cy - r * 2, cx + r * 2, cy + r * 2, 120);
+    if (world.lifeGame) world.lifeGame.clear(cx - r * 1.6, cy - r * 1.6, cx + r * 1.6, cy + r * 1.2);
     return { removed, damaged };
   }
 
