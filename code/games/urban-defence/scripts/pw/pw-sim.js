@@ -556,7 +556,7 @@
       const keep = [];
       for (let n = 0; n < count; n += 1) {
         const c = list[(n + cursor) % count];
-        if (performance.now() - started > budgetMs && processed > 0) { keep.push(c); continue; }
+        if (!PW.DETERMINISTIC && performance.now() - started > budgetMs && processed > 0) { keep.push(c); continue; }
         const { moved, powder } = processChunk(c);
         processed += 1;
         if (powder) hadPowder[c] = 1;

@@ -99,7 +99,9 @@
   };
   // Torch: heat the brush disc to flame temperature (ignites grass, plants and wood; boils water).
   const torch = (x, y) => heat.heatDisc(x, y, Math.max(3, brush), 900);
-  let tool = 'pan', brush = 10, paused = false;
+  // (a deterministic run - see PW.DETERMINISTIC - starts paused: the world steps only when it is
+  // told to, never by however many frames happen to pass before a test takes hold of it)
+  let tool = 'pan', brush = 10, paused = PW.DETERMINISTIC;
   function paint(x, y, radius, make) {
     for (let dy = -radius; dy <= radius; dy += 1) for (let dx = -radius; dx <= radius; dx += 1) {
       if (dx * dx + dy * dy > radius * radius) continue;

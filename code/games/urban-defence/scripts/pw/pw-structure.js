@@ -162,7 +162,7 @@
         due.delete(id);
         last.set(id, tick);
         analyse(building(id));
-        if (performance.now() - t0 > budgetMs) break;
+        if (!PW.DETERMINISTIC && performance.now() - t0 > budgetMs) break;
       }
       stats.ms = performance.now() - t0;
       stats.maxMs = Math.max(stats.maxMs, stats.ms);

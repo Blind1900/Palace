@@ -789,6 +789,12 @@
     slide, spread, settlesTo, buoyancy, fade, passesLight };
   PW.CHUNK = CHUNK;
   PW.CHUNK_SHIFT = CHUNK_SHIFT;
+  // The simulation keeps to a few milliseconds a tick (the powder sim, the structure checks, the
+  // plants settling): on a slow or busy machine it runs behind, a chunk or a building put off to
+  // the next tick, rather than dropping frames - so the same world played twice can come out a
+  // little differently. DETERMINISTIC (?det=1, or set by a test) drops those time limits: every
+  // tick does all its work, and a world comes out the same on any machine.
+  PW.DETERMINISTIC = typeof location !== 'undefined' && /[?&]det=1(&|$)/.test(location.search);
   PW.CHUNK_MASK = CHUNK_MASK;
   PW.CHUNK_CELLS = CHUNK_CELLS;
   PW.WATER_REACH = WATER_REACH;

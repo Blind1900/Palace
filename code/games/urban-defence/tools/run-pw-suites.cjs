@@ -11,11 +11,13 @@ const os = require('node:os');
 
 const args = Object.fromEntries(process.argv.slice(2).map((a) => a.replace(/^--/, '').split('=')));
 const jobs = Number(args.jobs || 2), seed = String(args.seed || 7), limit = Number(args.limit || 240);
+// (det=1: the physics suites run deterministic - no time-sliced work, the world stepped only by
+// the test - so they come out the same on a loaded machine; see PW.DETERMINISTIC)
 const SUITES = [
-  { name: 'pw-grounding' }, { name: 'pw-settlements' }, { name: 'pw-tunnels' }, { name: 'pw-mining' },
-  { name: 'pw-pipes' }, { name: 'pw-made-ground' }, { name: 'pw-physics' }, { name: 'pw-ore' }, { name: 'pw-fields' }, { name: 'pw-styles' }, { name: 'pw-sandbox' }, { name: 'pw-views' }, { name: 'pw-repair' },
+  { name: 'pw-grounding', params: 'det=1' }, { name: 'pw-settlements' }, { name: 'pw-tunnels' }, { name: 'pw-mining' },
+  { name: 'pw-pipes' }, { name: 'pw-made-ground' }, { name: 'pw-physics', params: 'det=1' }, { name: 'pw-ore' }, { name: 'pw-fields' }, { name: 'pw-styles' }, { name: 'pw-sandbox' }, { name: 'pw-views' }, { name: 'pw-repair' },
   { name: 'pw-slopes', params: 'gallery=slopes' }, { name: 'pw-mirror', params: 'gallery=mirror' },
-  { name: 'pw-fire', alone: true }, { name: 'pw-collapse', alone: true },
+  { name: 'pw-fire', alone: true, params: 'det=1' }, { name: 'pw-collapse', alone: true, params: 'det=1' },
 ].filter((s) => !args.only || args.only.split(',').includes(s.name));
 const root = path.resolve(__dirname, '..');
 const out = path.join(os.tmpdir(), 'claude-scratch', 'shots');

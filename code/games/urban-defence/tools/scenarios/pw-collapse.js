@@ -21,6 +21,13 @@ const coresA = coresUnder(A), coresB = coresUnder(B);
 const others = world.buildings.filter((b) => b !== A && b !== B);
 const decoBefore = (b) => { let n = 0; for (let y = b.ground - 120; y < b.ground; y += 1) for (let x = b.body.left - 300; x <= b.body.right + 300; x += 1) if (PW.getLayer(world, 'deco', x, y)) n += 1; return n; };
 const decoA = decoBefore(A);
+// (every cell of another building that flying or falling debris breaks, as it happens: the
+// builders patch a struck neighbour within seconds, so its health afterwards says little)
+const struck = new Map();
+const noteHit = (owner) => { if (owner > 0 && owner < 50000 && owner !== A.id && owner !== B.id) struck.set(owner, (struck.get(owner) || 0) + 1); };
+const chipWas = pwApp.particles.listeners.chip, damageWas = world.onDamage;
+pwApp.particles.listeners.chip = (owner, x, y) => { noteHit(owner); if (chipWas) chipWas(owner, x, y); };
+world.onDamage = (owner, ...rest) => { noteHit(owner); if (damageWas) damageWas(owner, ...rest); };
 
 // A: the whole ground floor; B: the left half of its ground floor (whatever its width).
 for (let x = A.body.left + 6; x <= A.body.right - 6; x += 14) pwApp.explode(x, A.ground - 16, 14, 1.3);
@@ -70,8 +77,10 @@ const spread = (b, dir) => {
 const dirB = (B.failures || []).length ? -1 : -1;
 check(spread(B, dirB) > heightOf(B) * 0.4, `the tipped tower's rubble reaches out the way it fell (${spread(B, dirB)} cells past its wall, height ${heightOf(B)})`);
 // Debris hurts what it hits: neighbouring buildings, trees and fittings, the ground.
+pwApp.particles.listeners.chip = chipWas; world.onDamage = damageWas;
 const hurt = others.filter((b) => b.health !== undefined && b.health < 1).length;
-check(hurt > 0 || fragments.stats.chipped > 0, `falling debris damages neighbouring buildings (${hurt} neighbours damaged, ${fragments.stats.chipped} cells chipped)`);
+const struckCells = [...struck.values()].reduce((n, v) => n + v, 0);
+check(hurt > 0 || struck.size > 0, `falling debris damages neighbouring buildings (${struck.size} neighbours struck, ${struckCells} hits on them, ${hurt} still damaged; ${fragments.stats.chipped} cells chipped by falling pieces, ${pwApp.particles.stats.chipped} by debris)`);
 // (struck by flying debris, a lamp or gate that loses its footing or much of itself topples)
 const toppled = PW.streetProps ? PW.streetProps.stats.toppled : 0;
 check((fragments.stats.swept || 0) + toppled > 0 && decoBefore(A) < decoA, `falling debris knocks down trees, lamps and fittings (${fragments.stats.swept || 0} swept, ${toppled} street props toppled, deco ${decoA} -> ${decoBefore(A)})`);

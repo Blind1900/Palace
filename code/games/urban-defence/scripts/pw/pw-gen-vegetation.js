@@ -1224,7 +1224,7 @@
       record.from = null;
       if (record.felled) felled += 1;
       n += 1;
-      if (performance.now() - t0 > 2) break;
+      if (!PW.DETERMINISTIC && performance.now() - t0 > 2) break;
     }
     if (felled) { noteLost(world); world.flora = world.flora.filter((r) => !r.felled); world.floraIndex = null; }
     return n;
