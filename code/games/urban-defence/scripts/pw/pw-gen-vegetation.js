@@ -592,10 +592,11 @@
   }
   // Leaves cut loose from their wood come down together, as a mass - sinking slowly, swaying and
   // spreading as they go, carried along on the wind, like a heavy gas settling - never left
-  // hanging in the air. (cells: [x, y, ...] of plant cells to let go; charred ones crumble.)
+  // hanging in the air. (cells: [x, y, ...] of plant cells to let go; charred ones crumble. `from`:
+  // a blast that tore them off - the wave throws them out from it.)
   const LEAVES_MAX = 1500;      // leaves let go at a time as falling leaves (of a bigger mass, every
                                 // second, third... of them)
-  function fallLeaves(world, particles, cells) {
+  function fallLeaves(world, particles, cells, from = null) {
     const F = PW.PARTICLE, n = cells.length / 2, stride = Math.max(1, Math.ceil(n / LEAVES_MAX));
     for (let j = 0; j < n; j += 1) {
       const x = cells[j * 2], y = cells[j * 2 + 1];
@@ -604,7 +605,12 @@
         if (flags & PW.FLAG.CHARRED) charcoal(world, particles, x, y, color, 0, 0);
         else if (j % stride === 0) {
           const wind = world.air && world.air.wind ? world.air.wind(x, y)[0] : 0;
-          particles.spawn(x + 0.5, y + 0.5, wind * 0.3, 4 + (PW.hash2(x, y) & 7), 0, color, F.LEAF, 2 + (PW.hash2(y, x) & 3) * 0.5);
+          let vx = wind * 0.3, vy = 4 + (PW.hash2(x, y) & 7);
+          if (from && from.power) {
+            const dx = x + 0.5 - from.x, dy = y + 0.5 - from.y, d = Math.hypot(dx, dy) || 1, v = Math.min(160, from.power * 4500 / (d + 40));
+            vx += dx / d * v; vy += dy / d * v * 0.5 - v * 0.2;
+          }
+          particles.spawn(x + 0.5, y + 0.5, vx, vy, 0, color, F.LEAF, 2 + (PW.hash2(y, x) & 3) * 0.5);
         }
       }
       PW.setLayer(world, 'deco', x, y, 0);
@@ -647,9 +653,9 @@
   // A plant is wood (trunk, boughs, twigs) holding leaves, and each leaf belongs to the wood nearest
   // it: a bough that breaks off takes its own leaves with it, so there is never a cut through the
   // crown. What is still joined, wood to wood, to its roots on solid ground stands with its leaves;
-  // each piece cut off falls as one rigid piece - a bough, a crown, the whole tree - and comes to
-  // rest lying where it lands. Falling plants do not hurt what they land on, so one tree coming
-  // down does not set off the next. Leaves come off only in a fire or in the heart of a blast.
+  // what is cut off comes apart by branch, each branch falling free as one rigid piece, and comes
+  // to rest lying where it lands. Falling plants do not hurt what they land on, so one tree coming
+  // down does not set off the next. A blast takes most of the leaves off first (see blowLeaves).
   // The cells of a plant still drawn, sorted: 1 wood, 2 leaf (in its box; see the mask).
   function cellsOf(world, record) {
     const { mask } = record, sprite = mask ? null : regenerate(record);
@@ -765,6 +771,83 @@
     for (const k of ks) if (box.kind[k] === 1 && (best < 0 || girth[k] > girth[best])) best = k;
     return best >= 0 ? [best] : [];
   }
+  // A blast takes a plant's leaves first: of those in the box, the share `share(d)` (d: their
+  // distance from the blast over its radius; no blast, d is 0) comes off at once, falling and
+  // thrown out from it (see fallLeaves). They are dropped from `box`'s kinds too.
+  function blowLeaves(world, particles, box, from, share) {
+    const { left, top, w, n, kind } = box, cells = [];
+    for (let k = 0; k < n; k += 1) {
+      if (kind[k] !== 2) continue;
+      const x = left + (k % w), y = top + ((k / w) | 0);
+      const d = from && from.r ? Math.hypot(x - from.x, y - from.y) / from.r : 0;
+      if ((PW.hash3(x, y, 5) & 255) / 255 >= share(d)) continue;
+      cells.push(x, y); kind[k] = 0;
+    }
+    if (cells.length) fallLeaves(world, particles, cells, from);
+    return cells.length / 2;
+  }
+  // A piece cut off a plant comes apart by branch. From its foot (`foot`: cells of the box), the
+  // wood is grown out through the stoutest way first (see stems); where the wood has thinned to a
+  // share of the girth its branch started at - a limb leaving the trunk, the trunk's own top, a
+  // twig off a limb - a branch of its own starts. A branch of too few cells stays with the stem it
+  // grows on. Leaves go with the nearest wood. ([{ ks, foot }, ...]: the cells of each
+  // branch and the cells it was joined at.)
+  const BRANCH_THIN = 0.67, BRANCH_MIN = 20;
+  function branches(box, ks, foot) {
+    const { w, h, n, kind } = box;
+    if (!foot.length) return [{ ks, foot }];
+    const girth = box.girth || (box.girth = girthOf(kind, w, h)), stem = stems(kind, girth, w, h, foot);
+    const mine = new Uint8Array(n);
+    for (const k of ks) mine[k] = 1;
+    const owner = new Int32Array(n), up = [0, 0], size = [0, 0], starts = [null, foot.filter((k) => mine[k] && kind[k] === 1)];
+    const base = [0, starts[1].reduce((g, k) => Math.max(g, stem[k]), 1)];
+    const buckets = Array.from({ length: 16 }, () => []);
+    for (const k of starts[1]) { owner[k] = 1; size[1] += 1; buckets[stem[k]].push(k); }
+    const wood = [];
+    for (let b = 15; b >= 0; b -= 1) {
+      const list = buckets[b];
+      while (list.length) {
+        const k = list.pop(), x = k % w, y = (k / w) | 0;
+        wood.push(k);
+        for (let dy = -1; dy <= 1; dy += 1) {
+          for (let dx = -1; dx <= 1; dx += 1) {
+            const nx = x + dx, ny = y + dy;
+            if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+            const j = ny * w + nx;
+            if (kind[j] !== 1 || !mine[j] || owner[j]) continue;
+            if (stem[j] <= base[owner[k]] * BRANCH_THIN) { owner[j] = size.length; up.push(owner[k]); size.push(1); starts.push([j]); base.push(Math.max(1, stem[j])); }
+            else { owner[j] = owner[k]; size[owner[k]] += 1; }
+            buckets[Math.min(stem[j], b)].push(j);
+          }
+        }
+      }
+    }
+    // (a small branch, and the small ones off it, stay with the stem they grow on)
+    const own = new Int32Array(size.length);
+    for (let id = size.length - 1; id > 1; id -= 1) if (size[id] < BRANCH_MIN) size[up[id]] += size[id];
+    for (let id = 1; id < size.length; id += 1) own[id] = id > 1 && size[id] < BRANCH_MIN ? own[up[id]] : id;
+    const label = new Int32Array(n), queue = [];
+    for (const k of wood) { label[k] = own[owner[k]]; queue.push(k); }
+    for (let q = 0; q < queue.length; q += 1) {
+      const k = queue[q], x = k % w, y = (k / w) | 0;
+      for (let dy = -1; dy <= 1; dy += 1) {
+        for (let dx = -1; dx <= 1; dx += 1) {
+          const nx = x + dx, ny = y + dy;
+          if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+          const j = ny * w + nx;
+          if (kind[j] === 2 && mine[j] && !label[j]) { label[j] = label[k]; queue.push(j); }
+        }
+      }
+    }
+    const out = new Map();
+    for (const k of ks) {
+      const id = label[k] || 1;
+      let part = out.get(id);
+      if (!part) out.set(id, part = { ks: [], foot: id === 1 ? starts[1] : starts[id] });
+      part.ks.push(k);
+    }
+    return [...out.values()];
+  }
   // Where a plant's weight bears down: the middle of its wood, moved over by the wind on its crown
   // (the wind's push on all of it, at the height of its middle over its foot, over its weight).
   function balance(world, record, cells) {
@@ -869,8 +952,10 @@
     // A tree stands by its base. Where the ground under its trunk and roots gives way - a crater,
     // a slide, a dug hole - what is left of it must bear the tree: the middle of its weight (pushed
     // over by the wind on its crown) over the ground still under it, roots holding on either side
-    // of a hole. If not, it goes over ("timber!") about the edge of that ground, the way its weight
-    // hangs; with nothing under it at all, it drops free.
+    // of a hole. If not, it is no longer attached: nothing of it stays rooted, most of its leaves
+    // shake off, and it comes apart by branch, each falling free (no swing about a hinge: the air,
+    // the wind and what it lands on turn it).
+    let adrift = false, tip = 0;
     if (!record.fallen && record.kind === 'tree' && record.foot) {
       const tw = Math.max(2, Math.round((record.size || 60) * 0.03));
       let trunk = 0, held = 0, x0 = Infinity, x1 = -Infinity;
@@ -882,20 +967,19 @@
       }
       if (trunk && held < trunk) {
         box = cellsOf(world, record);
-        if (x0 > x1) return timber(world, particles, record, lean(world, record), null, box);
-        const cx = balance(world, record, box);
-        if (cx < x0) return timber(world, particles, record, -1, x0, box);
-        if (cx > x1 + 1) return timber(world, particles, record, 1, x1 + 1, box);
+        if (x0 > x1) adrift = true;
+        else { const cx = balance(world, record, box); adrift = cx < x0 || cx > x1 + 1; tip = cx < x0 ? -1 : 1; }
       }
     }
     if (!box) box = cellsOf(world, record);
     const { left, top, w, h, n, kind, cells } = box;
     if (!cells) { record.felled = true; return 0; }
+    if (adrift) blowLeaves(world, particles, box, from, () => (from ? 0.9 : 0.6));
     // label: 1 wood joined to the roots (wood at the foot - anywhere along it, for a fallen tree -
     // on ground or rubble), 2.. each piece of wood cut off from them; leaves take their wood's.
     const label = new Int32Array(n), queue = [];
     for (let k = 0; k < n; k += 1) {
-      if (kind[k] !== 1) continue;
+      if (kind[k] !== 1 || adrift) continue;
       const wx = left + (k % w), wy = top + ((k / w) | 0);
       if ((record.fallen || wy >= record.row - 6) && holds(world, wx, wy + 1)) { label[k] = 1; queue.push(k); }
     }
@@ -947,7 +1031,8 @@
       if (!list) pieces.set(label[k], list = []);
       list.push(k);
     }
-    const side = from ? (record.anchorX >= from.x ? 1 : -1) : lean(world, record);
+    // (which way it goes: away from the blast; or over the side of its ground its weight hangs off)
+    const side = from ? (record.anchorX >= from.x ? 1 : -1) : adrift && tip ? tip : lean(world, record);
     const at = from ? null : joints(label, kind, w, h);
     for (const [id, ks] of pieces) {
       fell += ks.length;
@@ -964,32 +1049,37 @@
       }
       // (its foot: where it broke off; or, cut loose all round, its end nearest the plant's foot)
       const joint = at && at.get(id);
-      const foot = joint ? footOf(box, ks, joint[0], joint[1], 3) : record.fallen ? thickest(box, ks) : footOf(box, ks, record.anchorX - left + 0.5, record.row - top - 1, 0);
-      fall(world, particles, lift(world, box, ks, foot), side, from, joint ? { x: left + joint[0], y: top + joint[1] } : null);
+      const foot = joint ? footOf(box, ks, joint[0], joint[1], 3) : record.fallen ? thickest(box, ks) : trunkFoot(record, box, ks);
+      // (it comes apart by branch, each going its own way)
+      for (const part of branches(box, ks, foot)) fall(world, particles, lift(world, box, part.ks, part.foot), from, side);
     }
     // (and what is left hangs together: leaves with nothing left holding them fall)
     looseAround(world, particles, record);
     if (!held) record.felled = true;
     return fell;
   }
-  // A piece of a plant falls: flung away from a blast; or broken off where it was joined to the
-  // tree, swinging down about the break before it comes away (a piece hanging from it already just
-  // drops); or, cut loose all round, dropping free - the air and the wind turning and carrying it
-  // as its shape and weight let them (see pw-fragments). (With no falling-piece system, it is drawn
-  // back where it lands at once.)
-  function fall(world, particles, data, side, from, joint = null) {
+  // A piece of a plant falls: flung away from a blast, or, cut loose, dropping free - the air and
+  // the wind turning and carrying it as its shape and weight let them (see pw-fragments). Nothing
+  // swings it about a hinge. A tall piece dropping free is never balanced on end: the way the tree
+  // leant (`side`: its slope, its crown) starts it over, and its weight, once it lands, takes it
+  // on over. (With no falling-piece system, it is drawn back where it lands at once.)
+  const LEAN_SPIN = 0.06;       // rad/s a tall piece cut loose sets off turning, the way it leant
+  function fall(world, particles, data, from, side = 0) {
     if (!world.fragments) { land(world, particles, data, null); return; }
-    let mx = 0, my = 0, m = 0;
-    for (let j = 0; j < data.x.length; j += 1) if (data.solid[j]) { mx += data.x[j] + 0.5; my += data.y[j] + 0.5; m += 1; }
+    let mx = 0, my = 0, m = 0, x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+    for (let j = 0; j < data.x.length; j += 1) {
+      if (!data.solid[j]) continue;
+      const x = data.x[j], y = data.y[j];
+      mx += x + 0.5; my += y + 0.5; m += 1;
+      if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+    }
     mx /= m || 1; my /= m || 1;
     if (from && from.power) {
       const dx = mx - from.x, dy = my - from.y, d = Math.hypot(dx, dy) || 1;
       const v = Math.min(240, from.power * 9000 / (d + 40));
       const omega = (PW.hash2(mx | 0, 7) & 1 ? 1 : -1) * (0.5 + (PW.hash2(my | 0, 9) & 7) * 0.15);
       world.fragments.spawn({ data, flora: true, vx: dx / d * v, vy: dy / d * v * 0.5 - v * 0.3, omega, generation: 0 });
-    } else if (joint && my < joint.y + 4) {
-      world.fragments.spawn({ data, flora: true, pivot: joint, dir: Math.sign(mx - joint.x) || side, omega: 0, base: Math.ceil(joint.y) + 1 });
-    } else world.fragments.spawn({ data, flora: true, vx: 0, vy: 0, omega: 0 });
+    } else world.fragments.spawn({ data, flora: true, vx: 0, vy: 0, omega: y1 - y0 > x1 - x0 ? side * LEAN_SPIN : 0 });
   }
   // Something strikes a plant at (x, y) with `power` (about 1 for a fast lump of debris, 8 for a
   // heavy piece of a building). Leaves are not knocked off - what flies through a crown passes
@@ -1164,55 +1254,36 @@
     return felled;
   }
   // A blast of radius r and power p at (from.x, from.y) reached the plant. How hard it pushed it:
-  // its strength over its distance from the plant. Close to a strong blast the plant is broken
-  // apart - its trunk and boughs snap where the blast reached them and the pieces are flung away;
-  // further off it is knocked over whole ("timber!"), swinging down about its foot away from the
-  // blast; further still it stands.
+  // its strength over its distance from the plant. The wave takes most of its leaves first, the
+  // more the harder it pushed. Close to a strong blast the plant is broken apart - its trunk and
+  // boughs snap where the blast reached them. A blast at its base that its trunk cannot bear there
+  // (the push on it there over its thickness) snaps it off its roots. Otherwise it stands. What is
+  // snapped off comes apart by branch and is flung away (see settle and fall).
+  const BASE_SNAP = 6;          // a push of 1 snaps a trunk this many cells across at its base
+  const push = (from, d) => from.power * from.r / (d + from.r * 0.5);
   function blastTree(world, particles, record, from) {
     const nx = Math.max(record.x, Math.min(record.x + record.width, from.x)), ny = Math.max(record.y, Math.min(record.y + record.height, from.y));
-    const d = Math.hypot(from.x - nx, from.y - ny), push = from.power * from.r / (d + from.r * 0.5);
-    const side = record.anchorX >= from.x ? 1 : -1;
-    if (d < from.r * 0.6 && from.power >= 1) {
-      const { left, top, w, n, kind } = cellsOf(world, record);
+    const d = Math.hypot(from.x - nx, from.y - ny), near = d < from.r * 0.6 && from.power >= 1;
+    const box = cellsOf(world, record);
+    blowLeaves(world, particles, box, from, near ? (dd) => Math.max(0.5, 0.95 - dd * 0.3) : () => Math.min(0.9, push(from, d) * 0.6));
+    if (near) {
+      const { left, top, w, n, kind } = box;
       for (let k = 0; k < n; k += 1) {
         if (kind[k] !== 1) continue;
         const x = left + (k % w), y = top + ((k / w) | 0);
         if (x % 6 || y % 6 || Math.hypot(x - from.x, y - from.y) > from.r) continue;
         if (isWood(world, x, y)) cut(world, particles, x, y);
       }
-      settle(world, particles, record, from);
-    } else if (push > 0.3 && !record.fallen) topple(world, particles, record, side, 0.25 + push * 0.4);
-    else settle(world, particles, record, from);
-  }
-  // A tree whose ground was hollowed out comes down whole: swinging over about the edge of the
-  // ground still under it (pivotX), or - nothing under it at all - dropping, as the slope it stood
-  // on tips it.
-  function timber(world, particles, record, side, pivotX, box = cellsOf(world, record)) {
-    const { n, kind } = box;
-    const ks = [];
-    for (let k = 0; k < n; k += 1) if (kind[k]) ks.push(k);
-    record.felled = true;
-    if (!ks.length) return 0;
-    const data = lift(world, box, ks, trunkFoot(record, box, ks));
-    if (!world.fragments) land(world, particles, data, null);
-    else if (pivotX === null) world.fragments.spawn({ data, flora: true, vx: 0, vy: 0, omega: side * 0.08 });
-    else world.fragments.spawn({ data, flora: true, pivot: { x: pivotX, y: record.row }, dir: side, omega: side * 0.05, base: record.row + 1 });
-    world.floraIndex = null;
-    // (the leaves of the crowns it was tangled in, left with nothing holding them, fall)
-    looseAround(world, particles, record);
-    return ks.length;
-  }
-  // The whole plant falls as one piece, swinging down about the foot of its trunk.
-  function topple(world, particles, record, side, omega) {
-    const box = cellsOf(world, record), { n, kind } = box;
-    const ks = [];
-    for (let k = 0; k < n; k += 1) if (kind[k]) ks.push(k);
-    record.felled = true;
-    if (!ks.length) return;
-    const data = lift(world, box, ks, trunkFoot(record, box, ks));
-    if (world.fragments) world.fragments.spawn({ data, flora: true, pivot: { x: record.anchorX, y: record.row }, dir: side, omega: side * omega, base: record.row + 1 });
-    else land(world, particles, data, null);
-    looseAround(world, particles, record);
+    }
+    if (!record.fallen && record.kind === 'tree' && record.foot) {
+      // (the trunk a little over its roots)
+      for (let y = record.row - 3; y >= record.row - 8; y -= 1) {
+        if (!isWood(world, record.anchorX, y)) continue;
+        if (push(from, Math.hypot(record.anchorX - from.x, y - from.y)) * BASE_SNAP >= stem(world, record.anchorX, y).across) cut(world, particles, record.anchorX, y);
+        break;
+      }
+    }
+    settle(world, particles, record, from);
   }
   // A plant or a piece of one comes to rest: drawn again where it lies, as a fallen plant of its own
   // that can burn, be struck and be knocked about again. Where it was pressed into the ground or
@@ -1523,6 +1594,6 @@
 
   PW.generateVegetation = generateVegetation;
 
-  PW.flora = { plant, fell, regenerate, afterBlast, strike, settle, step, recordAt, shed, land, topple, cut, makeGround, frozenGround, FLAT, tuft, bendReach, AIR_DRAG, loose };
+  PW.flora = { plant, fell, regenerate, afterBlast, strike, settle, step, recordAt, shed, land, cut, makeGround, frozenGround, FLAT, tuft, bendReach, AIR_DRAG, loose };
   PW.vegetation = { broadleaf, conifer, birch, bush, deadTree, boulder, reeds, stamp, createSprite, foliage, limb, trim, spanDrop, spanRise };
 })();

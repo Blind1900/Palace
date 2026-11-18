@@ -15,8 +15,6 @@
   const { phase, structural, hardness, breaksTo, palettes } = PW.mat;
 
   const RELEASE = 0.95;       // a hinging piece swings free after this much rotation (radians)
-  const FLORA_RELEASE = 2.2;  // ...a tree only once past lying flat (its roots hold its foot on
-                              // the edge until then: over a drop, it goes on over)
   const SPLIT_MIN = 300;      // pieces at least this big can crack into chunks
   const CHUNK_MIN = 36;       // chunks smaller than this turn straight into debris
   const MAX_PIECES = 100;
@@ -489,7 +487,7 @@
             const c = Math.cos(p.angle), sn = Math.sin(p.angle);
             p.px = p.hx + p.rx * c - p.ry * sn;
             p.py = p.hy + p.rx * sn + p.ry * c;
-            if (Math.abs(p.angle) > (p.flora ? FLORA_RELEASE : RELEASE)) {
+            if (Math.abs(p.angle) > RELEASE) {
               // (what is left of it, its foot crushed away, goes on free as a piece of its own)
               if (p.eaten) { done = rebuild(p); break; }
               const [wx, wy] = centre(p);
@@ -992,14 +990,6 @@
         const [cx, cy] = centre(p), rn = (wx - cx) * ny - (wy - cy) * nx;
         const blow = hit / (1 / p.mass + rn * rn / Math.max(1, p.inertia)) / wentN, g3 = p.ptGirth[weakest >> 1] ** 3;
         if (hit > 0 && (blow > WOOD_BLOW * g3 || p.mass * G / wentN > WOOD_LOAD * g3) && snapBranch(p, weakest)) return false;
-      }
-      // A toppling plant's roots hold its foot on its pivot: what its trunk or limbs come down on
-      // stops it turning there - it lies on it, its foot still on the edge - unless its weight is
-      // out beyond it: then it tips on over that, its foot lifting (free, below).
-      if (p.flora && p.mode === 'hinge' && (centre(p)[0] - wx) * p.dir <= 0) {
-        // (only if it is coming down onto it: turning the other way, it lifts off it)
-        if (p.omega * ((wx - p.hx) * fy - (wy - p.hy) * fx) < 0) { p.omega *= -0.05; p.touched = p.age; }
-        return false;
       }
       // From now on it moves free, about whatever it rests on or strikes (made over first if its
       // foot was crushed away).
