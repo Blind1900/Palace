@@ -127,7 +127,12 @@ if (asian) {
   for (const s of world.settlements) {
     for (let x = s.streetLeft + 10; x < s.streetRight - 10; x += 7) {
       const g = world.groundTop[x];
-      if (!(PW.getFlags(world, x, g) & PW.FLAG.ROAD) || PW.getOwner(world, x, g + 6)) continue;
+      if (!(PW.getFlags(world, x, g) & PW.FLAG.ROAD)) continue;
+      // (a column someone's work crosses - a bed's gallery, the god-metal skirt a lot runs out
+      // under the later street - carries that work in place of the courses)
+      let owned = false;
+      for (let d = 4; d < 11 && !owned; d += 1) owned = PW.getOwner(world, x, g + d) > 0;
+      if (owned) continue;
       streets += 1;
       if (coursed(x)) built += 1;
     }

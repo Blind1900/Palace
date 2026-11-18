@@ -22,7 +22,9 @@
     const c = K.createCanvas(36, 48, 44);
     const oy = K.coreUnit(c, 18, 42);
     K.bakeLights(c, 'modern');
-    const groundY = ground + 28;
+    // Deep in natural ground (the user's rule: cores sit deeper in the wild and rise up for
+    // urban ground - the grown building's bed stands near the surface; the seed sinks).
+    const groundY = ground + 42;
     PW.stampBuilding(world, c, x - 18, groundY, { owner: 0 });
     const coreY = groundY + oy - c.ground;
     const tap = world.pipes && world.pipes.connectCore ? world.pipes.connectCore(x, coreY, side) : null;
@@ -85,12 +87,11 @@
     record.growing = true;
     record.grewAt = world.tick || 0;
     world.buildings.push(record);
-    // The bundle threads every vault core of the newborn building.
-    if (world.pipes && world.pipes.connectCore) {
-      for (const core of record.cores) {
-        if (core.orb || core.standing || !core.vault) continue;
-        world.pipes.connectCore(core.x, core.y, side, world.pipes.TAPS && world.pipes.TAPS.population, record.id);
-      }
+    // The bundle threads every vault core of the newborn building, and the god's roots go down.
+    for (const core of record.cores) {
+      if (core.orb || core.standing || !core.vault) continue;
+      if (world.pipes && world.pipes.connectCore) world.pipes.connectCore(core.x, core.y, side, world.pipes.TAPS && world.pipes.TAPS.population, record.id);
+      if (PW.foundations && PW.foundations.coreRoots) PW.foundations.coreRoots(world, core.x, core.vault.bottom + 12, record.id);
     }
     world.repair.notify(record.id);
     site.building = record.id;

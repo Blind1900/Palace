@@ -502,14 +502,19 @@
     }
     // The space between the cores is no bare earth: a reinforced concrete gallery ties bed to
     // bed, military-grade - the vaults' hazard-banded rim runs on across it, poured concrete in
-    // shuttering courses below, bolted at the joints. The bundle sleeves through it (painted
-    // over the concrete), and in a collapse it breaks to concrete debris like any foundation.
+    // shuttering courses below, bolted at the joints. And it RADIATES from the cores (the user's
+    // rule: the cores create everything): finished god-metal at each bed, roughening and
+    // earthening toward the middle of the span; a dashed ink circuit trace runs bed to bed with
+    // the odd white point in it, and every bolt carries a little down-pointed spear tip - the
+    // god's mark, kept subtle. The bundle sleeves through it, and in a collapse it breaks to
+    // concrete debris like any foundation.
     const vaults = (c.cores || []).filter((k) => !k.standing && k.vault).sort((p, q) => p.x - q.x);
     for (let i = 0; i + 1 < vaults.length; i += 1) {
       const a = vaults[i].vault, b2 = vaults[i + 1].vault;
       const x0 = a.x1 + VAULT.wall + 2, x1 = b2.x0 - VAULT.wall - 2;
       if (x1 - x0 < 2 || a.lid !== b2.lid) continue;
       const yTop = a.lid, yBot = Math.max(a.bottom, b2.bottom) + 10;
+      const halfSpan = Math.max(1, (x1 - x0) / 2);
       for (let y = yTop; y <= yBot; y += 1) {
         for (let x = x0; x <= x1; x += 1) {
           if (isSolid(c, x, y)) continue;
@@ -519,16 +524,26 @@
             solid(c, x, y, M.STEEL, hazard ? HAZARD : [40, 40, 44], ROLE.CRADLE);
             continue;
           }
+          // 1 against a bed, 0 midway between them: the finish radiates outward from the cores.
+          const t = 1 - Math.min(x - x0, x1 - x) / halfSpan;
+          if (y === yTop + 6 && (x - x0) % 3 !== 2) {
+            solid(c, x, y, M.FOUNDATION, (x & 15) === 8 ? WHITE_DIM : INK, ROLE.VAULT);
+            continue;
+          }
           const course = (y - yTop) % 8 === 0, seam = ((x - x0) % 14) === 0;
-          const bolt = course && seam;
+          const bolt = course && seam, tip = (y - yTop) % 8 === 1 && seam;
+          const rough = grain(x, y) < 3 + (1 - t) * 5;
           const color = bolt ? PLATE_LIT
-            : course ? [64, 67, 73]
-            : seam ? [78, 81, 87]
-            : tone([96, 100, 106], grain(x, y) < 3 ? 0.9 : 1);
+            : tip ? [20, 22, 26]
+            : course && t > 0.35 ? [64, 67, 73]
+            : seam && t > 0.35 ? [78, 81, 87]
+            : mix(tone([96, 100, 106], rough ? 0.88 : 1), [92, 86, 72], (1 - t) * 0.45);
           solid(c, x, y, M.FOUNDATION, color, ROLE.VAULT);
         }
       }
     }
+    // (the roots under each bed are world-side work - the canvas ends at the bed's underside;
+    // see PW.foundations.coreRoots, called on placement and on growth)
   }
 
   PW.buildingKit = {

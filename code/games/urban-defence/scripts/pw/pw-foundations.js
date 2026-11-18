@@ -581,6 +581,60 @@
   // ---- Place a building with its base ------------------------------------------------------------------
   // Plans the floor, cuts and builds the base, stamps the canvas at the floor (with its core vaults
   // under it) and returns { stamp, plan }. null if the lot can't take it.
+  // The god's work does not stop dead at the lot line: a skirt of its metal runs on just under
+  // the turf either side, stepping with the terrain and breaking up into it with distance - the
+  // city radiating outward from its cores (the user's roots/circuit rule), and the band's ends
+  // smoothed into the land instead of a vertical face.
+  function giftSkirt(world, p, owner) {
+    for (const side of [-1, 1]) {
+      const edge = side < 0 ? p.x0 : p.x1;
+      for (let d = 1; d <= 14; d += 1) {
+        const x = edge + side * d;
+        if (x < 2 || x >= world.width - 2) break;
+        const g = ground(world, x);
+        if (PW.getFlags(world, x, g) & FLAG.ROAD) break;        // the street's own base takes over
+        if (PW.getOwner(world, x, g + 2)) break;                // a neighbour's work already there
+        // Only bare, natural turf takes the skirt: any style's paving - or its flared road base
+        // reaching past the flags - stops it dead.
+        const sid = PW.get(world, x, g) & ID_MASK;
+        if (![M.GRASS, M.TOPSOIL, M.SOIL, M.CLAY, M.GRAVEL, M.STONE, M.SAND, M.LOOSE_SOIL, M.LOOSE_STONE].includes(sid)) break;
+        const depth = d < 6 ? 3 : d < 10 ? 2 : 1;
+        for (let k = 0; k < depth; k += 1) {
+          const y = g + 2 + k;
+          if ((PW.hash2(x, y) & 7) < (d > 8 ? 4 : d > 4 ? 2 : 0)) continue;   // breaking up with distance
+          const id = PW.get(world, x, y) & ID_MASK;
+          if (!PW.mat.terrain[id] || id === M.ORE || id === M.BEDROCK) continue;
+          const c = mix([96, 100, 106], [100, 92, 76], Math.min(1, d / 14));
+          put(world, x, y, M.FOUNDATION, tone(c, (PW.hash2(x, y) & 3) === 0 ? 0.88 : 1), owner);
+        }
+      }
+    }
+  }
+
+  // Roots: under every bed a few fingers of the god's metal wander down into the earth, an ink
+  // trace inside each, thinning to a black spear point - the circuit rooting the city (the
+  // user's rule: the cores radiate everything outward, deeper into natural ground). Never
+  // through ore or bedrock; the fingers thread what ground is really there.
+  function coreRoots(world, cx, yTop, owner) {
+    const lay = (x, y, color) => {
+      const id = PW.get(world, x, y) & ID_MASK;
+      if (!PW.mat.terrain[id] || id === M.ORE || id === M.BEDROCK) return;
+      put(world, x, y, M.FOUNDATION, color, owner);
+    };
+    for (let r = 0; r < 3; r += 1) {
+      let x = cx + [-7, 1, 8][r] + (PW.hash2(cx, r) & 1);
+      const len = 12 + (PW.hash2(cx + r * 17, yTop) & 15);
+      for (let d = 0; d < len; d += 1) {
+        const y = yTop + d;
+        if ((PW.hash2(x, y) & 3) === 3) x += (PW.hash2(y, x) & 1) ? 1 : -1;
+        const tipD = len - d;
+        if (tipD <= 2) { lay(x, y, [8, 8, 10]); continue; }
+        lay(x, y, d % 5 === 2 ? [40, 40, 44] : [84, 88, 94]);
+        if (tipD > 5) lay(x + 1, y, (d & 3) === 1 ? [8, 8, 10] : [74, 78, 84]);
+      }
+    }
+  }
+
   function place(world, canvas, worldX, options = {}) {
     const style = options.style || (canvas.meta && canvas.meta.style) || 'modern';
     const extent = measure(world, canvas, worldX, style);
@@ -600,11 +654,16 @@
     }
     const walls = p.uphill.map((side) => retainingWall(world, p, side, owner)).filter(Boolean);
     const under = underStructure(world, p, owner);
+    giftSkirt(world, p, owner);
     // (the cores' vaults hang under the floor with it, in the ground or among the stage's piers)
     const stamp = PW.stampBuilding(world, canvas, worldX, G, { owner });
+    for (const k of canvas.cores) {
+      if (k.standing || !k.vault) continue;
+      coreRoots(world, worldX + k.x, G + k.vault.bottom - canvas.ground + 12, owner);
+    }
     const cores = canvas.cores.map((c) => ({ x: worldX + c.x, y: G + c.y - canvas.ground }));
     return { stamp, plan: p, walls, under, cores, works: [extent.left, extent.right] };
   }
 
-  PW.foundations = { plan, measure, place, lie, allows, rockTerrace, STEEP, STYLE, CUT_MAX, CUT_MAX_HANGAR };
+  PW.foundations = { plan, measure, place, lie, allows, rockTerrace, coreRoots, STEEP, STYLE, CUT_MAX, CUT_MAX_HANGAR };
 })();
