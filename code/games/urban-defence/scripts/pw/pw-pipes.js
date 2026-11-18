@@ -20,9 +20,9 @@
   const ORE_BITS = [[240, 210, 255], [192, 107, 252], [155, 86, 203], [127, 71, 167]];
   // The three lanes, top to bottom inside the casing. `row` is the lane's row within the bore.
   const LANES = [
-    { resource: 'hm', row: 1, channel: [26, 20, 30], cargo: ORE_BITS, speed: 15, every: 0 },
-    { resource: 'sm', row: 3, channel: [14, 28, 14], cargo: [[127, 214, 91], [190, 206, 96], [96, 170, 70]], speed: 26, every: 0.3 },
-    { resource: 'water', row: 5, channel: [10, 24, 32], cargo: [[140, 210, 226], [96, 170, 214], [200, 236, 246]], speed: 42, every: 0.1 },
+    { resource: 'hm', row: 1, channel: [38, 28, 46], cargo: ORE_BITS, speed: 15, every: 0 },
+    { resource: 'sm', row: 3, channel: [24, 46, 24], cargo: [[127, 214, 91], [190, 206, 96], [96, 170, 70]], speed: 26, every: 0.3 },
+    { resource: 'water', row: 5, channel: [18, 40, 54], cargo: [[140, 210, 226], [96, 170, 214], [200, 236, 246]], speed: 42, every: 0.1 },
   ];
   const LANE_OF = { hm: 0, sm: 1, water: 2 };
   const DEPTH = 16;                  // cover: about a metre of ground over the casing (urban)
@@ -267,17 +267,20 @@
       for (let r = 0; r < BORE; r += 1) layCell(line, x, y + r, pipeColor(r, x));
     }
     // A riser between the line and an anchor at (x, y): for the few taps that are not cores (the
-    // lake pump, a mining hopper, the main core's pedestal).
+    // lake pump, a mining hopper, the main core's pedestal). It is the SAME pipe, turned (the
+    // user's rule: vertical and horizontal are one design): the full bore stood on end, casing,
+    // lanes, tendril wraps and collars, flanged where it meets the run below - the pump merges
+    // into the line as one continuous flow.
     function layRiser(line, anchor) {
       const lineY = line.ys[Math.max(0, Math.min(line.ys.length - 1, anchor.x - line.x0))];
       const yA = Math.min(anchor.y, lineY), yB = Math.max(anchor.y, lineY + BORE - 1);
-      for (let y = yA; y <= yB; y += 1) {
-        for (let r = 0; r < 3; r += 1) {
-          const joint = (y - yA) % 24 === 0;
-          const color = r === 1 ? LANES[LANE_OF[anchor.resource] ?? 2].channel : tone(CASING, (r === 0 ? 1.3 : 0.85) * (joint ? 1.15 : 1));
-          layCell(line, anchor.x - 1 + r, y, color);
-        }
+      for (let r = 0; r < BORE; r += 1) {
+        const x = anchor.x - 3 + r;
+        for (let y = yA; y <= yB; y += 1) layCell(line, x, y, pipeColor(r, y));
       }
+      layFlange(line, anchor.x, yA - 1);
+      if (yB > lineY + BORE - 1) layFlange(line, anchor.x, yB + 1);
+      else layFlange(line, anchor.x, lineY - 1);
       return { x: anchor.x, y0: yA, y1: yB, anchorY: anchor.y, flow: anchor.flow, kind: anchor.kind, resource: anchor.resource,
         building: anchor.building, op: anchor.op, occ: new Uint8Array(yB - yA + 1), timer: 0, pending: 0 };
     }
@@ -296,19 +299,61 @@
     // tendril wraps and collar bands running across it, sleeved through structure like a span
     // and cased through the ground. The line reads joined, and the cargo climbs it instead of
     // teleporting (the user's gaps, run to ground by the physics track).
+    // A flange where a vertical run meets a horizontal one: a dark banded joint across the
+    // bore, bolts at its corners - the same joint whichever way the pipe turns (one design).
+    function layFlange(line, xc, y) {
+      for (let dx = -4; dx <= 4; dx += 1) {
+        const corner = Math.abs(dx) === 4;
+        layCell(line, xc + dx, y, corner ? [150, 156, 164] : tone(CASING, 0.7));
+      }
+    }
     function layWells(line, k0 = 1, k1 = Infinity) {
+      const dropped = (line.wells || []).filter((w) => w.k >= k0 && w.k <= k1);
       line.wells = (line.wells || []).filter((w) => w.k < k0 || w.k > k1);
       for (let k = Math.max(1, k0); k <= Math.min(line.ys.length - 1, k1); k += 1) {
         const a = line.ys[k - 1], b = line.ys[k];
-        if (Math.abs(b - a) <= 2) continue;
+        const dy = Math.abs(b - a);
+        if (dy <= 2) continue;
         const xc = line.x0 + k;
         const yTop = Math.min(a, b), yBot = Math.max(a, b) + BORE - 1;
+        if (dy <= 6) {
+          // A small step is a mitred bend, not a shaft: the bore's own rows carried across the
+          // joint at both columns, lanes unbroken - the pipe just turns.
+          for (const x of [xc - 1, xc]) {
+            for (let y = yTop; y <= yBot; y += 1) {
+              const r = Math.max(0, Math.min(BORE - 1, y - (x === xc ? b : a)));
+              layCell(line, x, y, pipeColor(r, x));
+            }
+          }
+          continue;
+        }
         for (let r = 0; r < BORE; r += 1) {
           const x = xc - 3 + r;
           for (let y = yTop; y <= yBot; y += 1) layCell(line, x, y, pipeColor(r, y));
         }
-        line.wells.push({ k, x: xc, y0: yTop, y1: yBot });
+        // (flanged where the shaft meets each bore, so the turn reads as one built joint)
+        layFlange(line, xc, yTop - 1);
+        layFlange(line, xc, yBot + 1);
+        line.wells.push({ k, x: xc, y0: yTop - 1, y1: yBot + 1 });
         stats.wells = (stats.wells || 0) + 1;
+      }
+      // A well whose step a fresh route smoothed away takes its shaft with it: the abandoned
+      // vertical is dug up (keeping the live bore and every well still standing).
+      for (const w of dropped) {
+        if (line.wells.some((q) => q.k === w.k)) continue;
+        for (let x = w.x - 3; x <= w.x + 3; x += 1) {
+          const kk = x - line.x0;
+          for (let y = Math.max(1, w.y0); y <= Math.min(H - 2, w.y1); y += 1) {
+            if (kk >= 0 && kk < line.ys.length && y >= line.ys[kk] - 1 && y <= line.ys[kk] + BORE) continue;
+            if (line.wells.some((q) => Math.abs(x - q.x) <= 3 && y >= q.y0 && y <= q.y1)) continue;
+            if ((mat[y * W + x] & ID_MASK) === M.PIPE && PW.getOwner(world, x, y) === line.owner) {
+              PW.set(world, x, y, M.FILL, { quiet: true });
+              PW.setLayer(world, 'paint', x, y, rgb(tone(SAND, 0.92)));
+              PW.setOwner(world, x, y, 0);
+            }
+            PW.setLayer(world, 'pipe', x, y, 0);
+          }
+        }
       }
     }
     // Grow a line to [x0, x1]; new columns get their y from ysFor and are laid.
@@ -495,17 +540,19 @@
       const path = freshPath(line, Math.max(0, k - 2), Math.min(line.ys.length - 1, k + 2));
       const ny = path.ys[k - path.a];
       const old = line.ys[k];
-      if (Math.abs(ny - old) > 1) {
-        // (take up what is left of the old run in this column, wherever the blast let it lie)
-        for (let r = -8, x = line.x0 + k; r <= BORE + 8; r += 1) {
-          const y = old + r;
-          if (y < 1 || y >= H - 1) continue;
+      if (Math.abs(ny - old) > 1 && !line.risers.some((rr) => Math.abs(line.x0 + k - rr.x) <= 4)) {
+        // Take up what is left of the old run in this column - the WHOLE span between the old
+        // level and the new one (a freshly read path can move the line by storeys; nothing of
+        // the abandoned level may stay behind), plus a margin for casing the blast let lie.
+        const lo = Math.min(ny, old) - 8, hi = Math.max(ny, old) + BORE + 8;
+        for (let y = Math.max(1, lo), x = line.x0 + k; y <= Math.min(H - 2, hi); y += 1) {
+          if (y >= ny - 1 && y <= ny + BORE) continue;   // the new bore and its lip stay
           if ((mat[y * W + x] & ID_MASK) === M.PIPE && PW.getOwner(world, x, y) === line.owner) {
             PW.set(world, x, y, M.FILL, { quiet: true });
             PW.setLayer(world, 'paint', x, y, rgb(tone(SAND, 0.92)));
             PW.setOwner(world, x, y, 0);
           }
-          if (r >= 0 && r < BORE) PW.setLayer(world, 'pipe', x, y, 0);
+          PW.setLayer(world, 'pipe', x, y, 0);
         }
       }
       line.ys[k] = ny;
@@ -545,7 +592,10 @@
     function sweepAround(line, kA, kB = kA) {
       for (let k = Math.max(0, kA - 44); k <= Math.min(line.ys.length - 1, kB + 44); k += 1) {
         const x = line.x0 + k, y0 = line.ys[k];
-        for (let r = -26; r <= BORE + 34; r += 1) {
+        if (line.risers.some((rr) => Math.abs(x - rr.x) <= 4)) continue;   // a riser is the line's own
+        // (the band reaches well above and below: a path re-read mid-growth can wander by
+        // storeys, and everything of the line's own left off the final route is garbage)
+        for (let r = -70; r <= BORE + 44; r += 1) {
           if (r >= -1 && r <= BORE) continue;
           const y = y0 + r;
           if (y < 1 || y >= H - 1) continue;
