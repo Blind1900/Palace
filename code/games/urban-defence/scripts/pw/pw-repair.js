@@ -88,6 +88,7 @@
         stats.scanned += 1;
       }
       if (job.scanCol >= b.canvas.width && job.queue.length) {
+        if (job.dead) { job.queue = job.queue.filter(Boolean); job.dead = 0; job.rot = 0; }
         // The build order (F2): from the bottom up, the cores' pillars running a storey ahead
         // (LEAD), the floors tying them, back then side walls trailing, glass last - and each
         // row grown from the middle outward, so the work never leans lopsided off its support
@@ -99,12 +100,35 @@
     // Unowned natural ground standing inside the blueprint is the builders' to dig: a growing
     // lot's hillside, or the slide that filled a wound (A2.3b). Never ore and never bedrock.
     const diggable = (now, x, y) => PW.mat.terrain[now] && now !== M.ORE && now !== M.BEDROCK && !PW.getOwner(world, x, y);
+    // The work SPREADS like Life (the user's model): a cell may only be built touching work
+    // that already stands, each class growing its own way - the pillars climb from the
+    // translator on top of the core; the floors branch off the pillars and reach outward; the
+    // back walls and side walls fill in from the pillars and floors; the finery from anything.
+    // The sorted queue stays as the order the frontier PREFERS; readiness decides what it MAY
+    // take. (Anything the building owns counts as standing - the bed and the gift below ground
+    // are the first sources, so a newborn grows out of its translator exactly as asked.)
+    const builtAt = (b, x, y) => PW.getOwner(world, x, y) === b.id;
+    function ready(b, cell) {
+      const { x, y, p } = cell;
+      if (p === 0) return builtAt(b, x, y + 1) || builtAt(b, x - 1, y + 1) || builtAt(b, x + 1, y + 1) || builtAt(b, x, y - 1);
+      if (p === 1) return builtAt(b, x - 1, y) || builtAt(b, x + 1, y) || builtAt(b, x, y + 1);
+      return builtAt(b, x - 1, y) || builtAt(b, x + 1, y) || builtAt(b, x, y + 1) || builtAt(b, x, y - 1);
+    }
     // Restore one queued cell. Debris in the wound is swept into the recycler first - that is
     // where the building's own HM comes from. The sort already orders the work storey by storey
     // with the frame ahead of the finery at each height, so every class builds in its turn.
     function restore(b, job) {
-      let deferred = 0;
-      const drop = (cell) => { job.queue.pop(); job.seen.delete(cell.back ? -cell.i - 1 : cell.i); };
+      // The queue is sorted with the first work at the END; finished or impossible entries
+      // become tombstones and the array is compacted now and then. Each placement attempt
+      // looks at a bounded window, the window's start going round the queue across calls -
+      // the old rotate-to-front deferral moved the whole queue for every unready cell, which
+      // on a sixty-thousand-cell blueprint was O(n^2) and froze the page (the user's crash;
+      // repair's share of the performance pass).
+      const q = job.queue;
+      const kill = (idx, cell) => { q[idx] = null; job.dead = (job.dead || 0) + 1; job.seen.delete(cell.back ? -cell.i - 1 : cell.i); };
+      const compact = () => {
+        if ((job.dead || 0) > 2048 && job.dead * 3 > q.length) { job.queue = q.filter(Boolean); job.dead = 0; job.rot = 0; }
+      };
       const pay = () => {
         if (job.pool >= 1 / CELLS_PER_HM) { job.pool -= 1 / CELLS_PER_HM; return true; }
         // The bundle's HM tops the pool up, one unit at a time.
@@ -113,50 +137,40 @@
         stats.waiting += 1;
         return false;
       };
-      while (job.queue.length && deferred <= job.queue.length) {
-        const cell = job.queue[job.queue.length - 1];
+      const attempt = (idx, cell, force) => {
         const c = b.canvas, i = cell.i;
         const now = PW.get(world, cell.x, cell.y) & ID_MASK;
+        // Not touching standing work yet: the frontier passes it by (unless forced: an island
+        // cut off in the blueprint must not stall the work forever).
+        if (!force && !ready(b, cell)) return 'skip';
         if (cell.back) {
           if (LOOSE[now]) {
-            // (the heap slumped into the room: it goes to the recycler and the wall goes up)
             PW.set(world, cell.x, cell.y, M.AIR, { quiet: true });
-            job.pool += HM_PER_DEBRIS;
-            stats.recycled += 1;
-            stats.hmFromDebris += HM_PER_DEBRIS;
+            job.pool += HM_PER_DEBRIS; stats.recycled += 1; stats.hmFromDebris += HM_PER_DEBRIS;
           } else if (diggable(now, cell.x, cell.y)) {
-            // (the room is dug out of the hillside; the spoil is worth a little)
             PW.set(world, cell.x, cell.y, M.AIR, { quiet: true });
-            job.pool += HM_PER_DEBRIS * 0.5;
-            stats.dug = (stats.dug || 0) + 1;
-          } else if (now !== M.AIR || (PW.getLayer(world, 'back', cell.x, cell.y) && PW.getOwner(world, cell.x, cell.y) === b.id)) { drop(cell); continue; }
+            job.pool += HM_PER_DEBRIS * 0.5; stats.dug = (stats.dug || 0) + 1;
+          } else if (now !== M.AIR || (PW.getLayer(world, 'back', cell.x, cell.y) && PW.getOwner(world, cell.x, cell.y) === b.id)) { kill(idx, cell); return 'again'; }
           if (!pay()) return false;
           PW.setLayer(world, 'back', cell.x, cell.y, c.back[i]);
-          // The wall is the building's again: the structure judge counts only owned cells, and
-          // stability stops treating an owned wall as a loose ruin panel.
           PW.setOwner(world, cell.x, cell.y, b.id);
           stats.backRestored += 1;
           job.passProgress = (job.passProgress || 0) + 1;
-          drop(cell);
+          kill(idx, cell);
           return true;
         }
         const wanted = c.mat[i] & ID_MASK;
-        if (now === wanted && PW.getOwner(world, cell.x, cell.y) === b.id) { drop(cell); continue; }
-        // Loose stuff in the wound is recycled; solid foreign material blocks the cell for now.
+        if (now === wanted && PW.getOwner(world, cell.x, cell.y) === b.id) { kill(idx, cell); return 'again'; }
         const openish = now === M.AIR || now === M.WATER || PW.mat.phase[now] === PW.PHASE.GAS;
         if (!openish && !LOOSE[now] && PW.getOwner(world, cell.x, cell.y) !== b.id) {
           // A risen core standing in the cell moves on later: the work waits its turn again.
-          if (now === M.CORE || now === M.STEEL) { job.queue.pop(); job.queue.unshift(cell); deferred += 1; continue; }
-          if (!diggable(now, cell.x, cell.y)) { drop(cell); continue; }
+          if (now === M.CORE || now === M.STEEL) return 'skip';
+          if (!diggable(now, cell.x, cell.y)) { kill(idx, cell); return 'again'; }
         }
         if (LOOSE[now]) {
-          job.pool += HM_PER_DEBRIS;
-          stats.recycled += 1;
-          stats.hmFromDebris += HM_PER_DEBRIS;
+          job.pool += HM_PER_DEBRIS; stats.recycled += 1; stats.hmFromDebris += HM_PER_DEBRIS;
         } else if (!openish && diggable(now, cell.x, cell.y)) {
-          // (dug, not found: the ground the blueprint grows through is worth half a heap cell)
-          job.pool += HM_PER_DEBRIS * 0.5;
-          stats.dug = (stats.dug || 0) + 1;
+          job.pool += HM_PER_DEBRIS * 0.5; stats.dug = (stats.dug || 0) + 1;
         }
         if (!pay()) return false;
         PW.set(world, cell.x, cell.y, c.mat[i], { quiet: true });
@@ -165,16 +179,39 @@
         if (c.deco[i]) PW.setLayer(world, 'deco', cell.x, cell.y, c.deco[i]);
         stats.restored += 1;
         job.passProgress = (job.passProgress || 0) + 1;
-        // The white fleck of the translator's work.
         if (particles && F && (stats.restored & 3) === 0) {
           particles.spawn(cell.x + 0.5, cell.y + 0.5, ((PW.hash2(cell.x, cell.y) & 63) - 32) * 0.6, -26, M.DEBRIS | 3 << 6, 0, 0, 3);
         }
         // The god's foam: now and then a small white colony of Life plays over the fresh work
         // and dies away (black and white are the dead machine god's colours; pw-life runs it).
         if (world.lifeGame && (PW.hash2(cell.x, cell.y) & 31) === 7) world.lifeGame.seed(cell.x, cell.y - 3, 2, world.lifeGame.WHITE);
-        drop(cell);
+        kill(idx, cell);
         return true;
+      };
+      const SCAN_CAP = 400;
+      let scanned = 0, fallbackIdx = -1, fallbackCell = null;
+      const start = q.length - 1 - (job.rot || 0);
+      for (let n = 0; n < q.length && scanned < SCAN_CAP; n += 1) {
+        const idx = ((start - n) % q.length + q.length) % q.length;
+        const cell = q[idx];
+        if (!cell) continue;
+        scanned += 1;
+        const r = attempt(idx, cell, false);
+        if (r === true) { job.sinceReady = 0; compact(); return true; }
+        if (r === false) return false;
+        if (r === 'skip' && fallbackIdx < 0) { fallbackIdx = idx; fallbackCell = cell; }
       }
+      job.rot = ((job.rot || 0) + SCAN_CAP) % Math.max(1, q.length);
+      job.sinceReady = (job.sinceReady || 0) + scanned;
+      // A whole lap found nothing touching: take the best candidate anyway, so an island cut
+      // off in the blueprint never stalls the work.
+      if (fallbackCell && job.sinceReady > q.length + SCAN_CAP) {
+        job.sinceReady = 0;
+        const r = attempt(fallbackIdx, fallbackCell, true);
+        if (r === true) { compact(); return true; }
+        if (r === false) return false;
+      }
+      compact();
       return false;
     }
     // The recycler: debris lying against the building - on its floors, its roof, in its rooms -
@@ -218,13 +255,13 @@
           || (b.cores || []).some((core) => core.free || core.settled) || !!b.coresHome);
         if (b.ruined && !risen) continue;
         if (job.scanCol < b.canvas.width) scan(b, job);
-        if (!job.queue.length) {
+        if (job.queue.length - (job.dead || 0) <= 0) {
           if (job.scanCol >= b.canvas.width) {
             // A pass that built or cleared anything may have unblocked wounds that were dropped
             // while debris or wreckage sat in them (and back walls hidden behind solids are not
             // even seen until the cell clears) - look over the blueprint again. Only a pass that
             // changed nothing ends the work.
-            if ((job.passProgress || 0) > 0) { job.passProgress = 0; job.scanCol = 0; }
+            if ((job.passProgress || 0) > 0) { job.passProgress = 0; job.scanCol = 0; job.queue = []; job.dead = 0; job.rot = 0; }
             else { jobs.delete(id); b.growing = false; }
           }
           continue;

@@ -423,7 +423,9 @@
         const j = ((grain(Math.round(a * 57) + cx, t) & 3) - 1.5) * 0.45;
         const px = cx + Math.round(Math.cos(a) * t + Math.cos(a + Math.PI / 2) * j);
         const py = oy + Math.round(Math.sin(a) * t + Math.sin(a + Math.PI / 2) * j);
-        if (Math.abs(px - cx) > 9 || Math.abs(py - oy) > 9) break;
+        // (the ball keeps inside the plate's shelter: streak tips past 6 would trade armour
+        // for filament and die in every collapse)
+        if (Math.abs(px - cx) > 6 || Math.abs(py - oy) > 6) break;
         solid(c, px, py, M.CORE, t >= len - 1 ? WHITE_DIM : (t & 1) ? WHITE_CORE : WHITE_DIM, ROLE.CORE);
       }
     };
@@ -432,9 +434,9 @@
       solid(c, cx + dx, oy + dy, M.CORE, INK, ROLE.CORE);
     }
     for (const pole of [-Math.PI / 2, Math.PI / 2]) {
-      for (let i = -2; i <= 2; i += 1) ray(pole + i * 0.24, 8 - Math.abs(i));
+      for (let i = -2; i <= 2; i += 1) ray(pole + i * 0.24, 6 - Math.abs(i));
     }
-    for (let i = 0; i < 8; i += 1) ray(i * Math.PI / 4 + 0.39, 5 + (grain(cx, i) & 1));
+    for (let i = 0; i < 8; i += 1) ray(i * Math.PI / 4 + 0.39, 4 + (grain(cx, i) & 1));
     for (const [dx, dy] of [[0, 0], [1, 0], [0, 1], [1, 1]]) solid(c, cx + dx, oy + dy, M.CORE, WHITE_CORE, ROLE.CORE);
     // The bed's connectors, left and right: a plain socket with a white port point.
     for (const side of [-1, 1]) {
