@@ -407,28 +407,35 @@
   const INK = [8, 8, 10], INK_DEEP = [40, 40, 44], WHITE_CORE = [238, 242, 246], WHITE_DIM = [152, 158, 164];
   function coreUnit(c, cx, b) {
     const oy = b - 10;   // the bed: a perfect square, 21 x 21, flush on the floor
+    // The bed plate, with a dark circular recess where the ball stands - no steel box about the
+    // core any more (the user's redesign).
     for (let dy = -10; dy <= 10; dy += 1) for (let dx = -10; dx <= 10; dx += 1) {
       const edge = Math.abs(dx) === 10 || Math.abs(dy) === 10;
-      solid(c, cx + dx, oy + dy, M.STEEL, edge ? PLATE_DARK : dy === -9 ? PLATE_LIT : PLATE, ROLE.CRADLE);
+      const d = Math.hypot(dx, dy);
+      solid(c, cx + dx, oy + dy, M.STEEL,
+        edge ? PLATE_DARK : d < 8.4 ? mix(INK_DEEP, [24, 25, 30], Math.min(1, d / 8.4)) : dy === -9 ? PLATE_LIT : PLATE, ROLE.CRADLE);
     }
-    // The core: a perfect square set in the bed's middle, the tendrils gripping the white point.
-    for (let dy = -6; dy <= 6; dy += 1) for (let dx = -6; dx <= 6; dx += 1) {
-      const rim = Math.abs(dx) === 6 || Math.abs(dy) === 6;
-      solid(c, cx + dx, oy + dy, M.CORE, rim ? ARMOUR : dy === -5 ? INK : INK_DEEP, ROLE.CORE);
-    }
-    for (let k = 0; k < 4; k += 1) {
-      const a0 = k * Math.PI / 2 + 0.78;
-      for (let t = 0; t <= 10; t += 1) {
-        const r = 7 - t * 0.56, a = a0 + t * 0.3;
-        const x = cx + Math.round(Math.cos(a) * r), y = oy + Math.round(Math.sin(a) * r * 0.92);
-        if (Math.abs(x - cx) > 5 || Math.abs(y - oy) > 5) continue;
-        solid(c, x, y, M.CORE, t === 8 ? WHITE_DIM : INK, ROLE.CORE);
-        // (each strand is two cells thick for most of its reach, so it reads as an arm, not grit)
-        if (t < 7) solid(c, x + (Math.abs(x + 1 - cx) <= 5 ? 1 : -1), y, M.CORE, INK, ROLE.CORE);
+    // The ENERGY BALL (the user's design): a white heart in a black nucleus and lightning
+    // streaks pointing in every direction - exponentially more at the poles - black and white,
+    // nothing else. (pw-cores animates it like an atom and detonates it when it dies.)
+    const ray = (a, len) => {
+      for (let t = 2; t <= len; t += 1) {
+        const j = ((grain(Math.round(a * 57) + cx, t) & 3) - 1.5) * 0.45;
+        const px = cx + Math.round(Math.cos(a) * t + Math.cos(a + Math.PI / 2) * j);
+        const py = oy + Math.round(Math.sin(a) * t + Math.sin(a + Math.PI / 2) * j);
+        if (Math.abs(px - cx) > 9 || Math.abs(py - oy) > 9) break;
+        solid(c, px, py, M.CORE, t >= len - 1 ? WHITE_DIM : (t & 1) ? WHITE_CORE : WHITE_DIM, ROLE.CORE);
       }
+    };
+    for (let dy = -2; dy <= 2; dy += 1) for (let dx = -2; dx <= 2; dx += 1) {
+      if (Math.hypot(dx, dy) > 2.4) continue;
+      solid(c, cx + dx, oy + dy, M.CORE, INK, ROLE.CORE);
     }
+    for (const pole of [-Math.PI / 2, Math.PI / 2]) {
+      for (let i = -2; i <= 2; i += 1) ray(pole + i * 0.24, 8 - Math.abs(i));
+    }
+    for (let i = 0; i < 8; i += 1) ray(i * Math.PI / 4 + 0.39, 5 + (grain(cx, i) & 1));
     for (const [dx, dy] of [[0, 0], [1, 0], [0, 1], [1, 1]]) solid(c, cx + dx, oy + dy, M.CORE, WHITE_CORE, ROLE.CORE);
-    for (const [dx, dy] of [[-1, 0], [2, 0], [0, -1], [1, 2]]) solid(c, cx + dx, oy + dy, M.CORE, WHITE_DIM, ROLE.CORE);
     // The bed's connectors, left and right: a plain socket with a white port point.
     for (const side of [-1, 1]) {
       for (let dy = -3; dy <= 3; dy += 1) for (let d = 11; d <= 13; d += 1) {

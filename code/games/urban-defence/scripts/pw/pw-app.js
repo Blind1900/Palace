@@ -283,6 +283,7 @@
     drawPreview(now / 1000);
     particles.draw(renderer);
     if (life.draw) life.draw(renderer);
+    if (cores && cores.draw) cores.draw(renderer, now);
     PW.drawEffects(world, renderer, (now - (frame.prev || now)) / 1000);
     frame.prev = now;
     frames += 1;

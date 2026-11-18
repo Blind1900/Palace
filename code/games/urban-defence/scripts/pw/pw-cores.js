@@ -40,8 +40,7 @@
         if (core.homeY === undefined) core.homeY = core.y;   // where it sinks back to (F part 2)
         const c = columnOf(core);
         for (let y = c.top; y <= c.bottom; y += 1) for (let x = c.x0; x <= c.x1; x += 1) {
-          const id = PW.get(world, x, y) & ID_MASK;
-          if ((id === M.CORE || id === M.STEEL) && PW.getOwner(world, x, y) === b.id) PW.setOwner(world, x, y, 0);
+          if ((PW.get(world, x, y) & ID_MASK) === M.CORE && PW.getOwner(world, x, y) === b.id) PW.setOwner(world, x, y, 0);
         }
         const v = core.vault;
         if (!v) continue;
@@ -64,8 +63,10 @@
     // (air, smoke and dust are open; rubble is pushed aside; anything else stands in the way)
     const open = (x, y) => PW.mat.phase[PW.get(world, x, y) & ID_MASK] <= PW.PHASE.GAS;
     const loose = (x, y) => LOOSE[PW.get(world, x, y) & ID_MASK] === 1;
-    // The core's own cells: its orb, rings and clamps (freed from the building, so unowned).
-    const own = (x, y) => { const id = PW.get(world, x, y) & ID_MASK; return (id === M.CORE || id === M.STEEL) && !PW.getOwner(world, x, y); };
+    // The core's own cells: the energy ball alone (freed from the building, so unowned). The
+    // bed stays put when the ball rises - only the ball travels, so nothing of the plate drags
+    // up with it and scrambles the climb (the user's rise glitch).
+    const own = (x, y) => (PW.get(world, x, y) & ID_MASK) === M.CORE && !PW.getOwner(world, x, y);
     // Each column of the core: its topmost and lowest cell.
     function spans(core) {
       const c = columnOf(core), out = [];
@@ -215,8 +216,38 @@
       }
       return true;
     }
+    // The god's gift does not die quietly (the user's rule): a ball whose last core cell is
+    // destroyed detonates - a real blast and a burst of white sparks. Alive again (rebuilt by
+    // repair), it may die again another day.
+    function deathWatch() {
+      const watch = (holder, x, y, big, id) => {
+        let alive = false;
+        for (let dy = -3; dy <= 3 && !alive; dy += 1) for (let dx = -3; dx <= 3 && !alive; dx += 1) {
+          if ((PW.get(world, x + dx, y + dy) & ID_MASK) === M.CORE) alive = true;
+        }
+        if (alive) { holder.wasAlive = true; holder.dead = false; return; }
+        if (!holder.wasAlive || holder.dead) return;
+        holder.dead = true;
+        if (PW.explode) PW.explode(world, particles, { x, y, radius: big ? 30 : 18, power: big ? 2 : 1.3 });
+        if (particles && F) {
+          for (let i = 0; i < 14; i += 1) {
+            const h = PW.hash3(x, i, tick), a = (i / 14) * Math.PI * 2;
+            particles.spawn(x + 0.5, y + 0.5, Math.cos(a) * (90 + (h & 63)), Math.sin(a) * (90 + (h >> 6 & 63)), M.DEBRIS | 3 << 6, 0, F.LAND, 6);
+          }
+        }
+        if (id && world.onDamage) world.onDamage(id);
+      };
+      for (const b of world.buildings || []) {
+        for (const core of b.cores || []) {
+          if (core.standing) continue;
+          watch(core, core.x, core.y, !!core.orb, b.id);
+        }
+      }
+      for (const s of world.seedCores || []) if (!s.building) watch(s, s.x, s.y, false, 0);
+    }
     function step() {
       tick += 1;
+      if (tick % 30 === 17) deathWatch();
       for (const b of world.buildings || []) {
         if (!b.cores || !b.cores.length) continue;
         // (a building still going up for the first time is no ruin to expose - its cores are
@@ -262,7 +293,51 @@
         }
       }
     }
-    return { step, expose, exposed, stats };
+    // The ball lives (the user's design): two white points orbit it like an atom's electrons on
+    // crossed ellipses, and every so often a streak of lightning snaps off a pole and dies away.
+    // Drawn over the world each frame for the cores in view.
+    function draw(renderer, time) {
+      const { ctx, camera, view } = renderer;
+      const z = camera.zoom;
+      if (z < 0.5) return;
+      const t = time * 0.001;
+      const put = (wx, wy, c, a) => {
+        ctx.fillStyle = `rgba(${c[0]},${c[1]},${c[2]},${a})`;
+        ctx.fillRect(Math.round((wx - camera.x) * z), Math.round((wy - camera.y) * z), Math.max(1, Math.round(z)), Math.max(1, Math.round(z)));
+      };
+      const vx0 = camera.x - 20, vx1 = camera.x + view.width / z + 20, vy0 = camera.y - 20, vy1 = camera.y + view.height / z + 20;
+      const WHITE = [238, 242, 246], DIM = [168, 174, 180];
+      const each = (x, y, seed) => {
+        for (let e = 0; e < 2; e += 1) {
+          const a = t * (0.9 + e * 0.7) + seed * 2.09 + e * 2.6;
+          const ex = x + Math.cos(a) * (6.5 + e * 2.5);
+          const ey = y + Math.sin(a) * (3.2 + e * 1.3) * (e ? -1 : 1);
+          put(ex, ey, WHITE, 0.95);
+          put(ex - Math.cos(a), ey - Math.sin(a) * 0.5, DIM, 0.45);
+        }
+        const phase = Math.floor(t * 2.3) + seed;
+        if (((Math.imul(phase, 2654435761) >>> 27) & 7) < 2) {
+          const up = (phase & 1) ? -1 : 1;
+          const aa = up * Math.PI / 2 + (((Math.imul(phase, 40503) >>> 24) / 255) - 0.5) * 0.9;
+          for (let s = 3; s <= 9; s += 1) {
+            const j = ((PW.hash3(phase, s, seed) & 3) - 1.5) * 0.6;
+            put(x + Math.cos(aa) * s + Math.cos(aa + Math.PI / 2) * j, y + Math.sin(aa) * s + Math.sin(aa + Math.PI / 2) * j, WHITE, 1 - (s - 3) * 0.12);
+          }
+        }
+      };
+      for (const b of world.buildings || []) {
+        for (const core of b.cores || []) {
+          if (core.standing || core.dead) continue;
+          if (core.x < vx0 || core.x > vx1 || core.y < vy0 || core.y > vy1) continue;
+          each(core.x, core.y, (core.x * 7 + core.y) & 1023);
+        }
+      }
+      for (const s of world.seedCores || []) {
+        if (s.building || s.dead || s.x < vx0 || s.x > vx1 || s.y < vy0 || s.y > vy1) continue;
+        each(s.x, s.y, (s.x * 7 + s.y) & 1023);
+      }
+    }
+    return { step, expose, exposed, stats, draw };
   }
 
   PW.createCores = createCores;
