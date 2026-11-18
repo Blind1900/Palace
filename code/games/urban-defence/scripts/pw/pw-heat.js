@@ -384,22 +384,13 @@
     }
 
     // ---- Glow ---------------------------------------------------------------------------------------
-    // Heat is a modifier on how a cell looks: anything hot enough glows - rock, metal, rubble, a
-    // furnace's charge - its own light added over its colour, a dull red from about GLOW_FROM,
-    // through cherry and orange to yellow and white-hot at GLOW_FULL, dimming as it cools. (Hot
-    // air does not glow: the flames and smoke are their own pixels. Light added, not painted, so
-    // it reads by day and burns bright at night.) Each hot chunk's glow is an image of its hot
-    // cells, made again each heat tick, drawn over the world with additive blending.
-    const GLOW_FROM = 480, GLOW_FULL = 1400;
-    const GLOW_STOPS = [[480, 0, 0, 0], [560, 70, 8, 0], [700, 170, 30, 4], [850, 240, 85, 14], [1000, 255, 150, 50], [1200, 255, 215, 140], [1400, 255, 245, 215]];
-    const GLOW_LUT = new Uint32Array(256);
-    for (let k = 0; k < 256; k += 1) {
-      const t = GLOW_FROM + (GLOW_FULL - GLOW_FROM) * k / 255;
-      let s = 1;
-      while (s < GLOW_STOPS.length - 1 && GLOW_STOPS[s][0] < t) s += 1;
-      const [t0, r0, g0, b0] = GLOW_STOPS[s - 1], [t1, r1, g1, b1] = GLOW_STOPS[s], f = Math.max(0, Math.min(1, (t - t0) / (t1 - t0)));
-      GLOW_LUT[k] = PW.abgr(r0 + (r1 - r0) * f, g0 + (g1 - g0) * f, b0 + (b1 - b0) * f);
-    }
+    // Heat is a modifier on how a cell looks (see PW.glowAt): anything hot enough glows - rock,
+    // metal, rubble, smoke and dust in the hot air over a fire or a blast - its own light added
+    // over its colour, dimming back to its own colour as it cools. Liquids do not glow: they boil
+    // away first. (Hot air itself is clear: it does not glow. Light added, not painted, so it reads
+    // by day and burns bright at night.) Each hot chunk's glow is an image of its hot cells, made
+    // again each heat tick, drawn over the world with additive blending.
+    const GLOW_FROM = PW.GLOW_FROM, glowAt = PW.glowAt, phaseOf = PW.mat.phase;
     const glowImages = new Map();   // chunk -> { canvas, ctx, made (heat tick), w, h, lx, ly, any }
     function glowImage(c, T) {
       const r = rects.get(c);
@@ -416,14 +407,17 @@
       e.made = made; e.any = false;
       if (!r || r[2] < r[0]) return e;
       const lx0 = Math.max(0, r[0] - 1), ly0 = Math.max(0, r[1] - 1), lx1 = Math.min(CHUNK - 1, r[2] + 1), ly1 = Math.min(CHUNK - 1, r[3] + 1);
-      const w = lx1 - lx0 + 1, h = ly1 - ly0 + 1, px = e.px, scale = 255 / (GLOW_FULL - GLOW_FROM);
+      const w = lx1 - lx0 + 1, h = ly1 - ly0 + 1, px = e.px;
       const cx = (c % chunksX) << CHUNK_SHIFT, cy = ((c / chunksX) | 0) << CHUNK_SHIFT;
       for (let ly = 0; ly < h; ly += 1) {
         const row = (cy + ly0 + ly) * W + cx + lx0, trow = (ly0 + ly) << CHUNK_SHIFT;
         for (let lx = 0; lx < w; lx += 1) {
           const t = T[trow + lx0 + lx];
           let v = 0;
-          if (t > GLOW_FROM && !open[mat[row + lx] & ID_MASK]) { v = GLOW_LUT[Math.min(255, ((t - GLOW_FROM) * scale) | 0)]; e.any = true; }
+          if (t > GLOW_FROM) {
+            const id = mat[row + lx] & ID_MASK;
+            if (id !== M.AIR && phaseOf[id] !== PW.PHASE.LIQUID) { v = glowAt(t); e.any = true; }
+          }
           px[ly * CHUNK + lx] = v;
         }
       }

@@ -78,6 +78,10 @@
     const below = r * 0.55;        // craters are wider than deep
     const x0 = Math.max(1, Math.floor(cx - r - 2)), x1 = Math.min(W - 2, Math.ceil(cx + r + 2));
     const y0 = Math.max(0, Math.floor(cy - r - 2)), y1 = Math.min(H - 1, Math.ceil(cy + below + 2));
+    // (how hot what it throws out of (x, y) is: as hot as its heat leaves the cell - see heatDisc
+    // below - so what flies from the heart of it glows)
+    const heatPeak = 380 + 420 * power, heatR = r * 1.15;
+    const hotAt = (x, y) => { const d = Math.hypot(x - cx, y - cy) / heatR; return d < 1 ? PW.AMBIENT + (heatPeak - PW.AMBIENT) * Math.pow(1 - d, 1.5) : PW.AMBIENT; };
     const fling = (x, y, speed, up) => {
       const dx = x - cx, dy = y - cy, d = Math.hypot(dx, dy) || 1;
       const a = speed * (0.55 + random() * 0.8);
@@ -161,7 +165,7 @@
           // flung off as chunks; the rest goes to dust)
           if (building ? (PW.hash2(Math.floor((x + (PW.hash2(y >> 1, 3) & 3)) / 5), Math.floor(y / 5)) % 3) === 0 : random() < 0.15) {
             const [vx, vy] = fling(x, y, 280 * power, 160 * power);
-            particles.spawn(x + 0.5, y + 0.5, vx, vy, M.DEBRIS, back, F.LAND | F.DAMAGE, 6, building ? backOwner : 0);
+            particles.spawn(x + 0.5, y + 0.5, vx, vy, M.DEBRIS, back, F.LAND | F.DAMAGE, 6, building ? backOwner : 0, hotAt(x, y));
           }
         }
         // A pipe fixed to the wall of a tunnel or a cave is torn off with it.
@@ -170,7 +174,7 @@
           PW.setLayer(world, 'pipe', x, y, 0);
           if (random() < 0.2) {
             const [vx, vy] = fling(x, y, 280 * power, 160 * power);
-            particles.spawn(x + 0.5, y + 0.5, vx, vy, M.DEBRIS | PW.DEBRIS_KIND.METAL << 6, wallPipe, F.LAND, 6);
+            particles.spawn(x + 0.5, y + 0.5, vx, vy, M.DEBRIS | PW.DEBRIS_KIND.METAL << 6, wallPipe, F.LAND, 6, 0, hotAt(x, y));
           }
         }
         if (id === M.AIR) continue;
@@ -181,19 +185,19 @@
         removed += 1;
         if (id === M.WATER) {
           const [vx, vy] = fling(x, y, 220 * power, 160 * power);
-          particles.spawn(x + 0.5, y + 0.5, vx, vy, m, 0, F.WATER, 6);
+          particles.spawn(x + 0.5, y + 0.5, vx, vy, m, 0, F.WATER, 6, 0, hotAt(x, y));
         } else if (structural[id] || ownerId) {
           if (ownerId) damaged.set(ownerId, (damaged.get(ownerId) || 0) + 1);
           // A building's broken structure is thrown well back from the blast in a plume: most of
           // it, fast, flung outward and up.
           if (random() < 0.85) {
             const [vx, vy] = fling(x, y, 480 * power, 300 * power);
-            particles.spawn(x + 0.5, y + 0.5, vx, vy, breaksTo[id] || M.DEBRIS, paint || 0, F.LAND | F.DAMAGE, 7, ownerId);
+            particles.spawn(x + 0.5, y + 0.5, vx, vy, breaksTo[id] || M.DEBRIS, paint || 0, F.LAND | F.DAMAGE, 7, ownerId, hotAt(x, y));
           }
         } else if (phase[id] >= PW.PHASE.POWDER && (random() < 0.06 || (PW.hash2(Math.floor((x + (PW.hash2(y >> 1, 5) & 3)) / 5), Math.floor((y + (PW.hash2(x >> 1, 6) & 3)) / 5)) & 1023) < 200)) {
           // (ground blown out is thrown in lumps - whole patches of it, about a fifth - and grit)
           const [vx, vy] = fling(x, y, 260 * power, 170 * power);
-          particles.spawn(x + 0.5, y + 0.5, vx, vy, breaksTo[id] || M.LOOSE_SOIL, 0, F.LAND, 6);
+          particles.spawn(x + 0.5, y + 0.5, vx, vy, breaksTo[id] || M.LOOSE_SOIL, 0, F.LAND, 6, 0, hotAt(x, y));
         }
         // Pulverised earth hangs in the air as a dust cloud.
         if (PW.mat.terrain[id] && random() < DUST_SHARE) PW.set(world, x, y, M.DUST | (1 + (random() < 0.5 ? 1 : 0)) << 6, { quiet: true });
@@ -369,17 +373,18 @@
     const F = PW.PARTICLE;
     for (let k = 0, n = 60 + r * 3; k < n; k += 1) {
       const a = random() * Math.PI * 2, sp = (180 + random() * 420) * power;
-      const hot = [[255, 250, 220], [255, 222, 120], [255, 170, 60], [240, 110, 30]][k & 3];
+      // (a spark's colour is its heat: white-hot, yellow, orange - each cooling as it flies)
+      const hot = [[255, 250, 220], [255, 222, 120], [255, 170, 60], [240, 110, 30]][k & 3], heat = [1450, 1250, 1050, 900][k & 3];
       const x = cx + Math.cos(a) * r * 0.2, y = cy + Math.sin(a) * r * 0.2;
       // (a streak: the spark and a dimmer one trailing it)
-      particles.spawn(x, y, Math.cos(a) * sp, Math.sin(a) * sp - 50, 0, PW.abgr(hot[0], hot[1], hot[2]), F.GLOW, 0.2 + random() * 0.6);
-      if (k & 1) particles.spawn(x - Math.cos(a) * 1.5, y - Math.sin(a) * 1.5, Math.cos(a) * sp * 0.97, Math.sin(a) * sp * 0.97 - 50, 0, PW.abgr(hot[0], hot[1] * 0.7, hot[2] * 0.5), F.GLOW, 0.15 + random() * 0.35);
+      particles.spawn(x, y, Math.cos(a) * sp, Math.sin(a) * sp - 50, 0, PW.abgr(hot[0], hot[1], hot[2]), F.GLOW, 0.2 + random() * 0.6, 0, heat);
+      if (k & 1) particles.spawn(x - Math.cos(a) * 1.5, y - Math.sin(a) * 1.5, Math.cos(a) * sp * 0.97, Math.sin(a) * sp * 0.97 - 50, 0, PW.abgr(hot[0], hot[1] * 0.7, hot[2] * 0.5), F.GLOW, 0.15 + random() * 0.35, 0, heat - 150);
     }
     const SHRAPNEL = M.DEBRIS | PW.DEBRIS_KIND.METAL << 6;
     for (let k = 0, n = Math.round(r * 0.6); k < n; k += 1) {
       const a = random() * Math.PI * 2, sp = (300 + random() * 360) * power;
       const c = 46 + (random() * 30 | 0);
-      particles.spawn(cx, cy, Math.cos(a) * sp, Math.sin(a) * sp - 40, SHRAPNEL, PW.abgr(c, c - 2, c - 4), F.LAND | F.DAMAGE, 4);
+      particles.spawn(cx, cy, Math.cos(a) * sp, Math.sin(a) * sp - 40, SHRAPNEL, PW.abgr(c, c - 2, c - 4), F.LAND | F.DAMAGE, 4, 0, 950);
     }
   }
   // The blast's smoke where it is shut in: a body of gas driven out of the fireball into the space

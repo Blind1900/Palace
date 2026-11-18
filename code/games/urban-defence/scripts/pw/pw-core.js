@@ -610,6 +610,29 @@
   // Sparse per-chunk Float32 temperatures (°C). Chunks without an array are at ambient. Chunks that
   // hold heat are listed in heatList for the heat module to diffuse, cool and drop when cold.
   const AMBIENT = 20;
+  // Heat is a modifier on how anything looks: hot enough, it glows - its own light, a dull red
+  // from about GLOW_FROM, through cherry, orange and yellow to white-hot at GLOW_FULL - added to
+  // its colour, and as it cools it goes back to its own colour. (A cell of the grid - see pw-heat's
+  // glow - or a flying pixel - see pw-particles.) glowAt(t): the light at t °C, 0 below GLOW_FROM.
+  const GLOW_FROM = 480, GLOW_FULL = 1400;
+  const GLOW_STOPS = [[480, 0, 0, 0], [560, 70, 8, 0], [700, 170, 30, 4], [850, 240, 85, 14], [1000, 255, 150, 50], [1200, 255, 215, 140], [1400, 255, 245, 215]];
+  const GLOW_LUT = new Uint32Array(256);
+  for (let k = 0; k < 256; k += 1) {
+    const t = GLOW_FROM + (GLOW_FULL - GLOW_FROM) * k / 255;
+    let s = 1;
+    while (s < GLOW_STOPS.length - 1 && GLOW_STOPS[s][0] < t) s += 1;
+    const [t0, r0, g0, b0] = GLOW_STOPS[s - 1], [t1, r1, g1, b1] = GLOW_STOPS[s], f = Math.max(0, Math.min(1, (t - t0) / (t1 - t0)));
+    GLOW_LUT[k] = (255 << 24 | Math.round(b0 + (b1 - b0) * f) << 16 | Math.round(g0 + (g1 - g0) * f) << 8 | Math.round(r0 + (r1 - r0) * f)) >>> 0;
+  }
+  const GLOW_SCALE = 255 / (GLOW_FULL - GLOW_FROM);
+  const glowAt = (t) => (t > GLOW_FROM ? GLOW_LUT[Math.min(255, ((t - GLOW_FROM) * GLOW_SCALE) | 0)] : 0);
+  // (colour c with the glow of t °C added to it, channel by channel, up to white)
+  function glowing(c, t) {
+    const g = glowAt(t);
+    if (!g) return c;
+    const r = Math.min(255, (c & 255) + (g & 255)), gg = Math.min(255, (c >>> 8 & 255) + (g >>> 8 & 255)), b = Math.min(255, (c >>> 16 & 255) + (g >>> 16 & 255));
+    return ((c >>> 24) << 24 | b << 16 | gg << 8 | r) >>> 0;
+  }
   function heatAt(world, x, y) {
     if (x < 0 || y < 0 || x >= world.width || y >= world.height) return AMBIENT;
     const chunk = world.heat[chunkIndex(world, x, y)];
@@ -809,5 +832,6 @@
     get, id, set, swapCells, sinkColumn, touchGroundTop, refreshGroundTop, rebuildGroundTop,
     getLayer, setLayer, layerCell, clearPaintAt, isSolid, isOpen, groundBelow, supportBelow, traceShot,
     getOwner, setOwner, growing, isGrowing, getFlags, setFlag, AMBIENT, heatAt, setHeat, addHeat, heatChunk,
+    GLOW_FROM, GLOW_FULL, glowAt, glowing,
   });
 })();

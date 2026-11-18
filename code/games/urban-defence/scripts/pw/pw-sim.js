@@ -458,7 +458,13 @@
       // (and parcels of it rise at their own pace, so a cloud's underside is ragged, not a level
       // floor)
       const pace = 0.65 + 0.7 * ((PW.hash3(x >> 3, y >> 3, world.tick >> 5) & 255) / 255);
-      const rise = (id === M.SMOKE ? RISE[id] * (0.4 + 0.2 * density) : RISE[id]) * pace;
+      let rise = (id === M.SMOKE ? RISE[id] * (0.4 + 0.2 * density) : RISE[id]) * pace;
+      // (red-hot - straight out of a fire or a blast, glowing - it is lighter still: it climbs as
+      // the flames do until it has cooled to its own colour)
+      if (id === M.SMOKE && world.heat[(y >> CHUNK_SHIFT) * chunksX + (x >> CHUNK_SHIFT)]) {
+        const t = PW.heatAt(world, x, y);
+        if (t > PW.GLOW_FROM) rise = Math.max(rise, Math.min(0.95, 0.45 + (t - PW.GLOW_FROM) / 1500));
+      }
       // Concentrated clumps pour like rain: in a scattering of columns (changing every second) the
       // thickest gas falls through clear air in streaks hanging under the cloud, until it has
       // thinned enough to rise again.

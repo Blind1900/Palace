@@ -193,6 +193,16 @@
     const size = toolbar.querySelector('#brush-size');
     if (size) size.addEventListener('input', () => { brush = Number(size.value); });
   }
+  // Space pauses and resumes, as the PAUSE button does (not while typing into a field).
+  window.addEventListener('keydown', (event) => {
+    if (event.code !== 'Space' || event.repeat || event.target.closest?.('input, textarea, select')) return;
+    event.preventDefault();
+    paused = !paused;
+    const button = toolbar && toolbar.querySelector('[data-action="pause"]');
+    if (button) button.classList.toggle('on', paused);
+  });
+  // (and a toolbar button that has the focus is not pressed by it as well)
+  window.addEventListener('keyup', (event) => { if (event.code === 'Space' && !event.target.closest?.('input, textarea, select')) event.preventDefault(); });
 
   // ---- Input ------------------------------------------------------------------------------------
   const drag = { active: false, pan: false, x: 0, y: 0 };

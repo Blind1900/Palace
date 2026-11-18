@@ -27,6 +27,16 @@
   // (the flame's colour over its life: white-hot first, dark red last)
   const FLAME = [[255, 252, 236], [255, 240, 170], [255, 214, 104], [255, 178, 60], [248, 136, 40], [226, 96, 30], [184, 64, 26], [124, 40, 22]]
     .map((c) => PW.abgr(c[0], c[1], c[2]));
+  // Heat is a modifier on every pixel (see PW.glowAt): each carries its temperature, and hot it
+  // glows, cooling back to its own colour. A fire pixel is a pixel of smoke burning hot: its
+  // flame's colour is its heat, white-hot at FIRE_HOT cooling to a dark red at FIRE_END over its
+  // life; then, smoke, it cools on at SMOKE_COOL to its own colour within a moment. Sparks and
+  // shrapnel, a blast's hot rubble, embers glow and cool as they fly (in COOL_SPARK, COOL_DEBRIS:
+  // seconds to lose most of their heat over the air), and what lands hot is still hot in the
+  // heap. A liquid does not glow: hot enough, a drop of water flashes to steam.
+  const FIRE_HOT = 1500, FIRE_END = 560, SMOKE_COOL = 500;
+  const COOL_SPARK = 1.2, COOL_DEBRIS = 2.5;
+  const AMBIENT = PW.AMBIENT, GLOW_FROM = PW.GLOW_FROM;
   const BUBBLE_RISE = 7;    // cells/s terminal rise speed
 
   function createParticles(world, capacity = 32768) {
@@ -37,6 +47,7 @@
     const cell = new Uint8Array(capacity), flags = new Uint16Array(capacity);
     const color = new Uint32Array(capacity), owner = new Uint16Array(capacity);
     const painted = new Uint8Array(capacity);   // carries its own colour (a piece of a building)
+    const temp = new Float32Array(capacity);    // °C
     // Shock energy of strikes, gathered over 16x16-cell tiles until the vibration system takes it.
     const impacts = new Map();
     function drainImpacts(fn) {
@@ -57,27 +68,31 @@
     const freeChunks = [];
     for (let k = CHUNKS - 1; k >= 0; k -= 1) freeChunks.push(k);
 
-    function spawn(x, y, svx, svy, byte, rgba, fl, lifeSeconds = 6, own = 0) {
+    // (`heat`: its temperature, °C; left out, a fire pixel is white-hot, smoke, a leaf or a bubble
+    // is at the air's, and anything else is as hot as where it came from)
+    function spawn(x, y, svx, svy, byte, rgba, fl, lifeSeconds = 6, own = 0, heat = 0) {
       // (what breaks off in the same tick is gathered first, to go as chunks - see breakage)
       if ((fl & F.LAND) && !(fl & (F.WATER | F.LEAF | F.GLOW | F.SMOKE | F.BUBBLE | F.LOOSE)) && kindOf(byte) !== KIND.NONE) {
         if (pend.n >= PEND_MAX) flushDebris();
         const k = pend.n++;
         pend.x[k] = x; pend.y[k] = y; pend.vx[k] = svx; pend.vy[k] = svy; pend.byte[k] = byte;
-        pend.rgba[k] = rgba || 0; pend.fl[k] = fl; pend.life[k] = lifeSeconds; pend.own[k] = own;
+        pend.rgba[k] = rgba || 0; pend.fl[k] = fl; pend.life[k] = lifeSeconds; pend.own[k] = own; pend.heat[k] = heat || heatHere(x, y);
         return -1;
       }
-      return spawnNow(x, y, svx, svy, byte, rgba, fl, lifeSeconds, own);
+      return spawnNow(x, y, svx, svy, byte, rgba, fl, lifeSeconds, own, heat);
     }
-    function spawnNow(x, y, svx, svy, byte, rgba, fl, lifeSeconds = 6, own = 0) {
+    const heatHere = (x, y) => PW.heatAt(world, x | 0, y | 0);
+    function spawnNow(x, y, svx, svy, byte, rgba, fl, lifeSeconds = 6, own = 0, heat = 0) {
+      if (!heat) heat = fl & F.FIRE ? FIRE_HOT : fl & (F.SMOKE | F.LEAF | F.BUBBLE) ? AMBIENT : heatHere(x, y);
       if (count >= capacity) {
         // Over capacity: settle land particles straight into the grid, drop cosmetic ones.
-        if (fl & (F.LAND | F.WATER)) deposit(x, y, byte, fl, rgba);
+        if (fl & (F.LAND | F.WATER)) deposit(x, y, byte, fl, rgba, heat);
         return -1;
       }
       const i = count++;
       px[i] = x; py[i] = y; vx[i] = svx; vy[i] = svy;
       cell[i] = byte; flags[i] = fl; color[i] = rgba || paletteColor(byte, x, y); painted[i] = rgba ? 1 : 0;
-      life[i] = lifeSeconds; age[i] = 0; owner[i] = own; chunkOf[i] = -1;
+      life[i] = lifeSeconds; age[i] = 0; owner[i] = own; chunkOf[i] = -1; temp[i] = heat;
       return i;
     }
 
@@ -118,7 +133,7 @@
     const CRACK_MIN = 8;          // a chunk of this many cells or more cracks into chunks; smaller, into grains
     const PEND_MAX = 32768;
     const pend = { n: 0, x: new Float32Array(PEND_MAX), y: new Float32Array(PEND_MAX), vx: new Float32Array(PEND_MAX), vy: new Float32Array(PEND_MAX),
-      byte: new Uint8Array(PEND_MAX), rgba: new Uint32Array(PEND_MAX), fl: new Uint16Array(PEND_MAX), life: new Float32Array(PEND_MAX), own: new Uint16Array(PEND_MAX) };
+      byte: new Uint8Array(PEND_MAX), rgba: new Uint32Array(PEND_MAX), fl: new Uint16Array(PEND_MAX), life: new Float32Array(PEND_MAX), own: new Uint16Array(PEND_MAX), heat: new Float32Array(PEND_MAX) };
     const jag = (a, b, amp) => ((PW.hash2(Math.floor(a / 3), b) & 7) / 7 - 0.5) * amp;
     // (the jagged tile the cell (x, y) of a kind breaks off in: its block, cut as the block is cut)
     function tileOf(x, y, kind, rule, out) {
@@ -136,13 +151,13 @@
     // chunks too (slabs of its floors, lumps of its walls), not grain by grain.
     const HOLD_TICKS = 4, HOLD_MAX = 16384;
     const held = { n: 0, x: new Float32Array(HOLD_MAX), y: new Float32Array(HOLD_MAX), vx: new Float32Array(HOLD_MAX), vy: new Float32Array(HOLD_MAX),
-      byte: new Uint8Array(HOLD_MAX), rgba: new Uint32Array(HOLD_MAX), fl: new Uint16Array(HOLD_MAX), life: new Float32Array(HOLD_MAX), own: new Uint16Array(HOLD_MAX) };
+      byte: new Uint8Array(HOLD_MAX), rgba: new Uint32Array(HOLD_MAX), fl: new Uint16Array(HOLD_MAX), life: new Float32Array(HOLD_MAX), own: new Uint16Array(HOLD_MAX), heat: new Float32Array(HOLD_MAX) };
     let heldFor = 0;
-    function hold(x, y, svx, svy, byte, rgba, fl, lifeSeconds = 6, own = 0) {
-      if (held.n >= HOLD_MAX || !(fl & F.LAND) || kindOf(byte) === KIND.NONE) return spawn(x, y, svx, svy, byte, rgba, fl, lifeSeconds, own);
+    function hold(x, y, svx, svy, byte, rgba, fl, lifeSeconds = 6, own = 0, heat = 0) {
+      if (held.n >= HOLD_MAX || !(fl & F.LAND) || kindOf(byte) === KIND.NONE) return spawn(x, y, svx, svy, byte, rgba, fl, lifeSeconds, own, heat);
       const k = held.n++;
       held.x[k] = x; held.y[k] = y; held.vx[k] = svx; held.vy[k] = svy; held.byte[k] = byte;
-      held.rgba[k] = rgba || 0; held.fl[k] = fl; held.life[k] = lifeSeconds; held.own[k] = own;
+      held.rgba[k] = rgba || 0; held.fl[k] = fl; held.life[k] = lifeSeconds; held.own[k] = own; held.heat[k] = heat || heatHere(x, y);
       return -1;
     }
     function release() {
@@ -150,7 +165,7 @@
         if (pend.n >= PEND_MAX) flushDebris();
         const j = pend.n++;
         pend.x[j] = held.x[k]; pend.y[j] = held.y[k]; pend.vx[j] = held.vx[k]; pend.vy[j] = held.vy[k]; pend.byte[j] = held.byte[k];
-        pend.rgba[j] = held.rgba[k]; pend.fl[j] = held.fl[k]; pend.life[j] = held.life[k]; pend.own[j] = held.own[k];
+        pend.rgba[j] = held.rgba[k]; pend.fl[j] = held.fl[k]; pend.life[j] = held.life[k]; pend.own[j] = held.own[k]; pend.heat[j] = held.heat[k];
       }
       held.n = 0;
     }
@@ -204,26 +219,27 @@
             const x = Math.floor(pend.x[k]), y = Math.floor(pend.y[k]);
             if (x > 0 && y > 0 && x < W - 1 && y < H - 1 && (mat[y * W + x] & ID_MASK) === M.AIR) PW.set(world, x, y, M.DUST | 2 << 6, { quiet: true });
           } else if (h < rule.dust + rule.shard) {
-            spawnNow(pend.x[k], pend.y[k], pend.vx[k] * 1.35, pend.vy[k] * 1.2 - 15, pend.byte[k], pend.rgba[k], pend.fl[k], pend.life[k], pend.own[k]);
+            spawnNow(pend.x[k], pend.y[k], pend.vx[k] * 1.35, pend.vy[k] * 1.2 - 15, pend.byte[k], pend.rgba[k], pend.fl[k], pend.life[k], pend.own[k], pend.heat[k]);
           } else keep.push(k);
         }
       }
       if (!keep.length) return;
       if (keep.length === 1 || !freeChunks.length || count >= capacity) {
         stats.grains = (stats.grains || 0) + keep.length;
-        for (const k of keep) spawnNow(pend.x[k], pend.y[k], pend.vx[k], pend.vy[k], pend.byte[k], pend.rgba[k], pend.fl[k], pend.life[k], pend.own[k]);
+        for (const k of keep) spawnNow(pend.x[k], pend.y[k], pend.vx[k], pend.vy[k], pend.byte[k], pend.rgba[k], pend.fl[k], pend.life[k], pend.own[k], pend.heat[k]);
         return;
       }
       // (its anchor: the middle of its bottom row; it goes as one of its cells was thrown - so
       // chunks fly as far and as variously as the grains would have)
-      let sx = 0, bottom = -Infinity, lifeMax = 0, fl = 0;
+      let sx = 0, bottom = -Infinity, lifeMax = 0, fl = 0, heat = 0;
       for (const k of keep) {
         sx += Math.floor(pend.x[k]); bottom = Math.max(bottom, Math.floor(pend.y[k]));
-        lifeMax = Math.max(lifeMax, pend.life[k]); fl |= pend.fl[k];
+        lifeMax = Math.max(lifeMax, pend.life[k]); fl |= pend.fl[k]; heat += pend.heat[k];
       }
       const ax = Math.round(sx / keep.length), m = keep.length;
       const k0 = keep[0], kv = keep[PW.hash2(ax, bottom) % m];
-      const i = spawnNow(ax + 0.5, bottom + 0.5, pend.vx[kv], pend.vy[kv], pend.byte[k0], pend.rgba[k0], fl, lifeMax, pend.own[k0]);
+      // (a lump is as hot as its cells were, together)
+      const i = spawnNow(ax + 0.5, bottom + 0.5, pend.vx[kv], pend.vy[kv], pend.byte[k0], pend.rgba[k0], fl, lifeMax, pend.own[k0], heat / m);
       if (i < 0) return;
       const c = freeChunks.pop(), base = c * CHUNK_CELLS;
       chunkOf[i] = c; chunkN[c] = m;
@@ -274,11 +290,12 @@
           // light and shadow - see launch)
           if ((byte & ID_MASK) === M.DEBRIS) PW.setLayer(world, 'paint', gx, gy, rubbleTone(chunkColor[base + q], gx, gy));
           else if (m >= 4) PW.setLayer(world, 'paint', gx, gy, chunkColor[base + q]);
+          keepHeat(gx, gy, temp[i]);
           stats.landed += 1;
           continue;
         }
         const [cx, cy] = cellOf(c, q, x, y);
-        deposit(cx, cy, byte, flags[i], chunkColor[base + q]);
+        deposit(cx, cy, byte, flags[i], chunkColor[base + q], temp[i]);
       }
       stats.lumps = (stats.lumps || 0) + 1;
       stats.lumpCells = (stats.lumpCells || 0) + m;
@@ -298,9 +315,16 @@
       if (i === last) return;
       px[i] = px[last]; py[i] = py[last]; vx[i] = vx[last]; vy[i] = vy[last];
       life[i] = life[last]; age[i] = age[last]; cell[i] = cell[last]; flags[i] = flags[last];
-      color[i] = color[last]; owner[i] = owner[last]; painted[i] = painted[last];
+      color[i] = color[last]; owner[i] = owner[last]; painted[i] = painted[last]; temp[i] = temp[last];
       chunkOf[i] = chunkOf[last]; chunkOf[last] = -1;
     }
+    // (colour c a share k of the way to colour d, and the more solid the more of d)
+    const mix = (c, d, k) => {
+      const r = (c & 255) + ((d & 255) - (c & 255)) * k, g = (c >>> 8 & 255) + ((d >>> 8 & 255) - (c >>> 8 & 255)) * k, b = (c >>> 16 & 255) + ((d >>> 16 & 255) - (c >>> 16 & 255)) * k;
+      return (Math.max(c >>> 24, Math.round(255 * k)) << 24 | Math.round(b) << 16 | Math.round(g) << 8 | Math.round(r)) >>> 0;
+    };
+    // (what comes to rest hot is still hot where it lies: its heat goes into the cell - see pw-heat)
+    const keepHeat = (x, y, t) => { if (t > AMBIENT + 30 && t > PW.heatAt(world, x, y)) PW.setHeat(world, x, y, t); };
     // Chunk i, at (x, y) going `speed`, breaks into its grains: each from its own cell, going on
     // as the chunk was going (a little apart from each other) - so each bounces or runs on down the
     // slope as a grain does. (The blow was the chunk's: its grains do no more damage.)
@@ -311,7 +335,7 @@
         const [gx, gy] = cellOf(c, q, ax, ay);
         const h = PW.hash3(gx, gy, q);
         const jx = ((h & 255) / 255 - 0.5) * 2 * kick, jy = ((h >>> 8 & 255) / 255 - 0.5) * kick;
-        spawnNow(gx + 0.5, gy + 0.5, vx[i] + jx, vy[i] + jy, chunkByte[base + q], chunkColor[base + q], (flags[i] | F.LOOSE) & ~F.DAMAGE, life[i], owner[i]);
+        spawnNow(gx + 0.5, gy + 0.5, vx[i] + jx, vy[i] + jy, chunkByte[base + q], chunkColor[base + q], (flags[i] | F.LOOSE) & ~F.DAMAGE, life[i], owner[i], temp[i]);
       }
       stats.shattered = (stats.shattered || 0) + 1;
     }
@@ -333,7 +357,7 @@
       for (let q = 0; q < m; q += 1) {
         const [gx, gy] = cellOf(c, q, ax, ay), k = k0 + q;
         pend.x[k] = gx + 0.5; pend.y[k] = gy + 0.5; pend.byte[k] = chunkByte[base + q]; pend.rgba[k] = chunkColor[base + q];
-        pend.fl[k] = flags[i] & ~F.DAMAGE; pend.life[k] = life[i]; pend.own[k] = owner[i];
+        pend.fl[k] = flags[i] & ~F.DAMAGE; pend.life[k] = life[i]; pend.own[k] = owner[i]; pend.heat[k] = temp[i];
         mx += gx; my += gy;
       }
       mx /= m; my /= m;
@@ -364,7 +388,7 @@
     // Particle i comes to rest at (x, y) in the grid (a chunk, all its cells).
     function land(i, x, y) {
       if (chunkOf[i] >= 0) { depositChunk(i, Math.floor(x), Math.floor(y)); return true; }
-      return deposit(x, y, cell[i], flags[i], painted[i] ? color[i] : 0);
+      return deposit(x, y, cell[i], flags[i], painted[i] ? color[i] : 0, temp[i]);
     }
     // A grain coming to rest in water takes the place of the water it lands in, and that water
     // goes up to the top of the column it stands in: the surface rises by the grain's volume.
@@ -379,7 +403,7 @@
     // Put a landed particle into the first open cell at or above (x, y): air, or water it is heavy
     // enough to sink in (a light one rests on the surface). (A grain that came to rest and was
     // buried by the rest of the heap landing on it goes to the top of the heap.)
-    function deposit(x, y, byte, fl, paint = 0) {
+    function deposit(x, y, byte, fl, paint = 0, heat = AMBIENT) {
       let cx = Math.max(1, Math.min(W - 2, Math.floor(x))), cy = Math.min(H - 1, Math.floor(y));
       for (let k = 0; k < 400 && cy >= 0; k += 1, cy -= 1) {
         const id = mat[cy * W + cx] & ID_MASK;
@@ -416,6 +440,7 @@
             stats.gasLost = (stats.gasLost || 0) + (moved ? 0 : 1);
           }
           PW.set(world, cx, cy, byte);
+          keepHeat(cx, cy, heat);
           // (landing, it stirs the heap it lands on: the heap settles to its slope)
           if (!(fl & F.WATER)) PW.stir(world, cx, cy, cx, cy);
           // (a piece of a building keeps its colours as rubble, a little dulled with dust)
@@ -466,15 +491,30 @@
 
     function step(dt) {
       flushDebris();
+      const keepSpark = Math.exp(-dt / COOL_SPARK), keepDebris = Math.exp(-dt / COOL_DEBRIS);
       for (let i = count - 1; i >= 0; i -= 1) {
         const fl = flags[i];
         age[i] += dt;
         life[i] -= dt;
+        // Its heat: a fire pixel's is its flame's, by how much of its life has burnt; anything else
+        // hot cools - smoke at once to its own colour, a spark or a lump over a second or two.
+        if (fl & F.FIRE) temp[i] = FIRE_HOT - (FIRE_HOT - FIRE_END) * Math.min(1, age[i] / (age[i] + Math.max(0, life[i])));
+        else if (temp[i] > AMBIENT + 0.5) temp[i] = fl & F.SMOKE ? Math.max(AMBIENT, temp[i] - SMOKE_COOL * dt) : AMBIENT + (temp[i] - AMBIENT) * (fl & F.GLOW ? keepSpark : keepDebris);
+        // (a drop of water as hot as boiling flashes to steam)
+        if ((fl & F.WATER) && temp[i] >= 100) {
+          const cx = px[i] | 0, cy = py[i] | 0;
+          // (no room for its steam where it is: it flies on, at the boil, and tries again)
+          if (cx > 0 && cy > 0 && cx < W - 1 && cy < H - 1 && (mat[cy * W + cx] & ID_MASK) === M.AIR) {
+            PW.set(world, cx, cy, M.STEAM | 3 << 6); PW.setHeat(world, cx, cy, temp[i]);
+            kill(i);
+            continue;
+          }
+        }
         if (fl & (F.SMOKE | F.FIRE)) {
           if (life[i] <= 0) {
-            // (a flame dies as a pixel of smoke, if it carries one)
+            // (a flame dies as a pixel of smoke, if it carries one - still red-hot, cooling)
             if ((fl & F.FIRE) && (color[i] >>> 24)) {
-              flags[i] = F.SMOKE; age[i] = 0;
+              flags[i] = F.SMOKE; age[i] = 0; temp[i] = FIRE_END;
               life[i] = SMOKE_LIFE[0] + (PW.hash2(i, count) & 255) / 255 * (SMOKE_LIFE[1] - SMOKE_LIFE[0]);
               vx[i] *= 0.5; vy[i] *= 0.5;
             } else kill(i);
@@ -691,21 +731,29 @@
         if (chunkOf[i] >= 0) {
           // (a chunk: each of its cells, on the grid)
           const c = chunkOf[i], base = c * CHUNK_CELLS, ax = Math.floor(x), ay = Math.floor(y);
-          for (let q = 0; q < chunkN[c]; q += 1) put(chunkColor[base + q], ax + chunkDx[base + q], ay + chunkDy[base + q]);
+          const t = temp[i], hot = t > GLOW_FROM;
+          for (let q = 0; q < chunkN[c]; q += 1) put(hot ? PW.glowing(chunkColor[base + q], t) : chunkColor[base + q], ax + chunkDx[base + q], ay + chunkDy[base + q]);
           continue;
         }
         if (x < x0 || x > x1 || y < y0 || y > y1) continue;
         let c = color[i];
-        if (flags[i] & F.FIRE) {
-          // (the flame's colour by how much of its life is gone)
-          c = FLAME[Math.min(FLAME.length - 1, (age[i] / (age[i] + life[i]) * FLAME.length) | 0)];
-        } else if (flags[i] & F.SMOKE) {
-          // (its own shade, see-through as it was made, fading out over its last second and a half)
+        const t = temp[i], fl = flags[i];
+        if (fl & F.FIRE) {
+          // (the flame's colour is its heat: white-hot when it bursts out, dark red as it dies)
+          c = FLAME[Math.max(0, Math.min(FLAME.length - 1, ((FIRE_HOT - t) / (FIRE_HOT - FIRE_END) * FLAME.length) | 0))];
+        } else if (fl & F.SMOKE) {
+          // (its own shade, see-through as it was made, fading out over its last second and a half;
+          // still red-hot from the flame it was, a moment, as it cools to that shade)
           const fade = Math.max(0, Math.min(1, life[i] / 1.5));
           const a = Math.round((c >>> 24) * fade / 32) * 32;
           if (a < 24) continue;
           c = (c & 0x00ffffff | Math.min(255, a) << 24) >>> 0;
-        }
+          if (t > GLOW_FROM) c = mix(c, FLAME[FLAME.length - 1], Math.min(1, (t - GLOW_FROM) / (FIRE_END - GLOW_FROM)));
+        } else if (fl & F.GLOW) {
+          // (a spark is all light: its colour is its heat; spent, it is gone)
+          if (t > GLOW_FROM) c = PW.glowAt(t);
+          else if (t > AMBIENT + 30) continue;
+        } else if (t > GLOW_FROM) c = PW.glowing(c, t);
         put(c, Math.floor(x), Math.floor(y));
       }
       for (const [c, list] of groups) {
