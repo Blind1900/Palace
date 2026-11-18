@@ -11,7 +11,7 @@
   const PW = window.PW;
   const { M, ID_MASK } = PW;
 
-  const RATE = 0.25;              // seconds per HM per living core
+  const RATE = 0.15;              // seconds per HM per living core (user: reconstruction 67% faster)
   const CELLS_PER_HM = 8;         // repair pixels one HM buys (the translator turns HM into a burst)
   const HM_PER_DEBRIS = 0.2;      // what a recycled cell of debris is worth
   const SCAN_COLS = 8;            // canvas columns rescanned per damaged building per tick

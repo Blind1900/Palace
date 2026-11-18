@@ -601,7 +601,8 @@
         const depth = d < 6 ? 3 : d < 10 ? 2 : 1;
         for (let k = 0; k < depth; k += 1) {
           const y = g + 2 + k;
-          if ((PW.hash2(x, y) & 7) < (d > 8 ? 4 : d > 4 ? 2 : 0)) continue;   // breaking up with distance
+          // (breaking up with distance - in CLUMPS, never lone speckle cells)
+          if ((PW.hash2(x >> 2, k) & 7) < (d > 8 ? 4 : d > 4 ? 2 : 0)) continue;
           const id = PW.get(world, x, y) & ID_MASK;
           if (!PW.mat.terrain[id] || id === M.ORE || id === M.BEDROCK) continue;
           const c = mix([96, 100, 106], [100, 92, 76], Math.min(1, d / 14));
@@ -635,6 +636,60 @@
     }
   }
 
+  // The deck between a building's beds is a flat layer ABOVE the land, not a slab through it
+  // (the user's rule: the metal terrain matches the varying terrain). Where the old ground runs
+  // close under the deck, the god-metal embeds a few cells into it; where the land falls away,
+  // slender piers carry the deck down to it and the slope shows through underneath. It radiates
+  // like everything else: more finished against the beds, earthing with distance.
+  function bedUnderbody(world, beds, G, naturalAt, owner) {
+    const wall = (PW.buildingKit && PW.buildingKit.VAULT ? PW.buildingKit.VAULT.wall : 4);
+    const deckBot = G + 8;
+    const lay = (x, y, color) => {
+      const id = PW.get(world, x, y) & ID_MASK;
+      if (PW.mat.structural[id] || id === M.ORE || id === M.BEDROCK) return;
+      const o = PW.getOwner(world, x, y);
+      if (o && o !== owner) return;
+      put(world, x, y, M.FOUNDATION, color, owner);
+    };
+    // Every bed stands on its own solid plinth first: god-metal from the vault's underside down
+    // into the ground it was cut into, so no armoured vault ever borders open air below (debris
+    // through an under-deck gap must not reach a core's underside).
+    for (const bed of beds) {
+      const bot = bed.bottom ?? deckBot;
+      for (let x = bed.x0 - 2; x <= bed.x1 + 2; x += 1) {
+        const n = Math.max(bot + 4, Math.round(naturalAt(x)) + 5);
+        for (let y = bot + 1; y <= n; y += 1) {
+          lay(x, y, mix(tone([96, 100, 106], (PW.hash2(x >> 1, y >> 1) & 3) === 0 ? 0.9 : 1), [98, 90, 74], Math.min(1, (y - bot) / 14)));
+        }
+      }
+    }
+    for (let i = 0; i + 1 < beds.length; i += 1) {
+      const a = beds[i], b = beds[i + 1];
+      const x0 = a.x1 + wall + 2, x1 = b.x0 - wall - 2;
+      if (x1 - x0 < 2) continue;
+      const half = Math.max(1, (x1 - x0) / 2);
+      for (let x = x0; x <= x1; x += 1) {
+        const t = 1 - Math.min(x - x0, x1 - x) / half;
+        const n = Math.max(deckBot - 4, Math.round(naturalAt(x)));
+        const gap = n - deckBot;
+        if (gap <= 6) {
+          // the land runs close: the deck embeds into it, breaking up with depth (in clumps,
+          // never lone speckle cells)
+          for (let y = deckBot + 1; y <= n + 5; y += 1) {
+            if ((PW.hash2(x >> 2, y >> 1) & 7) < (y > n + 2 ? 3 : 0)) continue;
+            lay(x, y, mix(tone([96, 100, 106], (PW.hash2(x, y) & 3) === 0 ? 0.9 : 1), [98, 90, 74], Math.min(1, (1 - t) * 0.45 + (y - deckBot) / 16)));
+          }
+        } else if (((x - x0) % 18) < 2) {
+          // the land falls away: a slender pier carries the deck down to it, an ink dash in it,
+          // a black spear foot driven into the ground
+          for (let y = deckBot + 1; y <= n + 6; y += 1) {
+            lay(x, y, y > n + 3 ? [8, 8, 10] : (y - deckBot) % 6 === 3 ? [40, 40, 44] : [84, 88, 94]);
+          }
+        }
+      }
+    }
+  }
+
   function place(world, canvas, worldX, options = {}) {
     const style = options.style || (canvas.meta && canvas.meta.style) || 'modern';
     const extent = measure(world, canvas, worldX, style);
@@ -657,6 +712,9 @@
     giftSkirt(world, p, owner);
     // (the cores' vaults hang under the floor with it, in the ground or among the stage's piers)
     const stamp = PW.stampBuilding(world, canvas, worldX, G, { owner });
+    const beds = canvas.cores.filter((k) => !k.standing && k.vault)
+      .map((k) => ({ x0: worldX + k.vault.x0, x1: worldX + k.vault.x1, bottom: G + k.vault.bottom - canvas.ground + 11 })).sort((u, v) => u.x0 - v.x0);
+    bedUnderbody(world, beds, G, p.natural, owner);
     for (const k of canvas.cores) {
       if (k.standing || !k.vault) continue;
       coreRoots(world, worldX + k.x, G + k.vault.bottom - canvas.ground + 12, owner);
@@ -665,5 +723,5 @@
     return { stamp, plan: p, walls, under, cores, works: [extent.left, extent.right] };
   }
 
-  PW.foundations = { plan, measure, place, lie, allows, rockTerrace, coreRoots, STEEP, STYLE, CUT_MAX, CUT_MAX_HANGAR };
+  PW.foundations = { plan, measure, place, lie, allows, rockTerrace, coreRoots, bedUnderbody, STEEP, STYLE, CUT_MAX, CUT_MAX_HANGAR };
 })();

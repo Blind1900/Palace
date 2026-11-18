@@ -52,6 +52,9 @@
     if (hi - lo > 34) return null;
     const G = Math.round(sum / (bx1 - bx0 + 1));
     const oy = G - canvas.ground;
+    // (the ground as it lies before any work: the deck's underbody meets THIS line)
+    const nat0 = worldX, natural = [];
+    for (let x = worldX; x < worldX + canvas.width; x += 1) natural.push(world.groundTop[x]);
     // The gift below the ground line is set whole: beds, vaults, gallery, foundation plinth.
     // Everything above stays blueprint: repair raises it (and digs the lot out) cell by cell.
     const id = world.buildings.length + 1;
@@ -87,7 +90,13 @@
     record.growing = true;
     record.grewAt = world.tick || 0;
     world.buildings.push(record);
-    // The bundle threads every vault core of the newborn building, and the god's roots go down.
+    // The deck's underbody meets the old ground line, the bundle threads every vault core of
+    // the newborn building, and the god's roots go down.
+    if (PW.foundations && PW.foundations.bedUnderbody) {
+      const beds = record.cores.filter((k) => !k.standing && k.vault)
+        .map((k) => ({ x0: k.vault.x0, x1: k.vault.x1, bottom: k.vault.bottom + 11 })).sort((u, v) => u.x0 - v.x0);
+      PW.foundations.bedUnderbody(world, beds, G, (x) => natural[x - nat0] ?? G, record.id);
+    }
     for (const core of record.cores) {
       if (core.orb || core.standing || !core.vault) continue;
       if (world.pipes && world.pipes.connectCore) world.pipes.connectCore(core.x, core.y, side, world.pipes.TAPS && world.pipes.TAPS.population, record.id);

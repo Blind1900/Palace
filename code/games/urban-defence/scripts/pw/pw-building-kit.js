@@ -513,7 +513,11 @@
       const a = vaults[i].vault, b2 = vaults[i + 1].vault;
       const x0 = a.x1 + VAULT.wall + 2, x1 = b2.x0 - VAULT.wall - 2;
       if (x1 - x0 < 2 || a.lid !== b2.lid) continue;
-      const yTop = a.lid, yBot = Math.max(a.bottom, b2.bottom) + 10;
+      // A flat DECK, not a slab through the ground (the user's rule): the canvas carries only
+      // the capping and eight rows of structure tying bed to bed; below that the world-side
+      // underbody meets whatever terrain is really there (PW.foundations.bedUnderbody - embeds
+      // where the land runs close, piers down to it where it falls away).
+      const yTop = a.lid, yBot = yTop + 8;
       const halfSpan = Math.max(1, (x1 - x0) / 2);
       for (let y = yTop; y <= yBot; y += 1) {
         for (let x = x0; x <= x1; x += 1) {
