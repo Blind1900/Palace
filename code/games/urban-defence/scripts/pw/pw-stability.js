@@ -188,36 +188,47 @@
       // ground under the box, ground carrying on past its sides, buildings, propped tunnels),
       // through solid ground only; any ground it does not reach - an island left by the slide, a
       // block resting on loose rubble - comes down too.
+      // (its passes over the box - finding what anchors, following it out, gathering what it did not
+      // reach - are worked through CELLS_PER_TICK cells a tick between them, like the scan)
       stats.stage = `link ${bw}x${bh}`;
-      if (!region.scan.linked) {
-        const linked = region.scan.linked = new Uint8Array(bw * bh), queue = region.scan.queue = [];
-        for (let k = 0; k < bw * bh; k += 1) {
+      const sc = region.scan, n = bw * bh;
+      if (!sc.linked) { sc.linked = new Uint8Array(n); sc.queue = []; sc.head = 0; sc.seedK = 0; sc.finK = 0; }
+      const { linked, queue } = sc;
+      let left = CELLS_PER_TICK;
+      if (sc.seedK < n) {
+        const end = Math.min(n, sc.seedK + left);
+        left -= end - sc.seedK;
+        for (let k = sc.seedK; k < end; k += 1) {
           const x = x0 + (k % bw), y = y0 + ((k / bw) | 0), i = y * W + x;
           if (reach[k] === FAR || !holds(i, x, y)) continue;
           if (y === y1 || x === x0 || x === x1 || !breakable(i, x, y)) { linked[k] = 1; queue.push(k); }
         }
-        region.scan.head = 0;
+        sc.seedK = end;
+        if (sc.seedK < n || left <= 0) return -1;
       }
-      if (region.scan.head < region.scan.queue.length) {
-        const { linked, queue } = region.scan;
-        let n = 0;
-        while (region.scan.head < queue.length && n < CELLS_PER_TICK) {
-          const k = queue[region.scan.head++];
-          n += 1;
+      if (sc.head < queue.length) {
+        while (sc.head < queue.length && left > 0) {
+          const k = queue[sc.head++];
+          left -= 4;
           const kx = k % bw;
           for (const j of [k - bw, k + bw, kx > 0 ? k - 1 : -1, kx < bw - 1 ? k + 1 : -1]) {
-            if (j < 0 || j >= bw * bh || linked[j] || reach[j] === FAR) continue;
+            if (j < 0 || j >= n || linked[j] || reach[j] === FAR) continue;
             const x = x0 + (j % bw), y = y0 + ((j / bw) | 0);
             if (!holds(y * W + x, x, y)) continue;
             linked[j] = 1; queue.push(j);
           }
         }
-        if (region.scan.head < queue.length) return -1;
-        for (let k = 0; k < bw * bh; k += 1) {
+        if (sc.head < queue.length || left <= 0) return -1;
+      }
+      if (sc.finK < n) {
+        const end = Math.min(n, sc.finK + left);
+        for (let k = sc.finK; k < end; k += 1) {
           if (linked[k] || reach[k] === FAR) continue;
           const x = x0 + (k % bw), y = y0 + ((k / bw) | 0), i = y * W + x;
           if (holds(i, x, y) && breakable(i, x, y)) { out.push(i); reach[k] = FAR; }
         }
+        sc.finK = end;
+        if (sc.finK < n) return -1;
         // (from the bottom up, so each comes away from under what rested on it)
         out.sort((a, b) => b - a);
         return -1;
@@ -740,8 +751,29 @@
       stats.ruinsLoosened = (stats.ruinsLoosened || 0) + n;
       return n;
     }
-    // (both, in a box: bits of ruin first - their panels may go with them)
-    function loose(x0, y0, x1, y1) { return looseRuins(Math.floor(x0), Math.floor(y0), Math.ceil(x1), Math.ceil(y1)) + panels(x0, y0, x1, y1); }
+    // (is anything of ruin r left - a cell of it, or a panel?)
+    function ruinLeft(r) {
+      const PANEL = PW.FLAG.PANEL;
+      for (let y = Math.max(1, r.y0); y <= Math.min(H - 2, r.y1); y += 1) {
+        for (let x = Math.max(1, r.x0); x <= Math.min(W - 2, r.x1); x += 1) {
+          if ((mat[y * W + x] & ID_MASK) === M.RUIN || (PW.getFlags(world, x, y) & PANEL)) return true;
+        }
+      }
+      return false;
+    }
+    // (both, in a box: bits of ruin first - their panels may go with them. Only where a ruin lies:
+    // its bits and panels are never outside its box, a panel's ledge never further than
+    // PANEL_SIDE from it)
+    function loose(x0, y0, x1, y1) {
+      let n = 0;
+      for (const r of world.ruins || []) {
+        const rx0 = Math.max(Math.floor(x0), r.x0 - PANEL_SIDE), ry0 = Math.max(Math.floor(y0), r.y0 - PANEL_SIDE);
+        const rx1 = Math.min(Math.ceil(x1), r.x1 + PANEL_SIDE), ry1 = Math.min(Math.ceil(y1), r.y1 + PANEL_SIDE);
+        if (rx1 < rx0 || ry1 < ry0) continue;
+        n += looseRuins(rx0, ry0, rx1, ry1) + panels(rx0, ry0, rx1, ry1);
+      }
+      return n;
+    }
     // (asked for by others - round a damaged building - and looked at here, one box a tick)
     const looseQueue = [];
     function looseLater(x0, y0, x1, y1) {
@@ -756,8 +788,11 @@
       // gone without a look, the heap it lay on run off from under it)
       const ruins = world.ruins;
       if (ruins && ruins.length && tick % PANEL_EVERY === 0) {
-        const r = ruins[ruinAt = (ruinAt + 1) % ruins.length];
+        ruinAt = (ruinAt + 1) % ruins.length;
+        const r = ruins[ruinAt];
         loose(r.x0 - PANEL_SIDE, r.y0 - PANEL_SIDE, r.x1 + PANEL_SIDE, r.y1 + PANEL_SIDE);
+        // (a ruin all gone - crumbled, cleared, built over - is forgotten)
+        if (!ruinLeft(r)) ruins.splice(ruinAt, 1);
       }
       if (sags.length) { const t0 = performance.now(); stepSags(1 / 60); stats.sagMs = performance.now() - t0; }
       if (toppling.length) goOver();

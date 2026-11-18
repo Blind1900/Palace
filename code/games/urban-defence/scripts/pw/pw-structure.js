@@ -39,6 +39,12 @@
     const stats = { analysed: 0, collapses: 0, detached: 0, crumbled: 0, orphans: 0, ms: 0, maxMs: 0, last: null };
     let tick = 0;
     const isStructure = (id) => phase[id] === PW.PHASE.SOLID && (structural[id] || groundMat[id]);
+    // (by material: frame, and what holds frame up - ground, or structure it does not own)
+    const frameOf = new Uint8Array(ID_MASK + 1), holds = new Uint8Array(ID_MASK + 1);
+    for (let id = 0; id <= ID_MASK; id += 1) {
+      frameOf[id] = isStructure(id) ? 1 : 0;
+      holds[id] = phase[id] === PW.PHASE.SOLID && (groundMat[id] === 1 || structural[id] === 1) ? 1 : 0;
+    }
     const building = (id) => (world.buildings || [])[id - 1] || null;
     const size = 1 << CHUNK_SHIFT;
 
@@ -60,33 +66,37 @@
       const cls = new Uint8Array(gw * gh);
       const at = (x, y) => (y - y0 + 1) * gw + (x - x0 + 1);
       let fx0 = Infinity, fy0 = Infinity, fx1 = -Infinity, fy1 = -Infinity, count = 0;
+      const fits = [];
       for (let cy = y0 >> CHUNK_SHIFT; cy <= y1 >> CHUNK_SHIFT; cy += 1) {
         for (let cx = x0 >> CHUNK_SHIFT; cx <= x1 >> CHUNK_SHIFT; cx += 1) {
           const c = cy * world.chunksX + cx;
           const own = world.owner[c];
           if (!own) continue;
           const back = world.back[c], deco = world.deco[c];
-          for (let ly = 0; ly < size; ly += 1) {
-            const y = (cy << CHUNK_SHIFT) + ly;
-            if (y < y0 || y > y1) continue;
-            for (let lx = 0; lx < size; lx += 1) {
+          const bx = cx << CHUNK_SHIFT, by = cy << CHUNK_SHIFT;
+          const ly0 = Math.max(0, y0 - by), ly1 = Math.min(size - 1, y1 - by), lx0 = Math.max(0, x0 - bx), lx1 = Math.min(size - 1, x1 - bx);
+          for (let ly = ly0; ly <= ly1; ly += 1) {
+            const y = by + ly;
+            for (let lx = lx0; lx <= lx1; lx += 1) {
               const l = ly << CHUNK_SHIFT | lx;
               if (own[l] !== b.id) continue;
-              const x = (cx << CHUNK_SHIFT) + lx;
-              if (x < x0 || x > x1) continue;
+              const x = bx + lx;
               let k = 0;
-              if (isStructure(mat[y * W + x] & ID_MASK)) k = SOLID;
+              if (frameOf[mat[y * W + x] & ID_MASK]) k = SOLID;
               else if (back && back[l]) k = BACK;
               if (deco && deco[l]) k |= FIT;
               if (!k) continue;
               cls[at(x, y)] = k;
               count += 1;
               if (k & FRAME) { if (x < fx0) fx0 = x; if (x > fx1) fx1 = x; if (y < fy0) fy0 = y; if (y > fy1) fy1 = y; }
+              else fits.push(at(x, y));
             }
           }
         }
       }
-      return { x0, y0, x1, y1, gw, gh, cls, at, count, fx0, fx1, fy0, fy1 };
+      // (fits: the fittings standing free of the frame, by cls index)
+      fits.sort((a, b) => a - b);
+      return { x0, y0, x1, y1, gw, gh, cls, at, count, fx0, fx1, fy0, fy1, fits };
     }
     // As built, from its canvas: per row above the floor, the load (frame above the row), the
     // supporting columns (frame with frame on top), their span and centre, the widest gap between
@@ -94,7 +104,9 @@
     function blueprintOf(b) {
       if (b.blueprint) return b.blueprint;
       const c = b.canvas, rows = c.ground;
-      const frame = (x, y) => (c.mat[y * c.width + x] && isStructure(c.mat[y * c.width + x] & ID_MASK)) || c.back[y * c.width + x] !== 0;
+      const isFrame = new Uint8Array(rows * c.width);
+      for (let i = 0; i < isFrame.length; i += 1) isFrame[i] = frameOf[c.mat[i] & ID_MASK] || c.back[i] !== 0 ? 1 : 0;
+      const frame = (x, y) => isFrame[y * c.width + x] === 1;
       const load = new Float32Array(rows), support = new Int32Array(rows), left = new Int32Array(rows).fill(1e9), right = new Int32Array(rows).fill(-1e9);
       const supportX = new Float64Array(rows), maxGap = new Int32Array(rows), balanced = new Uint8Array(rows);
       let total = 0, above = 0, aboveX = 0;
@@ -155,6 +167,60 @@
       stats.ms = performance.now() - t0;
       stats.maxMs = Math.max(stats.maxMs, stats.ms);
     }
+    // Mark the building's frame that is anchored - joined, 8-connected, to ground or to structure
+    // it does not own - in `state`; [frame cells, anchored cells]. (A tower is a hundred thousand
+    // cells, its rooms walled behind: its frame is searched in runs - unbroken stretches of a row -
+    // each joined to the runs it touches, corners too, in the rows above and below.)
+    function anchor(b, S, state) {
+      const { cls, at, gw } = S;
+      const fy0 = S.fy0, fx0 = S.fx0, fx1 = S.fx1, runRows = S.fy1 - S.fy0 + 1;
+      const rowAt = new Int32Array(runRows + 1), runX0 = [], runX1 = [], held = [];
+      let frame = 0, anchored = 0;
+      // (ground, or structure the building does not own, next to frame at cls index j, world i)
+      const support = (j, i) => !(cls[j] & FRAME) && holds[mat[i] & ID_MASK] === 1;
+      // The main base's armoured block floats over its pit, held up by its core's field for as
+      // long as the core lives.
+      const f = b.floating;
+      const floats = !!f && (b.cores || []).some((core) => (mat[core.y * W + core.x] & ID_MASK) === M.CORE);
+      for (let y = fy0; y <= S.fy1; y += 1) {
+        rowAt[y - fy0] = runX0.length;
+        const floatRow = floats && y >= f.top && y <= f.bottom;
+        for (let x = fx0, k = at(x, y), i = y * W + x; x <= fx1; x += 1, k += 1, i += 1) {
+          if (!(cls[k] & FRAME)) continue;
+          const start = x;
+          let seed = 0;
+          for (; x <= fx1 && (cls[k] & FRAME); x += 1, k += 1, i += 1) {
+            // (a core holds itself up by its field - risen out of the ruins too, hanging over the
+            // wreck - and whatever is built onto it)
+            if (!seed && ((mat[i] & ID_MASK) === M.CORE || (y + 1 < H && support(k + gw, i + W)) || (x + 1 < W && support(k + 1, i + 1)) || (x > 0 && support(k - 1, i - 1)) || (y > 0 && support(k - gw, i - W))
+              || (floatRow && x >= f.left && x <= f.right))) seed = 1;
+          }
+          frame += x - start;
+          runX0.push(start); runX1.push(x - 1); held.push(seed);
+        }
+      }
+      rowAt[runRows] = runX0.length;
+      const runs = runX0.length, runRow = new Int32Array(runs), stack = [];
+      for (let r = 0; r < runRows; r += 1) for (let q = rowAt[r]; q < rowAt[r + 1]; q += 1) runRow[q] = r;
+      for (let q = 0; q < runs; q += 1) if (held[q]) stack.push(q);
+      while (stack.length) {
+        const q = stack.pop(), a = runX0[q] - 1, z = runX1[q] + 1;
+        for (let r = runRow[q] - 1; r <= runRow[q] + 1; r += 2) {
+          if (r < 0 || r >= runRows) continue;
+          // (the first run in that row reaching a, then each on that starts by z)
+          let lo = rowAt[r], hi = rowAt[r + 1];
+          while (lo < hi) { const mid = (lo + hi) >> 1; if (runX1[mid] < a) lo = mid + 1; else hi = mid; }
+          for (let s = lo; s < rowAt[r + 1] && runX0[s] <= z; s += 1) if (!held[s]) { held[s] = 1; stack.push(s); }
+        }
+      }
+      for (let q = 0; q < runs; q += 1) {
+        if (!held[q]) continue;
+        const k = at(runX0[q], fy0 + runRow[q]), n = runX1[q] - runX0[q] + 1;
+        state.fill(1, k, k + n);
+        anchored += n;
+      }
+      return [frame, anchored];
+    }
     function analyse(b) {
       if (!b) return null;
       stats.analysed += 1;
@@ -164,37 +230,10 @@
       if (S.fx1 < S.fx0) { b.health = 0; b.ruined = true; loosePanels(b); return report; }
       // Anchored frame: joined to ground or to structure the building does not own (8-connected).
       const state = new Uint8Array(gw * gh);           // 1 anchored frame
-      const queue = [];
-      const support = (x, y) => {
-        if (x < 0 || y < 0 || x >= W || y >= H || (cls[at(x, y)] & FRAME)) return false;
-        const nid = mat[y * W + x] & ID_MASK;
-        return phase[nid] === PW.PHASE.SOLID && (groundMat[nid] === 1 || structural[nid] === 1);
-      };
-      for (let y = S.fy0; y <= S.fy1; y += 1) for (let x = S.fx0; x <= S.fx1; x += 1) {
-        const k = at(x, y);
-        if (!(cls[k] & FRAME)) continue;
-        report.frame += 1;
-        // (a core holds itself up by its field - risen out of the ruins too, hanging over the wreck
-        // - and whatever is built onto it)
-        if ((mat[y * W + x] & ID_MASK) === M.CORE || support(x, y + 1) || support(x + 1, y) || support(x - 1, y) || support(x, y - 1)) { state[k] = 1; queue.push(x, y); }
-      }
-      // The main base's armoured block floats over its pit, held up by its core's field for as
-      // long as the core lives.
-      const f = b.floating;
-      if (f && (b.cores || []).some((core) => (mat[core.y * W + core.x] & ID_MASK) === M.CORE)) {
-        for (let y = Math.max(S.fy0, f.top); y <= Math.min(S.fy1, f.bottom); y += 1) for (let x = Math.max(S.fx0, f.left); x <= Math.min(S.fx1, f.right); x += 1) {
-          const k = at(x, y);
-          if ((cls[k] & FRAME) && !state[k]) { state[k] = 1; queue.push(x, y); }
-        }
-      }
-      for (let q = 0; q < queue.length; q += 2) {
-        const x = queue[q], y = queue[q + 1];
-        for (let dy = -1; dy <= 1; dy += 1) for (let dx = -1; dx <= 1; dx += 1) {
-          const k = at(x + dx, y + dy);
-          if ((cls[k] & FRAME) && !state[k]) { state[k] = 1; queue.push(x + dx, y + dy); }
-        }
-      }
-      report.anchored = queue.length / 2;
+      [report.frame, report.anchored] = anchor(b, S, state);
+      // (the parts not anchored are searched cell by cell, on cls indices: frame lies inside the
+      // scan's padded box, so a cell's 8 neighbours are k + NEAR)
+      const queue = new Int32Array(S.count + 1), NEAR = [-gw - 1, -gw, -gw + 1, -1, 1, gw - 1, gw, gw + 1];
       // A building going up - built or repaired cell by cell (b.growing) - is a construction site
       // (b.site) from the first time it is worked until it is all but whole (SITE_DONE), even
       // while the work pauses or stalls. What is being put up is not yet joined to what holds it -
@@ -211,18 +250,21 @@
       // Parts no longer joined to anything fall; small bits crumble.
       if (report.anchored < report.frame) {
         const seen = new Uint8Array(gw * gh);
+        // (world index of the cell at cls index k)
+        const toCell = (k) => ((k / gw | 0) - 1 + S.y0) * W + (k % gw) - 1 + S.x0;
         for (let y = S.fy0; y <= S.fy1; y += 1) for (let x = S.fx0; x <= S.fx1; x += 1) {
           const k0 = at(x, y);
           if (!(cls[k0] & FRAME) || state[k0] || seen[k0]) continue;
           const part = [];
-          const stack = [x, y];
+          let top = 0;
+          queue[top++] = k0;
           seen[k0] = 1;
-          while (stack.length) {
-            const py = stack.pop(), px = stack.pop();
-            part.push(py * W + px);
-            for (let dy = -1; dy <= 1; dy += 1) for (let dx = -1; dx <= 1; dx += 1) {
-              const k = at(px + dx, py + dy);
-              if ((cls[k] & FRAME) && !state[k] && !seen[k]) { seen[k] = 1; stack.push(px + dx, py + dy); }
+          while (top) {
+            const kp = queue[--top];
+            part.push(toCell(kp));
+            for (let d = 0; d < 8; d += 1) {
+              const k = kp + NEAR[d];
+              if ((cls[k] & FRAME) && !state[k] && !seen[k]) { seen[k] = 1; queue[top++] = k; }
             }
           }
           if (site && !lost) {
@@ -256,8 +298,7 @@
       for (let y = S.fy0; y <= Math.min(S.fy1, b.ground - 1); y += 1) {
         const r = y - b.oy;
         let rowN = 0, rowX = 0, carried = 0, carriedX = 0, left = Infinity, right = -Infinity, last = -1, gap = 0, gapAt = 0;
-        for (let x = cx0; x <= cx1; x += 1) {
-          const k = at(x, y);
+        for (let x = cx0, k = at(cx0, y); x <= cx1; x += 1, k += 1) {
           if (!state[k]) continue;
           rowN += 1; rowX += x + 0.5;
           if (state[k - gw]) {
@@ -348,27 +389,25 @@
     // Fittings (front deco the building owns) left with nothing holding them come down: one stays
     // while it is joined to standing frame or stands on something solid.
     function clearFittings(b, S, state) {
-      const { cls, at, gw, gh, x0, y0 } = S;
+      const { cls, gw, gh, x0, y0 } = S;
       const held = new Uint8Array(gw * gh);
       const queue = [];
       // (fittings over the frame travel with it; these are the free-standing ones)
-      for (let k = 0; k < cls.length; k += 1) {
-        if (cls[k] !== FIT) continue;
+      for (const k of S.fits) {
         const x = (k % gw) - 1 + x0, y = ((k / gw) | 0) - 1 + y0;
         // (standing on firm ground or structure: loose debris under it can slide away)
-        if (phase[mat[Math.min(H - 1, y + 1) * W + x] & ID_MASK] === PW.PHASE.SOLID) { held[k] = 1; queue.push(x, y); continue; }
-        for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) if (state[at(x + dx, y + dy)]) { held[k] = 1; queue.push(x, y); break; }
+        if (phase[mat[Math.min(H - 1, y + 1) * W + x] & ID_MASK] === PW.PHASE.SOLID || state[k + 1] || state[k - 1] || state[k + gw] || state[k - gw]) { held[k] = 1; queue.push(k); }
       }
-      for (let q = 0; q < queue.length; q += 2) {
-        const x = queue[q], y = queue[q + 1];
-        for (let dy = -1; dy <= 1; dy += 1) for (let dx = -1; dx <= 1; dx += 1) {
-          const k = at(x + dx, y + dy);
-          if (cls[k] === FIT && !held[k]) { held[k] = 1; queue.push(x + dx, y + dy); }
+      for (let q = 0; q < queue.length; q += 1) {
+        const kq = queue[q];
+        for (let dy = -gw; dy <= gw; dy += gw) for (let dx = -1; dx <= 1; dx += 1) {
+          const k = kq + dy + dx;
+          if (cls[k] === FIT && !held[k]) { held[k] = 1; queue.push(k); }
         }
       }
       let removed = 0;
-      for (let k = 0; k < cls.length; k += 1) {
-        if (cls[k] !== FIT || held[k]) continue;
+      for (const k of S.fits) {
+        if (held[k]) continue;
         const x = (k % gw) - 1 + x0, y = ((k / gw) | 0) - 1 + y0;
         if (PW.getOwner(world, x, y) !== b.id || !PW.getLayer(world, 'deco', x, y)) continue;
         const color = PW.getLayer(world, 'deco', x, y);
@@ -402,14 +441,16 @@
       const { at } = S;
       const yf = fail.y;
       const piece = [], band = [];
-      for (let y = S.fy0; y <= S.fy1; y += 1) for (let x = S.fx0; x <= S.fx1; x += 1) {
-        if (!state[at(x, y)]) continue;
-        const jag = (PW.hash2(x >> 1, yf) % 5) - 2;    // the break is ragged
-        if (y < yf + jag - 1) piece.push(y * W + x);
-        else if (y <= yf + jag + 2) band.push(y * W + x);
+      const jags = new Int8Array(S.fx1 - S.fx0 + 1);
+      for (let x = S.fx0; x <= S.fx1; x += 1) jags[x - S.fx0] = (PW.hash2(x >> 1, yf) % 5) - 2;    // the break is ragged
+      for (let y = S.fy0; y <= S.fy1; y += 1) {
+        for (let x = S.fx0, k = at(x, y); x <= S.fx1; x += 1, k += 1) {
+          if (!state[k]) continue;
+          const jag = jags[x - S.fx0];
+          if (y < yf + jag - 1) { piece.push(y * W + x); state[k] = 0; }
+          else if (y <= yf + jag + 2) { band.push(y * W + x); state[k] = 0; }
+        }
       }
-      for (const i of piece) state[at(i % W, (i / W) | 0)] = 0;
-      for (const i of band) state[at(i % W, (i / W) | 0)] = 0;
       if (piece.length < CRUMBLE_ONLY) { crumble(piece.concat(band)); fail.cells = piece.length + band.length; return; }
       crumble(band);
       for (const i of band) if ((PW.hash2(i, 3) & 7) === 0) fragments.puff(i % W, ((i / W) | 0) - 1, 2, 4, 2);

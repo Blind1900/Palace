@@ -84,6 +84,7 @@
         // tens of thousands of cells)
         const { CHUNK_SHIFT, CHUNK_MASK } = PW;
         const touched = new Set();
+        let lastChunk = -1;
         for (const i of spec.cells) {
           const x = i % W, y = (i / W) | 0;
           const c = (y >> CHUNK_SHIFT) * world.chunksX + (x >> CHUNK_SHIFT), l = (y & CHUNK_MASK) << CHUNK_SHIFT | (x & CHUNK_MASK);
@@ -106,7 +107,7 @@
           if (backs) backs[l] = 0;
           if (decos) decos[l] = 0;
           if (owners) owners[l] = 0;
-          touched.add(c);
+          if (c !== lastChunk) { touched.add(c); lastChunk = c; }
         }
         // Re-raster every chunk the piece left (both layers, its whole area).
         for (const c of touched) {
@@ -116,14 +117,14 @@
         }
         for (const key of ['x', 'y', 'color', 'byte', 'solid', 'girth']) if (data[key]) data[key] = data[key].slice(0, k);
       }
-      const n = data.x.length;
+      const n = data.x.length, X = data.x, Y = data.y, SOL = data.solid;
       // (its weight is in its frame: a back wall weighs little - see THIN)
       let mass = 0, heavy = 0, thin = 0, sx = 0, sy = 0;
       for (let k = 0; k < n; k += 1) {
-        const w = weightOf(data.solid[k]);
+        const w = weightOf(SOL[k]);
         if (!w) continue;
-        mass += w; sx += (data.x[k] + 0.5) * w; sy += (data.y[k] + 0.5) * w;
-        if (data.solid[k] === 1) heavy += 1; else thin += 1;
+        mass += w; sx += (X[k] + 0.5) * w; sy += (Y[k] + 0.5) * w;
+        if (SOL[k] === 1) heavy += 1; else thin += 1;
       }
       // A part of a piece (a chunk it broke into, what is left of it) goes on from just where it
       // was in the piece, turned as it was, and - unless told otherwise - moving as that part of it
@@ -151,51 +152,58 @@
       const ax = Math.floor(cx), ay = Math.floor(cy);
       // Local grid around the anchor cell (ax, ay), for drawing and contact.
       let u0 = Infinity, v0 = Infinity, u1 = -Infinity, v1 = -Infinity;
-      for (let k = 0; k < n; k += 1) { const u = data.x[k] - ax, v = data.y[k] - ay; u0 = Math.min(u0, u); u1 = Math.max(u1, u); v0 = Math.min(v0, v); v1 = Math.max(v1, v); }
-      const gw = u1 - u0 + 1, gh = v1 - v0 + 1;
-      const grid = new Int32Array(gw * gh);
-      for (let k = 0; k < n; k += 1) grid[(data.y[k] - ay - v0) * gw + (data.x[k] - ax - u0)] = k + 1;
+      for (let k = 0; k < n; k += 1) { const u = X[k] - ax, v = Y[k] - ay; if (u < u0) u0 = u; if (u > u1) u1 = u; if (v < v0) v0 = v; if (v > v1) v1 = v; }
+      const gw = u1 - u0 + 1, gh = v1 - v0 + 1, N = gw * gh;
+      const grid = new Int32Array(N);
+      for (let k = 0; k < n; k += 1) grid[(Y[k] - ay - v0) * gw + (X[k] - ax - u0)] = k + 1;
       // What it strikes with is its frame - pillars, floors, outer walls (a tree's wood). A
       // building is mostly air: its rooms are open, the back wall only a panel behind them, so
       // what it falls on can come into its rooms (and a piece hollow enough breaks up the easier).
-      const solidAt = (u, v) => { if (u < u0 || u > u1 || v < v0 || v > v1) return false; const g = grid[(v - v0) * gw + (u - u0)]; return g > 0 && data.solid[g - 1] === 1; };
+      // (a building's piece is tens of thousands of cells, made over again as it is crushed: all
+      // of this is flat arrays, read by grid index)
+      const frame = new Uint8Array(N);
+      for (let g = 0; g < N; g += 1) if (grid[g] && SOL[grid[g] - 1] === 1) frame[g] = 1;
       // (the open space outside it: everything not frame reached from the edges of its box)
-      const outside = new Uint8Array(gw * gh), fill = [];
-      for (let gv = 0; gv < gh; gv += 1) for (let gu = 0; gu < gw; gu += 1) {
-        if (gu > 0 && gv > 0 && gu < gw - 1 && gv < gh - 1) continue;
-        if (!solidAt(gu + u0, gv + v0)) { outside[gv * gw + gu] = 1; fill.push(gv * gw + gu); }
+      const outside = new Uint8Array(N), fill = new Int32Array(N);
+      let tail = 0;
+      for (let gu = 0; gu < gw; gu += 1) for (const g of [gu, N - gw + gu]) if (!frame[g] && !outside[g]) { outside[g] = 1; fill[tail++] = g; }
+      for (let gv = 1; gv < gh - 1; gv += 1) for (const g of [gv * gw, gv * gw + gw - 1]) if (!frame[g] && !outside[g]) { outside[g] = 1; fill[tail++] = g; }
+      for (let q = 0; q < tail; q += 1) {
+        const g = fill[q], gu = g % gw;
+        if (gu > 0 && !frame[g - 1] && !outside[g - 1]) { outside[g - 1] = 1; fill[tail++] = g - 1; }
+        if (gu < gw - 1 && !frame[g + 1] && !outside[g + 1]) { outside[g + 1] = 1; fill[tail++] = g + 1; }
+        if (g >= gw && !frame[g - gw] && !outside[g - gw]) { outside[g - gw] = 1; fill[tail++] = g - gw; }
+        if (g < N - gw && !frame[g + gw] && !outside[g + gw]) { outside[g + gw] = 1; fill[tail++] = g + gw; }
       }
-      for (let q = 0; q < fill.length; q += 1) {
-        const g = fill[q], gu = g % gw, gv = (g / gw) | 0;
-        for (const [du, dv] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-          const nu = gu + du, nv = gv + dv;
-          if (nu < 0 || nv < 0 || nu >= gw || nv >= gh) continue;
-          const j = nv * gw + nu;
-          if (outside[j] || solidAt(nu + u0, nv + v0)) continue;
-          outside[j] = 1; fill.push(j);
-        }
-      }
-      const isOutside = (u, v) => u < u0 || u > u1 || v < v0 || v > v1 || outside[(v - v0) * gw + (u - u0)] === 1;
       // Outline: frame cells with an open side (where it touches the world first), and which way
       // each faces (out through its open sides). Its outer faces are tested closely, the faces of
       // its rooms more sparsely.
-      const outer = [], inner = [];
-      let inertia = 0;
+      // (kept as cell index and which of its sides are frame - left 1, right 2, top 4, bottom 8)
+      const outer = new Int32Array(n), inner = new Int32Array(n);
+      let outers = 0, inners = 0, inertia = 0;
+      const gcx = cx - ax, gcy = cy - ay;
       for (let k = 0; k < n; k += 1) {
-        const wgt = weightOf(data.solid[k]);
+        const wgt = weightOf(SOL[k]);
         if (!wgt) continue;
-        const u = data.x[k] - ax, v = data.y[k] - ay;
-        inertia += wgt * ((u + 0.5 - (cx - ax)) ** 2 + (v + 0.5 - (cy - ay)) ** 2);
-        if (data.solid[k] !== 1) continue;
-        const l = solidAt(u - 1, v), r = solidAt(u + 1, v), t = solidAt(u, v - 1), b = solidAt(u, v + 1);
+        const u = X[k] - ax, v = Y[k] - ay;
+        inertia += wgt * ((u + 0.5 - gcx) ** 2 + (v + 0.5 - gcy) ** 2);
+        if (SOL[k] !== 1) continue;
+        const gu = u - u0, gv = v - v0, g = gv * gw + gu;
+        const l = gu > 0 && frame[g - 1] === 1, r = gu < gw - 1 && frame[g + 1] === 1;
+        const t = gv > 0 && frame[g - gw] === 1, b = gv < gh - 1 && frame[g + gw] === 1;
         if (l && r && t && b) continue;
-        const out = (!l && isOutside(u - 1, v)) || (!r && isOutside(u + 1, v)) || (!t && isOutside(u, v - 1)) || (!b && isOutside(u, v + 1));
-        (out ? outer : inner).push(u + 0.5, v + 0.5, (l ? 0 : -1) + (r ? 0 : 1), (t ? 0 : -1) + (b ? 0 : 1));
+        const out = (!l && (gu === 0 || outside[g - 1] === 1)) || (!r && (gu === gw - 1 || outside[g + 1] === 1))
+          || (!t && (gv === 0 || outside[g - gw] === 1)) || (!b && (gv === gh - 1 || outside[g + gw] === 1));
+        const e = k << 4 | (l ? 1 : 0) | (r ? 2 : 0) | (t ? 4 : 0) | (b ? 8 : 0);
+        if (out) outer[outers++] = e; else inner[inners++] = e;
       }
       const picked = [];
-      for (const [set, share] of [[outer, 0.75], [inner, 0.25]]) {
-        const stride = Math.max(1, Math.ceil(set.length / 4 / (OUTLINE_MAX * share)));
-        for (let k = 0; k < set.length; k += 4 * stride) picked.push(set[k], set[k + 1], set[k + 2], set[k + 3]);
+      for (const [set, count, share] of [[outer, outers, 0.75], [inner, inners, 0.25]]) {
+        const stride = Math.max(1, Math.ceil(count / (OUTLINE_MAX * share)));
+        for (let q = 0; q < count; q += stride) {
+          const e = set[q], k = e >> 4;
+          picked.push(X[k] - ax + 0.5, Y[k] - ay + 0.5, (e & 1 ? 0 : -1) + (e & 2 ? 0 : 1), (e & 4 ? 0 : -1) + (e & 8 ? 0 : 1));
+        }
       }
       const points = new Float32Array(picked.length / 2), faces = new Float32Array(picked.length / 2);
       for (let k = 0, j = 0; k < picked.length; k += 4, j += 2) {
@@ -532,8 +540,7 @@
         for (let u = u0; u < u0 + gw; u += 1) {
           const gi = (v - v0) * gw + (u - u0), g = grid[gi];
           if (!g || !data.solid[g - 1]) continue;
-          const [wx, wy] = toWorld(p, c, s, u + 0.5, v + 0.5);
-          const x = Math.floor(wx), y = Math.floor(wy);
+          const x = Math.floor(p.px + (u + 0.5) * c - (v + 0.5) * s), y = Math.floor(p.py + (u + 0.5) * s + (v + 0.5) * c);
           if (!blocking(x, y)) continue;
           // (its own stump under it is crushed instead)
           if (p.owner && y < p.base && PW.getOwner(world, x, y) === p.owner && (mat[y * W + x] & ID_MASK) !== M.CORE) { crush(x, y, p.owner, mid); continue; }
@@ -1062,16 +1069,19 @@
       const band = Math.max(4, Math.min(40, felt / 6 * (0.3 + p.hollow)));
       const lateral = spread / 2 + band * 2 + 8;
       const tx = -ny, ty = nx;
-      const d = p.data, n = d.x.length;
+      const d = p.data, n = d.x.length, X = d.x, Y = d.y;
       const folded = [], rest = [];
       let lost = 0;
+      // (toWorld, cell by cell)
+      const ox = p.ox0 - 0.5, oy = p.oy0 - 0.5, px = p.px, py = p.py;
       for (let k = 0; k < n; k += 1) {
-        const [x, y] = toWorld(p, c, s, d.x[k] - p.ox0 + 0.5, d.y[k] - p.oy0 + 0.5);
-        const ex = x - wx, ey = y - wy;
+        const u = X[k] - ox, v = Y[k] - oy;
+        const ex = px + u * c - v * s - wx, ey = py + u * s + v * c - wy;
         // (how high above what it struck, and how far along it; the fold is ragged)
         const h = ex * nx + ey * ny, a = ex * tx + ey * ty;
-        const edge = band + ((PW.hash2(d.x[k] >> 2, d.y[k] >> 2) & 7) - 3.5) * 0.6;
-        if (h < edge && Math.abs(a) < lateral) { folded.push(k); lost += weightOf(d.solid[k]); } else rest.push(k);
+        if (h >= band + 2.1 || Math.abs(a) >= lateral) { rest.push(k); continue; }
+        const edge = band + ((PW.hash2(X[k] >> 2, Y[k] >> 2) & 7) - 3.5) * 0.6;
+        if (h < edge) { folded.push(k); lost += weightOf(d.solid[k]); } else rest.push(k);
       }
       if (lost < 4 || !rest.length) return false;
       const go = (40 + felt * 0.8);
@@ -1391,19 +1401,20 @@
     }
     // The piece's cells at their present places in the world, as data for a new piece.
     function place(p, part, c, s) {
-      const out = { x: new Int32Array(part.x.length), y: new Int32Array(part.x.length), color: part.color, byte: part.byte, solid: part.solid, girth: part.girth };
-      for (let j = 0; j < part.x.length; j += 1) {
-        const u = part.x[j] - p.ox0 + 0.5, v = part.y[j] - p.oy0 + 0.5;
-        const [wx, wy] = toWorld(p, c, s, u, v);
-        out.x[j] = Math.floor(wx); out.y[j] = Math.floor(wy);
+      const n = part.x.length, out = { x: new Int32Array(n), y: new Int32Array(n), color: part.color, byte: part.byte, solid: part.solid, girth: part.girth };
+      // (toWorld, cell by cell)
+      const ox = p.ox0 - 0.5, oy = p.oy0 - 0.5, px = p.px, py = p.py;
+      for (let j = 0; j < n; j += 1) {
+        const u = part.x[j] - ox, v = part.y[j] - oy;
+        out.x[j] = Math.floor(px + u * c - v * s); out.y[j] = Math.floor(py + u * s + v * c);
       }
       return out;
     }
     function pick(data, ks) {
       const n = ks.length;
       const out = { x: new Int32Array(n), y: new Int32Array(n), color: new Uint32Array(n), byte: new Uint8Array(n), solid: new Uint8Array(n) };
-      ks.forEach((k, j) => { out.x[j] = data.x[k]; out.y[j] = data.y[k]; out.color[j] = data.color[k]; out.byte[j] = data.byte[k]; out.solid[j] = data.solid[k]; });
-      if (data.girth) { out.girth = new Uint8Array(n); ks.forEach((k, j) => { out.girth[j] = data.girth[k]; }); }
+      for (let j = 0; j < n; j += 1) { const k = ks[j]; out.x[j] = data.x[k]; out.y[j] = data.y[k]; out.color[j] = data.color[k]; out.byte[j] = data.byte[k]; out.solid[j] = data.solid[k]; }
+      if (data.girth) { out.girth = new Uint8Array(n); for (let j = 0; j < n; j += 1) out.girth[j] = data.girth[ks[j]]; }
       return out;
     }
     // Break a set of cells up where they are: most heap as rubble in open cells, a share is thrown
