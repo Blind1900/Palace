@@ -154,6 +154,9 @@
         if (particles && F && (stats.restored & 3) === 0) {
           particles.spawn(cell.x + 0.5, cell.y + 0.5, ((PW.hash2(cell.x, cell.y) & 63) - 32) * 0.6, -26, M.DEBRIS | 3 << 6, 0, 0, 3);
         }
+        // The god's foam: now and then a small white colony of Life plays over the fresh work
+        // and dies away (black and white are the dead machine god's colours; pw-life runs it).
+        if (world.lifeGame && (PW.hash2(cell.x, cell.y) & 31) === 7) world.lifeGame.seed(cell.x, cell.y - 3, 2, world.lifeGame.WHITE);
         drop(cell);
         return true;
       }
