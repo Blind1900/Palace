@@ -136,7 +136,7 @@
       if (!building(id) || due.has(id)) return;
       due.set(id, Math.max(tick + 2, (last.get(id) ?? -1e9) + REPEAT));
     }
-    let sweepAt = 0;
+    let sweepAt = 0, blueprintAt = 0;
     function step(budgetMs = 1.5) {
       tick += 1;
       const t0 = performance.now();
@@ -163,6 +163,18 @@
         last.set(id, tick);
         analyse(building(id));
         if (!PW.DETERMINISTIC && performance.now() - t0 > budgetMs) break;
+      }
+      // (with time to spare, one building a tick has its blueprint worked out ahead of the first
+      // blow to it, so the analysis right after a blast does not pay for that too - it is the same
+      // whenever it is worked out)
+      if (all.length && performance.now() - t0 < budgetMs * 0.5) {
+        for (let k = 0; k < all.length; k += 1) {
+          const b = all[(blueprintAt + k) % all.length];
+          if (b.blueprint || !b.canvas) continue;
+          blueprintOf(b);
+          blueprintAt = (blueprintAt + k + 1) % all.length;
+          break;
+        }
       }
       stats.ms = performance.now() - t0;
       stats.maxMs = Math.max(stats.maxMs, stats.ms);
@@ -252,8 +264,7 @@
         const seen = new Uint8Array(gw * gh);
         // (world index of the cell at cls index k)
         const toCell = (k) => ((k / gw | 0) - 1 + S.y0) * W + (k % gw) - 1 + S.x0;
-        for (let y = S.fy0; y <= S.fy1; y += 1) for (let x = S.fx0; x <= S.fx1; x += 1) {
-          const k0 = at(x, y);
+        for (let y = S.fy0; y <= S.fy1; y += 1) for (let x = S.fx0, k0 = at(S.fx0, y); x <= S.fx1; x += 1, k0 += 1) {
           if (!(cls[k0] & FRAME) || state[k0] || seen[k0]) continue;
           const part = [];
           let top = 0;
@@ -371,17 +382,19 @@
     }
     // Fittings in front that hang on a falling part (a sign on its wall, a lamp on its corner) go
     // with it: those joined to it through other fittings.
+    // (on cls indices - a part is tens of thousands of cells: the same search, in the same order)
+    const AROUND = (gw) => [-gw - 1, -gw, -gw + 1, -1, 0, 1, gw - 1, gw, gw + 1];
     function fittingsOn(S, part) {
-      const { cls, at } = S;
-      const out = [], seen = new Set();
+      const { cls, at, gw, x0, y0 } = S, around = AROUND(gw);
+      const out = [], seen = new Uint8Array(cls.length);
       const queue = [];
-      for (const i of part) queue.push(i % W, (i / W) | 0);
-      for (let q = 0; q < queue.length; q += 2) {
-        const x = queue[q], y = queue[q + 1];
-        for (let dy = -1; dy <= 1; dy += 1) for (let dx = -1; dx <= 1; dx += 1) {
-          const nx = x + dx, ny = y + dy, k = at(nx, ny);
-          if (cls[k] !== FIT || seen.has(k)) continue;
-          seen.add(k); out.push(ny * W + nx); queue.push(nx, ny);
+      for (const i of part) queue.push(at(i % W, (i / W) | 0));
+      for (let q = 0; q < queue.length; q += 1) {
+        const k0 = queue[q];
+        for (let d = 0; d < 9; d += 1) {
+          const k = k0 + around[d];
+          if (cls[k] !== FIT || seen[k]) continue;
+          seen[k] = 1; out.push((((k / gw) | 0) - 1 + y0) * W + (k % gw) - 1 + x0); queue.push(k);
         }
       }
       return out;

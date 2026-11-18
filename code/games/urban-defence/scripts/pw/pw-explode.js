@@ -18,11 +18,12 @@
     const { structural, open, palettes } = PW.mat;
     const reach = r * (1.35 + 0.25 * Math.min(1, power)), x0 = Math.max(1, Math.floor(cx - reach)), x1 = Math.min(W - 2, Math.ceil(cx + reach));
     const y0 = Math.max(1, Math.floor(cy - reach)), y1 = Math.min(H - 2, Math.ceil(cy + reach * 0.8));
-    // (solid cells between the blast and (x, y), not counting (x, y) itself)
+    // (solid cells between the blast and (x, y), not counting (x, y) itself - counted from (x, y)
+    // back towards the blast, where the wall it is part of is: past `most` the count stops)
     const between = (x, y, most) => {
       const dx = x - cx, dy = y - cy, n = Math.ceil(Math.max(Math.abs(dx), Math.abs(dy)));
       let hit = 0;
-      for (let s = 1; s < n; s += 1) {
+      for (let s = n - 1; s >= 1; s -= 1) {
         const px = Math.round(cx + dx * s / n), py = Math.round(cy + dy * s / n);
         if (!open[mat[py * W + px] & ID_MASK] && (mat[py * W + px] & ID_MASK) !== M.WATER && (hit += 1) > most) return hit;
       }
@@ -30,13 +31,18 @@
     };
     const darken = (color, k) => { const c = PW.unpack(color); return PW.abgr(c[0] * k + 4, c[1] * k + 3, c[2] * k + 2); };
     for (let y = y0; y <= y1; y += 1) {
-      for (let x = x0; x <= x1; x += 1) {
+      // (only the cells of the row within reach: the disc's span of it, a cell to spare)
+      const half = Math.sqrt(Math.max(0, reach * reach - (y - cy) * (y - cy)));
+      for (let x = Math.max(x0, Math.floor(cx - half) - 1), xe = Math.min(x1, Math.ceil(cx + half) + 1); x <= xe; x += 1) {
         const d = Math.hypot(x - cx, y - cy) / reach;
         if (d >= 1) continue;
         // (a ragged edge: the soot thins out in patches)
         const near = 1 - d;
         if ((PW.hash2(x >> 1, y >> 1) & 255) / 255 > near * 2.4) continue;
-        const i = y * W + x, id = mat[i] & ID_MASK, owner = PW.getOwner(world, x, y);
+        const i = y * W + x, id = mat[i] & ID_MASK;
+        // (bare ground, and open air with no wall behind it: nothing there takes soot)
+        if (id === M.AIR ? !PW.getLayer(world, 'back', x, y) : PW.mat.terrain[id]) continue;
+        const owner = PW.getOwner(world, x, y);
         const building = owner > 0 && owner < 50000;
         const again = (PW.getFlags(world, x, y) & PW.FLAG.SCORCH) !== 0;
         const k = again ? 0.9 : 1 - 0.58 * Math.min(1, near * 1.7);

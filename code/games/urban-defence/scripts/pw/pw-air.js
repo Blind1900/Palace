@@ -32,6 +32,8 @@
     const p = new Float32Array(AW * AH), vx = new Float32Array(AW * AH), vy = new Float32Array(AW * AH);
     const wall = new Uint8Array(AW * AH);          // air cell mostly solid: the air does not pass
     const active = new Map();                      // tile -> steps it has been quiet
+    const live = new Uint8Array(TW * TH);          // (the same, as a flag per tile: what every gas
+                                                   // cell asks of the air each tick - see at)
     const stats = { tiles: 0, ms: 0, shattered: 0, lifted: 0 };
     const advection = PW.mat.advection, phase = PW.mat.phase;
     const clamp = (v) => (v > 40 ? 40 : v < -40 ? -40 : v);
@@ -58,7 +60,7 @@
         measureWall(ax, ay);
         if (!wall[ay * AW + ax]) open += 1;
       }
-      if (open) active.set(t, 0);
+      if (open) { active.set(t, 0); live[t] = 1; }
     }
     // A blast at (x, y): a burst of pressure, strongest at the centre, into the air within its
     // radius. Only the open air takes it: a blast in a cave or a room drives it all out through
@@ -97,7 +99,7 @@
         if (ax < 0 || ay < 0 || ax >= AW || ay >= AH) continue;
         const d = Math.hypot(ax + 0.5 - acx, ay + 0.5 - acy) / ar;
         const i = ay * AW + ax;
-        if (d >= 1 || wall[i] || !active.has(((ay / TILE) | 0) * TW + ((ax / TILE) | 0))) continue;
+        if (d >= 1 || wall[i] || !live[((ay / TILE) | 0) * TW + ((ax / TILE) | 0)]) continue;
         const k = 1 - d * d;
         // (it does not slow air already going faster that way)
         if (ux && (Math.abs(vx[i]) < Math.abs(ux) * k || Math.sign(vx[i]) !== Math.sign(ux))) vx[i] = clamp(vx[i] + (ux * k - vx[i]) * 0.8);
@@ -165,7 +167,7 @@
         if (loudest[k] >= QUIET) { active.set(t, 0); continue; }
         const quiet = active.get(t) + 1;
         if (quiet <= 30) { active.set(t, quiet); continue; }
-        active.delete(t);
+        active.delete(t); live[t] = 0;
         const tx = t % TW, ty = (t / TW) | 0;
         for (let ay = ty * TILE; ay < Math.min(AH, ty * TILE + TILE); ay += 1) for (let ax = tx * TILE; ax < Math.min(AW, tx * TILE + TILE); ax += 1) { const i = ay * AW + ax; p[i] = 0; vx[i] = 0; vy[i] = 0; }
       }
@@ -180,8 +182,9 @@
     // Shatter the glass in air cell (ax, ay); the shards fly with the wind in air cell `from`.
     function shatter(ax, ay, from) {
       const fx = from % AW, wx = (vx[from] + (fx > 0 ? vx[from - 1] : 0)) * S * 1.5, wy = (vy[from] + (from >= AW ? vy[from - AW] : 0)) * S * 1.5;
-      for (let y = ay * S; y < Math.min(H, ay * S + S); y += 1) for (let x = ax * S; x < Math.min(W, ax * S + S); x += 1) {
-        if ((mat[y * W + x] & ID_MASK) !== M.GLASS) continue;
+      const xe = Math.min(W, ax * S + S), ye = Math.min(H, ay * S + S), GLASS = M.GLASS;
+      for (let y = ay * S; y < ye; y += 1) for (let x = ax * S, i = y * W + x; x < xe; x += 1, i += 1) {
+        if ((mat[i] & ID_MASK) !== GLASS) continue;
         const owner = PW.getOwner(world, x, y);
         PW.set(world, x, y, M.AIR);
         if (particles && (PW.hash2(x, y) & 3) === 0) particles.spawn(x + 0.5, y + 0.5, wx + ((PW.hash3(x, y, 1) & 63) - 32), wy - 20, M.DEBRIS | PW.DEBRIS_KIND.METAL << 6, PW.abgr(170, 210, 230), PW.PARTICLE.LAND | PW.PARTICLE.DAMAGE, 4, owner);
@@ -212,8 +215,7 @@
     // The wind the air grid adds at world cell (x, y), in cells per second.
     function at(x, y) {
       const ax = (x / S) | 0, ay = (y / S) | 0;
-      if (ax < 0 || ay < 0 || ax >= AW || ay >= AH || !active.size) return ZERO;
-      if (!active.has(((ay / TILE) | 0) * TW + ((ax / TILE) | 0))) return ZERO;
+      if (ax < 0 || ay < 0 || ax >= AW || ay >= AH || !live[((ay / TILE) | 0) * TW + ((ax / TILE) | 0)]) return ZERO;
       const i = ay * AW + ax;
       OUT[0] = vx[i] * S * 6; OUT[1] = vy[i] * S * 6; OUT[2] = p[i];
       return OUT;
