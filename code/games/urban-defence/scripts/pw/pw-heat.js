@@ -17,6 +17,12 @@
   const BOIL = 100, LATENT = 250, SCORCH = 420, PLANT_IGNITE = 250;
   const FLAME = 820;                // flame temperature of a burning cell
   const LOSS_OPEN = 0.035, LOSS_OPEN_UNDER = 0.015, LOSS_WATER = 0.012, LOSS_SOLID = 0.004;
+  // Water quenches: where water touches something solid (or a heap) the two trade heat far faster
+  // than either conducts - the water boiling off it - so hot rock, metal or rubble that meets
+  // water goes dark at once, in a hiss of steam. (QUENCH: the share of their difference traded
+  // each heat tick.)
+  const QUENCH = 0.4;
+  const quench = (a, b) => (a === M.WATER) !== (b === M.WATER) && !open[a === M.WATER ? b : a];
   const RISE = 0.3;                 // share of hot air's excess carried up per heat tick
   const SMOKE_CHANCE = 0.3;         // per burning cell per heat tick
 
@@ -245,7 +251,7 @@
             const k = conduct[id];
             // Right and down neighbours (inside this chunk directly, across edges via the core).
             if (x + 1 < W) {
-              const kj = conduct[mat[i + 1] & ID_MASK], kk = k < kj ? k : kj;
+              const j1 = mat[i + 1] & ID_MASK, kj = conduct[j1], kk = quench(id, j1) ? QUENCH : k < kj ? k : kj;
               const tj = lx < CHUNK - 1 ? T[li + 1] : PW.heatAt(world, x + 1, y);
               const flux = kk * (t - tj);
               if (flux > 0.02 || flux < -0.02) {
@@ -254,7 +260,7 @@
               }
             }
             if (y + 1 < H) {
-              const kj = conduct[mat[i + W] & ID_MASK], kk = k < kj ? k : kj;
+              const j1 = mat[i + W] & ID_MASK, kj = conduct[j1], kk = quench(id, j1) ? QUENCH : k < kj ? k : kj;
               const tj = ly < CHUNK - 1 ? T[li + CHUNK] : PW.heatAt(world, x, y + 1);
               const flux = kk * (t - tj);
               if (flux > 0.02 || flux < -0.02) {

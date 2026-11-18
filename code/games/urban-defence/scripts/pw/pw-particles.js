@@ -27,10 +27,11 @@
   // (the flame's colour over its life: white-hot first, dark red last)
   const FLAME = [[255, 252, 236], [255, 240, 170], [255, 214, 104], [255, 178, 60], [248, 136, 40], [226, 96, 30], [184, 64, 26], [124, 40, 22]]
     .map((c) => PW.abgr(c[0], c[1], c[2]));
-  // Heat is a modifier on every pixel (see PW.glowAt): each carries its temperature, and hot it
-  // glows, cooling back to its own colour. A fire pixel is a pixel of smoke burning hot: its
-  // flame's colour is its heat, white-hot at FIRE_HOT cooling to a dark red at FIRE_END over its
-  // life; then, smoke, it cools on at SMOKE_COOL to its own colour within a moment. Sparks and
+  // Heat is its own property of every pixel, beside what the pixel is (see PW.glowAt): each
+  // carries its temperature, and hot it glows, cooling back to its own colour. Fire is a pixel of
+  // its own - a flame, coloured by its life (white-hot as it bursts out, dark red as it dies: see
+  // FLAME) - and it is hot too (FIRE_HOT, falling to FIRE_END over its life), so the smoke it dies
+  // into is born red-hot and cools at SMOKE_COOL to its own shade within a moment. Sparks and
   // shrapnel, a blast's hot rubble, embers glow and cool as they fly (in COOL_SPARK, COOL_DEBRIS:
   // seconds to lose most of their heat over the air), and what lands hot is still hot in the
   // heap. A liquid does not glow: hot enough, a drop of water flashes to steam.
@@ -496,8 +497,8 @@
         const fl = flags[i];
         age[i] += dt;
         life[i] -= dt;
-        // Its heat: a fire pixel's is its flame's, by how much of its life has burnt; anything else
-        // hot cools - smoke at once to its own colour, a spark or a lump over a second or two.
+        // Its heat: a flame's falls as its life burns; anything else hot cools - smoke at once to
+        // its own colour, a spark or a lump over a second or two.
         if (fl & F.FIRE) temp[i] = FIRE_HOT - (FIRE_HOT - FIRE_END) * Math.min(1, age[i] / (age[i] + Math.max(0, life[i])));
         else if (temp[i] > AMBIENT + 0.5) temp[i] = fl & F.SMOKE ? Math.max(AMBIENT, temp[i] - SMOKE_COOL * dt) : AMBIENT + (temp[i] - AMBIENT) * (fl & F.GLOW ? keepSpark : keepDebris);
         // (a drop of water as hot as boiling flashes to steam)
@@ -560,6 +561,8 @@
           return cy >= 0 && cy < H && cx >= 0 && cx < W ? mat[cy * W + cx] & ID_MASK : M.AIR;
         })();
         const inLiquid = phase[around] === PW.PHASE.LIQUID;
+        // (a hot lump in water is quenched: its heat goes into the water about it, which boils)
+        if (inLiquid && temp[i] > 100) { PW.addHeat(world, px[i] | 0, py[i] | 0, (temp[i] - 100) * 0.5); temp[i] = 100 + (temp[i] - 100) * 0.5; }
         let g = GRAVITY * (fl & F.LEAF ? 0.25 : 1);
         if (inLiquid && own && !(fl & F.WATER)) g *= 1 - weight[around] / Math.max(1, weight[own]);
         const buoyant = g < 0;
@@ -739,8 +742,8 @@
         let c = color[i];
         const t = temp[i], fl = flags[i];
         if (fl & F.FIRE) {
-          // (the flame's colour is its heat: white-hot when it bursts out, dark red as it dies)
-          c = FLAME[Math.max(0, Math.min(FLAME.length - 1, ((FIRE_HOT - t) / (FIRE_HOT - FIRE_END) * FLAME.length) | 0))];
+          // (a flame, its own pixel: its colour by how much of its life is gone)
+          c = FLAME[Math.min(FLAME.length - 1, (age[i] / (age[i] + life[i]) * FLAME.length) | 0)];
         } else if (fl & F.SMOKE) {
           // (its own shade, see-through as it was made, fading out over its last second and a half;
           // still red-hot from the flame it was, a moment, as it cools to that shade)
