@@ -1079,7 +1079,7 @@
       // HESCO gabions on the terraces: a basket on each tread past the first (clear of the walls
       // and doors), so the steps carry a broken defensive wall down both flanks.
       for (const tread of terrace.treads) if (Math.abs(tread.x - summit) > half + 20) hesco(world, tread, style, random);
-      const works = mountainWorks(world, summit, half, Y, id, facing);
+      const works = mountainWorks(world, summit, half, Y, id, facing, record.cores.map((q) => q.x));
       world.outposts.push({ side, style, building: record, terrace, summit,
         footprints: [[terrace.x0 - 10, terrace.x1 + 10], ...works.footprints] });
     }
@@ -1091,7 +1091,7 @@
   // enemy side, and the crown of the summit round the works is lined with reinforcement that
   // follows the mountain's own shape.
   const REINF = [96, 104, 100], REINF_DARK = [74, 80, 78], REINF_LIT = [122, 130, 124];
-  function mountainWorks(world, summit, half, Y, id, facing) {
+  function mountainWorks(world, summit, half, Y, id, facing, coreXs = []) {
     const footprints = [];
     const armour = (x, y, edge, stud) => {
       PW.set(world, x, y, M.REINFORCED, { quiet: true });
@@ -1112,8 +1112,10 @@
       if (x1 - x0 < 50) return null;
       return { x0, x1, y0: g.y0, y1: g.y1 };
     };
-    const g1 = clamp({ x0: summit - half + 6, x1: summit + half - 6, y0: Y + 34, y1: Y + 74 })
-      || clamp({ x0: summit - half + 6, x1: summit + half - 6, y0: Y + 64, y1: Y + 104 });
+    // (48 below the bench: the blockhouse's beds and vaults - and the bundle through their
+    // connectors - sit whole above the command gallery's ceiling, nothing cut off)
+    const g1 = clamp({ x0: summit - half + 6, x1: summit + half - 6, y0: Y + 48, y1: Y + 88 })
+      || clamp({ x0: summit - half + 6, x1: summit + half - 6, y0: Y + 78, y1: Y + 118 });
     if (!g1) return { footprints, galleries: [], shaft: null };
     const g2 = clamp({ x0: summit - half + 16, x1: summit + half - 2, y0: g1.y1 + 26, y1: g1.y1 + 66 });
     for (const g of [g1, g2]) {
@@ -1123,7 +1125,13 @@
       tunnelLamps(world, g.x0, g.x1, g.y0 + 2, 48);
     }
     // The ladder shaft: bench to command, command to stores, and on down to the tunnels' stub.
-    const shaftX = summit - facing * Math.round(half * 0.45);
+    // It keeps clear of every core (the user's note: nothing cuts a bed off) - candidates are
+    // tried until one stands at least 20 from each, inside the command gallery's span.
+    let shaftX = summit - facing * Math.round(half * 0.45);
+    for (const f of [0.45, 0.25, 0.62, 0.08, -0.18, -0.4]) {
+      const cand = Math.max(g1.x0 + 10, Math.min(g1.x1 - 10, summit - facing * Math.round(half * f)));
+      if (coreXs.every((cx) => Math.abs(cand - cx) >= 20)) { shaftX = cand; break; }
+    }
     const shaftBottom = g2.y1 + 50;
     for (let y = Y - S.DOOR_H; y <= shaftBottom; y += 1) {
       for (let dx = -7; dx <= 7; dx += 1) {
@@ -1176,7 +1184,7 @@
       for (let d = 1; d <= depth; d += 1) {
         const y = s + d;
         if (!rock(x, y) || PW.getOwner(world, x, y)) continue;
-        if (end < 16 && (PW.hash2(x, y) & 7) < 3) continue;   // ragged where it runs out
+        if (end < 16 && (PW.hash2(x >> 2, d) & 7) < 3) continue;   // ragged where it runs out (in clumps, no speckle)
         armour(x, y, d === depth, (x & 7) === 0 && (y & 7) === 0);
       }
     }

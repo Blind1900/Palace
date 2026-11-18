@@ -121,23 +121,43 @@
     }
   }
 
-  // Cut an opening from (x, y) stepping by (dx, dy) until it breaks into daylight; rim it. Gives
-  // up (and fills nothing back) if the rock runs on past `max` steps. Returns the columns it cut,
-  // so the wild can be kept off the opening's mouth.
+  // Cut an opening from (x, y) stepping by (dx, dy) until it breaks into daylight. It is a
+  // FIGHTING POSITION, finished like the works it serves (the user's note: the holes must read
+  // as places to garrison behind and shoot out of, merged with the walls): ribbed dark concrete
+  // inside, lit warm at the inner end so it reads manned; a studded tread course underfoot and
+  // plain reinforcement over; a hazard-tipped armour sill at the inner mouth to shoot over; the
+  // outer third splays open and wears a darker cast collar at the breach. Gives up (and fills
+  // nothing back) if the rock runs on past `max` steps. Returns the columns it cut, so the wild
+  // can be kept off the opening's mouth.
   function cutOpening(world, x, y, dx, dy, halfH, max, owner) {
     let d = 0;
     while (d < max && solidRock(world, x + dx * d, y + dy * d - halfH)) d += 1;
     if (d >= max) return null;
+    const splay = (t) => halfH + (t > d * 0.68 ? 1 : 0);
     for (let t = 0; t <= d; t += 1) {
       const cx = x + dx * t, cy = y + dy * t;
-      for (let k = -halfH; k <= halfH; k += 1) {
+      const hh = splay(t);
+      for (let k = -hh; k <= hh; k += 1) {
         const id = PW.get(world, cx, cy + k) & ID_MASK;
         if (id !== M.AIR) PW.set(world, cx, cy + k, M.AIR, { quiet: true });
         PW.setLayer(world, 'deco', cx, cy + k, 0);
-        PW.setLayer(world, 'back', cx, cy + k, rgb([16, 18, 20]));
+        const rib = (t % 6) === 1;
+        const glow = Math.max(0, 1 - t / 7) * 0.5;
+        const base = rib ? 34 : 21;
+        PW.setLayer(world, 'back', cx, cy + k, rgb([base + 46 * glow, base + 2 + 38 * glow, base + 5 + 18 * glow]));
+        PW.setFlag(world, cx, cy + k, FLAG.TUNNEL | FLAG.CARVED);
       }
-      // The lining above and below the cut, so the opening reads as built, not blasted.
-      for (const k of [-halfH - 1, halfH + 1]) if (solidRock(world, cx, cy + k)) put(world, cx, cy + k, M.REINFORCED, REINF_C, owner);
+      const collar = t >= d - 2;
+      for (const k of [-hh - 1, hh + 1]) {
+        if (!solidRock(world, cx, cy + k)) continue;
+        const tread = k > 0 && (t & 3) === 0 && !collar;
+        put(world, cx, cy + k, M.REINFORCED, collar ? REINF_DARK : tread ? REINF_LIT : REINF_C, owner);
+      }
+    }
+    // The sill at the fighting end: two armour cells with a hazard tip, cover to shoot over.
+    for (const t of [0, 1]) {
+      const sx = x + dx * t, sy = y + dy * t + halfH;
+      put(world, sx, sy, M.REINFORCED, t === 0 ? [230, 184, 40] : REINF_LIT, owner);
     }
     return { x0: Math.min(x, x + dx * d), x1: Math.max(x, x + dx * d) };
   }

@@ -200,12 +200,24 @@
       rearRoof.left += facing > 0 ? 34 : 0; rearRoof.right -= facing > 0 ? 0 : 34;
     }
     if (variant === 'bastion') {
-      // Earth glacis banked against the rear wall, and a dome on the roof.
+      // Earth glacis banked against the rear wall - faced with the god's revetment so it reads
+      // as the works' own earthwork, not a stray mound (the user's note): plate courses skin
+      // the slope, hazard chevrons where it meets the wall, and grass creeps over the toe to
+      // hand it back to the land.
       for (let lx = -60; lx < 0; lx += 1) {
         const h = Math.round((lx + 60) / 60 * (S.FLOOR - 6));
         for (let dy = 0; dy < h; dy += 1) {
-          const id = dy === h - 1 ? M.GRASS : M.SOIL;
-          K.solid(c, X(lx), ground - 1 - dy, id, id === M.GRASS ? [88, 124, 54] : tone([104, 80, 52], 0.95 + (PW.hash2(lx, dy) & 1) * 0.08), ROLE.ORNAMENT);
+          const face = dy >= h - 2, toe = lx < -48;
+          if (face && !toe) {
+            const lip = lx >= -8 && dy === h - 1;
+            const course = ((lx + dy) % 9) === 0;
+            const col = lip ? (((lx + dy) >> 1 & 1) === 0 ? [230, 184, 40] : [40, 40, 44])
+              : course ? [64, 67, 73] : tone([96, 100, 106], (PW.hash2(lx, dy) & 3) === 0 ? 0.88 : 1);
+            K.solid(c, X(lx), ground - 1 - dy, M.FOUNDATION, col, ROLE.ORNAMENT);
+          } else {
+            const id = face && dy === h - 1 ? M.GRASS : M.SOIL;
+            K.solid(c, X(lx), ground - 1 - dy, id, id === M.GRASS ? [88, 124, 54] : tone([104, 80, 52], 0.95 + (PW.hash2(lx, dy) & 1) * 0.08), ROLE.ORNAMENT);
+          }
         }
       }
       const dcx = Math.round((rearRoof.left + rearRoof.right) / 2);
