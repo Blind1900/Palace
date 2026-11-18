@@ -570,6 +570,186 @@
     return { network: net.id, shaft: { x: sx, top: pitFloor, bottom: driftBottom }, drift: { x0: d0, x1: d1, top: driftTop, bottom: driftBottom },
       storage: { x0: Math.min(r0, sx), x1: Math.max(r1, sx), top: driftTop - 8, bottom: driftBottom }, node };
   }
+  // N11F: the miners push on from every mine - hallways of varying height and look that SERVE
+  // as rooms (storage, pipe control, an armoury, trash, and the subliminal room), dug just
+  // beside the workings but always heading toward ore, and using caves as highways: break in
+  // at the nearest reach, carry on from the cave's point nearest the next vein. N12F keeps the
+  // headings honest: a body already worked sends the heading on to the next, or to a cave.
+  const HALL_ROOMS = [
+    { kind: 'storage', h: 44, w: 130 }, { kind: 'pipes', h: 36, w: 100 }, { kind: 'armoury', h: 36, w: 110 },
+    { kind: 'trash', h: 26, w: 90 }, { kind: 'subliminal', h: 22, w: 70 },
+  ];
+  function furnishHallRoom(world, kind, x0, x1, floor, h, random) {
+    const deco = (x, y, c) => { if ((PW.get(world, x, y) & 63) === M.AIR) PW.setLayer(world, 'deco', x, y, rgb(c)); };
+    if (kind === 'storage') {
+      for (let n = 0; n < 3; n += 1) {
+        const bx = x0 + 18 + n * Math.round((x1 - x0 - 36) / 3) + random.int(-6, 6);
+        for (let dy = 0; dy < 10; dy += 1) for (let dx = 0; dx < 14; dx += 1) {
+          deco(bx + dx, floor - 1 - dy, dy === 9 || dx === 0 || dx === 13 ? [74, 60, 40] : (dx + dy) % 5 ? [108, 88, 58] : [90, 72, 48]);
+        }
+      }
+    } else if (kind === 'pipes') {
+      const px = Math.round((x0 + x1) / 2);
+      for (let dy = 6; dy < h - 6; dy += 1) PW.setLayer(world, 'back', px, floor - dy, rgb([52, 56, 60]));
+      for (const wx of [px - 14, px + 14]) {
+        for (let a = 0; a < 12; a += 1) {
+          const ang = a * Math.PI / 6;
+          deco(wx + Math.round(Math.cos(ang) * 4), floor - 16 + Math.round(Math.sin(ang) * 4), [130, 136, 142]);
+        }
+        deco(wx, floor - 16, [10, 10, 12]);
+      }
+    } else if (kind === 'armoury') {
+      for (let n = 0; n < 4; n += 1) {
+        const ax = x0 + 16 + n * 18;
+        for (let dy = 0; dy < 16; dy += 1) deco(ax, floor - 1 - dy, dy === 15 || dy === 0 ? [96, 100, 108] : [48, 50, 56]);
+        deco(ax + 1, floor - 16, [96, 100, 108]);
+      }
+    } else if (kind === 'trash') {
+      // (drawn junk, not loose cells: real debris in a raw tunnel would sit in cells the
+      // development can never line, and the network would never count as whole)
+      for (let n = 0; n < 5; n += 1) {
+        const tx = x0 + 10 + random.int(0, Math.max(8, x1 - x0 - 26));
+        const w = 5 + random.int(0, 7), hh = 2 + random.int(0, 3);
+        for (let dy = 0; dy < hh; dy += 1) for (let dx = dy; dx < w - dy; dx += 1) {
+          deco(tx + dx, floor - 1 - dy, (dx + dy) % 3 ? [74, 68, 58] : [96, 86, 66]);
+        }
+      }
+    } else if (kind === 'subliminal') {
+      // The god's room: ink to every wall, one white point, nothing else. Subtle; it watches.
+      for (let y = floor - h + 1; y <= floor; y += 1) for (let x = x0 + 1; x < x1; x += 1) {
+        if (PW.getLayer(world, 'back', x, y)) PW.setLayer(world, 'back', x, y, rgb([6, 6, 8]));
+      }
+      const mx = Math.round((x0 + x1) / 2), my = floor - Math.round(h / 2);
+      for (const [dx, dy] of [[0, 0], [1, 0], [0, 1], [1, 1]]) PW.setLayer(world, 'back', mx + dx, my + dy, rgb([238, 242, 246]));
+    }
+  }
+  function mineWorkings(world, layout, from, side, random) {
+    if (!from || !from.network || !PW.tunnels) return;
+    const net = PW.tunnels.state(world).networks[from.network - 1];
+    if (!net) return;
+    if (from.node) from.node.worked = (from.node.worked || 0) + 1;
+    let wayX = from.drift ? Math.round((from.drift.x0 + from.drift.x1) / 2) : from.shaft.x;
+    let wayY = from.drift ? from.drift.bottom : from.shaft.bottom;
+    const targets = (layout.nodes || [])
+      .filter((n) => n !== from.node && !n.worked && Math.abs(n.x - wayX) < 1600 && Math.abs(n.y - wayY) < 700
+        && n.y > world.groundTop[Math.max(0, Math.min(world.width - 1, Math.round(n.x)))] + 260)
+      .sort((p, q) => (Math.abs(p.x - wayX) + Math.abs(p.y - wayY) * 2) - (Math.abs(q.x - wayX) + Math.abs(q.y - wayY) * 2))
+      .slice(0, 2);
+    let roomIdx = (from.shaft ? from.shaft.x : 0) % HALL_ROOMS.length;
+    // No box of the workings may cut a cave's standing formations (columns, stalagmites - the
+    // grounding rule): a leg or shaft that would clip one is clipped back instead.
+    const clearOfProps = (x0, y0, x1, y1) => {
+      let a = Math.min(x0, x1), b2 = Math.max(x0, x1);
+      for (const p of world.props || []) {
+        if (p.y1 < y0 - 2 || p.y0 > y1 + 2 || p.x1 < a - 2 || p.x0 > b2 + 2) continue;
+        if (p.x0 > a) b2 = Math.min(b2, p.x0 - 4); else a = Math.max(a, p.x1 + 4);
+      }
+      return b2 - a > 20 ? [a, b2] : null;
+    };
+    // Returns the span really dug (clearOfProps may clip it), or null: the caller must walk on
+    // from the DUG end, never past a gap - a leg started beyond a clipped one is an island the
+    // development wave can never reach.
+    const digLeg = (x0, y, x1, h, kind) => {
+      const span = clearOfProps(x0, y - h + 1, x1, y);
+      if (!span) return null;
+      return PW.tunnels.digBox(world, net, span[0], y - h + 1, span[1], y, { kind, keepOre: true }).ok ? span : null;
+    };
+    for (const target of targets) {
+      // A cave on the way is a highway: dig to its nearest reach, walk its open dark, carry on
+      // from its point nearest the vein.
+      let hop = null;
+      for (const cave of layout.caves || []) {
+        for (const p of cave.points) {
+          const between = (p.x - wayX) * (target.x - wayX) > 0 && Math.abs(p.x - wayX) < Math.abs(target.x - wayX);
+          if (!between || Math.abs(p.y - wayY) > 420) continue;
+          if (!hop || Math.abs(p.x - wayX) < Math.abs(hop.in.x - wayX)) {
+            const out = cave.points.reduce((b2, q) => Math.abs(q.x - target.x) + Math.abs(q.y - target.y) < Math.abs(b2.x - target.x) + Math.abs(b2.y - target.y) ? q : b2, p);
+            hop = { in: p, out };
+          }
+        }
+      }
+      const stops = hop ? [{ x: Math.round(hop.in.x), y: Math.round(hop.in.y) }, { x: Math.round(hop.out.x), y: Math.round(hop.out.y), skipTo: true }, target] : [target];
+      let guard = 0;
+      for (const stop of stops) {
+        if (stop.skipTo) {
+          // Through the cave itself - and the next leg starts at the FAR wall, not among the
+          // chamber's formations: the way walks on through open dark until rock closes in.
+          const inX = wayX, inY = wayY;
+          wayX = stop.x; wayY = stop.y;
+          const on = Math.sign((stops[stops.length - 1].x || wayX) - wayX) || 1;
+          for (let d = 0; d < 220; d += 1) {
+            const id = PW.get(world, wayX + on, wayY - 10) & 63;
+            if (id !== M.AIR || (PW.getFlags(world, wayX + on, wayY - 10) & FLAG.TUNNEL)) break;
+            wayX += on;
+          }
+          // The highway is claimed as the miners' own walkway through the chamber (prop-guarded,
+          // mostly open air already): without it the far side's halls are cut off from the
+          // development wave and stay raw forever.
+          // Dig ORDER is connectivity: a box only gets its development times from cells already
+          // claimed when it is dug - so the entry leg first, the shaft off it, the far leg off
+          // that. (The shaft-first version left permanently raw islands.)
+          const wkA = digLeg(Math.min(inX, stop.x), inY, Math.max(inX, stop.x), 30, 'drift');
+          if (Math.abs(stop.y - inY) > 16) {
+            PW.tunnels.digBox(world, net, stop.x - 12, Math.min(inY, stop.y) - 2, stop.x + 12, Math.max(inY, stop.y), { kind: 'shaft', keepOre: true });
+          }
+          const wkB = digLeg(Math.min(stop.x, wayX), wayY, Math.max(stop.x, wayX), 30, 'drift');
+          // (a clipped walkway cannot carry the development wave: nothing is dug beyond it)
+          if (!wkA || !wkB || (wkB[1] < wayX && wayX > stop.x) || (wkB[0] > wayX && wayX < stop.x)) { guard = 99; break; }
+          continue;
+        }
+        while (Math.abs(stop.x - wayX) > 60 && guard++ < 16) {
+          const dir = Math.sign(stop.x - wayX) || 1;
+          // The run first, the climb at its far end: a vertical dug beside the mine's own
+          // surface shaft would widen that opening past what the pipe router can bridge, and
+          // the line would dive seven hundred rows into the pit it tore open.
+          let run = Math.max(70, Math.min(random.int(170, 260), Math.abs(stop.x - wayX) - 30));
+          // A leg breaching a cave stops at the wall: the chamber beyond is the highway, and
+          // its formations - columns, stalagmites, the standing dark - are left as they are.
+          let breached = false;
+          for (let d = 20; d <= run; d += 1) {
+            const cx2 = wayX + dir * d;
+            if ((PW.get(world, cx2, wayY - 10) & 63) === M.AIR && !(PW.getFlags(world, cx2, wayY - 10) & FLAG.TUNNEL)) { run = d + 2; breached = true; break; }
+          }
+          const h = 28 + random.int(0, 2) * 8;   // hallways of varying height
+          const dug = digLeg(wayX, wayY, wayX + dir * run, h, 'drift');
+          if (!dug) { guard = 99; break; }
+          wayX = dir > 0 ? dug[1] : dug[0];
+          if (breached) break;   // the wall is open: the cave carries the way from here
+          const aimY = stop === target ? veinRow(world, target, wayX) + 10 : stop.y;
+          const dy = Math.max(-60, Math.min(60, aimY - wayY));
+          if (Math.abs(dy) > 16) {
+            const yA = Math.min(wayY, wayY + dy) - 2, yB = Math.max(wayY, wayY + dy);
+            // (a climb that would cut through anything standing - a cave's formations, the
+            // mine's own crates on the floor above - waits for the next leg)
+            const clips = (world.props || []).some((p) => !(p.x1 < wayX - 16 || p.x0 > wayX + 16 || p.y1 < yA - 4 || p.y0 > yB + 2));
+            if (!clips) {
+              PW.tunnels.digBox(world, net, wayX - 12, yA, wayX + 12, yB, { kind: 'shaft', keepOre: true });
+              ladder(world, wayX - 6, yA, yB - 1);
+              wayY += dy;
+            }
+          }
+          if ((guard & 1) === 1 && stop === target) {
+            // every other leg widens into a room with a purpose
+            const spec = HALL_ROOMS[roomIdx % HALL_ROOMS.length]; roomIdx += 1;
+            const rw = spec.w + random.int(-12, 12);
+            const room = digLeg(wayX, wayY, wayX + dir * rw, spec.h, 'room');
+            if (room) {
+              furnishHallRoom(world, spec.kind, room[0], room[1], wayY, spec.h, random);
+              wayX = dir > 0 ? room[1] : room[0];
+            }
+          }
+        }
+      }
+      if (guard >= 16) continue;
+      // The last leg stops just short of the vein: the ore stands as the face, and if nobody
+      // works this body yet an operation opens (N12F's cap decides inside).
+      const dir = Math.sign(target.x - wayX) || 1;
+      const face = oreFace(world, target, wayX, dir, wayY - 40, wayY);
+      const dug = digLeg(wayX, wayY, face - dir, 40, 'drift');
+      if (dug && PW.mining) PW.mining.afterDig(world, net, { x0: dug[0], y0: wayY - 39, x1: dug[1], y1: wayY });
+      target.worked = (target.worked || 0) + 1;
+    }
+  }
   // A mine headframe's own shaft: straight down to a nearby vein, or a short sump if none is near.
   function headframeShaft(world, mine, nodes, side) {
     const x = mine.shaft.x, top = mine.shaft.top;
@@ -992,12 +1172,14 @@
         core.mine = starterMine(world, core, node, dir || 1, side);
         core.mine.props = PW.props.furnishMine(world, core.mine, random);
         if (PW.mining) core.mine.operation = PW.mining.openFromWorkings(world, core.mine, side);
+        mineWorkings(world, layout, core.mine, side, random);
         settlement.core = core;
       }
       for (const mine of settlement.buildings.filter((item) => item.type === 'mine')) {
         mine.workings = headframeShaft(world, mine, layout.nodes, side);
         mine.workings.props = PW.props.furnishMine(world, mine.workings, random);
         if (PW.mining) mine.workings.operation = PW.mining.openFromWorkings(world, mine.workings, side);
+        mineWorkings(world, layout, mine.workings, side, random);
       }
       // Ground defences beyond the front of each base (past the runway's end); neutrals guard both
       // ends of their street.

@@ -311,6 +311,9 @@
         const wx = left + px;
         if (wx < 1 || wy < 1 || wx >= W - 1 || wy >= H - 1) return null;
         const id = mat[wy * W + wx] & ID_MASK;
+        // A formation never stands across carved tunnel (the miners' halls break into caves:
+        // nothing may be placed over a doorway - its footing would be dug away).
+        if (info.setting === 'cave' && (PW.getFlags(world, wx, wy) & (PW.FLAG.TUNNEL | (PW.FLAG.CARVED || 0)))) return null;
         if (id === M.AIR) { cells.push(wy * W + wx, prop.mats[i], prop.colors[i]); continue; }
         if (prop.conform && phase[id] >= PW.PHASE.POWDER && !COVER[id] && !PW.mat.structural[id]) continue;
         return null;

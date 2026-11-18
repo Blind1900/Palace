@@ -74,7 +74,9 @@ const own = PW.tunnels.digBox(world, net, shaft.x - 60, shaft.top + 10, shaft.x 
 check(own.ok, `the left side can branch off through its own lining (${own.cells} cells)`);
 
 // 5. Fully developed after enough time; then even the old raw end is closed to the enemy.
-PW.tunnels.advanceTo(world, t0 + 900);
+// (the N11F workings grew the starter networks by whole hallways, so the mine shares its
+// development pace with far more tunnel than before - the wait grew with it)
+PW.tunnels.advanceTo(world, t0 + 1100);
 check(net.developed === net.cells, `the whole starter mine develops in time (${net.developed} of ${net.cells})`);
 const late = PW.tunnels.digBox(world, enemy, mine.storage.x0 + 20, mine.storage.top - 10, mine.storage.x0 + 60, mine.storage.top + 6);
 check(late.blocked, `once developed, the storage room's lining stops enemy digging too (${late.blocked ? 'blocked' : 'dug ' + late.cells})`);

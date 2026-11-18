@@ -542,28 +542,36 @@
     const queue = createHeap();
     const inFresh = new Set(fresh);
     const offer = (i, t) => { if (!best.has(i) || t < best.get(i)) { best.set(i, t); queue.push(t, i); } };
+    // (8-connected: a diagonal-only join - two boxes meeting at a corner, a walkway clipped
+    // along a cave wall - must carry the wave too, or its far side stays raw forever)
     for (const i of fresh) {
-      for (const j of [i - 1, i + 1, i - W, i + W]) {
+      for (const j of [i - 1, i + 1, i - W, i + W, i - W - 1, i - W + 1, i + W - 1, i + W + 1]) {
         if (inFresh.has(j) || netAt(world, j % W, (j / W) | 0) !== net.id) continue;
         offer(i, Math.max(T.time, devAtOf(world, j % W, (j / W) | 0)) + step);
       }
     }
-    if (!queue.size) {
-      // The network's first dig: the wave starts at the root (or the nearest new cell to it).
-      let start = fresh[0], bestD = Infinity;
-      for (const i of fresh) {
-        const d = Math.abs(i % W - net.root.x) + Math.abs(((i / W) | 0) - net.root.y);
-        if (d < bestD) { bestD = d; start = i; }
+    // EVERY disconnected group of the batch gets a seed - the network's first dig, and any
+    // group cut off inside its own box (a drift crossing a kept ore vein splits in two; the
+    // far side must still develop, or it stands raw forever).
+    for (;;) {
+      if (!queue.size) {
+        let start = -1, bestD = Infinity;
+        for (const i of fresh) {
+          if (best.has(i)) continue;
+          const d = Math.abs(i % W - net.root.x) + Math.abs(((i / W) | 0) - net.root.y);
+          if (d < bestD) { bestD = d; start = i; }
+        }
+        if (start < 0) break;
+        offer(start, T.time);
       }
-      offer(start, T.time);
-    }
-    while (queue.size) {
-      const t = queue.peek(), i = queue.pop();
-      if (t > best.get(i)) continue;
-      const x = i % W, y = (i / W) | 0;
-      setL(world, 'tunnelDev', Float32Array, x, y, t);
-      T.pending.push(t, i);
-      for (const j of [i - 1, i + 1, i - W, i + W]) if (inFresh.has(j)) offer(j, t + step);
+      while (queue.size) {
+        const t = queue.peek(), i = queue.pop();
+        if (t > best.get(i)) continue;
+        const x = i % W, y = (i / W) | 0;
+        setL(world, 'tunnelDev', Float32Array, x, y, t);
+        T.pending.push(t, i);
+        for (const j of [i - 1, i + 1, i - W, i + W, i - W - 1, i - W + 1, i + W - 1, i + W + 1]) if (inFresh.has(j)) offer(j, t + step);
+      }
     }
   }
 

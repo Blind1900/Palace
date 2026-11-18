@@ -12,7 +12,7 @@
   const { M, FLAG, ID_MASK } = PW;
 
   const REACH = 14;              // cells: a tunnel this close to a vein opens a mining operation
-  const MINERS = 3;
+  const MINERS = 2;              // at most two miners harvest any one body (N12F)
   const ROOM_H = 40;             // working room height (2.8 m)
   const LOAD = 6;                // ore cells a miner carries per trip
   const DRILL_TIME = 0.55;       // seconds of drilling per ore cell
@@ -99,7 +99,9 @@
   // dug from `contact` (a tunnel cell next to the vein).
   function open(world, net, node, w = {}) {
     const all = list(world);
-    if (all.some((op) => op.node === node && op.net === net.id)) return null;
+    // One operation per ore body, whoever reaches it (N12F: at most two miners harvest any one
+    // body - the next tunnel to touch it digs on to other ore, or to the caves).
+    if (all.some((op) => op.node === node)) return null;
     let floor, rx0, rx1, dir, storage = w.storage || null, shaft = w.shaft || null;
     if (w.drift) {
       floor = w.drift.bottom;

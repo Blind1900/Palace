@@ -10,8 +10,11 @@ const ops = world.miningOps;
 const W = world.width;
 
 // 1. Operations at the starter and neutral mines, with miners, belts and pipelines.
-check(ops.filter((o) => o.side !== 'neutral').length === 2 && ops.length >= 4, `mining operations at both starter mines and the neutral mines (${ops.map((o) => `${o.side}:${o.node.tier}`).join(', ')})`);
-check(ops.every((o) => o.miners.length >= 3), 'each operation has a crew of miners');
+check(ops.filter((o) => o.side === 'left').length >= 1 && ops.filter((o) => o.side === 'right').length >= 1 && ops.length >= 4,
+  `mining operations at both starter mines and the neutral mines (${ops.map((o) => `${o.side}:${o.node.tier}`).join(', ')})`);
+// N12F: at most two miners harvest any one body - exactly one two-man operation per node.
+check(ops.every((o) => o.miners.length === 2), 'each operation has its crew of two miners (N12F)');
+check(new Set(ops.map((o) => o.node)).size === ops.length, 'no ore body is worked by more than one operation (N12F)');
 for (const side of ['left', 'right']) {
   const hm = pipes.lineFor(side, 'hm');
   const op = ops.find((o) => o.side === side);
