@@ -1,0 +1,23 @@
+[
+ {
+  "id": "mwmq0g8m",
+  "at": "2026-11-18T22:56:31.798Z",
+  "tag": "other",
+  "body": "have it so water cools pixels from heat;",
+  "status": "new"
+ },
+ {
+  "id": "mwmq5bws",
+  "at": "2026-11-18T23:00:19.468Z",
+  "tag": "collapse",
+  "body": "the top parts of buildings when blown up at the mid section seems to fight between what hitbox and fall animation it should have, there should be no animation. its all simulated by the physics. Buildings should be programed so that they are ready to be broken apart and disconnect into many pieces",
+  "status": "new"
+ },
+ {
+  "id": "mwmq6gjn",
+  "at": "2026-11-18T23:01:12.131Z",
+  "tag": "trees",
+  "body": "Make sure that tree branches to be flexible and bend according to force, collisions with terrain, bullet hits, etc.",
+  "status": "new"
+ }
+]

@@ -1,0 +1,288 @@
+{
+  "charts": [
+    {
+      "title": "BLAST L in town: 5 s after, where the tick goes (p95 per system, seed 828982143)",
+      "unit": "ms p95",
+      "limit": 16.7,
+      "series": [
+        {
+          "name": "p95",
+          "points": [
+            {
+              "label": "whole tick",
+              "v": 12.6
+            },
+            {
+              "label": "powder sim (capped 3)",
+              "v": 3.8
+            },
+            {
+              "label": "particles",
+              "v": 3.3
+            },
+            {
+              "label": "structure",
+              "v": 2.6
+            },
+            {
+              "label": "falling pieces",
+              "v": 1.6
+            },
+            {
+              "label": "heat",
+              "v": 1.5
+            },
+            {
+              "label": "repair",
+              "v": 0.8
+            },
+            {
+              "label": "air",
+              "v": 0.8
+            },
+            {
+              "label": "stability",
+              "v": 0.7
+            },
+            {
+              "label": "pipes",
+              "v": 0.4
+            }
+          ]
+        },
+        {
+          "name": "worst tick",
+          "points": [
+            {
+              "label": "whole tick",
+              "v": 47.2
+            },
+            {
+              "label": "powder sim (capped 3)",
+              "v": 4.8
+            },
+            {
+              "label": "particles",
+              "v": 14.3
+            },
+            {
+              "label": "structure",
+              "v": 32.7
+            },
+            {
+              "label": "falling pieces",
+              "v": 12
+            },
+            {
+              "label": "heat",
+              "v": 10.8
+            },
+            {
+              "label": "repair",
+              "v": 6.6
+            },
+            {
+              "label": "air",
+              "v": 4.5
+            },
+            {
+              "label": "stability",
+              "v": 3.4
+            },
+            {
+              "label": "pipes",
+              "v": 5.6
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "BLAST L moment: 6 towers on seed 828982143 (summed over the 6 blasts)",
+      "unit": "ms",
+      "series": [
+        {
+          "name": "explode call",
+          "points": [
+            {
+              "label": "before",
+              "v": 109
+            },
+            {
+              "label": "exact speed-ups",
+              "v": 91
+            }
+          ]
+        },
+        {
+          "name": "tick right after",
+          "points": [
+            {
+              "label": "before",
+              "v": 215
+            },
+            {
+              "label": "exact speed-ups",
+              "v": 190
+            }
+          ]
+        },
+        {
+          "name": "second tick",
+          "points": [
+            {
+              "label": "before",
+              "v": 189
+            },
+            {
+              "label": "exact speed-ups",
+              "v": 183
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Collapse: structure + falling pieces per tick (pw-collapse)",
+      "unit": "ms p95",
+      "limit": 3,
+      "series": [
+        {
+          "name": "p95",
+          "points": [
+            {
+              "label": "before L",
+              "v": 2.8
+            },
+            {
+              "label": "stab slice",
+              "v": 2.8
+            },
+            {
+              "label": "anchor+spawn",
+              "v": 1.7
+            }
+          ]
+        },
+        {
+          "name": "p99",
+          "points": [
+            {
+              "label": "before L",
+              "v": 10.2
+            },
+            {
+              "label": "stab slice",
+              "v": 10.2
+            },
+            {
+              "label": "anchor+spawn",
+              "v": 4.3
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Collapse worst tick (first analyses after the blasts)",
+      "unit": "ms max",
+      "series": [
+        {
+          "name": "max tick",
+          "points": [
+            {
+              "label": "before L",
+              "v": 50.9
+            },
+            {
+              "label": "stab slice",
+              "v": 50.9
+            },
+            {
+              "label": "anchor+spawn",
+              "v": 45.3
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Stability look for ground that lost its footing (pw-physics)",
+      "unit": "ms worst",
+      "limit": 8,
+      "series": [
+        {
+          "name": "seed 7",
+          "points": [
+            {
+              "label": "before L",
+              "v": 6.6
+            },
+            {
+              "label": "sliced link",
+              "v": 3.3
+            }
+          ]
+        },
+        {
+          "name": "seed 11",
+          "points": [
+            {
+              "label": "before L",
+              "v": 4.6
+            },
+            {
+              "label": "sliced link",
+              "v": 2.1
+            }
+          ]
+        },
+        {
+          "name": "seed 3",
+          "points": [
+            {
+              "label": "before L",
+              "v": 5.5
+            },
+            {
+              "label": "sliced link",
+              "v": 2.8
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Run-based anchoring vs cell BFS (660 real building scans)",
+      "unit": "ms total",
+      "series": [
+        {
+          "name": "cell BFS",
+          "points": [
+            {
+              "label": "seed 7",
+              "v": 579.8
+            },
+            {
+              "label": "seed 3",
+              "v": 569.6
+            }
+          ]
+        },
+        {
+          "name": "runs",
+          "points": [
+            {
+              "label": "seed 7",
+              "v": 110.7
+            },
+            {
+              "label": "seed 3",
+              "v": 100.3
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

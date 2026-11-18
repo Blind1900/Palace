@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Urban Defence - progress</title>
+<style>
+  :root { --bg: #15181d; --panel: #1d2128; --panel2: #171a20; --line: #2c323b; --text: #d8dce2; --dim: #8a939e; --gold: #f0c860; --green: #6cc070; --blue: #8fb4e0; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.5 'Segoe UI', Consolas, sans-serif; min-height: 100vh; display: flex; flex-direction: column; gap: 8px; padding: 10px; }
+  header, nav, footer, aside, main { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; }
+  header { padding: 14px 20px; display: flex; flex-wrap: wrap; align-items: center; gap: 18px; }
+  header h1 { margin: 0; font-size: 20px; color: var(--gold); }
+  header .meter { flex: 1; min-width: 240px; }
+  .bar { height: 10px; background: #0f1115; border: 1px solid var(--line); border-radius: 5px; overflow: hidden; display: flex; }
+  .bar i { display: block; height: 100%; } .bar .d { background: var(--green); } .bar .p { background: var(--gold); }
+  header .meta { font-size: 12px; color: var(--dim); }
+  nav { display: flex; flex-wrap: wrap; gap: 4px; padding: 6px; position: sticky; top: 0; z-index: 5; }
+  nav button { background: transparent; border: 1px solid transparent; color: var(--dim); font: 600 14px 'Segoe UI', sans-serif; padding: 8px 18px; border-radius: 5px; cursor: pointer; }
+  nav button:hover { color: #fff; background: #232831; }
+  nav button.on { color: #15181d; background: var(--gold); }
+  nav .count { font-size: 11px; opacity: .75; margin-left: 5px; }
+  .cols { display: grid; grid-template-columns: 210px minmax(0, 1fr) 250px; gap: 8px; align-items: start; flex: 1; }
+  aside { padding: 12px; font-size: 13px; position: sticky; top: 56px; max-height: calc(100vh - 70px); overflow: auto; }
+  aside h3 { margin: 0 0 6px; font-size: 12px; color: var(--dim); text-transform: uppercase; letter-spacing: .06em; }
+  aside section + section { margin-top: 16px; }
+  aside input[type=search], aside select, .field { width: 100%; background: #0f1115; border: 1px solid var(--line); color: var(--text); padding: 6px 8px; border-radius: 4px; font: inherit; }
+  aside label { display: flex; gap: 6px; align-items: center; padding: 2px 0; cursor: pointer; }
+  aside a.play { display: block; background: #2a3a26; border: 1px solid #4f7a44; color: #cdeec0; padding: 5px 10px; border-radius: 4px; text-decoration: none; margin-bottom: 5px; }
+  aside a.play:first-child { background: #3d5a2f; color: #fff; font-weight: bold; }
+  aside a.play:hover { background: #4f7a44; }
+  main { padding: 16px 20px; min-height: 60vh; }
+  main h2 { margin: 0 0 4px; font-size: 18px; color: #fff; }
+  .lead { color: var(--dim); margin: 0 0 14px; }
+  .tab { display: none; } .tab.on { display: block; }
+  .news { border-top: 1px solid var(--line); padding: 8px 0; }
+  .news b { color: #fff; } .news small { color: var(--dim); display: block; }
+  .who { display: inline-block; font-size: 11px; font-weight: bold; padding: 1px 8px; border-radius: 9px; margin-right: 8px; border: 1px solid #434b57; background: #2c323b; color: #9aa4b0; }
+  .who-fable { background: #2a3a52; color: #9ec4f2; border-color: #42608a; } .who-opus { background: #45322a; color: #f0b58a; border-color: #7a5a42; } .who-both { background: #3a2a4a; color: #cfa8ee; border-color: #64468a; }
+  .entry { background: var(--panel2); border: 1px solid var(--line); border-radius: 6px; padding: 12px 16px; margin-bottom: 12px; }
+  .entry h4 { margin: 0; font-size: 15px; color: #fff; cursor: pointer; } .entry h4::before { content: '\25BE'; color: var(--dim); display: inline-block; width: 18px; }
+  .entry.collapsed h4::before { content: '\25B8'; } .entry.collapsed > :not(h4) { display: none; }
+  .time { color: var(--dim); font-size: 12px; margin: 2px 0 6px; } .note { white-space: pre-wrap; }
+  .lists { display: grid; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); gap: 12px; margin-top: 10px; align-items: start; }
+  .lists section { background: var(--bg); border: 1px solid var(--line); border-radius: 5px; padding: 10px 12px; }
+  .lists h5 { font-size: 14px; margin: 0 0 6px; } .lists .done h5 { color: var(--green); } .lists .part h5 { color: var(--gold); } .lists .todo h5 { color: var(--blue); }
+  .lists h6 { font-size: 11px; color: var(--dim); margin: 10px 0 2px; text-transform: uppercase; letter-spacing: .05em; }
+  .lists ul { list-style: none; padding: 0; margin: 0; } .lists li { display: flex; gap: 8px; align-items: baseline; padding: 3px 0; border-bottom: 1px solid #20252c; }
+  .lists .t { flex: 1; } .lists .t i { color: #9aa3ad; font-style: normal; } .lists .s { font-size: 11px; color: var(--gold); white-space: nowrap; }
+  .lists .id { min-width: 38px; font-size: 11px; font-weight: bold; text-align: center; border-radius: 3px; color: #15181d; }
+  .lists .done .id { background: var(--green); } .lists .part .id { background: var(--gold); } .lists .todo .id { background: var(--blue); }
+  ul.steps { list-style: none; padding: 0; margin: 8px 0 0; } ul.steps li { padding: 3px 0 3px 26px; position: relative; }
+  ul.steps li::before { position: absolute; left: 0; width: 20px; text-align: center; }
+  li.done { color: var(--dim); } li.done::before { content: '\2713'; color: var(--green); } li.now { color: #fff; font-weight: bold; } li.now::before { content: '\25B6'; color: var(--gold); } li.todo::before { content: '\25CB'; color: #5a626c; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
+  figure { margin: 0; background: var(--panel2); border: 1px solid var(--line); border-radius: 6px; padding: 8px; }
+  figure img { width: 100%; display: block; image-rendering: pixelated; cursor: zoom-in; border-radius: 3px; }
+  figcaption { font-size: 12px; color: #9aa3ad; margin-top: 6px; } figcaption b { color: #fff; font-weight: 600; }
+  .charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 14px; }
+  .chart { background: var(--panel2); border: 1px solid var(--line); border-radius: 6px; padding: 12px; } .chart h4 { margin: 0 0 6px; font-size: 14px; }
+  .chart svg { width: 100%; height: 190px; display: block; } .chart .legend { font-size: 12px; color: var(--dim); margin-top: 4px; }
+  .chart .sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin: 0 4px 0 10px; vertical-align: -1px; }
+  iframe { width: 100%; height: 75vh; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
+  .post { background: var(--panel2); border: 1px solid var(--line); border-radius: 6px; padding: 10px 14px; margin-bottom: 10px; } .post .meta { font-size: 12px; color: var(--dim); }
+  .post .tag { font-size: 11px; background: #232831; color: var(--gold); padding: 0 6px; border-radius: 3px; margin-left: 6px; } .post .body { white-space: pre-wrap; margin-top: 4px; }
+  .post button { float: right; background: none; border: 0; color: var(--dim); cursor: pointer; } .post button:hover { color: #f08a8a; }
+  textarea.field { min-height: 90px; resize: vertical; } .row { display: flex; gap: 8px; margin: 8px 0; } .go { background: #3d5a2f; border: 1px solid #4f7a44; color: #fff; padding: 6px 16px; border-radius: 4px; cursor: pointer; font: inherit; }
+  footer { padding: 10px 20px; font-size: 12px; color: var(--dim); display: flex; flex-wrap: wrap; gap: 20px; justify-content: space-between; }
+  #zoom { position: fixed; inset: 0; background: rgba(0,0,0,.9); display: none; align-items: center; justify-content: center; cursor: zoom-out; z-index: 10; } #zoom img { max-width: 96vw; max-height: 96vh; image-rendering: pixelated; }
+  mark { background: #5a4a1a; color: #fff; }
+  @media (max-width: 1100px) { .cols { grid-template-columns: 1fr; } aside { position: static; max-height: none; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Urban Defence &mdash; live progress</h1>
+  <div class="meter"><div class="bar" id="bar"></div><div class="meta" id="barText"></div></div>
+  <div class="meta" id="sub">loading&hellip;</div>
+</header>
+<nav id="nav">
+  <button data-tab="checklist" class="on">Checklist</button>
+  <button data-tab="shots">Screenshots<span class="count" id="nShots"></span></button>
+  <button data-tab="perf">Performance</button>
+  <button data-tab="elements">Element table</button>
+  <button data-tab="bulletin">Physics bulletin<span class="count" id="nPosts"></span></button>
+  <button data-tab="news">News log<span class="count" id="nNews"></span></button>
+</nav>
+<div class="cols">
+  <aside id="left">
+    <section><h3>Play the live build</h3>
+      <a class="play" href="../pixel-world.html" target="_blank">&#9654; Live game</a>
+      <a class="play" href="../pixel-world.html?seed=7" target="_blank">seed 7</a>
+      <a class="play" href="../pixel-world.html?seed=3" target="_blank">seed 3</a>
+      <a class="play" href="../pixel-world.html?seed=11" target="_blank">seed 11</a>
+    </section>
+    <section><h3>Filter</h3>
+      <input type="search" id="q" placeholder="search text&hellip;">
+      <div style="margin-top:8px"><label><input type="checkbox" class="who-f" value="Opus" checked> Opus (physics)</label>
+      <label><input type="checkbox" class="who-f" value="Fable" checked> Fable (world)</label>
+      <label><input type="checkbox" class="who-f" value="other" checked> others / earlier</label></div>
+      <div id="stateF" style="margin-top:8px"><label><input type="checkbox" class="st-f" value="done" checked> done</label>
+      <label><input type="checkbox" class="st-f" value="part" checked> partly built</label>
+      <label><input type="checkbox" class="st-f" value="todo" checked> not in yet</label></div>
+    </section>
+  </aside>
+  <main>
+    <div class="tab on" id="t-checklist"></div>
+    <div class="tab" id="t-shots"></div>
+    <div class="tab" id="t-perf"></div>
+    <div class="tab" id="t-elements"><h2>Element table</h2><p class="lead">Every material the physics knows.</p><iframe src="elements.html" title="elements"></iframe></div>
+    <div class="tab" id="t-bulletin"></div>
+    <div class="tab" id="t-news"></div>
+  </main>
+  <aside id="right"><section><h3>Latest</h3><div id="latest"></div></section></aside>
+</div>
+<footer><span>Board refreshes itself every 4 s from board.json, perf.json and bulletin.json.</span><span id="foot"></span></footer>
+<div id="zoom"><img alt=""></div>
+<script>
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const $ = (s, r = document) => r.querySelector(s), $$ = (s, r = document) => [...r.querySelectorAll(s)];
+let entries = [], perf = null, posts = [], texts = { board: '', perf: '', bulletin: '' };
+const collapsed = new Set(JSON.parse(localStorage.getItem('board-collapsed') || '[]'));
+let tab = location.hash.slice(1) || 'checklist';
+const who = (a) => /opus/i.test(a || '') ? 'opus' : /fable/i.test(a || '') ? 'fable' : /both/i.test(a || '') ? 'both' : '';
+const state = { q: '', who: new Set(['Opus', 'Fable', 'other']), st: new Set(['done', 'part', 'todo']) };
+const passWho = (a) => state.who.has(/opus/i.test(a || '') ? 'Opus' : /fable/i.test(a || '') ? 'Fable' : 'other');
+const passOwner = (o) => state.who.has(o === 'O' ? 'Opus' : o === 'F' ? 'Fable' : 'other');
+const passQ = (...t) => !state.q || t.join(' ').toLowerCase().includes(state.q);
+
+function renderChecklist() {
+  const keep = (e) => /^(Status|Plan):/.test(e.title);
+  let h = '<h2>Checklist</h2><p class="lead">What is done, what is partly built, what is not in yet, and the plan step by step.</p>';
+  for (const e of entries.filter(keep)) {
+    const key = 'c:' + e.title;
+    h += `<div class="entry${collapsed.has(key) ? ' collapsed' : ''}" data-key="${esc(key)}"><h4>${esc(e.title)}</h4><div class="time">${esc(e.time)}</div>`;
+    if (e.note) h += `<div class="note">${esc(e.note)}</div>`;
+    if (e.steps) h += `<ul class="steps">${e.steps.filter((s) => passQ(s.text)).map((s) => `<li class="${esc(s.state)}">${esc(s.text)}</li>`).join('')}</ul>`;
+    if (e.lists) h += `<div class="lists">${e.lists.filter((l) => state.st.has(l.kind)).map((l) => `<section class="${esc(l.kind)}"><h5>${esc(l.heading)}</h5>${l.groups.map((g) => {
+      const items = g.items.filter((it) => passQ(it.text, it.left, it.step, it.id) && passOwner(it.owner));
+      return items.length ? `${g.name ? `<h6>${esc(g.name)}</h6>` : ''}<ul>${items.map((it) => `<li>${it.id ? `<span class="id" title="${it.owner === 'O' ? 'built by Opus' : it.owner === 'F' ? 'built by Fable' : 'owner not assigned'}">${esc(it.id)}${esc(it.owner || '')}</span>` : ''}<span class="t">${esc(it.text)}${it.left ? ` <i>&mdash; still to do: ${esc(it.left)}</i>` : ''}</span><span class="s">${esc(it.step)}</span></li>`).join('')}</ul>` : '';
+    }).join('')}</section>`).join('')}</div>`;
+    h += '</div>';
+  }
+  $('#t-checklist').innerHTML = h;
+}
+function renderShots() {
+  const all = [];
+  for (const e of entries) if (e.shots && passWho(e.author)) for (const s of e.shots) if (passQ(s.caption, e.title, e.note)) all.push({ e, s });
+  $('#t-shots').innerHTML = `<h2>In-game screenshots</h2><p class="lead">${all.length} shots, newest first, each with its note. Click to enlarge.</p><div class="grid">${all.map(({ e, s }) => `<figure><img loading="lazy" src="${esc(s.src)}" alt=""><figcaption><span class="who who-${who(e.author)}">${esc(e.author || 'board')}</span><b>${esc(e.title)}</b><br>${esc(s.caption)}<br><small>${esc(e.time)}</small></figcaption></figure>`).join('')}</div>`;
+}
+function chart(title, unit, series, limit) {
+  const W = 600, H = 190, pad = 30, pts = series.flatMap((s) => s.points.map((p) => p.v)), max = Math.max(...pts, limit || 0) * 1.1 || 1;
+  const n = Math.max(...series.map((s) => s.points.length)), x = (i) => pad + (n < 2 ? 0 : i * (W - pad - 8) / (n - 1)), y = (v) => H - 20 - v / max * (H - 36);
+  let g = [0, .5, 1].map((f) => `<line x1="${pad}" x2="${W}" y1="${y(max * f)}" y2="${y(max * f)}" stroke="#2c323b"/><text x="2" y="${y(max * f) + 4}" fill="#8a939e" font-size="10">${(max * f).toFixed(max < 10 ? 1 : 0)}</text>`).join('');
+  if (limit) g += `<line x1="${pad}" x2="${W}" y1="${y(limit)}" y2="${y(limit)}" stroke="#d66" stroke-dasharray="4 3"/><text x="${W - 4}" y="${y(limit) - 3}" fill="#d66" font-size="10" text-anchor="end">budget ${limit}</text>`;
+  const colors = ['#f0c860', '#6cc070', '#8fb4e0', '#cfa8ee'];
+  g += series.map((s, k) => `<polyline fill="none" stroke="${colors[k % 4]}" stroke-width="2" points="${s.points.map((p, i) => `${x(i)},${y(p.v)}`).join(' ')}"/>${s.points.map((p, i) => `<circle cx="${x(i)}" cy="${y(p.v)}" r="3" fill="${colors[k % 4]}"><title>${esc(s.name)} ${esc(p.label)}: ${p.v} ${unit}</title></circle>`).join('')}`).join('');
+  const labels = series[0].points.map((p, i) => `<text x="${x(i)}" y="${H - 5}" fill="#8a939e" font-size="9" text-anchor="middle">${esc(p.label)}</text>`).join('');
+  return `<div class="chart"><h4>${esc(title)}</h4><svg viewBox="0 0 ${W} ${H}">${g}${labels}</svg><div class="legend">${series.map((s, k) => `<span class="sw" style="background:${colors[k % 4]}"></span>${esc(s.name)}`).join('')} &middot; ${esc(unit)}</div></div>`;
+}
+function renderPerf() {
+  $('#t-perf').innerHTML = `<h2>Performance</h2><p class="lead">Measured in headless runs of the real game. Points are added to perf.json as work lands.</p>` + (perf && perf.charts ? `<div class="charts">${perf.charts.map((c) => chart(c.title, c.unit, c.series, c.limit)).join('')}</div>` : '<p>No perf.json yet.</p>');
+}
+function renderBulletin() {
+  $('#nPosts').textContent = posts.length ? ' ' + posts.length : '';
+  const tags = ['trees', 'blasts', 'collapse', 'terrain', 'water', 'fire', 'smoke', 'pipes', 'other'];
+  $('#t-bulletin').innerHTML = `<h2>Physics comment bulletin</h2><p class="lead">Leave a physics consideration. Opus reads this board and picks each one up.</p>
+    <div class="post"><textarea class="field" id="pbody" placeholder="e.g. branches should snap before the trunk, leaves should strip first..."></textarea>
+    <div class="row"><select class="field" id="ptag" style="width:160px">${tags.map((t) => `<option>${t}</option>`).join('')}</select><button class="go" id="ppost">Post</button></div></div>
+    ${posts.filter((p) => passQ(p.body, p.tag)).slice().reverse().map((p) => `<div class="post"><button data-del="${esc(p.id)}" title="delete">&times;</button><div class="meta">${esc(new Date(p.at).toLocaleString())}<span class="tag">${esc(p.tag)}</span>${p.status ? `<span class="tag">${esc(p.status)}</span>` : ''}</div><div class="body">${esc(p.body)}</div></div>`).join('')}`;
+}
+function renderNews() {
+  const news = entries.filter((e) => !/^(Status|Plan):/.test(e.title) && passWho(e.author) && passQ(e.title, e.note));
+  $('#nNews').textContent = ' ' + news.length;
+  $('#t-news').innerHTML = `<h2>News log</h2><p class="lead">Every finished step, newest first.</p>` + news.map((e) => {
+    const key = 'n:' + e.title;
+    return `<div class="entry${collapsed.has(key) ? ' collapsed' : ''}" data-key="${esc(key)}"><h4><span class="who who-${who(e.author)}">${esc(e.author || 'board')}</span>${esc(e.title)}</h4><div class="time">${esc(e.time)}</div>${e.note ? `<div class="note">${esc(e.note)}</div>` : ''}${e.shots ? `<div class="grid" style="margin-top:8px">${e.shots.map((s) => `<figure><img loading="lazy" src="${esc(s.src)}" alt=""><figcaption>${esc(s.caption)}</figcaption></figure>`).join('')}</div>` : ''}</div>`;
+  }).join('');
+}
+function renderHeader() {
+  const st = entries.find((e) => /^Status:/.test(e.title));
+  if (st && st.lists) {
+    const c = { done: 0, part: 0, todo: 0 };
+    for (const l of st.lists) c[l.kind] += l.groups.reduce((n, g) => n + g.items.length, 0);
+    const t = c.done + c.part + c.todo || 1;
+    $('#bar').innerHTML = `<i class="d" style="width:${c.done / t * 100}%"></i><i class="p" style="width:${c.part / t * 100}%"></i>`;
+    $('#barText').textContent = `${c.done} done, ${c.part} partly built, ${c.todo} not in yet (${Math.round((c.done + c.part / 2) / t * 100)}% of the checklist)`;
+  }
+  $('#nShots').textContent = ' ' + entries.reduce((n, e) => n + (e.shots ? e.shots.length : 0), 0);
+  $('#latest').innerHTML = entries.filter((e) => !/^(Status|Plan):/.test(e.title)).slice(0, 6).map((e) => `<div class="news"><b>${esc(e.title)}</b><small>${esc(e.author || '')} ${esc(e.time)}</small></div>`).join('');
+}
+function renderAll() { renderHeader(); renderChecklist(); renderShots(); renderPerf(); renderBulletin(); renderNews(); showTab(tab); }
+function showTab(t) {
+  tab = t; location.hash = t;
+  for (const b of $$('#nav button')) b.classList.toggle('on', b.dataset.tab === t);
+  for (const d of $$('.tab')) d.classList.toggle('on', d.id === 't-' + t);
+  $('#left').style.display = $('#right').style.display = t === 'elements' ? 'none' : '';
+}
+async function get(name, file) { try { const r = await fetch(file, { cache: 'no-store' }); if (!r.ok) return null; const t = await r.text(); if (t === texts[name]) return null; texts[name] = t; return JSON.parse(t); } catch { return null; } }
+// Bulletin: the live server keeps it in bulletin.json (api/bulletin). On a plain copy of the repo (no server)
+// it is kept in this browser's localStorage, so the page still works, but posts stay on that machine.
+let api = true;
+async function getBulletin() {
+  if (api) {
+    try {
+      const r = await fetch('api/bulletin', { cache: 'no-store' });
+      if (r.ok) { const t = await r.text(); if (t === texts.bulletin) return null; texts.bulletin = t; return JSON.parse(t); }
+    } catch { /* no server */ }
+    api = false;
+  }
+  const t = localStorage.getItem('board-bulletin') || '[]';
+  if (t === texts.bulletin) return null;
+  texts.bulletin = t; return JSON.parse(t);
+}
+async function addPost(body, tag) {
+  if (api) { try { const r = await fetch('api/bulletin', { method: 'POST', body: JSON.stringify({ body, tag }) }); if (r.ok) return; } catch { /* no server */ } api = false; }
+  const list = JSON.parse(localStorage.getItem('board-bulletin') || '[]');
+  list.push({ id: Date.now().toString(36), at: new Date().toISOString(), tag, body, status: 'new' });
+  localStorage.setItem('board-bulletin', JSON.stringify(list));
+}
+async function delPost(id) {
+  if (api) { try { const r = await fetch('api/bulletin?delete=' + encodeURIComponent(id), { method: 'POST' }); if (r.ok) return; } catch { /* no server */ } api = false; }
+  const list = JSON.parse(localStorage.getItem('board-bulletin') || '[]').filter((p) => p.id !== id);
+  localStorage.setItem('board-bulletin', JSON.stringify(list));
+}
+async function load() {
+  const [b, p, bl] = await Promise.all([get('board', 'board.json'), get('perf', 'perf.json'), getBulletin()]);
+  let dirty = false;
+  if (b) { entries = b; dirty = true; } if (p) { perf = p; dirty = true; } if (bl) { posts = bl; dirty = true; }
+  if (dirty && !document.activeElement.matches('textarea, input[type=search]')) renderAll();
+  $('#sub').textContent = `updated ${new Date().toLocaleTimeString()}`;
+  $('#foot').textContent = `${entries.length} board entries`;
+}
+document.addEventListener('click', async (ev) => {
+  const t = ev.target, nav = t.closest('[data-tab]'), h = t.closest('.entry > h4');
+  if (nav) showTab(nav.dataset.tab);
+  else if (h) { const box = h.parentElement, k = box.dataset.key; collapsed.has(k) ? collapsed.delete(k) : collapsed.add(k); box.classList.toggle('collapsed'); localStorage.setItem('board-collapsed', JSON.stringify([...collapsed])); }
+  else if (t.matches('figure img')) { $('#zoom img').src = t.src; $('#zoom').style.display = 'flex'; }
+  else if (t.closest('#zoom')) $('#zoom').style.display = 'none';
+  else if (t.id === 'ppost') { const body = $('#pbody').value.trim(); if (!body) return; await addPost(body, $('#ptag').value); texts.bulletin = ''; await load(); renderBulletin(); }
+  else if (t.dataset.del) { await delPost(t.dataset.del); texts.bulletin = ''; await load(); renderBulletin(); }
+});
+document.addEventListener('input', (ev) => {
+  const t = ev.target;
+  if (t.id === 'q') state.q = t.value.toLowerCase().trim();
+  else if (t.matches('.who-f')) { t.checked ? state.who.add(t.value) : state.who.delete(t.value); }
+  else if (t.matches('.st-f')) { t.checked ? state.st.add(t.value) : state.st.delete(t.value); }
+  else return;
+  renderAll();
+});
+window.addEventListener('hashchange', () => showTab(location.hash.slice(1) || 'checklist'));
+load(); setInterval(load, 4000);
+</script>
+</body>
+</html>

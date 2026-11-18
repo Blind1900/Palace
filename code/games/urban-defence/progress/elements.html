@@ -1,0 +1,65 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Urban Defence - element table</title>
+<style>
+  body { background: #15181d; color: #d8dce2; font: 13px/1.45 Consolas, 'Segoe UI', monospace; margin: 0; padding: 18px 26px 60px; }
+  h1 { font-size: 18px; margin: 0 0 4px; color: #f0c860; }
+  a { color: #9fd3ff; }
+  .sub { color: #8a939e; margin-bottom: 14px; max-width: 1200px; }
+  table { border-collapse: collapse; }
+  th, td { border: 1px solid #2c323b; padding: 3px 8px; text-align: right; white-space: nowrap; }
+  td.l, th.l { text-align: left; }
+  th { background: #232831; color: #f0c860; position: sticky; top: 0; cursor: help; }
+  tr:hover td { background: #222834; }
+  .sw { display: inline-block; width: 12px; height: 12px; margin-right: 1px; vertical-align: middle; border: 1px solid #000; }
+  .zero { color: #4d545e; }
+  .group td { background: #1d2128; color: #f0c860; text-align: left; font-weight: bold; }
+</style>
+</head>
+<body>
+<h1>Element table</h1>
+<div class="sub"><a href="/">&larr; back to the progress board</a> &middot; read live from the game's own code (scripts/pw/pw-core.js), so it is exactly what the physics uses right now. Hover a column heading for what it means.</div>
+<table id="t"></table>
+<script src="/game/scripts/pw/pw-core.js"></script>
+<script>
+const { mat, M, PHASE } = PW;
+const phaseName = Object.fromEntries(Object.entries(PHASE).map(([k, v]) => [v, k.toLowerCase()]));
+const name = (id) => (id >= 0 && mat.names[id]) || '';
+const num = (v, d = 2) => (v === 0 ? '<span class="zero">0</span>' : Number.isInteger(v) ? String(v) : v.toFixed(d));
+const kind = (id) => [mat.terrain[id] && 'ground', mat.structural[id] && 'building', mat.open[id] && 'open', mat.stopsShots && mat.stopsShots[id] && 'stops shots'].filter(Boolean).join(', ');
+const cols = [
+  ['id', 'material id (6 bits)', (id) => id, 'l'],
+  ['element', 'name and its colours (4 variants)', (id) => mat.palettes[id] ? [0, 2, 4, 6].map((k) => { const c = mat.palettes[id][k] || 0; return `<span class="sw" style="background:rgb(${c & 255},${c >>> 8 & 255},${c >>> 16 & 255})"></span>`; }).join('') + ' ' + name(id) : name(id), 'l'],
+  ['state', 'air, gas, liquid, powder (moves) or solid', (id) => phaseName[mat.phase[id]], 'l'],
+  ['kind', 'ground (natural or made), part of a building, open space', kind, 'l'],
+  ['weight', 'what sinks through what: heavier displaces lighter (a grain sinks in water unless lighter; a gas rises through a heavier one)', (id) => num(mat.weight[id])],
+  ['hardness', 'how strong a blast must be to break it (0 nothing, 1 unbreakable)', (id) => num(mat.hardness[id])],
+  ['blastResist', 'blast strength taken out per cell of it a blast passes through: rock and town ground shield what lies behind them', (id) => num(mat.blastResist[id], 3)],
+  ['cohesion', 'how many cells it reaches out over a void before breaking loose; x4 = how tall a cut face of it stands', (id) => num(mat.cohesion[id])],
+  ['wind', 'how much of the wind or a blast wave it takes on (advection)', (id) => num(mat.advection[id])],
+  ['shake', 'how readily vibration sets it moving', (id) => num(mat.shake[id])],
+  ['slide', 'chance a resting grain runs off a slope each tick', (id) => num(mat.slide[id])],
+  ['spread', 'cells further out it still runs to where the ground falls away (flatter heaps)', (id) => num(mat.spread[id])],
+  ['settlesTo', 'what it packs into after resting on natural ground ~10 s', (id) => name(mat.settlesTo[id])],
+  ['buoyancy', 'gas: how fast it rises (below 0 it sinks)', (id) => num(mat.buoyancy[id])],
+  ['fade', 'gas: chance per tick it thins', (id) => num(mat.fade[id], 4)],
+  ['breaksTo', 'what it breaks into', (id) => (mat.breaksTo[id] ? name(mat.breaksTo[id]) : '')],
+  ['heat', 'how well it conducts heat', (id) => num(mat.conduct[id], 3)],
+  ['ignites', 'temperature it catches fire at (°C)', (id) => num(mat.ignite[id])],
+  ['burns', 'seconds it burns for', (id) => num(mat.burnTime[id], 1)],
+  ['burnsTo', 'what it burns to', (id) => (mat.burnsTo[id] ? name(mat.burnsTo[id]) : '')],
+];
+let html = '<tr>' + cols.map(([h, tip, , c]) => `<th class="${c || ''}" title="${tip}">${h}</th>`).join('') + '</tr>';
+const ids = [];
+for (let id = 0; id < 64; id += 1) if (mat.names[id] || id === 0) ids.push(id);
+let lastPhase = null;
+for (const id of ids.sort((a, b) => mat.phase[a] - mat.phase[b] || a - b)) {
+  if (mat.phase[id] !== lastPhase) { lastPhase = mat.phase[id]; html += `<tr class="group"><td colspan="${cols.length}">${phaseName[lastPhase]}</td></tr>`; }
+  html += '<tr>' + cols.map(([, , f, c]) => `<td class="${c || ''}">${f(id) ?? ''}</td>`).join('') + '</tr>';
+}
+document.getElementById('t').innerHTML = html;
+</script>
+</body>
+</html>

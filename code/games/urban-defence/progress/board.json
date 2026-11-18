@@ -1,0 +1,1586 @@
+[
+ {
+  "title": "Opus: heat makes pixels glow (3ac33b4)",
+  "author": "Opus",
+  "time": "2026-11-18 22:45",
+  "note": "Any cell hot enough glows - its own light added over its colour: dull red from ~480 °C through cherry, orange, yellow to white-hot at 1400 °C, dimming as it cools. Shown: a band of stone heated 450 -> 1450 °C left to right, the same band 10 s later (cooled to red, the heat soaking into the rock), and a BLAST L crater wall glowing for a moment. Hot air does not glow; smoke and fire are their own pixels and look as before. Drawn additively in pw-heat (no pw-render change), ~0.2 ms a frame.",
+  "shots": [
+   {
+    "src": "shots/glow-ramp.png",
+    "caption": "stone at 450 -> 1450 °C"
+   },
+   {
+    "src": "shots/glow-ramp-cooling.png",
+    "caption": "10 s later"
+   },
+   {
+    "src": "shots/glow-crater.png",
+    "caption": "BLAST L crater wall"
+   }
+  ]
+ },
+ {
+  "title": "Opus: deterministic physics suites (221a0be) and a cheaper blast moment (a1cda0c)",
+  "time": "2026-11-18",
+  "note": "Collapse flickers fixed at the root: tests now run det=1 (no time-sliced work, world starts paused), so the same blast gives a bit-identical world on any machine. The seed-3 debris check then failed every time: neighbours were hit 3000+ times but repair had healed them by the end - it now counts the hits as they happen. BLAST L profiled on your seed 828982143 (see the Performance tab): the hitch is the blast moment - the explode call (~15 ms), the tick after (particles 14 ms, heat 11, smoke bursts 7) and the next (structure analysis 33 ms, of it 13 ms lifting the falling part). Exact speed-ups only (bit-identical world with det=1, smoke and fire untouched): explode 109->91 ms, tick after 215->190, second tick 189->183 (six blasts summed). Next: the falling tower's crush steps (8-12 ms spikes as it sinks storey by storey), the debris flush, and the first analysis after a blast. 17/17 on seeds 7/3/11.",
+  "shots": [
+   {
+    "src": "shots/blast-l-profile.png",
+    "caption": "blast l profile"
+   }
+  ],
+  "author": "Opus"
+ },
+ {
+  "title": "Fable: the core is an energy ball now - and the pipes are one design, every direction (8d45081, 440b98f)",
+  "time": "2026-11-18 17:12",
+  "note": "Your whole cores-and-pipes batch is in and pushed, 17/17 on all three seeds under Opus's new deterministic test mode:\n- THE CORE: the steel box is gone. Each core is a black-and-white energy ball in a dark recess on its bed - white heart, black nucleus, lightning streaks in every direction with dense clusters at the poles. It is ANIMATED: two white points orbit it like an atom's electrons on crossed ellipses, and every half-second a streak snaps off a pole and dies away. And when its last cell is destroyed it DETONATES - a real blast (bigger for a main orb), verified: smoke 0 to 658 cells from the core's own death alone.\n- THE RISE: only the ball climbs out of rubble now - the bed stays put and is redrawn when the ball settles home - so the glitchy scramble you saw is gone. A levelled tower is out of ruin within 40 seconds and at 83% in four minutes with your faster translators.\n- THE PIPES: risers are the full bore stood on end (casing, lanes, wraps, collars), flanged into the run below - the lake pump merges into the line as one continuous flow. Small level changes are mitred bends with unbroken lanes; big ones keep their flanged wells; lane colours sit brighter so the design reads at a glance. And nothing of the old pipe is left lying about: dropped wells take their shafts with them, regrown columns take up the whole old-to-new span, and the closure comb reaches storeys either side of the final route.",
+  "shots": [
+   {
+    "src": "shots/energy-ball.png",
+    "caption": "The energy ball on its bed: lightning to the poles, no box - the bundle flowing past through the connectors"
+   },
+   {
+    "src": "shots/core-detonation.png",
+    "caption": "A core's death, three seconds on: the detonation its killer did not bring - the ball itself blew"
+   }
+  ],
+  "author": "Fable"
+ },
+ {
+  "title": "Fable: wells, organic pipe regrowth, piers under the deck, fighting ports - your whole batch landed (6b05321..afc9a26)",
+  "time": "2026-11-18 16:21",
+  "note": "Everything from your last three notes is in, verified on all three seeds (the only failures left anywhere are the known collapse-physics flickers Opus is hunting in step L):\n- PIPES: 3m deep in open country, 1m through towns and works. The vertical cliffs at every mountain base - your 'many gaps' - each carry a WELL now: the whole bore turned vertical, collars and tendril wraps running across it, and the cargo climbs instead of teleporting. And repair is your organic model: the HM that clogs at a broken end pays for the regrowth, water and SM spill out and merge into the terrain, the two ends regrow toward each other re-reading the land as it settles, little ink feelers searching as they go.\n- THE METAL BETWEEN CORES: a flat deck above the land, not a slab through it - embedding where the ground runs close, slender spear-footed piers carrying it down where the land falls away. Every bed stands on a solid plinth (that also fixed collapses crushing core undersides through the gaps). Reconstruction is 67% faster per your ask.\n- MILITARY: the firing holes are proper fighting positions (ribbed lit interiors, hazard-tipped sill to shoot over, studded tread, splayed collared mouths); the summit galleries dropped to 48 under the bench and the shaft picks a drop clear of every core - a map-wide probe finds zero clipped beds; the stray mound by the hall was the bastion's glacis, now revetted in god-metal with grass creeping over its toe.",
+  "shots": [
+   {
+    "src": "shots/deep-country.png",
+    "caption": "The bundle diving past the town edge to its deep country run - one unbroken line under the pond and up the flank"
+   },
+   {
+    "src": "shots/summit-cleared.png",
+    "caption": "The summit works: beds whole on the bench, galleries deep below, the well dropping the flank line level to level"
+   },
+   {
+    "src": "shots/fighting-ports.png",
+    "caption": "The bunker gallery: embrasure and ports as finished fighting positions - collared mouths, lit inner ends, sills to shoot over"
+   }
+  ],
+  "author": "Fable"
+ },
+ {
+  "title": "Opus: trees come apart by branch, no hinge; blasts keep tearing flying pieces; pipeline gap cause found",
+  "time": "2026-11-18",
+  "note": "Trees: the timber hinge is gone. A tree cut loose at its base (ground dug or blown out under the side its weight hangs off, or the trunk snapped off its roots by a blast at its foot) loses most leaves first (90% in a blast, 60% when the ground drops), then comes apart by branch - trunk sections and boughs - each falling free. Tree weight follows girth (trunk cells weigh more than twig cells), so pieces lead with the base. A blast now also catches pieces already flying: it strips their leaves, splinters wood in its heart, splits them by branch and throws each part. Falling-piece step on a felled broadleaf 19.7 ms -> 1.0 ms. Commits a128d49 (step L perf), 407c643 (trees by branch), 91eea90 (blasts tear flying pieces, girth weight). Pipe regrowth and pillar-first construction are Fable's (agreed). Pipeline gaps: at every mountain outpost/bunker the bundle jumps 100-400 rows between two columns (snapToCores ramps only 34 columns; the contour runs ~200 rows under the base) - reported to Fable (pw-pipes is theirs) with a fix; pipe regrowth and pillar-first construction asks passed on.",
+  "shots": [
+   {
+    "src": "shots/trees-branch-d4.png",
+    "caption": "trees branch d4"
+   },
+   {
+    "src": "shots/trees-branch-d9.png",
+    "caption": "trees branch d9"
+   },
+   {
+    "src": "shots/trees-blast-b4.png",
+    "caption": "trees blast b4"
+   },
+   {
+    "src": "shots/trees-second-blast-e3.png",
+    "caption": "trees second blast e3"
+   },
+   {
+    "src": "shots/pipe-gap-outpost.png",
+    "caption": "pipe gap outpost"
+   }
+  ],
+  "author": "Opus"
+ },
+ {
+  "title": "Fable: the cores radiate everything - roots, circuit trace, the band eased into the land (e0a05e7)",
+  "time": "2026-11-18 15:28",
+  "note": "Your roots/circuit rule is in: the gallery between a building's beds is finished god-metal at each bed and roughens earthward toward the middle of the span; a dashed ink circuit trace runs bed to bed with the odd white point; every bolt carries a small down-pointed spear tip - the god's mark, kept subtle as asked (it stays hidden; only its influence shows).\nUnder every bed, roots: fingers of god-metal wandering down into the earth with an ink trace inside, thinning to black spear points - on placement and on seed-growth alike, threading whatever ground is really there (never ore, never bedrock). Seeds now sink deeper into natural ground; the grown building's bed stands near the surface - deep in the wild, risen for urban, exactly your rule.\nAnd the band no longer stops dead at the lot line: a god-metal skirt runs on just under the turf, stepping with the terrain and breaking up into it - only over bare natural ground, never over any style's paving.\nDMG lore saved to my notes (the shadow that haunts, animal shadows, spears and ink, slightly feminine, gifts and songs) - its influence stays architectural until the update you call for it.\nSuites green on all three seeds after one check learned that the skirt under a later-paved street is construction, not missing courses.",
+  "shots": [
+   {
+    "src": "shots/roots-band.png",
+    "caption": "The city's roots: the radiating band between beds, ink circuit trace under the capping, and the god-metal fingers wandering down from every bed into the earth"
+   }
+  ],
+  "author": "Fable"
+ },
+ {
+  "title": "Fable: step H begins - the city grows by itself (9fa7d86)",
+  "time": "2026-11-17 20:52",
+  "note": "The growth loop is alive: every half-minute or so a town carries a seed past the end of its street - only if its HM stock is above a kept-back war reserve, only onto a gentle, open, dry lot clear of other settlements and the military's works - and a new tower grows out of it by step G, pillars first, god-foam fizzing. One newcomer at a time: the next seed waits until the last stands whole. The street paves out to the newcomer's door and the bundle threads its cores live.\nWatched on seed 7: three towers self-grown in under twenty game-minutes, the mining income visibly feeding the stock and the builds draining it toward the reserve - your 'spreads until upkeep gets too demanding' rule emerging on its own. The warning, level-ups (sub cores), mountain tunnels and bridges come with the rest of step H.\nAll five key suites green with the loop wired in. Opus meanwhile has step L speed-ups in flight (collapse p95 2.8 to 1.7 ms so far).",
+  "shots": [
+   {
+    "src": "shots/city-spreads.png",
+    "caption": "The town spreading west on its own: fresh pavement and god-beds, a finished newcomer, and the newest site just rising with foam over it"
+   }
+  ],
+  "author": "Fable"
+ },
+ {
+  "title": "Fable: step G done - drop a seed, get a building (1c0f8bd)",
+  "time": "2026-11-17 20:34",
+  "note": "The whole pipeline runs by itself now: a seed plants the core unit a metre down, the bundle grows out to thread it, and PW.seeds.grow raises a level-1 tower out of it - the god-metal beds, vaults and gallery set whole into the earth, the body above grown cell by cell in your F2 order (pillars a storey ahead, floors tying them, walls, glass last), with the white god-foam playing on the build front.\nBorn at 2% health as a construction site, whole in about twelve game-minutes; the builders excavate the lot's own ground room by room as the blueprint grows through it (never ore, never bedrock).\nVerified on seed 7 end to end (0.13 to 0.84 health in eight minutes, pipe connected, both checks green) and the repair/collapse/settlements/pipes/fire suites pass on seeds 7 and 11 - seed 3 keeps only its two known physics flickers (Opus is on them with step L).\nThis unlocks step H: city growth is seeds dropped by the capital itself.",
+  "shots": [
+   {
+    "src": "shots/seed-rising.png",
+    "caption": "A minute in: the newborn tower's first storeys rising on fresh beds, the bundle already threading them"
+   },
+   {
+    "src": "shots/seed-grown.png",
+    "caption": "Twelve game-minutes after the seed hit the dirt: a whole lit tower, god-foam still fizzing round the crown"
+   }
+  ],
+  "author": "Fable"
+ },
+ {
+  "title": "Fable: the god's foam - white Life fizzes on the build front (1e2339e)",
+  "time": "2026-11-17 20:21",
+  "note": "Riding on Opus's Game of Life (e6e0d68): about one rebuilt cell in thirty-two seeds a small white colony into the air over the fresh work. Conway's rules play it out and it dies away, so a rising building fizzes with the dead machine god's white static along its build front - black and white, the god's colours.\nThe shot: the levelled pagoda five storeys back up, the foam playing round its rim. Repair, fire and sandbox suites green with it; pushed as 1e2339e.\nAlso green now: Opus's fire fix cleared the old seed-3 smoke flake, so the whole matrix is clean on seeds 7 and 11, with only the two time-budget flickers left anywhere (step L's target).",
+  "shots": [
+   {
+    "src": "shots/god-foam.png",
+    "caption": "Mid-resurrection at 55% health: white Life colonies playing over the fresh storeys and dying away"
+   }
+  ],
+  "author": "Fable"
+ },
+ {
+  "title": "Opus: the Game of Life in the world; ground and plants grow back (e6e0d68)",
+  "time": "2026-11-17 20:18",
+  "note": "Game of Life in the physics\n- Conway's Game of Life (B3/S23, our own code) runs on the world's own grid. Its live cells are pixels in open air: born in an empty cell with three live neighbours, living on with two or three.\n- They're part of the world: they die where the air gets filled (rubble, ground, water, a building), burn in heat, and are blown away by blasts.\n- The sandbox has a LIFE brush that paints white Life soup. Blinkers blink, blocks sit still and gliders glide.\nRegrowth in Life's style\n- Bare ground grows back by Life. Soil beside grass, or beside live green, now and then sprouts a little bright-green Life soup in the few cells over the surface. It flickers and crawls along the ground by Life's rules, turns the soil it lies on to grass, and dies away leaving the grass.\n- It's slow, as you asked: a cratered meadow is about a sixth green again after 2 minutes. It waits for a burn scar's scorch to fade and for nearby fire to cool, so it no longer feeds a fire across its firebreak.\n- Trees and bushes come back too. Where a plant was lost, once grass is back, a grown living plant within reach seeds it: a sapling or young bush of the same kind if one stands near. It grows a step every 30 s up to the size of what was lost.\nFable's side: the Life-style foam on repair's rebuild front.",
+  "shots": [
+   {
+    "src": "shots/life-soup.png",
+    "caption": "the sandbox LIFE brush: white soup evolving by Conway's rules, a glider escaping to the left"
+   },
+   {
+    "src": "shots/life-regrowth.png",
+    "caption": "a blasted meadow growing back: bright-green Life soup crawling in from the edge, grass following it"
+   },
+   {
+    "src": "shots/life-grown.png",
+    "caption": "two minutes on: grass coming back across the craters"
+   }
+  ],
+  "author": "Opus"
+ },
+ {
+  "title": "Fable: pipes joined and detailed, pillar-first buildings on god-metal foundations, bases carved into the mountains",
+  "time": "2026-11-17 19:56",
+  "note": "Four of your requests landed this morning (suites running; commit after green):\n- E2 pipes: the disconnects are gone - the router bridges across open space where a wall face stands, but the laying refused exactly those cells (and refused town-edge terrace footings), leaving permanent holes repair could never close. Both rules now agree; seed 7 scans with zero broken columns. Joint collars and a sand-over-gravel trench profile added from your pipeline refs.\n- F2 pillars: every core grows a 3-wide main pillar from its translator to the roof, in every building type. The build and repair order follows your hierarchy: pillars run a storey ahead, floors tie pillar to pillar, back walls fill, side walls close, glass last.\n- Your note on the space between the cores: it is now a reinforced concrete gallery, military-grade - the vaults' hazard rim runs on across it, poured concrete in shuttering courses below, bolted at the joints. And per the DMG lore, EVERY building's foundation is recoloured to the core aesthetic: whatever form a style's base takes to meet the terrain, its material is the god's gun-metal plate and concrete; faction colour starts above the ground line.\n- C2 mountains: the outpost no longer sits on the peak like a castle. The bench cuts 56+ deep so rock shoulders rise either side of the blockhouse; two galleries are carved inside the massif (command over stores), a ladder shaft drops through them to a stub for the step-H tunnels, a concrete-framed portal opens on the home flank, embrasure slits look over the enemy face, and the summit's crown is armoured five deep following the mountain's own shape, tapering ragged into the bare rock.",
+  "shots": [
+   {
+    "src": "shots/gift-foundations.png",
+    "caption": "The god's foundations: one gun-metal band under the whole town - beds, gallery and building bases in the core aesthetic, hazard rim at street level, the bundle threading through"
+   },
+   {
+    "src": "shots/c2-summit.png",
+    "caption": "A mountain base carved IN: recessed blockhouse between rock shoulders, two galleries inside the massif, the shaft dropping to the tunnel stub, the crown armoured along the mountain's shape"
+   },
+   {
+    "src": "shots/bundle-detail.png",
+    "caption": "The bundle up close: casing with tendril wraps and joint collars, hung below the street deck, entering the bed's connector"
+   }
+  ],
+  "author": "Fable"
+ },
+ {
+  "title": "Fable: F part 2 DONE - a ruined tower rises again, whole",
+  "time": "2026-11-17 19:33",
+  "note": "The resurrection is complete and verified end to end on the work branch (suites running now):\n- Three blasts level the pagoda tower into one big rubble dune over its three core beds.\n- The cores free themselves, the beds are rebuilt, and each core settles home the moment its vault is ready - no churn, no re-exposing, the gratings close once and stay closed.\n- With Opus's construction sites judging the work by what stands, health climbs steadily 0.14 to 0.92 in about 8 game-minutes: ruin over at 100 s, frame, floors, walls, then the finery.\n- Three bugs found and fixed on the way: settled cores were mistaken for gone and freed again (churn); the way home was \"blocked\" by the ground beside the bed; and rebuilt back walls were never owned by the building, so the structure judge could not see them and health froze at 0.37.\n- The site recycles its own wreck at the translators' pace until it is whole - the dune in the shot is gone by the end.\nNext: your pipe fixes (E2 - I found the disconnect cause: the router bridges across open air where a back wall stands, but the layer refuses to lay there), then the F2 pillar-first building growth and the C2 mountain bases.",
+  "shots": [
+   {
+    "src": "shots/f2-ruin.png",
+    "caption": "The tower levelled: one dune of debris over the three core beds, dust still hanging"
+   },
+   {
+    "src": "shots/f2-rebuilt.png",
+    "caption": "About 8 game-minutes later: the same tower stands whole again - storeys, stairs, lanterns, back walls - the wreck recycled into the work"
+   }
+  ],
+  "author": "Fable"
+ },
+ {
+  "title": "Opus: blasts as pixels - fireball shaped by the terrain, sparks and shrapnel, far less smoke (1cf649c)",
+  "time": "2026-11-17 19:24",
+  "note": "- Every flame and smoke particle is its own pixel, moving as in The Powder Toy (our own code): carried by the air - the weather's wind and the blast's own - losing its thrown speed fast, rising (flame faster), sliding along what it meets, never through it. Smoke pixels fade out.\n- The fireball goes where the terrain leaves room. Rays cast from the blast through open air pick the directions: on open ground it spreads in a dome along the ground, out of a crater it shoots up, beside a wall it is thrown away from it, in a tunnel it races along it.\n- Each flame pixel glows white-hot (the flash), then yellow, orange, dark red, mottled; about half leave a pixel of sooty smoke when they die.\n- The core drives grey smoke clumps outward ahead of the fire. A blast at the ground sends a low dusty surge rolling along it.\n- More, faster sparks with trails, plus dark shrapnel that flies far, hurts what it hits and lands as debris.\n- Far less smoke: about 500 smoke cells at its height on open ground instead of 9000; dust from blown-out earth cut from 30% to 12%. Craters smoulder briefly in wisps. Shut in (a tunnel, a room), smoke still floods along the openings as gas.\nNext for me: the Game of Life in the physics, and regrowth spreading in Life's style.",
+  "shots": [
+   {
+    "src": "shots/blast-flash.png",
+    "caption": "0.05 s: the flash, white-hot flame pixels bursting out of the core, sparks flying"
+   },
+   {
+    "src": "shots/blast-fireball.png",
+    "caption": "0.27 s: the fireball, every pixel its own flame, mottled yellow to dark red, spreading along the ground"
+   },
+   {
+    "src": "shots/blast-smoke.png",
+    "caption": "1.5 s: what is left - a rounded cloud of separate smoke pixels rising off the crater, far less than before"
+   }
+  ],
+  "author": "Opus"
+ },
+ {
+  "title": "Fable: checklist refreshed - B to E done, F part 2 resurrecting, your new requests queued",
+  "time": "2026-11-17 07:59",
+  "note": "The step-by-step plan now shows where things really stand:\n- DONE and pushed: B mountains as rock (ee9cb07), C military on mountains (777ab97, 623d2f1), D the black-and-white core unit (760b865), E the one resource bundle (4dcd2cd), F part 1 healing through cores (35c5412).\n- ON NOW: F part 2, resurrection. With Opus's construction sites (003ee73) the switch is on: the ruined tower's cores rise and the rebuild climbs instead of stalling. The last piece being finished: the cores settling home into their rebuilt vaults.\n- Your new requests are on the list as their own steps:\n  C2 - mountain bases carved into the mountain (hollowed, reinforced around its shape, developed underground) after your refs.\n  E2 - disconnected pipes joined up + pipe detail after your underground-pipeline refs.\n  F2 - pillar-first building growth, reworded to your support hierarchy: core pillars are the main support, floors hold everything together, background and side walls are secondary.",
+  "shots": [],
+  "author": "Fable"
+ },
+ {
+  "title": "Opus: construction sites - rebuilding ruins no longer knock themselves down (003ee73)",
+  "time": "2026-11-17 07:48",
+  "note": "Fable asked for this to unblock rebuilding ruins and growing buildings (steps F, F2, G).\n- The problem: a ruined tower being rebuilt cell by cell kept being condemned by the collapse rules, because half-built storeys fall short of the finished blueprint. Its new work fell in cycles: 20 collapses in 6 minutes, and it never got past 2% rebuilt.\n- Now a building being built or repaired becomes a construction site. That happens only after one ordinary check, so whatever damage started the work is judged first. It stays a site until 90% of it stands.\n- A site is never judged against its blueprint. Only if it really loses frame (a blast, a heavy piece through it) is it judged, against what each storey carried at its most built.\n- While work goes on, the site's scaffolding holds its parts that aren't joined to anything yet (floors put up before their pillars). Left abandoned, they come down as rubble in place.\n- A core holds up what is built onto it. A site still far from whole shrugs off light blows: flying rubble and small falling pieces.\n- Result: the same rebuild now climbs steadily from 2% to 15% and holds there, with at most one small collapse. It stops at 15% because of an ordering issue in repair (Fable's side, reported to them); once that is fixed the rebuild should continue.\nTests: all suites pass on seeds 7, 3 and 11, apart from two checks that fail the same way without this change.",
+  "shots": [
+   {
+    "src": "shots/site-ruin.png",
+    "caption": "a tower brought down to a ruin, its cores risen over the rubble"
+   },
+   {
+    "src": "shots/site-rising.png",
+    "caption": "the rebuild going up as a construction site, no longer knocked down in cycles"
+   }
+  ],
+  "author": "Opus"
+ },
+ {
+  "title": "Step G groundwork: seeds plant cores on the pipe (plus a 3x faster bundle router)",
+  "time": "2026-11-17 07:26",
+  "note": "- First piece of the seeds step, ahead of the growth semantics: drop a seed on gentle open ground and it plants a core - the unit from your sketch set bare into the earth about a metre down, its translator just under the turf. The side's bundle joins it live: past its end the line simply grows on (and is capped again); mid-run, the span around the new core is taken up and re-laid through its connectors, and the repair crew closes whatever the planting disturbed within seconds. The planted core is then a site on the pipe, drawing resources - the building that grows out of it comes once the construction-site physics land (Opus is mid-build on that now, in the structure system itself).\n- Also in: the bundle's router runs three times faster (410 -> 135 ms), and terrain generation now reports its stage costs for the performance pass (the strata fill is the next target: 1.9 s of the 2.5).\n- The board's big Status list below is refreshed too - it predated the rock look, the military mountains, the cores, the bundle and the repair.",
+  "shots": [
+   {
+    "src": "shots/seed-core.png",
+    "caption": "a planted seed core in the wild: bed and connectors threaded by the bundle, translator towards the surface"
+   }
+  ],
+  "author": "Fable"
+ },
+ {
+  "title": "A2.24 done - nothing floats (cb53f32)",
+  "time": "2026-11-16 22:13",
+  "note": "- The floating strips after a collapse were back-wall panels from ruins, left in the air once the ruin's solid parts were shaken loose. A ruin's panel now stands only while solid touches it on two opposite sides (left and right, or above and below). Held on one side, a short ledge stays; touching nothing, it comes down in chunks and dust.\n- A bit of ruin with nothing solid beside it and nothing heaped under it breaks up and falls as rubble.\n- A storey crushed by a falling top takes the wall behind it too, so no orphan wall is left hanging.\n- Checked after every ground check, around a damaged building when it is looked at, and now and then around each ruin. Street props drawn on the wall layer (gates, machines, lanterns) are never touched.\nTests: all suites pass with Fable's latest; two known checks (a fire time budget, cores clear of rubble) flicker under parallel load, the same at the last commit.",
+  "shots": [
+   {
+    "src": "shots/a224-clean-heap.png",
+    "caption": "a modern block after collapse: one heap, no wall panels hanging in the air"
+   },
+   {
+    "src": "shots/a224-pancaked.png",
+    "caption": "a tower whose top pancaked into its middle: what is left rests on the floors below it"
+   }
+  ],
+  "author": "Opus"
+ },
+ {
+  "title": "Step F part 2: the resurrection machinery is built; one physics interlock holds the switch (23c57dd)",
+  "time": "2026-11-16 22:11",
+  "note": "- The full choreography you specified is implemented: a ruined building's risen cores hang over the wreck; nothing is ever rebuilt across their way home; repair now works in true construction order (bottom-up, each row grown from the middle outward so nothing leans and topples), recycling whatever slumped into the work; when enough frame stands the ruin is over, the cores sink home row by row - loose grit riding down with them - snap the last stretch past the pipe sockets, redraw their unit in the bed, close the grating over themselves, and the fine work follows. The repair economy also got honest and quick: one HM buys a burst of eight repair pixels.\n- What held the switch: rebuilding cell by cell under the physics as it stands cannot converge - the structure rules judge every half-built state against the finished blueprint and condemn it, each condemnation sheds more debris, and the rubble dune flows back into the work. Ten minutes of full-speed rebuilding on a razed tower proved a perfect stalemate (timelapse on file: red fragments going up and coming down, for ever).\n- The fix belongs in the physics track's structure system: construction-site rules (a growing building judged by what stands, not what is missing) - the same rules the F2 pillar-growth, seeds (G) and city growth (H) will need. Opus has the design request; my side turns on with one flag the moment it lands.\n- Meanwhile everything from F part 1 still stands and passes its suite: standing buildings heal their wounds through their cores.",
+  "shots": [],
+  "author": "Fable"
+ },
+ {
+  "title": "Step F part 1: buildings heal through their cores (35c5412)",
+  "time": "2026-11-16 21:41",
+  "note": "- A wounded building now repairs itself, exactly as specified: while any of its cores survives, the debris lying against it is swept into a recycler for a little HM, the bundle's HM tops the pool up, and each core's translator turns 1 HM every quarter second into a repair pixel - one cell of the building restored from its own blueprint, with a white fleck of light at the work.\n- It rebuilds in the order a building grows (your F2 note): the frame and the cores' housing first, then floors and stairs, then the walls, then the glass, the trimmings last - each class from the bottom up.\n- The cores drive it: a building whose cores are all destroyed keeps its wounds. A ruined building does not patch itself either - its cores are busy rising out of the rubble; the full rebuild-from-the-bed (cores rise, remake their foundation bed, sink back and regrow the building) is part 2 of this step.\n- The economy is honest: every restored cell costs 1 HM, from recycled debris or the bundle. In the test, a blast hole of ~340 cells healed exactly as fast as the HM arrived.\n- A new pw-repair suite guards it; all 17 suites green on seeds 7, 3 and 11.",
+  "shots": [
+   {
+    "src": "shots/repair-wound.png",
+    "caption": "a blast bites the tower's wall; rubble on the ground"
+   },
+   {
+    "src": "shots/repair-healed.png",
+    "caption": "the same wall knitting itself back, paid in HM"
+   }
+  ],
+  "author": "Fable"
+ },
+ {
+  "title": "Step E complete: the god machine grips the ore too (4dcd2cd)",
+  "time": "2026-11-16 21:24",
+  "note": "- The last piece of the pipeline step: shadow tendrils now curl round every ore deposit as well - two or three black wisps wobbling in over the host rock to grip the crystal, a white glint where one catches the light. They never touch the ore itself, and they are drawn from hashes, so the world generates exactly as before.\n- Step E is done in full: one bundle through the cores, machines gone, military reach, sleeves, made ground, cargo, breaks and repair, tendrils on the pipe and the veins.\n- Next on this track: step F - repair. While any core survives, a building recycles the debris touching it into a little HM, draws more from the bundle, and its translators turn that HM into repair pixels that rebuild it in the F2 order: pillars first, then floors, back walls, outer walls.",
+  "shots": [
+   {
+    "src": "shots/ore-tendrils.png",
+    "caption": "a lode in the deep, the machine's wisps wrapped round its waist"
+   }
+  ],
+  "author": "Fable"
+ },
+ {
+  "title": "Step E part 1: ONE bundle through the cores, machines gone (c28cea1)",
+  "time": "2026-11-16 18:07",
+  "note": "- The three per-town supply lines and all the machine rows beside the buildings (tanks, generators, mills, crushers, transformers) are gone. As in your sketch: ONE thin bundle runs about a metre down, with HM, SM and water as three lanes in one casing, and it threads straight through every building's core bed - in the left connector, out the right. It only rises to the surface in three places: the lake pump, the mining hoppers, and the main core's pedestal in the pit.\n- The base bundles run on under the wild to the mountain outposts and the flank bunkers (the military reach), and dive deeper under any foreign town they cross. Where a building's pier or plinth stands in the way, the bundle runs through it in a painted sleeve - nothing load-bearing is cut.\n- The dead god machine grips the line: black tendril wisps wrap the casing every few metres, a white glint where they catch the light.\n- Towns keep their deep made ground (your cross-section refs), the bundle bedded in its upper metre. Farms keep an open strip on the side their field grows towards, and the street leaves it unpaved - fields stay healthy on all seeds.\n- Cargo still travels as real pixel particles lane by lane, queues at breaks, spills real water when the bundle is cut, and the crew re-lays a blasted span around the crater for HM - now sweeping up every scattered casing cell too.\n- All 16 suites green on seeds 7, 3 and 11 (collapse/physics time budgets still flicker only when two suite runs share the machine - the step L list).\n- Net: 438 lines in, 686 out. The pipeline is simpler than what it replaces.",
+  "shots": [
+   {
+    "src": "shots/bundle-through-core.png",
+    "caption": "the bundle threading the core beds: in one connector, out the other, cargo in the lanes"
+   },
+   {
+    "src": "shots/bundle-street.png",
+    "caption": "a base street: the one bundle under everything, core beds strung along it like beads"
+   }
+  ],
+  "author": "Fable"
+ },
+ {
+  "title": "A2.22 trees done; leaves fall like a heavy gas; bigger debris chunks (1644686, 50ec25f, fe566ed)",
+  "time": "2026-11-16 17:41",
+  "note": "Trees\n- A tree stands by its base: while the middle of its weight (pushed over by the wind on its crown) is over the ground still under its trunk and roots, it stands; otherwise it goes over about the edge of that ground, or drops free with nothing under it. Trees are checked a few at a time every tick, so digging or a slide under one brings it down.\n- A bough broken off swings down about the break, then drops. Cut loose all round, pieces fall with no made-up push: air drag on their leaves and wood, and the wind, carry and turn them (a leafy end trails).\n- Wood keeps the girth of the stem it grows from. Where a falling tree strikes, the thinnest wood that took the blow snaps off if it cannot bear its share (strength goes with girth cubed). So the crown it lands on breaks up and the tree comes down onto its trunk and stout limbs instead of being propped on its branch tips. Twigs and leaves pressed into the ground bend up to lie on it; thick wood splinters.\n- Fixed: pieces sliding down through ground or rubble, wild spinning and bouncing, cut boughs flying off sideways, fallen trees on rubble falling again and again, and a landing that cut the trunk in two.\nLeaves\n- Leaves with no wood and nothing under them (twig broken, burnt, or left behind when a tangled neighbour fell) never hang in the air. They come down together as a mass, sinking, swaying with the leaves around them and spreading like a heavy gas, then lie a moment where they land.\nChunks\n- Each material breaks along jagged blocks that stay whole or split 2x2 or 3x3: concrete and rock from a few cells up to slabs 16 across, wood 12, metal 8; earth stays mostly powder with the odd clod. Leaves stay single.\n- A chunk that hits gently enough lands whole as a lump, lit along its top and shadowed along its bottom. Harder, it cracks into 2-3 smaller chunks that bounce on; only small ones shatter into grains.\n- A collapsing building's crushed storeys burst out a block at a time in their own colours, gathered over a few ticks, so they go as slabs and lumps of wall.\nTests: 16/16 suites pass on seeds 7, 3 and 11 (one timing flicker under load passes alone). Fable's uncommitted pipes/urban work was mid-edit, so these were run on a clean copy of the last commit plus my files.",
+  "shots": [
+   {
+    "src": "shots/a222-topple.png",
+    "caption": "a tree undermined on one side goes over about the edge of the ground still under it"
+   },
+   {
+    "src": "shots/a222-lies.png",
+    "caption": "it lies along the ground in one piece, crown spread low, splinters where branches snapped"
+   },
+   {
+    "src": "shots/a222-leaves-0.png",
+    "caption": "a patch of crown cut loose: its leaves come down together as a cloud"
+   },
+   {
+    "src": "shots/a222-leaves-1.png",
+    "caption": "the cloud sinks and spreads like a heavy gas; the broken boughs lie beneath"
+   },
+   {
+    "src": "shots/chunks-collapse.png",
+    "caption": "a tower coming down: its crushed storeys burst out in chunks"
+   },
+   {
+    "src": "shots/chunks-heap.png",
+    "caption": "the heap: lumps of wall and trim among the grit and dust"
+   }
+  ],
+  "author": "Opus"
+ },
+ {
+  "title": "Core simplified per your note: two plain perfect squares (760b865)",
+  "time": "2026-11-16 16:40",
+  "note": "- As you asked: no more detail crowding the foundation. The FOUNDATIONAL BED is now a plain perfect square frame - it alone carries the machinery: the connector socket on either side (for the pipe bundle) and the translator nozzle on top (for the pillars). The CORE is the perfect square set in its middle that powers it: black tendrils about one white point. Feet, rivets, the etched glyph and the outer tendrils are gone from the unit.\n- Styles, settlements and collapse suites pass; cores still rise from ruins as before.",
+  "shots": [
+   {
+    "src": "shots/core-bed-plain.png",
+    "caption": "the bed (plain square frame) and the core (the square that powers it), in the vaults"
+   }
+  ],
+  "author": "Fable"
+ },
+ {
+  "title": "The main core converted too: black orb, white light (0 amber left)",
+  "time": "2026-11-16 16:37",
+  "note": "- The base's main core now wears the dead god machine's colours like its descendants: a black sphere, faintly lit along its upper edge, white light breaking out of thin cracks across its surface, one white eye at its heart, and the machine's black tendrils wrapped over its lower half. The pedestal joints under it, the seam of light up the main pillar, the glow washing the pit under the armoured block and the lamplight it throws are all white now.\n- Styles, settlements and collapse suites pass; the cores still rise from ruins exactly as before.",
+  "shots": [
+   {
+    "src": "shots/main-core-bw.png",
+    "caption": "the left base's heart: the black orb in its pit under the armoured block, pillar seamed with white"
+   }
+  ],
+  "author": "Fable"
+ },
+ {
+  "title": "Step D begun, your core redesign in: the black-and-white core unit (f1fa8a3)",
+  "time": "2026-11-16 16:34",
+  "note": "- Your feedback applied: the orange ball in a metal box is discarded. The core is now a perfect square of plate armour round a square dark heart, where the dead god machine's black tendrils curl in to grip one white point - black and white only, no purple, no amber, matching your sketch's shape: connector sockets left and right for the pipe bundle (step E docks there), the translator nozzle on top with a white slot (step F2 grows the building's pillars out of it), the glyph etched in the plate, and black tendrils gripping the body from outside. Even the grating above now lets white light up instead of amber.\n- Every building's vault cores across all three factions use the unit; the base's main core (the big orb in the pit) is next for the same treatment if you want it in black and white too - say the word.\n- On your note about roads, pipes and urban detail restyling around the cores: agreed - that lands with step E, when the one resource bundle is laid through the cores' side connectors and the urban ground is drawn to meet them; the connectors were built for exactly that.\n- Groundwork under the hood: PW.coreTree(world) now reads the whole hierarchy (main / descendant / sub) for the pipeline (E), repair (F) and seeds (G).",
+  "shots": [
+   {
+    "src": "shots/core-unit-bw.png",
+    "caption": "the core unit in its vaults: a perfect square, black tendrils gripping the white point"
+   }
+  ],
+  "author": "Fable"
+ },
+ {
+  "title": "Step C complete: cave bases ready for the tunnels (623d2f1)",
+  "time": "2026-11-16 08:33",
+  "note": "- The last piece of step C: a cave chamber can now be made over into an underground garrison base. The bowl of its floor is levelled and flagged (the fill fading down into the rock, so only the top courses read built), the lower walls are smoothed behind a lit faction band with a trim line, lamps go up - and the cave keeps its own character: the domed roof, the stalactites and flowstone off the pad, and any pool stay as they were found.\n- Cheaper than a surface base, as designed: how many troops it can deploy (2-8) and how much POP it needs follow from the size of the chamber it was built in.\n- Nothing builds one yet by itself: the trigger belongs to step H, when the miners' tunnels break into a cave on their way to the ore. The transformation is tested and committed now so H can simply call it.\n- With that, step C's list is in: summit outposts on stepped rock foundations with HESCO walls, forward bunkers with firing openings in the mountainsides, and cave bases. On to the physics track's remaining items (Opus) and then step D (the cores) on mine.",
+  "shots": [
+   {
+    "src": "shots/cavebase-hall.png",
+    "caption": "seed 7: a chamber as a garrison - flagged pad, lit band, lamps; the dome and its formations kept"
+   }
+  ],
+  "author": "Fable"
+ },
+ {
+  "title": "A2.20 done - loose stuff holds as it lies until something stirs it (232c7f9)",
+  "time": "2026-11-16 08:29",
+  "note": "- Rubble, earth and sand lying still now hold where they are, even in a straight-up stack, instead of always slumping to their slope.\n- They give way when something stirs them: grains landing on them or moving about them, ground breaking loose under them, a blast, a shake from an impact felt hard enough, or a blast's gust strong enough. How long and how far they slump depends on how hard they are shaken and how loose the stuff is: sand gives way to less than building rubble does.\n- Stirred, a heap slides and spreads to its natural slope as before. Once it has been still for a moment (about 1.5 s) it holds again, so a half-spilled stack can be left standing part-way.\n- Grains over open air still fall at once: only sliding sideways is held.\nTests: the suites pass alone on seeds 7, 3 and 11; with both sessions testing at once, a time budget or the ruins count sometimes flickers. Next for me: trees standing by their base, falling free when cut loose, branches bending as they hit (A2.22).",
+  "shots": [
+   {
+    "src": "shots/sf-stacks-0.png",
+    "caption": "a straight-up stack of building rubble (left) and one of sand (right), standing as they lie after 5 s"
+   },
+   {
+    "src": "shots/sf-stacks-1.png",
+    "caption": "a weak blast far off: a little spills from the feet of both; both stand"
+   },
+   {
+    "src": "shots/sf-stacks-2.png",
+    "caption": "a blast near both: they topple and spill into low heaps"
+   }
+  ],
+  "author": "Opus"
+ },
+ {
+  "title": "Step C part 1 landed: outposts and bunkers are in (777ab97)",
+  "time": "2026-11-16 08:21",
+  "note": "- The summit outposts and the flank bunkers from the two entries below are committed and pushed. The physics track's slender-column rule (Opus, a3a2ede) went in first; with both in, all 16 suites pass on seeds 7, 3 and 11 (one physics time-budget check still flickers only when two suite runs share the machine with your open game - a performance-pass item for step L).\n- One more fix on the way in: trees had been sprouting over the bunkers' firing-port mouths and floating there when the port cut the ground from under them; every opening's mouth now keeps the wild off it.\n- Still open in step C, coming next: cave bases (the placeholder base built round a cave when a tunnel breaks into one - groundwork now, the trigger belongs to the tunnels of step H).",
+  "shots": [],
+  "author": "Fable"
+ },
+ {
+  "title": "A2.21 done - your mountain top comes down: slender rock columns topple (a3a2ede)",
+  "time": "2026-11-16 08:12",
+  "note": "- Your screenshot's case: a blast deep under a summit left a tall column of rock standing free over the hollow. Now, wherever ground breaks away, the rock round it and up over it is checked for columns standing free: open air on both sides, measured through their bands of gravel and clay. One standing on rock and taller than about 3.7 times its width tips over as one solid piece about the edge of its foot, and lands broken, as talus that runs on down the slope and settles.\n- Kept from running away: one topple per disturbance, and nothing topples from the blows of falling rock or from a sag settling, so one topple never sets off another. The mountain test now has one spire going over right after the blast, then stays quiet.\n- With sinkholes (524df60) that completes A2.21: hollows under thick ground sag into bowls, small deep ones fill with their own broken roof, thin roofs cave in, and spires left by cave-ins come down.\n- Also: the falling-piece grinding is bounded (it only wears a piece away where it drives into the surface, at most 30% of it), so collapsed towers still leave whole pieces lying as ruins.\nTests: physics, collapse and fire pass alone on seeds 7, 3 and 11; the full matrix is noisy while both sessions run suites at once (time budgets). Next for me: debris stacks that hold until shaken (A2.20), then trees that stand by their base (A2.22) and nothing floating (A2.24).",
+  "shots": [
+   {
+    "src": "shots/sp-summit-0.png",
+    "caption": "a big hollow blasted under a summit; the cave-in cuts up into it, leaving a mushroom-shaped spire on top"
+   },
+   {
+    "src": "shots/sp-summit-1.png",
+    "caption": "1 s: the spire, standing free and far too slender for its foot, tips over"
+   },
+   {
+    "src": "shots/sp-summit-3.png",
+    "caption": "3 s: it has gone over and broken up on the summit"
+   },
+   {
+    "src": "shots/sp-summit-12.png",
+    "caption": "12 s: a rounded, settled summit - nothing left standing over the hollow"
+   }
+  ],
+  "author": "Opus"
+ },
+ {
+  "title": "Step C continued: bunkers built into the mountainsides",
+  "time": "2026-11-16 07:58",
+  "note": "- Each base now digs one forward bunker into the enemy-facing flank of a massif on its own half (keeping the same distance from the centre the outposts keep): a gun gallery carved out of the living rock, lit and furnished, behind a firing wall twice as thick as a normal wall and reinforced through.\n- Firing openings in the mountainside, as you asked: a horizontal embrasure runs from the gallery out through the thin front rock (splayed inside, with a step for the guard to kneel on), and two angled ports climb from under the ceiling to openings higher on the face.\n- The rock all round the chamber is reinforced with the military building material (a 6-cell lining ring), so the bunker stands up to the missiles that will come in M8.\n- At the rear, a ladder shaft drops to a sealed junction stub - that is where the auto-dug tunnels (step H) will find it and join it to the base's network.\n- A pair of cores in vaults sits under the gallery floor, like every military building, for repair and the economy later.\n- Where no spot on a mountain gives both enough cover and an embrasure that reaches daylight, the bunker moves to the next massif; all three seeds place one per side.\n- Still uncommitted together with the outposts: waiting on the physics track's slender-column rule landing, then the full three-seed matrix runs and both land.",
+  "shots": [
+   {
+    "src": "shots/bunker-flank.png",
+    "caption": "seed 7: the asian bunker in the flank under its outpost - embrasure right, two ports above, shaft to the stub below"
+   },
+   {
+    "src": "shots/bunker-crag.png",
+    "caption": "seed 3: the modern bunker carved high into the crag, firing left over the valley"
+   }
+  ],
+  "author": "Fable"
+ },
+ {
+  "title": "Step C in progress: outposts hold the mountain tops",
+  "time": "2026-11-16 07:48",
+  "note": "- The tallest two massifs on each side now carry a military outpost: the blockhouse with its watchtower, interceptor and turret, holding the summit for its base (left of centre = left base's style, right = right's), guns facing the enemy. The middle of the map belongs to no one and its summits stay bare.\n- An outpost does not perch on the peak: the summit is cut down to a bench (44-90 cells, deeper on a sheer crag) and the bench's edges are carried down the flanks on solid stepped terraces of battered courses, down to the massif rock - your mountain-fortress ref. Where the mountain rises on past the bench, the cut is benched instead: a back-wall of steps, each face short enough to hold, so nothing is left to shed (the first version left one sheer cut there, and the ground above it slid - caught by the test suites and the live sim, fixed).\n- HESCO gabion baskets (wire mesh over sand ballast) stand on the terrace treads clear of the walls, a broken defensive wall marching down both flanks.\n- Outposts are not towns: no street, no pipes, no made ground reaches them, and the wild keeps its distance only where the works actually stand.\n- A peak too sheer even for terraces is passed over for the next summit; each side holds at most two, spaced apart. Seeds 7 / 3 / 11 give 4 / 3 / 4 outposts, all standing stable in the live sim.\n- Not committed yet: the physics track (Opus) is mid-way through the slender-column rule and the undisturbed-ground test flickers on its work-in-progress; the matrix gets re-run and this lands once that rule is in.",
+  "shots": [
+   {
+    "src": "shots/outpost-summit.png",
+    "caption": "seed 7: the asian outpost on its summit bench, terraces down both flanks"
+   },
+   {
+    "src": "shots/outpost-terraces.png",
+    "caption": "up close: the stepped battered courses, HESCO baskets on the treads, the watchtower"
+   },
+   {
+    "src": "shots/outpost-knoll.png",
+    "caption": "seed 3: the modern blockhouse, benched back-wall stepping down into the saddle"
+   },
+   {
+    "src": "shots/outpost-saddle.png",
+    "caption": "seed 11: the crag pair - bench cut benched into the second crag, nothing shed"
+   },
+   {
+    "src": "shots/outpost-skyline.png",
+    "caption": "an outpost on the skyline between the bases"
+   }
+  ],
+  "author": "Fable"
+ },
+ {
+  "title": "collapses spill sideways, breakage in chunks, no more sliding through the ground, blasts throw things back (9b7fba0, 2e2ca02, aa2dbec)",
+  "time": "2026-11-16 07:22",
+  "note": "- Spill: what a building crushes under itself as it comes down - its stump, its foot, the rooms that fold, the pieces that break off - is squeezed out of its sides, low and wide, away from the middle of what came down on it. Rubble rolls further off the heap, so heaps lie long and low. Smoke is 35% thinner.\n- Chunks: things no longer break into powder only. What breaks off together flies as chunks shaped like what it came from, by material. Earth stays a smooth powder with the odd clod. Rock and concrete break into jagged lumps with dust and grit. A building's frame breaks into slabs of floor, lengths of pillar and blocks of wall, with some shrapnel. Wood breaks into lengths of trunk and branch with splinters. A chunk shatters into its grains where it lands hard. A building's back wall comes away in whole panels with the rest of it.\n- No noclipping: a falling piece that bites into the ground or another building no longer slides on through it. Where it drives in, its bottom breaks off there as rubble and dust. At most 30% of a piece wears away like this, so what is left still comes to rest whole as a ruin.\n- Blast push: a blast throws back what it breaks loose in the next moments - trees, boughs, pieces of building - as hard as the blast over the piece's weight. Branches are flung far, a tree group is shoved, a tower's top is hardly stirred. A building that loses one side still falls toward that side: the push only tips a falling top on over the way it is already going.\nAll 16 test suites pass on seeds 7, 3 and 11 (with Fable's rock look in). Next for me: slender rock columns topple (the rest of A2.21), then debris stacks that hold until shaken (A2.20), trees standing by their base (A2.22) and nothing floating (A2.24).",
+  "shots": [
+   {
+    "src": "shots/sp-tipped.png",
+    "caption": "a tipped tower's rubble spread out wide and low across the street"
+   },
+   {
+    "src": "shots/sp-dropped.png",
+    "caption": "a tower that lost its whole ground floor: a long low mound, not a peak"
+   },
+   {
+    "src": "shots/ck-tower.png",
+    "caption": "chunks of wall, trim and slab flying out of a blast at a tower (close up)"
+   },
+   {
+    "src": "shots/ck-tree.png",
+    "caption": "a blast in a tree: lengths of branch and leaves thrown out"
+   },
+   {
+    "src": "shots/gr-tower.png",
+    "caption": "a falling top breaking apart where it comes down on the heap, rubble bursting out"
+   },
+   {
+    "src": "shots/pu-tree.png",
+    "caption": "a blast at a stand of trees' foot throws them back away from it"
+   }
+  ],
+  "author": "Opus"
+ },
+ {
+  "title": "Step B: mountains are rock now - grey jointed massifs, not banded dirt",
+  "time": "2026-11-16 07:18",
+  "note": "- The body of every mountain - from its summit down to the ground it was raised on - is now drawn as one rock mass: grey granite parted by two wandering families of joints into uneven blocky masses, with sparse rusty iron stains and a pale weathered crust along the open faces. Below that foot line the ground is the lying strata as before. The two looks interlock cell by cell at the line, no seam.\n- Scree and talus (the broken rock banked at the feet and on the faces) are drawn as the same rock broken small, so a wall and the rubble under it read as one stone - the mountains are now visibly rocky at their summits AND their bases, as in your photo refs.\n- The red laterite and pale loess soil belts are lowland weathering crusts now: they fade off a mountain's flanks, and they fade out with depth too (no more deep red wedges cutting through the underground).\n- Clay and soil lenses no longer spawn inside a massif (they are features of the lying strata), so no more brown blobs on a rock face.\n- A fresh blast face shows unweathered grey; ground lifted out whole keeps the rock look it was drawn with (it runs through the same colour code Opus's falling pieces use).\n- Checked on seeds 7, 3 and 11: all 16 suites pass (two time-budget/ruins checks only flicker when suites run in parallel with the live game open - same as before).",
+  "shots": [
+   {
+    "src": "shots/rock-before-summit.png",
+    "caption": "before: a summit of banded dirt"
+   },
+   {
+    "src": "shots/rock-after-summit.png",
+    "caption": "after: the same summit as jointed grey rock"
+   },
+   {
+    "src": "shots/rock-before-valley.png",
+    "caption": "before: valley walls of layer-cake soil, red belts across them"
+   },
+   {
+    "src": "shots/rock-after-valley.png",
+    "caption": "after: grey massif walls, scree in the saddle, laterite only as a valley-floor crust"
+   },
+   {
+    "src": "shots/rock-before-range.png",
+    "caption": "before: the range reads as brown mounds"
+   },
+   {
+    "src": "shots/rock-after-range.png",
+    "caption": "after: grey pyramids over wooded foothills"
+   },
+   {
+    "src": "shots/rock-after-foot.png",
+    "caption": "a massif foot by the right base: cave mouth, scree apron, rock over strata"
+   }
+  ],
+  "author": "Fable"
+ },
+ {
+  "title": "Work split: two of us on the game now (Fable + Opus)",
+  "time": "2026-11-15 22:35",
+  "note": "- You asked us to divide the board. The Fable session (this one) takes the world-building track: step B (the world more rugged and closer to your nature refs: pyramid mountains with broad bases and straight flanks, real transitions between flats and mountains, rock dense at summits and bases) and then step C (military on mountain tops: stepped foundations into the rock, HESCO walls, mountain bunkers with firing openings, cave bases).\n- The Opus session keeps the physics track it is mid-way through: A2.21 part 2 (slender rock columns toppling and settling), then the remaining physics items (A2.20 debris stacks, A2.22 tree falls, A2.24 nothing left floating).\n- We stay out of each other's files and each commit only our own, so the two tracks cannot tread on each other.\n- Fable starting now on step B in pw-gen-terrain.js.",
+  "shots": [],
+  "author": "Both"
+ },
+ {
+  "title": "A2.21 part 1: sinkholes - ground over a hollow sags into a bowl (524df60)",
+  "time": "2026-11-15 20:27",
+  "note": "- A hollow shut in under a thick cover (a cave, a blasted void) no longer caves in as a vertical chimney. The ground over it sinks into it, column by column with everything in it, deepest over its middle, into a bowl wider than the hollow (by an angle of draw of about 24 degrees). It goes slowly at first, gathers pace and eases off over a few seconds.\n- How far it sinks comes from the hollow's size: its volume less what the broken rock bulks up to. A great hollow leaves a deep bowl. A small one deep down (under more than three times its own height of cover) just fills with its own packed broken roof, and nothing shows at the surface.\n- What stands on it goes down with it: trees whole with their foot, buildings column by column (so a tower over a sinkhole bows and its floors bend - its structure check decides if that is too much), pipes and made ground bending into the bowl. Tunnels hold their ground up. A thin roof still caves in into an open sinkhole.\n- Your mountain top: a hollow under a summit now lowers the whole summit into it (below). The tall column in your screenshot is a different case (rock left standing free between blasts, not over a hollow); a slender-column rule that settles properly comes next.\n- Also: your design doc is saved and its unit controls are written into steps M5 and M6 of the plan.\nAll 16 test suites pass on seeds 7, 3 and 11.",
+  "shots": [
+   {
+    "src": "shots/sh-forest-0.png",
+    "caption": "a hollow under a forest (cut out for the test)"
+   },
+   {
+    "src": "shots/sh-forest-7.png",
+    "caption": "7 s: the ground has sagged into a smooth bowl, the trees going down with it"
+   },
+   {
+    "src": "shots/sh-town-0.png",
+    "caption": "a hollow under a town tower"
+   },
+   {
+    "src": "shots/sh-town-12.png",
+    "caption": "the tower settled into the bowl, bowing; the pipes and made ground bend down with it"
+   },
+   {
+    "src": "shots/sh-summit-0.png",
+    "caption": "a big hollow under a summit"
+   },
+   {
+    "src": "shots/sh-summit-12.png",
+    "caption": "the summit sank into it whole (about 70 cells); a little rubble ran off its side"
+   }
+  ],
+  "author": "Earlier"
+ },
+ {
+  "title": "A2.21 in progress: why your mountain top stayed up, and what is next",
+  "time": "2026-11-15 19:50",
+  "note": "- Reproduced: large blasts deep under a summit. A cave-in deep underground only grows straight up, round by round, so it cuts a vertical chimney to the sky. The rock beside the chimney (the column in your screenshot) is never looked at as a free face, and nothing makes a slender column fall: rock stands as long as each cell has a column under it.\n- Tried first: a slender-column rule (rock standing free, much taller than wide, topples as one solid piece). It works on the case itself: the mushroom-shaped summit left by the cave-in toppled and lay as a ruin. But a toppled column sets off new looks where it lands, and on two of the three test seeds the mountain then never settled. Real ground has to settle, so it is not in the game; the draft is kept.\n- Next, the real fix: a cave-in under a thick cover will sag instead of cutting a chimney. The ground over the hollow sinks into it column by column, into a bowl wider than the hollow, with everything on it, gathering pace and easing off as the hollow fills; how deep depends on the hollow's size. Thin covers still cave in, opening a sinkhole. Then the column rule again, on top of that, so it settles.\n- Also in (a5faa4c): rock that comes loose as a piece keeps its strata colours.\n- Note: the test suites now pass running two at a time. Four at a time, two time-budgeted checks fail while the live game is open in your browser (it renders frames alongside). That gets looked at in the performance pass (L).",
+  "shots": [
+   {
+    "src": "shots/a221-topple.png",
+    "caption": "with the draft column rule: the summit's mushroom-shaped remains toppled and lie as a ruin (not in the game yet)"
+   }
+  ],
+  "author": "Earlier"
+ },
+ {
+  "title": "Pancaking towers, pillars to the ground, smoke that funnels, daylight in hollows, drills in the tunnels (ad0aed7, 8de9787)",
+  "time": "2026-11-15 19:01",
+  "note": "- Pancake while tipping (A2.26): a tipping top far heavier than what it stands on crushes the storeys under it as it leans. Its hinge comes down through the stump row by row across its whole width, then through its own lowest storeys. Each row resists by its walls and pillars (a floor slab carries nothing down), so a light top stalls and hinges as before, and a heavy tower comes down storey by storey as it goes over, rubble and dust bursting out of both sides.\n- Pillars (A2.27): the core bunker now stands on five pillars: the main one out of the core, a pair beside the core on the pit floor, and a pair down the pit's slopes. Every pillar, here and under the slope stages (timber posts, gothic piers, modern pilotis), goes down column by column to the ground under it. Blow them out and the block comes down.\n- Blast smoke (A2.28): a blast makes a set volume of smoke and drives it into the open space round it, nearest first along the ways open to it: round corners, along tunnels, through rooms, out of doors and broken windows, never through rock. It comes out fast and ever slower. In the open it races out as a near-round cloud with a few tongues; in a tunnel the same smoke fills it thick and shoots along it. Smoke also travels 18% faster than before (the burst, and rising and drifting).\n- Shadows (A2.25): open air under the ground is no longer dark in hard-edged blocks. Daylight gets in at a cave mouth, an overhang or a hole in a roof and fades away into it smoothly (about 50 cells sideways, less up and down). The light is kept up to date across chunks as the ground is blasted open.\n- Drills: rock drills lie here and there in the tunnels, about one per network on a drift or storage-room floor, never on the miners' rails. Picking them up comes with the units (M5).\nAll 16 test suites pass on seeds 7, 3 and 11. Now: A2.21. Your mountain top is reproduced: a cave-in under a summit cut a chimney straight up and left a slender rock spire standing. Rock that stands slender and free will topple, big spires as one solid piece, and cave-ins will sag the ground over them into a bowl instead of cutting chimneys.",
+  "shots": [
+   {
+    "src": "shots/pk-b1.png",
+    "caption": "pancake while tipping, 0.7 s: the tower leans, its bottom storeys crushing under it"
+   },
+   {
+    "src": "shots/pk-b2.png",
+    "caption": "1.1 s: three storeys shorter, leaning further"
+   },
+   {
+    "src": "shots/pk-b3.png",
+    "caption": "2 s: its top four storeys go over onto the heap of the floors that pancaked"
+   },
+   {
+    "src": "shots/pil-built.png",
+    "caption": "the core bunker on its five pillars, each down to the pit under it"
+   },
+   {
+    "src": "shots/sf-air-3.png",
+    "caption": "blast smoke in the open, 3 ticks: already a near-round cloud racing out"
+   },
+   {
+    "src": "shots/sf-air-12.png",
+    "caption": "0.2 s: nearly full size, a tongue reaching up"
+   },
+   {
+    "src": "shots/sf-tunnel-12.png",
+    "caption": "the same blast in a mine drift: the smoke fills the drift thick, end to end"
+   },
+   {
+    "src": "shots/sf-room-24.png",
+    "caption": "a small blast inside a tower: the smoke spreads along its storey"
+   },
+   {
+    "src": "shots/lt-cave.png",
+    "caption": "daylight fading into a cave cut in a cliff, and into a hollow under a thin roof (above)"
+   },
+   {
+    "src": "shots/dr-room.png",
+    "caption": "a rock drill lying on a storage-room floor (left room, by the shaft)"
+   }
+  ],
+  "author": "Earlier"
+ },
+ {
+  "title": "A2.19 and A2.23 done: leaves in front of the branches; blast smoke bursts out round (8b1fa1f)",
+  "time": "2026-11-15 18:29",
+  "note": "- Leaves: every tree marks its wood, so the leaves are drawn over the branches (a crown hides its boughs, a spruce its limbs), and burning or breaking still finds the wood behind them: burnt snags keep their whole skeleton.\n- Blast smoke: a blast throws out puffs of smoke from the fireball in every direction at once. They race out (about 30 m/s for a medium blast), the air brakes them hard - exponentially - and as they go they lay smoke behind them, so the cloud grows as a near-round disc filled from the middle out, with a few tongues reaching further. In about a second it has slowed to an ordinary drift and is ordinary smoke from then on (rises, drifts, thins). Only what is near the blast shapes it: puffs that meet the ground or a wall are turned along it. A blast in the open air no longer leaves a smouldering column; a crater still does.\n- Board: the status lists above (each item tagged D/P/N with its step), and every box can be folded with its arrow.\nAll 16 test suites pass on seeds 7, 3 and 11. Now: the pancake collapse while tipping (A2.26) and pillars that always reach the bottom (A2.27, first picture below), then the light that fades into caves and overhangs (A2.25) and the mountain top over a big blasted hole (A2.21).",
+  "shots": [
+   {
+    "src": "shots/sb-air-6.png",
+    "caption": "a blast in the open air, 0.1 s: the smoke racing out as a ring from the fireball"
+   },
+   {
+    "src": "shots/sb-air-12.png",
+    "caption": "0.2 s: filling in from the middle, a tongue reaching up"
+   },
+   {
+    "src": "shots/sb-air-60.png",
+    "caption": "1 s: slowed to a drift, a near-round cloud (partly behind the tree)"
+   },
+   {
+    "src": "shots/sb-ground-24.png",
+    "caption": "a blast on the ground: the puffs turned along it, the cloud sitting on the ground"
+   },
+   {
+    "src": "shots/lf-broadleaf.png",
+    "caption": "broadleaf crowns over their boughs; the trunks and lower limbs show below"
+   },
+   {
+    "src": "shots/lf-conifer.png",
+    "caption": "a spruce: the needles in front of its limbs"
+   },
+   {
+    "src": "shots/pil-built.png",
+    "caption": "next (A2.27): the core bunker on five pillars, each down to the pit under it"
+   }
+  ],
+  "author": "Earlier"
+ },
+ {
+  "title": "Status: what is done, what is partly built, what is not in yet (refreshed)",
+  "time": "2026-11-18 22:45",
+  "note": "Each item has its tag on the left (D = done, P = partly built, N = not in yet, then O or F for who builds it: P1F is partly built item 1, built by Fable; B is the separate Sonnet baseline job) and the plan step on the right. Refreshed after steps B-F: the old status predates the rock look, the military mountains, the cores, the bundle and the repair.",
+  "lists": [
+   {
+    "kind": "done",
+    "heading": "Done",
+    "groups": [
+     {
+      "name": "World and look",
+      "items": [
+       {
+        "text": "One cell grid (1 cell = 1 trooper pixel, ~7 cm), world 36,096 x 4,096, chunked rendering at several zooms",
+        "step": "M0, B",
+        "id": "D1",
+        "owner": "F"
+       },
+       {
+        "text": "Terrain after the nature refs: pyramid massifs drawn as grey jointed rock from summit to foot line, scree and talus as the same rock broken small, soil belts fading off the flanks and with depth",
+        "step": "B",
+        "id": "D2",
+        "owner": "F"
+       },
+       {
+        "text": "Soil horizons, caves with chambers and formations, crystalline HM ore in depth tiers - now gripped by the god machine's black tendril wisps",
+        "step": "A0.1, M1, E",
+        "id": "D3",
+        "owner": "F"
+       },
+       {
+        "text": "Plants grown wood-first, leaves in front of branches, burnt forests; night sky, clouds",
+        "step": "M0, A2.17-19",
+        "id": "D4",
+        "owner": "F"
+       }
+      ]
+     },
+     {
+      "name": "Buildings and towns",
+      "items": [
+       {
+        "text": "Population / military / farm buildings in three faction styles at real scale, bases and neutral towns with district infill, slope-adaptive foundations, courses-built roads",
+        "step": "M1, A0.2",
+        "id": "D5",
+        "owner": "F"
+       },
+       {
+        "text": "Military holds the mountains: summit outposts on stepped rock terraces with HESCO walls, forward bunkers in the flanks with embrasures and firing ports, cave bases ready for the tunnels",
+        "step": "C",
+        "id": "D6",
+        "owner": "F"
+       },
+       {
+        "text": "The core and its foundational bed: two perfect squares, black tendrils about one white point - black and white only; the main orb converted too; main / descendant / sub hierarchy readable",
+        "step": "D",
+        "id": "D7",
+        "owner": "F"
+       }
+      ]
+     },
+     {
+      "name": "Pipeline and economy",
+      "items": [
+       {
+        "text": "ONE resource bundle about a metre down with HM / SM / water lanes, threading every core bed's side connectors - no machines; reaches the military in the mountains; dives under foreign towns; sleeves through structure; black tendril wisps on the casing",
+        "step": "E",
+        "id": "D8",
+        "owner": "F"
+       },
+       {
+        "text": "Cargo as real pixel particles lane by lane; breaks spill real water; the crew re-lays a blasted span around the crater for HM; towns keep deep made ground with the bundle bedded in its upper metre",
+        "step": "E",
+        "id": "D9",
+        "owner": "F"
+       },
+       {
+        "text": "Repair through the cores: a wounded building rebuilds itself from its blueprint (frame first, bottom-up, centre-out), recycling the debris against it and drawing bundle HM - 8 repair pixels per HM; coreless buildings keep their wounds",
+        "step": "F",
+        "id": "D10",
+        "owner": "F"
+       },
+       {
+        "text": "Mining operations with miners, belts and hoppers feeding the bundle; stored ore hauled back when the line flows again",
+        "step": "M1, H, E",
+        "id": "D11",
+        "owner": "F"
+       }
+      ]
+     },
+     {
+      "name": "Physics",
+      "items": [
+       {
+        "text": "One element table; water conserved; blasts shielded by rock; air grid; heat and fire; landslides that flow and gather momentum; building collapses as hollow boxes that pancake, spill sideways and grind where they bite",
+        "step": "A2.x",
+        "id": "D12",
+        "owner": "O"
+       },
+       {
+        "text": "Sinkholes: ground over a hollow sags into a bowl with everything on it; slender rock columns left standing topple; loose stuff holds as it lies until stirred (static friction)",
+        "step": "A2.20-21",
+        "id": "D13",
+        "owner": "O"
+       },
+       {
+        "text": "Trees stand by their base, break in parts, ride landslides, drop loose leaf clumps when disturbed; nothing floats - wall panels and hanging ruin bits come down",
+        "step": "A2.22, A2.24",
+        "id": "D14",
+        "owner": "O"
+       },
+       {
+        "text": "Cores rise out of a ruined building's rubble, stand in the open on it, and sink home again into a rebuilt bed (grating closing over them)",
+        "step": "F",
+        "id": "D15",
+        "owner": "F"
+       },
+       {
+        "text": "18 automated test suites, run on 3 seeds before every commit",
+        "step": "all",
+        "id": "D16"
+       },
+       {
+        "text": "Construction sites: a building going up is judged by what stood, held up by its works, and shrugs off light blows (for repair, rebuilds and growth)",
+        "step": "F",
+        "tag": "physics",
+        "id": "D17",
+        "owner": "O"
+       },
+       {
+        "text": "Blasts as pixels: a fireball shaped by the ground round it, sparks, shrapnel, far less smoke (Powder Toy model)",
+        "step": "A2",
+        "tag": "physics",
+        "id": "D18",
+        "owner": "O"
+       },
+       {
+        "text": "Game of Life in the physics, and regrowth that spreads in Life's style (Opus; repair's build-front foam is Fable's)",
+        "step": "A2.13",
+        "tag": "physics",
+        "id": "D19",
+        "owner": "O"
+       },
+       {
+        "id": "N14",
+        "owner": "O",
+        "step": "3ac33b4",
+        "text": "Heat makes pixels glow: temperature is a modifier on every cell's colour - dull red from about 480 °C, through cherry, orange and yellow to white-hot at 1400 °C - fading as it cools (crater walls, torched stone); smoke and fire unchanged"
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "kind": "part",
+    "heading": "Partly built",
+    "groups": [
+     {
+      "name": "In progress",
+      "items": [
+       {
+        "text": "F part 2, the resurrection: all machinery landed and gated - waiting on construction-site semantics in the structure system (Opus building it: a growing building judged by what stands, light blows shrugged off)",
+        "step": "F",
+        "left": "the structure-side exemption, then flip PW.REBUILD_RUINS",
+        "id": "P1",
+        "owner": "F"
+       },
+       {
+        "text": "Performance pass: bundle routing 3x faster; collapse/physics time budgets still flicker when two suite runs share the machine. The regenerated baseline is its own job (P4B). Still to do: collapse spike (~53 ms max) under load; frame budgets per system",
+        "step": "L",
+        "left": "the blast-moment hitch: falling tower crush steps, the debris flush, the first analysis after a blast",
+        "id": "P2",
+        "owner": "O"
+       },
+       {
+        "text": "Lasting smoke after strikes",
+        "step": "A2.23",
+        "left": "smoulder plumes that linger",
+        "id": "P3",
+        "owner": "O"
+       },
+       {
+        "id": "P4B",
+        "owner": "B",
+        "step": "L",
+        "text": "Performance baseline regenerated at HEAD on seeds 7, 3, 11 in a clean worktree (wt-base), by a Sonnet chat (low); writes baseline.json; the checklist chat posts results to the Performance tab"
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "kind": "todo",
+    "heading": "Not in yet",
+    "groups": [
+     {
+      "name": "Growth and economy",
+      "items": [
+       {
+        "text": "How a building grows from its cores: translator pillars first, then floors, back walls, outer walls (needs the same construction-site semantics)",
+        "step": "F2",
+        "id": "N1",
+        "owner": "F"
+       },
+       {
+        "text": "Seeds: drop one in your vision, it grows a core and a level-1 building",
+        "step": "G",
+        "id": "N2",
+        "owner": "F"
+       },
+       {
+        "text": "City growth: capital, roads and pipe spreading, level-ups, tunnels through mountains, bridges; miners digging tunnel networks out to ore through caves; cities detecting each other and linking",
+        "step": "H",
+        "id": "N3",
+        "owner": "F"
+       },
+       {
+        "text": "Pop economy (SM and water thresholds, workers), farms spreading, military spread (guard posts, hackable panels, interceptors, deploy, healing)",
+        "step": "I, J, K",
+        "id": "N4",
+        "owner": "F"
+       },
+       {
+        "id": "N11",
+        "owner": "F",
+        "step": "H",
+        "text": "Tunnel building by miners: hallways of varying height and look that serve as rooms (storage, pipe control, armouries, trash, subliminal), dug just beside the mines but always heading toward the ore, using caves as highways (as noted before)"
+       },
+       {
+        "id": "N12",
+        "owner": "F",
+        "step": "H",
+        "text": "At most 2 miners harvest any one ore body; the rest reach out to other ore or to caves"
+       },
+       {
+        "id": "N13",
+        "owner": "F",
+        "step": "E",
+        "text": "Pipes never fork: the resource pipe is one continuous pipe, not a split into branches (user screenshot 2026-11-18); with vertical and horizontal pipes as one design, 111-degree turns, pumps joining the nearest pipe below"
+       },
+       {
+        "id": "N14",
+        "owner": "F",
+        "step": "E, F",
+        "text": "Repair look = the pipeline aesthetic everywhere: the repair stream's look (user screenshot) becomes the pipeline's look throughout, even when not repairing; while repairing it is less wide and more tubular; resources in the pipe move in a sine wave"
+       },
+       {
+        "id": "N15",
+        "owner": "F",
+        "step": "L",
+        "text": "Repair performance: the browser crashed during repair - repair must be optimised and refined (with PS: every other source of frame drops)"
+       },
+       {
+        "id": "N16",
+        "owner": "F",
+        "step": "E, F",
+        "text": "Repair pipe and ordinary pipe are not two visuals pasted over each other: the repair is the pipe itself extending and growing outward to reach and connect with the nearest open pipe, then resources start flowing through it"
+       },
+       {
+        "id": "N17",
+        "owner": "F",
+        "step": "E",
+        "text": "Hollow pipes: smoke and fire can travel through the pipe bore alongside the water, SM and HM flowing in it (WGM builds the hollow pipe; PS makes gas and fire move through it)"
+       }
+      ]
+     },
+     {
+      "name": "Units and combat",
+      "items": [
+       {
+        "text": "Units at GIF scale: troopers, guards, miners, tanks, mechs, jets; the item bar (rifle, 3 grenades, drills); hand-drilled secret dirt tunnels",
+        "step": "M5",
+        "id": "N5"
+       },
+       {
+        "text": "First playable: deploy, orders, take control, hacking, capture, win conditions, hot-seat, HUD; bullets cell by cell with cover rules",
+        "step": "M6",
+        "id": "N6"
+       },
+       {
+        "text": "Heavy combat: mech dodge, jets from the runway, missile salvos and interceptors, tunnel skirmishes",
+        "step": "M8",
+        "id": "N7"
+       },
+       {
+        "text": "The new world becomes the main game page (staged loading, performance budgets)",
+        "step": "M9",
+        "id": "N8"
+       },
+       {
+        "text": "Polish: foliage swaying, loose ground shivering from distant blasts",
+        "step": "Z",
+        "id": "N9",
+        "owner": "O"
+       },
+       {
+        "id": "N10",
+        "owner": "O",
+        "step": "M5",
+        "text": "Tanks in two sprites: the tracks are one sprite that always adjusts to the terrain under it, the turret with its long-range gun barrel is another that stays stabilised, aiming forward or at its target"
+       },
+       {
+        "id": "N18",
+        "owner": "O",
+        "step": "A2.21",
+        "text": "Cores, objects and decor keep their shape when the ground under them is hollowed out (no squashing or stretching in the sag): they fall or slide over depending on whether terrain still supports them, and break rather than distort; only metal distorts, and only when hot enough to melt"
+       },
+       {
+        "id": "N19",
+        "owner": "O",
+        "step": "A2",
+        "text": "Hitbox toggle button: show buildings' hitboxes before, during and after they are demolished, as a border that shifts from green to red with collision hit intensity"
+       }
+      ]
+     }
+    ]
+   }
+  ],
+  "author": "Board"
+ },
+ {
+  "title": "Trees grow wood-first and obey gravity; the core bunker stands on pillars (ba98e59)",
+  "time": "2026-11-15 17:44",
+  "note": "- Trees grow as trees do: trunk and boughs first, twigs off the branch ends, then leaf clusters along the outer branches and on the twigs. Conifers get a whorl of branches in each tier, birches thin branches out to their leaves. The wood stays wood under the leaves (shaded), so every tree has a whole skeleton. Generating the vegetation is also about three times faster.\n- No leaf without wood: leaves left too far from any wood drop and drift down to the ground. A blow to overlapping crowns re-checks every tree there (that was where the floating leaf patches came from).\n- Ground hollowed out under a trunk: the tree comes down whole. It swings over the edge of the ground still holding it, or drops into the hole.\n- Falling trees and boughs are now solid bodies like the buildings: they roll and slide over what they land on and lie down when still. Twigs too slight to fall whole come apart as leaves and splinters.\n- Core bunker: the armoured block stands on a main pillar grown out of the top of the core (its translator, as in your design F2) and two outer pillars down to the pit's lining. Blow them out and the block comes down.\nAll 16 test suites pass on seeds 7, 3 and 11. Next: foliage regrowing on wrecked ground (A2.13), then step B's last items and step C.",
+  "shots": [
+   {
+    "src": "shots/tw-forest.png",
+    "caption": "a forest of the new trees: branches through the leaves"
+   },
+   {
+    "src": "shots/tw-broadleaf.png",
+    "caption": "close: leaf clusters along the boughs and twigs"
+   },
+   {
+    "src": "shots/tw-conifer.png",
+    "caption": "a spruce: a whorl of branches under each tier of needles"
+   },
+   {
+    "src": "shots/tw-hollow.png",
+    "caption": "ground dug out under a tree's trunk: it came down whole, across the hole"
+   },
+   {
+    "src": "shots/tw-boughs.png",
+    "caption": "a tree hit hard: its broken boughs lie at its foot, no leaves left hanging"
+   },
+   {
+    "src": "shots/cbp-built.png",
+    "caption": "the core bunker: the block on its main pillar from the core and two outer pillars"
+   },
+   {
+    "src": "shots/cbp-blown.png",
+    "caption": "pillars blown out: the block comes down into the pit"
+   }
+  ],
+  "author": "Earlier"
+ },
+ {
+  "title": "Your afternoon requests: hollow buildings fold like boxes, landslides gather speed, burnt forests (9382ccf, 78b9d90)",
+  "time": "2026-11-15 17:11",
+  "note": "- Break-up by what a piece hits: rock and concrete crack it sooner and throw its rubble fast and far, down the slope; soil and sand take the blow (dented, clods thrown); water slows it and splashes. A long piece landing across a ridge or a corner snaps over it.\n- Rubble comes mostly from pillars, floors and outer walls; back walls and street props leave only a share, the rest goes up as dust.\n- Buildings are mostly air: a falling piece's weight and strength are in its frame, back walls weigh a tenth, and its rooms stay open (ruins too). Where a hollow piece lands hard, the rooms nearest the blow fold in, bursting out of the sides, and the rest comes on into the space: it collapses storey by storey like a box.\n- Landslides have momentum: a grain going over an edge steeper than it can lie on runs on with its own speed (about 300-450 cells/s down a mountainside) and spends it where the slope eases. A slide keeps working while its ground is still running off, and leaning cliffs count as cliffs, so about 30,000 cells now come off where 8,000 did. A blast still only starts slides where it hits: the untouched world stands still.\n- Burnt forests (from your photos): leaves, grass and twigs burn to a grey ash dusting; bark blackens as it burns or is scorched, fire creeps down trunks, and snags stand charred black with white ash flecks. The ground is charred, boulders sooted (they no longer burn away), and burnt trunks often smoulder for a minute or so.\n- Shed leaves drift down to the ground instead of vanishing in mid-air.\n- Your design notes are in the plan: F2 (buildings grow pillars-first from their cores) and C (mountain bunkers with firing openings and reinforced rock).\nAll 16 test suites pass on seeds 7, 3 and 11. Next: trees grown wood-first with leaves along their branches, trees that fall when their ground is hollowed out, core bunker pillars, and nothing left floating anywhere.",
+  "shots": [
+   {
+    "src": "shots/hb-1.png",
+    "caption": "a tower tipped onto the greenhouse folds down where it hit, dust bursting out of its side"
+   },
+   {
+    "src": "shots/hb-2.png",
+    "caption": "after: its far wall lies across the rubble of the rooms that folded under it"
+   },
+   {
+    "src": "shots/ls-1.png",
+    "caption": "a cut mountain face fails: rock pours down in a stream, gathering speed"
+   },
+   {
+    "src": "shots/ls-2.png",
+    "caption": "12 s on: the face has kept failing as the rock drained away; slides down both flanks"
+   },
+   {
+    "src": "shots/bf-1.png",
+    "caption": "a forest fire moving right: behind it, charred black snags and grey ash"
+   },
+   {
+    "src": "shots/bf-2.png",
+    "caption": "close: snags flecked with white ash, stumps, the ash dusting on burnt ground"
+   },
+   {
+    "src": "shots/dt-rock.png",
+    "caption": "a brick slab dropped on a rock peak shatters; its rubble runs down both flanks"
+   },
+   {
+    "src": "shots/dt-lake.png",
+    "caption": "the same slab dropped in a lake sinks whole and settles between the lake's sloping sides"
+   }
+  ],
+  "author": "Earlier"
+ },
+ {
+  "title": "Step A2.11 done: falling buildings are one physics system now - they tip all the way over and break apart as they land (c5bbbd5)",
+  "time": "2026-11-15 15:59",
+  "note": "- What you saw: when a falling building landed, the whole piece was turned into loose debris at once, which rained down in the building's outline (the \"ghost\"). Tipping pieces were also being switched to a straight drop partway through the fall, so they stopped midway.\n- Now every falling piece is one solid body with real contact physics. What it strikes pushes back at the point of contact, with friction, so it bounces, slides and turns over what it lands on.\n- A tower losing one side leans as the storeys at its foot are crushed into the ground under it. It goes all the way over onto its side.\n- Hard blows break off the corner that took them, thrown out the way the building was falling. A harder blow cracks it along jagged lines into chunks that carry on from exactly where they were, still drawn as the building, with no switch to a debris sprite. Each chunk keeps its own share of the motion and can crack again once.\n- Chunks that come to rest stay as ruins: whole pieces of the building, tilted and out of place.\n- A heavy piece flattens a weaker building it lands on (the greenhouse below).\n- Air: a falling building drives the air with it, so its dust rolls out the way it fell. A floor coming straight down blows dust and grit out of both sides at its base.\n- Dust: falling rubble used to erase the dust it landed in. Now it pushes the dust up out of its way, and collapse dust hangs longer.\n- A damaged building is re-checked every second or so, so no bit of it is left floating when what propped it slides away.\n- Also in this commit: trees topple whole when blasted, and only a very close, strong blast breaks them at the boughs and trunk; charred trees; walls count in a building's spans.\nAll 16 test suites pass on seeds 7, 3 and 11. Next: landslides (more of the mountain comes off, sooner), then foliage regrowing on wrecked ground.",
+  "shots": [
+   {
+    "src": "shots/cb-0.png",
+    "caption": "before: the grey tower (middle) loses the left half of its ground floor"
+   },
+   {
+    "src": "shots/cb-2.png",
+    "caption": "1.8 s: it leans left as its foot crushes into the ground"
+   },
+   {
+    "src": "shots/cb-3z.png",
+    "caption": "2.2 s, close: still one solid piece as it goes over, lower floors bursting out"
+   },
+   {
+    "src": "shots/cb-5.png",
+    "caption": "4 s: it lands on its side and cracks into chunks along its length"
+   },
+   {
+    "src": "shots/cb-6z.png",
+    "caption": "10 s: a rubble mound with whole pieces of the tower in it, tilted, under hanging dust"
+   },
+   {
+    "src": "shots/ca-2.png",
+    "caption": "the red tower with its whole ground floor gone sinks into its own rubble, debris spraying out of the sides"
+   },
+   {
+    "src": "shots/ca-4.png",
+    "caption": "10 s: its heap and dust cloud; some rubble poured down the open mine shaft beside it"
+   },
+   {
+    "src": "shots/hg-2.png",
+    "caption": "a hangar with its walls blown out comes down (right), next to the two fallen towers"
+   }
+  ],
+  "author": "Earlier"
+ },
+ {
+  "title": "Your requests from this afternoon: pipes, trees, fire, soot, landslides (bd58a31, ddfd63a)",
+  "time": "2026-11-15 14:40",
+  "note": "- Pipes are part of the background wall. Across tunnels, shafts and caves they run on the wall face, behind every timber, lamp, ladder, rail, crate and cave formation. They cross caves on the rock face instead of diving under them, which also stopped the endless re-laying where a line met a cave. In developed tunnels they show on the finished wall, held by steel clamps every 18 cells. Blasts tear them off.\n- Trees break in parts. A hit knocks leaves off, snaps a branch, or breaks the trunk if the blow is hard enough for its thickness. Whatever lost its hold falls as one piece, and pieces that only fall off don't fell the next tree, so the chain reaction is gone. (A blast beside a broadleaf forest also used to stall the game for up to 100 ms a tick; fixed.)\n- Fire: burnt trees stand as black, charred, leafless snags. They are brittle and crumble into ash and dust when hit. Tree wood burns 9-14 s; leaves, grass and bush twigs flare and are gone in 1-4 s. Wood debris and wood rubble burn to ash, and ash weathers into rich topsoil.\n- Soot: a blast darkens the building walls, floors and back walls it reaches, deepest by the hole, thinning out in patches. Walls shield what's behind them. The soot stays until the building is repaired.\n- Landslides: a cut face taller than its ground can hold (soil about 1 m, rock 4-5 m) fails as a wedge that topples off and pours down the slope. The face keeps failing until the talus at its foot props it up. A slide's check now grows sideways along the surface, so it no longer stops at straight seams.\n- Board: a live element table (button at the top), read straight from the game code.\nAll 16 test suites pass on seeds 7, 3 and 11.",
+  "shots": [
+   {
+    "src": "shots/pp-tunnel.png",
+    "caption": "pipes crossing a shaft behind its ladder and timbers"
+   },
+   {
+    "src": "shots/pp-cave.png",
+    "caption": "a pipe bundle crossing a cave on its rock face"
+   },
+   {
+    "src": "shots/dp-developed.png",
+    "caption": "a developed shaft: the pipes on the finished wall, the riser clamped to it"
+   },
+   {
+    "src": "shots/tr-2.png",
+    "caption": "a blast at a forest's edge: the near trees stripped and broken, the rest standing"
+   },
+   {
+    "src": "shots/fire-snag.png",
+    "caption": "trees burning: charred trunks, crowns flaring"
+   },
+   {
+    "src": "shots/fire-crumble.png",
+    "caption": "a blast beside the burnt snag: it crumbles into ash and dust"
+   },
+   {
+    "src": "shots/sl-0.png",
+    "caption": "a mountain flank before seven blasts"
+   },
+   {
+    "src": "shots/sl-3.png",
+    "caption": "after: the cut faces failed and poured down; the tallest step left is 46 cells"
+   }
+  ],
+  "author": "Earlier"
+ },
+ {
+  "title": "Step B in progress: the world 2.2x wider, pyramid mountains (first part in bd58a31)",
+  "time": "2026-11-15 13:15",
+  "note": "In the live build now (the Play link above runs it), but not finished or committed yet:\n- The world is 2.2 times wider (36,096 cells across instead of 16,384). The five town sites keep their size, so the wild land between them is over four times wider, room for towns to spread.\n- Each wild zone is a run of landforms after your nature refs: ranges of pyramid peaks, valley floors (flat ground for towns and farms), lakes, and broad river flats with a braided river in shallow channels.\n- Mountains: straight flanks on a broad base, spurs on the flanks, rounded saddles between peaks, cliff bands on the upper slopes, crags near the tops, low foothills easing them into the flat. The upper third is bare rock.\n- Talus at the feet: banks of gravel and stone blocks where each flank meets the flat, with boulders gathered there and near the summits.\n- Ore, caves and clay lenses scale with the width.\nStill to fix before I commit: trees growing on the summits (broadleaves high up the peaks), mountains are a bit small for the bigger world (I'll let a range be one big massif), cliff bands barely show, generation now takes about 5.5 s instead of 2.5 s, and the full test run on three seeds.",
+  "shots": [
+   {
+    "src": "shots/w-left.png",
+    "caption": "the left half of the wider world from far out: base, towns, ranges, lakes"
+   },
+   {
+    "src": "shots/w-mountain.png",
+    "caption": "a range: pyramid peaks with straight flanks and a saddle between (the trees on the tops are a bug I'm fixing)"
+   },
+   {
+    "src": "shots/w-summit.png",
+    "caption": "a summit up close: bare rock in bands, crags at the top"
+   },
+   {
+    "src": "shots/w-talus.png",
+    "caption": "a V-valley between two peaks, boulders and talus gathered in its floor"
+   },
+   {
+    "src": "shots/w-river.png",
+    "caption": "a river flat: shallow braided channels across a flat valley floor, then a town"
+   },
+   {
+    "src": "shots/w-valley.png",
+    "caption": "a valley floor beside a town, then a lake and a range"
+   }
+  ],
+  "author": "Earlier"
+ },
+ {
+  "title": "Step A2.5 done: everything moves by the same rules from the element table (e4cc578)",
+  "time": "2026-11-15 06:32",
+  "note": "- The element table now holds how each material moves: how readily it slides off a slope, how far it spreads, what it packs down into, how fast a gas rises and thins. The cell simulation reads these instead of keeping its own lists.\n- Heavier sinks through lighter, by the table's weights: rubble, sand and stone sink in water; ash is lighter than water and floats; a gas rises through water and through a heavier gas (steam up through smoke); dust sinks through smoke.\n- Anything with a long way to fall (24+ cells of open air under it) flies: it picks up speed under gravity and drifts on the wind as much as its 'wind' value says, then lands back in the grid, rolling off the heap. In water the weight of the water it pushes aside holds it up, so it sinks slower, and eddies spread a sinking mass out.\n- A grain landing in water pushes the water up, so no water is lost (tested: the lake's water count is exactly the same after 200 debris cells sink into it).\n- Fixed on the way: grains that came to rest and were buried by the rest of the heap were being lost (now they go to the top of the heap); fresh debris on a lake bed was packed into rubble the moment it landed; and when the ground line in a column moved, the air below was left drawn as a dark cave column in the sky.\nAll 16 test suites pass on seeds 7, 3 and 11. Next: B, the bigger, more rugged world.",
+  "shots": [
+   {
+    "src": "shots/mv-sand-0.png",
+    "caption": "a block of sand let go high above dry ground"
+   },
+   {
+    "src": "shots/mv-sand-1.png",
+    "caption": "a third of a second later: falling, speeding up"
+   },
+   {
+    "src": "shots/mv-sand-2.png",
+    "caption": "landed as a heap at sand's angle of repose; all 1200 grains accounted for"
+   },
+   {
+    "src": "shots/mv-lake-0.png",
+    "caption": "debris (left) and ash (right) above a lake"
+   },
+   {
+    "src": "shots/mv-lake-1.png",
+    "caption": "2 s: the debris sinks, spreading as it goes; the ash, lighter than water, has plunged in and is floating back up"
+   },
+   {
+    "src": "shots/mv-lake-2.png",
+    "caption": "10 s: the debris on the bed, the ash floating as a raft on the surface; the lake rose a little, and no water was lost"
+   }
+  ],
+  "author": "Earlier"
+ },
+ {
+  "title": "Step A2.4 done: the blast wave blows out glass, struck street props topple (d94a900)",
+  "time": "2026-11-15 05:50",
+  "note": "- The air grid now runs four passes a tick, so a blast wave runs out at about 1000 cells a second (it used to crawl, and a blast in the street beside a tower broke none of its glass).\n- A blast only pushes air where there is air: in a room or a cave it all drives out through the openings, and one deep in rock makes no blast wave.\n- Measured in open sky (radius 26 blast): the wave is strong enough to break glass out to about 100 cells, and gusts 60-260 cells/s carry smoke, dust, leaves and flying debris. The air goes still within about 1.4 s. Cost: 0.3-1 ms a tick, 3.3 ms on the tick of a big blast.\n- Glass struck by the wave shatters, the shards flying with the wind.\n- Street props (lamps, gates, benches, railings, furniture) are now kept as whole objects. When one is struck - by a blast, flying debris or a falling piece of building - what is left of it is checked: parts cut off from its feet fall, and a prop that has lost much of itself or whose weight lies beyond its feet (a gate with one pillar gone) topples and breaks up. Before, a blast could leave the top beam of a gate hanging in the air.\n- The base's floating armoured block stays up while its core lives (its core's field holds it).\nAll 16 test suites pass on seeds 7, 3 and 11. Committed and pushed to the work branch. Next: A2.5, every moving cell moving by the same rules from the element table.",
+  "shots": [
+   {
+    "src": "shots/air-0.png",
+    "caption": "before: a blast set off in the street 34 cells from the tower"
+   },
+   {
+    "src": "shots/air-1.png",
+    "caption": "4 ticks later: the fireball, and the wave already at the tower's wall"
+   },
+   {
+    "src": "shots/air-2.png",
+    "caption": "half a second: the windows facing the blast blown out, glass shards flying out on the wind (blue specks), debris plume and smoke"
+   },
+   {
+    "src": "shots/air-3.png",
+    "caption": "3 s: settled; 324 of the tower's glass cells gone, only on the side facing the blast"
+   },
+   {
+    "src": "shots/pr-0.png",
+    "caption": "a street gate, with a blast about to go off beside its left pillar"
+   },
+   {
+    "src": "shots/pr-1.png",
+    "caption": "the pillar is hit: the gate is checked against its feet ..."
+   },
+   {
+    "src": "shots/pr-2.png",
+    "caption": "... and topples into a heap of its own pieces instead of leaving the beam hanging in the air"
+   }
+  ],
+  "author": "Earlier"
+ },
+ {
+  "title": "Plan: step by step (reordered so each step builds on the last)",
+  "time": "2026-11-18 18:14",
+  "note": "Each step is tested on three seeds and committed to the work branch before the next one starts. Why this order:\n- The terrain comes first, because everything after it is placed on it.\n- Cores come before the pipeline (the pipe runs through the cores).\n- Repair comes after cores (it runs through their translators).\n- Seeds come after cores, pipeline and the steep rule.\n- City growth comes after seeds, then the economy, farms and military that run on it.\nThe shadow tentacles are designed into each structure as it is built.",
+  "steps": [
+   {
+    "state": "done",
+    "text": "A0.1 Soil: dark topsoil with roots and tongues into the subsoil; subsoil regions (brown earth / loess / red laterite)"
+   },
+   {
+    "state": "done",
+    "text": "A0.2 Roads built up in courses into the earth (asphalt -> crushed stone -> sand/gravel -> compacted subgrade)"
+   },
+   {
+    "state": "done",
+    "text": "A0.3 Pockets of flat land across the map; no pop/farm/core/mine buildings on too-steep ground"
+   },
+   {
+    "state": "done",
+    "text": "A0.4 Simpler Chinese dragons on stronger pedestals"
+   },
+   {
+    "state": "done",
+    "text": "A0.5 Smoke drifts in eddies and thins instead of hanging in one spot"
+   },
+   {
+    "state": "done",
+    "text": "A0.6 ROAD tool removed (roads come only from towns spreading)"
+   },
+   {
+    "state": "done",
+    "text": "A0.7 Mine conveyor HM (and pipe cargo) no longer drawn in front of crates and drums"
+   },
+   {
+    "state": "done",
+    "text": "A. Debris and gas: a collapsed piece rains down instead of standing as a column; debris spreads out flatter and faster; dense gas pours like rain; blasts throw building debris back in a plume and break back walls, ladders and fittings (tunnels too)"
+   },
+   {
+    "state": "done",
+    "text": "A2.1 Physics: one element table for every material, Powder Toy style (weight, state, gravity, drag, diffusion, hardness, cohesion, pressure strength, heat). Rock far tougher than dirt in blasts: blast strength is shielded by the hard material between a cell and the blast"
+   },
+   {
+    "state": "done",
+    "text": "A2.2 Avalanches: each ground material has cohesion (how far it can overhang); when a blast cuts away its support, the ground breaks loose and slides down the mountain as a landslide, cascading until stable"
+   },
+   {
+    "state": "done",
+    "text": "A2.3 Landslides that FLOW: released ground pours down the slope as a fast granular stream with dust over it; no slots, pillars or floating pieces left behind | trees break apart and fly or catch fire; everything left above a blast falls; towers dropping into their footprint break apart as they sink into their own rubble"
+   },
+   {
+    "state": "done",
+    "text": "A2.3b Repair around the new ground, even while it is still settling: pipes re-route in one smooth run around craters and slides; tunnels dig out the rubble and re-line; buildings in step F"
+   },
+   {
+    "state": "done",
+    "text": "A2.4 Air: a coarse pressure and wind grid (active only near blasts) that pushes smoke, dust and flying debris, blows out weak walls and glass, and kicks up loose ground | also: street lamps, gates and furniture topple when struck instead of leaving pieces hanging in the air"
+   },
+   {
+    "state": "done",
+    "text": "A2.5 Unified movement: every moving cell (debris, earth, water, gas) moves by the same rules from the element table: heavier sinks through lighter, fast things fly with velocity and settle back into the grid"
+   },
+   {
+    "state": "done",
+    "text": "A2.6 Pipes are part of the background wall: across tunnels, shafts and caves they run on the wall face, behind every timber, lamp, ladder, rail, crate and plant; they cross caves the same way instead of diving under them (and no more endless re-laying where they met a cave) | in developed tunnels too: the pipes are built into the finished wall design, not hidden behind it"
+   },
+   {
+    "state": "done",
+    "text": "A2.7 Trees break in parts, not all at once: a hit knocks off leaves, snaps a branch or breaks the trunk where it is struck (no chain reaction of whole trees exploding when their debris hits each other)"
+   },
+   {
+    "state": "done",
+    "text": "A2.8 Fire on trees: burnt trees stand as black, charred, leafless snags that are brittle and break into more dust; wood burns longer than leaves"
+   },
+   {
+    "state": "done",
+    "text": "A2.9 Blasts scorch buildings: the walls and floors around an impact are darkened"
+   },
+   {
+    "state": "done",
+    "text": "A2.10 Smoother landslides: a cut face taller than its ground can hold (soil about 1 m, rock 4-5 m) fails as a wedge that topples off and pours down the slope, again and again until the talus at its foot props it; no more straight seams where the check stopped"
+   },
+   {
+    "state": "done",
+    "text": "A2.11 Building collapses: the lower part sinking into its own rubble breaks up visibly, piece by piece, instead of vanishing into a smooth grey cone; a destroyed building keeps some of its structure as misplaced, unstable chunks; pieces that came away whole become ruins - part of the terrain - that city repair and growth later clear and recycle into HM | walls carry the building: a back wall alone does not hold a roof up, so a building whose walls are blasted away comes down"
+   },
+   {
+    "state": "done",
+    "text": "A2.12 Trees ride landslides: a tree whose ground slides away comes down with it as one piece and ends up lying on the slope, losing a few leaves, instead of bursting apart (blasts still tear trees up more)"
+   },
+   {
+    "state": "done",
+    "text": "A2.13 Foliage grows back on wrecked ground (grass, then bushes and saplings), slowly, from the plants still standing round it (e6e0d68, by the Game of Life)"
+   },
+   {
+    "state": "done",
+    "text": "A2.15 Falling buildings are hollow boxes: weight in the frame, rooms open, they fold where they land; rubble mostly from structure; break-up depends on what they hit (rock, soil, water, ridges)"
+   },
+   {
+    "state": "done",
+    "text": "A2.16 Landslides gather momentum (grains over steep edges run on as particles); slides keep going while their ground runs off; leaning cliffs fail"
+   },
+   {
+    "state": "done",
+    "text": "A2.17 Burnt forests: ash dusting, charred black snags and ground, sooted boulders, smouldering trunks"
+   },
+   {
+    "state": "done",
+    "text": "A2.18 Trees grown wood-first (trunk, branches, then leaves along the branches); no leaves without wood; trees fall over when their ground is hollowed out; core bunker block on pillars; nothing anywhere left floating (only arches of dense material span a gap)"
+   },
+   {
+    "state": "done",
+    "text": "A2.19 Leaves in front of the branches (the wood still there behind them, for breaking and burning)"
+   },
+   {
+    "state": "done",
+    "text": "A2.20 Debris holds as it lies - even a straight-up stack - until vibration or wind pushes it (heavier takes more); then it topples and spills (232c7f9)"
+   },
+   {
+    "state": "done",
+    "text": "A2.21 Sinkholes: ground over a void sinks slowly into a bowl sized by the hole, terrain, trees and buildings with it; the hole stopes upward until it breaches. No more vertical chimneys of dirt | a thin roof over a big blasted hole caves in, so the mountain top above it comes down (your screenshot) | slender columns and spires of rock or earth left standing free (taller than about 3 times their width for rock, 1.5 for soil) topple and come down, big ones as one piece | done: sags and chokes (524df60), slender rock columns topple (a3a2ede)"
+   },
+   {
+    "state": "done",
+    "text": "A2.22 Trees: the base decides whether one stands; cut loose, it falls free under wind, terrain, shape and weight, and its branches bend where they hit (stiffer the thicker) (1644686, 50ec25f)"
+   },
+   {
+    "state": "done",
+    "text": "A2.23 Blast smoke: a near-round cloud racing out from the fireball in every direction, a few tongues reaching further, braking hard (exponentially) to an ordinary drift; only the ground and walls near the blast shape it"
+   },
+   {
+    "state": "done",
+    "text": "A2.24 Nothing floats unless it is held at its sides: thin leftover strips of buildings, and back walls with nothing round them, come down (cb53f32)"
+   },
+   {
+    "state": "done",
+    "text": "A2.25 Shadows fade out softly (anisotropic: a long soft fade along the surface, a short one across it); no hard edges or blocky patches in the ground shading"
+   },
+   {
+    "state": "done",
+    "text": "A2.26 Pancake while tipping: the weight of a tipping top crushes the storeys it is tipping from, row by row across their whole width, and then its own lowest storeys, so it comes down storey by storey as it leans (a light top stalls on a stump that can hold it)"
+   },
+   {
+    "state": "done",
+    "text": "A2.27 Pillars always reach the bottom: the core bunker gets a pair of pillars beside its core on the pit floor; every pillar (bunker, slope stages: timber posts, gothic piers, modern pilotis) goes down column by column to the ground under it"
+   },
+   {
+    "state": "done",
+    "text": "A2.28 Blast smoke takes its shape from the space round it: the blast's smoke is driven into the open cells round it, nearest first along the ways open to it, so it funnels along tunnels, through rooms and out of doors and broken windows; thick where it is cramped, thin and patchy in the open; 18% faster"
+   },
+   {
+    "state": "done",
+    "text": "A2.29 Collapsing buildings spill out sideways, low and wide, top and bottom; smoke 35% thinner (9b7fba0)"
+   },
+   {
+    "state": "done",
+    "text": "A2.30 Things break into chunks as their stuff does: earth a powder with odd clods, rock and concrete jagged lumps with dust, a building's frame slabs, lengths and blocks with shrapnel, wood lengths of trunk and branch with splinters; back walls come away in panels (2e2ca02)"
+   },
+   {
+    "state": "done",
+    "text": "A2.31 Falling pieces no longer slide through the ground: where a piece drives into the ground or another building, its bottom breaks apart there (aa2dbec)"
+   },
+   {
+    "state": "done",
+    "text": "A2.32 Blasts throw back what they break loose - felled trees, boughs, pieces of building - as hard as the blast over the piece's weight (aa2dbec)"
+   },
+   {
+    "state": "done",
+    "text": "B. World 2.2x larger, closer to your nature refs: more rugged, real transitions between flats and mountains, pyramid-like mountains (broad base, straight flanks), rocks dense at summits and bases; flat pockets kept | done (ee9cb07): grey jointed massif rock summit to foot, scree as the same rock broken small, laterite/loess belts fading off the flanks"
+   },
+   {
+    "state": "done",
+    "text": "C. Military on mountains: an outpost blockhouse with a watchtower, solid stepped concrete/stone foundations down to the rock, and at most a rocky bowl between military buildings (HESCO walls) | Cave bases: when a tunnel breaks into a cave, a placeholder base is built round the cave (its floor and walls smoothed, some of its formations kept as decoration). It can host an underground military base that deploys troops into the tunnels: cheaper than a regular base, with how many troops it deploys and how much POP it needs set by the size of the original cave Mountain bunkers (your update): a base can build itself into a mountain as an underground bunker that joins the tunnels, with firing openings in the mountainside for garrisoned guards to shoot out of, and the rock round it reinforced with the military building material so it stands up to missiles and blasts. | done: outposts on stepped rock foundations + one forward mountain bunker per base (777ab97), cave bases ready for the tunnels (623d2f1)"
+   },
+   {
+    "state": "now",
+    "text": "C2. Mountain bases carved INTO the mountain (your update): the summit outposts look out of place sitting on top like castles - instead they hollow the mountain out more, reinforce the rock around its own shape, and develop the underground works (galleries, chambers, portals) after your Cheyenne Mountain / Maginot / Swiss fort refs | first cut landed: the bench sinks 56+ into the summit (rock shoulders flank the blockhouse), two galleries carved inside the massif joined by a ladder shaft down to the tunnel stub, a concrete-framed portal on the home flank, embrasure slits to the enemy face, and the crown armoured 5 deep along the mountain's own shape, tapering ragged into bare rock | ROUND 2 (afc9a26): firing ports are finished fighting positions (ribbed, lit, sill to shoot over, splayed collar), galleries 48 under the bench, the shaft dodges every core, the glacis revetted in god-metal"
+   },
+   {
+    "state": "done",
+    "text": "D. Cores: MAIN (genesis; it looks like the base's core bunker: the orb in a sunken pit under the floating armoured block) / DESCENDANT / SUB cores; the cores.zip shape (square, left and right connectors, top translator); the glyph as the dead god machine's mark, gripped by shadow tendrils | done (f1fa8a3, 760b865): two plain perfect squares - the foundational bed with side connectors and top translator, the core square inside powering it, black tendrils about one white point, black and white only"
+   },
+   {
+    "state": "done",
+    "text": "E. Resource pipeline: one thin bundle (water / SM / HM lanes) about 1 m down, running through the cores and connected only to them (no machines). Pipes spawn with buildings and join friendly buildings close enough; they reach farther to military. They pass behind tunnels and still break in blasts. Shadow tendrils on the pipe and the ore veins | done (c28cea1, 4dcd2cd): ONE bundle threads every core bed, machine plants deleted, ore-vein shadow tendrils in"
+   },
+   {
+    "state": "done",
+    "text": "E2. Pipe fixes (your update): pipes that spawn disconnected in places are joined up end to end; more visual detail on the bundle after your underground-pipeline refs (casing courses, joints, valves, bedding) | done: the router bridged where a wall face stands but the laying refused it (and town-edge terraces blocked it) - fixed, zero broken columns on seed 7; joint collars every 36 cells and a sand-and-gravel trench profile added from your refs | ROUND 2 (6b05321): deep in the wild (3m cover past the fray, 1m urban), WELLS join every level change (the bore turned vertical, cargo climbs them), and repair is your organic model - clogged HM pays for regrowth, water/SM spill into the ground, the broken ends seek each other along a path re-read from the land, ink feelers branching"
+   },
+   {
+    "state": "done",
+    "text": "F. Repair: while any core survives, a building recycles its own debris (only debris touching it) into a little HM, adds pipeline HM, and its translators turn 1 HM every 1/4 s per core into repair pixels; a nearly destroyed building's cores rise from the debris, rebuild their foundation bed, sink back and rebuild the building | part 1 done (35c5412): buildings heal through living cores, debris recycler, 8 repair pixels per HM | part 2 ON NOW: with Opus's construction sites (003ee73) the switch is flipped - a ruined tower's cores rise, the ruin clears and health climbs; finishing the last piece: the cores settling home into their rebuilt vaults | part 2 DONE: a levelled tower rebuilds to whole in about 8 game-minutes (three fixes: settled cores re-freed as \"gone\", the way home blocked by the ground beside the bed, rebuilt back walls unowned and so invisible to the structure judge)"
+   },
+   {
+    "state": "now",
+    "text": "F2. How a building grows from its cores (your update): each core's translator builds its base pillar up FIRST - these main pillars from the cores are the main support that holds the building up; floors then join pillar to pillar and hold everything together; background and side walls come last as secondary support. Buildings redesigned just enough to carry this, and repair, level-ups and collapses follow the same hierarchy (lose the pillars and it comes down; lose walls and it stands wounded). | pillars in: every core grows a 3-wide main pillar to the roof (all building types); build/repair order now pillars first (a storey ahead), floors tying them, back walls, side walls, glass last | your update: the space between the cores is a reinforced concrete military gallery, and every foundation is recoloured to the core aesthetic (the DMG gift lore) - level-up order still to come with step H"
+   },
+   {
+    "state": "done",
+    "text": "G. Seeds: drop one anywhere within your vision, on ground gentle enough for its type; costs HM, SM and POP; the seed drops a core that grows a level-1 building Your update: buildings, roads and tunnels are not drawn by hand - they grow from the seeds by themselves; deploying troops (and taking control of one) is the second part of the game. | groundwork landed (0d9565a): PW.seeds.drop plants a bare core unit about 1 m down and the pipe joins it live; the building growing out of it comes with F2 | DONE (1c0f8bd): PW.seeds.grow raises a level-1 tower out of a planted core - the gift below ground set whole, the body grown pillars-first by repair, the bundle threading the newborn cores, whole in about twelve game-minutes; the builders dig the lot out of the rooms as they go. The HM cost flows through the bundle already; SM/POP costs and the vision rule come with steps I and M6"
+   },
+   {
+    "state": "now",
+    "text": "H. City growth: the capital first, then roads and pipe spread; pop buildings level up (sub cores widen them and mostly make them taller); slow tunnels through mountains and slow bridges over water; spreading until upkeep gets too demanding, with a warning Tunnels: dug automatically by miners in military gear, a sleek Soviet underground-military look, spreading only from the base core tunnel: out to the nearest ore, up and down by steps and ladders, through caves (transformed whole, used as highways) and on to more ore. A capital reaches only so far: grow another city until the two detect each other and link, or send a miner. | first slice landed (9fa7d86): the town drops its own seeds past the street ends - reserves allowing, ground allowing - one newcomer at a time, the street paving out to meet it, the bundle threading it live; three towers self-grown on seed 7 in under twenty game-minutes. Still to come: level-ups via sub cores, the upkeep warning, slow tunnels and bridges, the Soviet miner tunnels to ore"
+   },
+   {
+    "state": "todo",
+    "text": "N11F. Tunnel building by miners (yours, step H): hallways of varying height and look that serve as rooms - storage, pipe control, armouries, trash, subliminal - dug just beside the mines but always heading toward the ore, using caves as highways"
+   },
+   {
+    "state": "todo",
+    "text": "N12F. At most 2 miners harvest any one ore body; the rest reach out to other ore or to caves"
+   },
+   {
+    "state": "now",
+    "text": "N13F. Pipes never fork: each pipe is one continuous run, no splits into branches - a base line passing a foreign town dives 40 under that town's whole shallow region so two lines never braid into a Y"
+   },
+   {
+    "state": "now",
+    "text": "N14F. The repair-stream look the user liked becomes the pipeline's aesthetic throughout: fine ribbed tubes along every lane; while repairing the stream is narrower and more tubular (adjacent well shafts merge into one clean tube)"
+   },
+   {
+    "state": "now",
+    "text": "N15F. Resources move down their lanes in a sine wave; repair optimised as part of the perf pass (the O(n^2) queue rotation that froze the browser during repair is gone - bounded window scans with tombstones), coordinated with the physics track's BLAST L chart"
+   },
+   {
+    "state": "now",
+    "text": "N16F. CLARIFIED by you: the glitch is the feature - the repairing pipe is the pipe stamping its own vertical cross-section outward, segment by segment (the trailing curtain of verticals you liked), until it reaches and connects with the nearest open pipe and the resources flow; at connection the sweeps leave one clean pipe. Same bore design as every pipe, never a separate overlay."
+   },
+   {
+    "state": "now",
+    "text": "N17F. Pipes are hollow: the bore's inside rows carry FLAG.HOLLOW - solid to debris, water and units, but smoke and fire travel the pipe among the cargo (and chimney up the wells); encoding agreed with the physics track (their gas rule: M.PIPE + HOLLOW is open to gas)"
+   },
+   {
+    "state": "todo",
+    "text": "I. Pop economy: SM and water thresholds (drain/replenish), workers per building, abandoned buildings"
+   },
+   {
+    "state": "todo",
+    "text": "J. Farms: a main farm with farmland and small buildings spreading; harvest stored in cores; you choose where pop and farm spreads meet"
+   },
+   {
+    "state": "todo",
+    "text": "K. Military spread: guard posts, the hackable panel on the top floor, interceptors at the highest point, edge turrets facing the enemy, the deploy garrison, healing for passing units"
+   },
+   {
+    "state": "todo",
+    "text": "L. Performance pass before units: find and fix the FPS spikes (long ticks during big collapses, slides, fires and blasts; rendering), so the game holds 60 FPS before troops and vehicles are added | groundwork: bundle router 3x faster (09df389), terrain stage timings measured (5220da6; strata at 1.9 s is the next target)"
+   },
+   {
+    "state": "todo",
+    "text": "M5. Units: troopers, guards and miners from your GIFs at 1:1; tanks (track animation, tilt on slopes), mechs (jump and boost, shadow tendrils designed in) and jets at real scale; walking, climbing ladders and stairs, swimming. The item bar: assault rifle (1), grenades (2, a stack of 3, restocked at military bases), drills for miners. Take control of a miner and drill a low-visibility dirt tunnel anywhere; it can be developed once it reaches the surface or a cave and joins the core tunnels | Drills lie here and there in the tunnels (already placed, a few per network): a soldier who picks one up can drill like a miner. | Controls (your design doc): A/D or arrows to move; troops jump (Space/W/Up) and crouch (hold S/Down/Ctrl, still moving), and a crouched troop is not seen by the AI or highlighted to the enemy; tanks only left/right, reaching top speed in about 1.5 s, and they fire into tunnel mouths but never enter; hoppers hop, double-tap A/D to boost (2 charges, then a 0.7 s slide), boost-jump to jet height, glide 2 s, explode into a crater; jets arc with A/D and turn round when it is held. Ladders up vertical tunnels; low bumps in horizontal tunnels as cover for crouched troops"
+   },
+   {
+    "state": "todo",
+    "text": "M6. First playable: deploy troops and give orders, take control of one, hack the top-floor panel (15 s), capture, win conditions (core, POP, centre hold), hot-seat left/right, the HUD in pixels; bullets traced cell by cell, the friendly-building cover rule, guards firing through glass | From your design doc: click / Shift+click / Shift+drag to select; move, attack a place or a building, go by the surface or the tunnels; a selected unit with no key pressed carries on towards the enemy; aim and shoot at the mouse; deploy from all or chosen military buildings along a surface or tunnel path; troops back away from a building about to fall on them and heal passing friendly housing; hacking a base's panel (15 s) shuts its turrets and interceptors for a while, then guards come out and it cannot be hacked again for 2 minutes; hacking an antenna on a main-base skyscraper (ladders up to the roof) steals its vision; units see in a cone, buildings in a rectangle; enemies outlined pinkish red, dots when zoomed out (friendly beige); health green, yellow, red"
+   },
+   {
+    "state": "todo",
+    "text": "M8. Heavy combat: mech dodge (jump and air boost), jets taking off from the runway and strafing, turret barrels, missile salvos (3/5/7/9) on high arcs and interceptors, tunnel skirmishes"
+   },
+   {
+    "state": "todo",
+    "text": "M9. Switch-over: the new world becomes the game's main page (the old beta kept as a legacy page), staged loading with progress, performance budgets checked per system"
+   },
+   {
+    "state": "todo",
+    "text": "Z. Polish (later): foliage sways in the wind; loose ground and debris shiver from distant blasts and avalanches (fits on the air grid from A2.4)"
+   }
+  ],
+  "author": "Board"
+ },
+ {
+  "title": "Board restored (the Temp folder it lived in was cleared)",
+  "time": "2026-11-15 05:50",
+  "note": "The folder this board was served from (AppData\\Local\\Temp\\claude-scratch) was emptied, so the board's older entries and screenshots are gone. Nothing in the game repo was lost: every finished step is committed and pushed to the work branch, and the A2.4 work in progress is intact. The plan above and the last two step reports are restored from my notes; new screenshots follow as each step lands.",
+  "steps": [
+   {
+    "state": "done",
+    "text": "Board server and page re-created (same address: http://127.0.0.1:47400/)"
+   },
+   {
+    "state": "done",
+    "text": "Your Documents folder moved into OneDrive (C:\\Users\\estar\\OneDrive\\Documents) this morning; the repo moved with it, all work intact. My tools now point there."
+   },
+   {
+    "state": "done",
+    "text": "Seed 11: the fire and collapse suites were only cut off by the folder move; both pass"
+   }
+  ],
+  "author": "Board"
+ },
+ {
+  "title": "Step A2.3b done: pipes and tunnels repair around the new ground (e75040b)",
+  "time": "2026-11-15 09:30",
+  "note": "- Pipes: a broken stretch is now re-planned as ONE run. The stretch plus 40 columns either side follows the ground as it lies now (down under a crater floor, under a heap), and eases into the intact pipe at both ends with no bend steeper than 45 degrees. The old pipe left in the stretch is taken up and backfilled, and the new run is laid from both ends inward. If the ground keeps moving and cuts it again, it is planned again. No more V-dips under craters, no stray pieces. Tested on 3 seeds.\n- Tunnels: a blast that reaches a tunnel sends its crew in a few seconds later. They dig the rubble out of the tunnel's own profile (about 120 cells a second), and every hole blown through the lining is cast in concrete again as development comes back round. They repeat pass after pass while rubble keeps settling in, until the tunnel is clean. Tested: a blasted storage room is dug out and re-lined.\n- Buildings rebuilding themselves comes with step F (repair through their cores).\nAll 16 test suites pass.",
+  "author": "Earlier"
+ },
+ {
+  "title": "Step A2.3 done: slides flow, nothing hangs, trees come apart, towers sink into their rubble (f0e7020)",
+  "time": "2026-11-15 08:40",
+  "note": "- Slides flow: rubble and earth that hit a slope now run on down it as a stream. They keep their speed on steep ground, lose it on gentle ground, spread out to a stop at the foot, and throw up dust as they go (they used to bounce and stack).\n- Nothing hangs: loose rubble no longer holds solid ground up, and any ground cut off from what anchors it comes down. The slots of hanging rock and the floating pieces are gone.\n- Trees: a blast tears them apart, flinging off the leaves and throwing the trunk and branches as splintered wood that lands as wood rubble. Trees whose ground is blown away or slides away topple and come down with it. Grass left in the air drops.\n- Buildings: a tower dropping into its footprint is crushed a storey at a time where it strikes. It sinks into its own rubble as it breaks apart, instead of bursting into a heap at once. The crushed storeys smoulder.\nAll 16 test suites pass.",
+  "author": "Earlier"
+ }
+]
