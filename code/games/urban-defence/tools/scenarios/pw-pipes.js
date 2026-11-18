@@ -143,7 +143,8 @@ for (let x = cutX - 90; x < cutX + 90; x += 1) {
   if (k < 1 || k >= water.ys.length) continue;
   if (water.cores.some((c) => Math.abs(x - c.x) < 40)) continue;
   if (water.risers.some((r) => Math.abs(x - r.x) <= 4)) continue;   // (a riser is the line's own vertical bore)
-  if (Math.abs(water.ys[k] - water.ys[k - 1]) > 6 && !inWell(x)) steep += 1;   // (up to 6 is a mitred bend, by design)
+  // (up to 6 is a mitred bend by design; a merged shaft may stand up to 12 columns off the step)
+  if (Math.abs(water.ys[k] - water.ys[k - 1]) > 6 && !(water.wells || []).some((w) => Math.abs(w.x - x) <= 12)) steep += 1;
   for (let y = water.ys[k] - 60; y < water.ys[k] + 70; y += 1) {
     if (y >= water.ys[k] - 1 && y <= water.ys[k] + BORE) continue;
     if (inWell(x, y)) continue;

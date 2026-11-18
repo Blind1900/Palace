@@ -193,13 +193,19 @@
       }
       if (row === 2 || row === 4) return wisp ? INK : DIVIDER;
       if (collarAt(along)) return tone(LANES[(row - 1) >> 1].channel, 0.75);   // the lanes pass behind the collar
-      return LANES[(row - 1) >> 1].channel;
+      // The stream look the user liked on the regrowing span, carried through the whole
+      // pipeline: each lane reads as a run of fine tubes, ribbed every other cell.
+      const ch = LANES[(row - 1) >> 1].channel;
+      return (along & 1) ? tone(ch, 1.35) : tone(ch, 0.78);
     }
     const collarAt = (along) => !tendrilAt(along) && ((along % 36) + 36) % 36 < 2;
     // Lay one bundle cell: in the ground a PIPE cell; across open space underground it is fixed to
     // the wall face; through a core's span it breaches plate and foundation into the bed's socket.
-    function layCell(line, x, y, color) {
+    function layCell(line, x, y, color, hollow) {
       if (x < 1 || y < 1 || x >= W - 1 || y >= H - 1) return false;
+      // The bore is hollow (N17F): its inside rows are marked so smoke and fire travel the
+      // pipe among the cargo (the physics track reads the flag; everything else sees solid).
+      if (hollow) PW.setFlag(world, x, y, FLAG.HOLLOW);
       const id = mat[y * W + x] & ID_MASK;
       const cover = id === M.COVER_ROCK || id === M.COVER_WOOD || id === M.COVER_METAL || id === M.COVER_SAND;
       if (PW.mat.open[id] || id === M.WATER || cover) {
@@ -264,7 +270,7 @@
         bedCell(x, y - b, b === 1 && collar ? tone(CASING, 1.2) : sand(-b));
         bedCell(x, y + BORE - 1 + b, b === 1 && collar ? tone(CASING, 0.78) : sand(b));
       }
-      for (let r = 0; r < BORE; r += 1) layCell(line, x, y + r, pipeColor(r, x));
+      for (let r = 0; r < BORE; r += 1) layCell(line, x, y + r, pipeColor(r, x), r > 0 && r < BORE - 1);
     }
     // A riser between the line and an anchor at (x, y): for the few taps that are not cores (the
     // lake pump, a mining hopper, the main core's pedestal). It is the SAME pipe, turned (the
@@ -276,7 +282,7 @@
       const yA = Math.min(anchor.y, lineY), yB = Math.max(anchor.y, lineY + BORE - 1);
       for (let r = 0; r < BORE; r += 1) {
         const x = anchor.x - 3 + r;
-        for (let y = yA; y <= yB; y += 1) layCell(line, x, y, pipeColor(r, y));
+        for (let y = yA; y <= yB; y += 1) layCell(line, x, y, pipeColor(r, y), r > 0 && r < BORE - 1);
       }
       layFlange(line, anchor.x, yA - 1);
       if (yB > lineY + BORE - 1) layFlange(line, anchor.x, yB + 1);
@@ -316,20 +322,34 @@
         if (dy <= 2) continue;
         const xc = line.x0 + k;
         const yTop = Math.min(a, b), yBot = Math.max(a, b) + BORE - 1;
+        // A shaft standing within a few columns of another is merged into it instead (the
+        // user's note on the regrowing span: less wide, more tubular - one clean well where
+        // an oscillating fresh path would have raised a curtain of them).
+        const near = dy > 6 && line.wells.find((w) => Math.abs(w.x - xc) <= 9 && yTop <= w.y1 && yBot >= w.y0);
+        if (near) {
+          const y0 = Math.min(near.y0 + 1, yTop), y1 = Math.max(near.y1 - 1, yBot);
+          for (let r = 0; r < BORE; r += 1) {
+            for (let y = y0; y <= y1; y += 1) layCell(line, near.x - 3 + r, y, pipeColor(r, y), r > 0 && r < BORE - 1);
+          }
+          layFlange(line, near.x, y0 - 1);
+          layFlange(line, near.x, y1 + 1);
+          near.y0 = y0 - 1; near.y1 = y1 + 1;
+          continue;
+        }
         if (dy <= 6) {
           // A small step is a mitred bend, not a shaft: the bore's own rows carried across the
           // joint at both columns, lanes unbroken - the pipe just turns.
           for (const x of [xc - 1, xc]) {
             for (let y = yTop; y <= yBot; y += 1) {
               const r = Math.max(0, Math.min(BORE - 1, y - (x === xc ? b : a)));
-              layCell(line, x, y, pipeColor(r, x));
+              layCell(line, x, y, pipeColor(r, x), r > 0 && r < BORE - 1);
             }
           }
           continue;
         }
         for (let r = 0; r < BORE; r += 1) {
           const x = xc - 3 + r;
-          for (let y = yTop; y <= yBot; y += 1) layCell(line, x, y, pipeColor(r, y));
+          for (let y = yTop; y <= yBot; y += 1) layCell(line, x, y, pipeColor(r, y), r > 0 && r < BORE - 1);
         }
         // (flanged where the shaft meets each bore, so the turn reads as one built joint)
         layFlange(line, xc, yTop - 1);
@@ -348,6 +368,7 @@
             if (line.wells.some((q) => Math.abs(x - q.x) <= 3 && y >= q.y0 && y <= q.y1)) continue;
             if ((mat[y * W + x] & ID_MASK) === M.PIPE && PW.getOwner(world, x, y) === line.owner) {
               PW.set(world, x, y, M.FILL, { quiet: true });
+              PW.setFlag(world, x, y, FLAG.HOLLOW, false);
               PW.setLayer(world, 'paint', x, y, rgb(tone(SAND, 0.92)));
               PW.setOwner(world, x, y, 0);
             }
@@ -465,7 +486,11 @@
         // On its way out to the mountains the bundle dives under any other town it crosses: the
         // shallow band there belongs to that town's own bundle.
         const foreign = (world.settlements || []).filter((s) => s !== line.settlement);
-        const depthThere = (x) => foreign.some((s) => x > s.streetLeft - 60 && x < s.streetRight + 60) ? DEPTH + 40 : depthAt(x);
+        // The dive under a foreign town covers that town's WHOLE shallow region - its street,
+        // its outskirts and its own line's approaches - so two lines never braid into what
+        // reads as a fork (N13F: every pipe is one continuous run, no splits); outside it the
+        // passing line keeps the deep-country level.
+        const depthThere = (x) => foreign.some((s) => x > s.streetLeft - 260 && x < s.streetRight + 260) ? DEEP + 40 : depthAt(x);
         const fresh = contour(x0, x1, depthThere);
         snapToCores(fresh, x0, line.cores);
         extendTo(line, x0, x1, (c) => fresh[c - x0]);
@@ -491,32 +516,61 @@
       }
       return false;
     };
+    // Breakage bookkeeping is incremental (the physics track profiled the old full scan at
+    // 34 ms of intactAt around a big blast): a column is marked the moment a scan finds it
+    // cut - the hurt span grows with it - and unmarked when a scan or the regrowth finds it
+    // whole; when a line's last broken column heals, the ground round the whole hurt is combed
+    // for flung casing, and once more a little later for pieces still landing.
+    function markBroken(line, k) {
+      if (line.broken[k]) return;
+      line.broken[k] = 1; line.brokenAt[k] = tick;
+      line.brokenCount = (line.brokenCount || 0) + 1;
+      spill(line, line.x0 + k);
+      line.hurt = line.hurt ? { k0: Math.min(line.hurt.k0, k), k1: Math.max(line.hurt.k1, k) } : { k0: k, k1: k };
+    }
+    function clearBroken(line, k) {
+      if (!line.broken[k]) return;
+      line.broken[k] = 0;
+      line.brokenCount -= 1;
+      if (!line.brokenCount && line.hurt) {
+        sweepAround(line, line.hurt.k0, line.hurt.k1);
+        line.tidy = { k0: line.hurt.k0, k1: line.hurt.k1, at: tick + 10 * 60 };
+        line.hurt = null;
+      }
+    }
+    // The watch walks each line in windows (a stretch per check, the cursor going round), so a
+    // quiet line costs almost nothing per tick; damage reported by a blast is looked at at
+    // once (notifyDamage), and anything a window misses is found within a few seconds.
+    const CHECK_WINDOW = 1600;
+    let dirtyPending = false;
+    function checkSpan(line, kA, kB) {
+      for (let k = Math.max(0, kA); k <= Math.min(line.ys.length - 1, kB); k += 1) {
+        if (intactAt(line, line.x0 + k)) clearBroken(line, k); else markBroken(line, k);
+      }
+    }
     function check() {
-      let broken = 0;
       for (const line of lines) {
-        const before = broken;
-        let first = -1, last = -1;
-        for (let x = line.x0; x <= line.x1; x += 1) {
-          const k = x - line.x0;
-          if (!intactAt(line, x)) {
-            if (!line.broken[k]) { line.broken[k] = 1; line.brokenAt[k] = tick; spill(line, x); }
-            broken += 1;
-            if (first < 0) first = k;
-            last = k;
-          } else line.broken[k] = 0;
-        }
-        line.anyBroken = broken > before;
-        // Remember how far the hurt reached; the moment the last column heals - grown shut, or
-        // cleared by the rubble falling away - the ground round it is combed for flung casing,
-        // and once more a little later for pieces still landing.
-        if (first >= 0) line.hurt = line.hurt ? { k0: Math.min(line.hurt.k0, first), k1: Math.max(line.hurt.k1, last) } : { k0: first, k1: last };
-        else if (line.hurt) {
-          sweepAround(line, line.hurt.k0, line.hurt.k1);
-          line.tidy = { k0: line.hurt.k0, k1: line.hurt.k1, at: tick + 10 * 60 };
-          line.hurt = null;
+        if (line.dirty) { checkSpan(line, line.dirty.k0, line.dirty.k1); line.dirty = null; }
+        if (tick % 30 === 0) {
+          const k0 = line.checkK || 0;
+          checkSpan(line, k0, k0 + CHECK_WINDOW - 1);
+          line.checkK = k0 + CHECK_WINDOW >= line.ys.length ? 0 : k0 + CHECK_WINDOW;
+          // (a hurt line is watched whole: the regrowth's work must be seen promptly)
+          if (line.hurt) checkSpan(line, line.hurt.k0 - 2, line.hurt.k1 + 2);
         }
       }
-      stats.broken = broken;
+      dirtyPending = false;
+      stats.broken = lines.reduce((n, l) => n + (l.brokenCount || 0), 0);
+    }
+    // A blast tells the lines where it struck: those columns are looked at next tick instead
+    // of waiting for the window to come round.
+    function notifyDamage(x0, x1) {
+      for (const line of lines) {
+        if (x1 < line.x0 || x0 > line.x1) continue;
+        const k0 = Math.max(0, x0 - line.x0), k1 = Math.min(line.ys.length - 1, x1 - line.x0);
+        line.dirty = line.dirty ? { k0: Math.min(line.dirty.k0, k0), k1: Math.max(line.dirty.k1, k1) } : { k0, k1 };
+        dirtyPending = true;
+      }
     }
     // ---- Regrowth (the user's design) -------------------------------------------------------------
     // No printer-scan crew. The HM that clogs at a broken end is what rebuilds the pipe; water
@@ -549,6 +603,7 @@
           if (y >= ny - 1 && y <= ny + BORE) continue;   // the new bore and its lip stay
           if ((mat[y * W + x] & ID_MASK) === M.PIPE && PW.getOwner(world, x, y) === line.owner) {
             PW.set(world, x, y, M.FILL, { quiet: true });
+            PW.setFlag(world, x, y, FLAG.HOLLOW, false);
             PW.setLayer(world, 'paint', x, y, rgb(tone(SAND, 0.92)));
             PW.setOwner(world, x, y, 0);
           }
@@ -558,6 +613,15 @@
       line.ys[k] = ny;
       layColumn(line, line.x0 + k);
       layWells(line, Math.max(1, k - 1), Math.min(line.ys.length - 1, k + 1));
+      // The growing end is the pipe stamping its own cross-section outward (N14F/N16F - the
+      // user kept the glitch as the feature): a vertical segment of the same bore design at
+      // the tip, each step's stamp left standing behind the last, so the reaching end trails
+      // a brief curtain of verticals - and when the ends meet, the closure sweeps leave one
+      // clean pipe and nothing else. Same design as every pipe; no overlay.
+      const tipX = line.x0 + k + dir * 4;
+      for (let r = 0; r < BORE; r += 1) {
+        for (let y = ny - 8; y < ny + BORE + 8; y += 1) layCell(line, tipX - 3 + r, y, pipeColor(r, y), r > 0 && r < BORE - 1);
+      }
       // A searching feeler now and then: a few cells of ink reaching off the fresh work into
       // the ground, grown over as the end moves on (painted; it cuts nothing).
       if ((PW.hash2(line.x0 + k, tick) & 7) === 3) {
@@ -568,7 +632,7 @@
         }
       }
       if (intactAt(line, line.x0 + k)) {
-        line.broken[k] = 0;
+        clearBroken(line, k);
         // The wreck of the old run in this column is taken up as the end closes over it - a
         // wide sweep for casing the blast let come to rest anywhere nearby (wells excepted).
         for (let r = -26, x = line.x0 + k; r <= BORE + 34; r += 1) {
@@ -578,6 +642,7 @@
           if ((line.wells || []).some((w) => Math.abs(x - w.x) <= 3 && y >= w.y0 && y <= w.y1)) continue;
           if ((mat[y * W + x] & ID_MASK) === M.PIPE && PW.getOwner(world, x, y) === line.owner) {
             PW.set(world, x, y, M.FILL, { quiet: true });
+            PW.setFlag(world, x, y, FLAG.HOLLOW, false);
             PW.setLayer(world, 'paint', x, y, rgb(tone(SAND, 0.9)));
             PW.setOwner(world, x, y, 0);
           }
@@ -602,6 +667,7 @@
           if ((line.wells || []).some((w) => Math.abs(x - w.x) <= 3 && y >= w.y0 && y <= w.y1)) continue;
           if ((mat[y * W + x] & ID_MASK) === M.PIPE && PW.getOwner(world, x, y) === line.owner) {
             PW.set(world, x, y, M.FILL, { quiet: true });
+            PW.setFlag(world, x, y, FLAG.HOLLOW, false);
             PW.setLayer(world, 'paint', x, y, rgb(tone(SAND, 0.9)));
             PW.setOwner(world, x, y, 0);
             PW.setLayer(world, 'pipe', x, y, 0);
@@ -611,10 +677,12 @@
     }
     function regrow() {
       for (const line of lines) {
-        let any = false;
-        for (let k = 0; k < line.broken.length; k += 1) {
+        if (!line.brokenCount || !line.hurt) { if (!line.brokenCount) line.growPath = null; continue; }
+        // (only the hurt span is walked - the physics track profiled the full-line walk; a
+        // snapshot, because the closure sweep clears line.hurt the moment the last column heals)
+        const h0 = line.hurt.k0, h1 = line.hurt.k1;
+        for (let k = h0; k <= h1; k += 1) {
           if (!line.broken[k]) continue;
-          any = true;
           let k1 = k;
           while (k1 + 1 < line.broken.length && line.broken[k1 + 1]) k1 += 1;
           const settled = tick - Math.max(line.brokenAt[k], line.brokenAt[k1]) >= REGROW_DELAY;
@@ -633,7 +701,6 @@
           }
           k = k1;
         }
-        if (!any) line.growPath = null;
       }
     }
     // A core grown after the world was made - a dropped seed, a new building - joins its side's
@@ -673,6 +740,7 @@
           const yy = old + r, xx = line.x0 + k;
           if ((mat[yy * W + xx] & ID_MASK) === M.PIPE && PW.getOwner(world, xx, yy) === line.owner) {
             PW.set(world, xx, yy, M.FILL, { quiet: true });
+            PW.setFlag(world, xx, yy, FLAG.HOLLOW, false);
             PW.setLayer(world, 'paint', xx, yy, rgb(tone(SAND, 0.92)));
             PW.setOwner(world, xx, yy, 0);
           }
@@ -836,15 +904,20 @@
         const ty = rowOf(line, nx, p.lane);
         if (Math.abs(ty - p.y) > 1) { p.y += Math.sign(ty - p.y) * Math.min(3, Math.abs(ty - p.y)); return true; }
         if (!free(line, nx, p.lane)) {
-          // Two streams meet head-on in the one lane: the packets slip past each other.
-          const q = nx >= line.x0 && nx <= line.x1 && !line.broken[nx - line.x0]
-            && line.packets.find((o) => o !== p && o.stage === 1 && o.lane === p.lane && o.x === nx && heading(o) === -dir);
-          if (!q) return false;
+          // Two streams meet head-on in the one lane: the packets slip past each other. The
+          // lookup is indexed per tick - searching the whole packet list for every blocked
+          // packet went quadratic in a supply jam and ate whole frames (the perf pass).
+          const q = nx >= line.x0 && nx <= line.x1 && !line.broken[nx - line.x0] && line.atCol
+            ? line.atCol.get(p.lane * W + nx) : null;
+          if (!q || q === p || q.stage !== 1 || q.x !== nx || heading(q) !== -dir) return false;
+          line.atCol.set(p.lane * W + nx, p);
+          line.atCol.set(p.lane * W + p.x, q);
           q.x = p.x; q.y = rowOf(line, q.x, q.lane);
           p.x = nx; p.y = rowOf(line, nx, p.lane);
           return true;
         }
         line.occ[laneOf(line, p.x, p.lane)] = 0;
+        if (line.atCol) { line.atCol.delete(p.lane * W + p.x); line.atCol.set(p.lane * W + nx, p); }
         p.x = nx; p.y = rowOf(line, nx, p.lane);
         line.occ[laneOf(line, nx, p.lane)] = 1;
         return true;
@@ -857,6 +930,10 @@
     function moveCargo(dt) {
       let count = 0;
       for (const line of lines) {
+        // (the per-column index for head-on slip-pasts, rebuilt once a tick)
+        const at = line.atCol || (line.atCol = new Map());
+        at.clear();
+        for (const p of line.packets) if (p.stage === 1) at.set(p.lane * W + p.x, p);
         for (const p of line.packets) {
           const v = p.stage === 1 ? LANES[p.lane].speed * dt : Math.max(LANES[p.lane].speed, HOIST) * dt;
           p.frac += v;
@@ -883,7 +960,7 @@
 
     function step(dt = 1 / 60) {
       tick += 1;
-      if (tick % 30 === 0) check();
+      if (dirtyPending || tick % 30 === 0) check();
       if (stats.broken) regrow();
       for (const line of lines) {
         if (line.tidy && tick >= line.tidy.at) { sweepAround(line, line.tidy.k0, line.tidy.k1); line.tidy = null; }
@@ -914,18 +991,18 @@
         for (const p of line.packets) {
           if (p.x < vx0 - 2 || p.x > vx1 + 2) continue;
           const cargo = LANES[p.lane].cargo;
-          if (p.resource === 'hm' && p.stage === 1) {
-            cell(p.x, p.y, cargo[(p.shade & 1) ? 0 : 1]);
-            cell(p.x - heading(p), p.y, cargo[2]);
-          } else {
-            cell(p.x, p.y, cargo[p.shade % 3]);
-            if (p.resource === 'sm' && p.stage === 1) cell(p.x - heading(p), p.y, tone(cargo[p.shade % 3], 0.8));
-          }
+          // Each resource pixel travels along the path of a sine wave (the user's design): the
+          // wave is fixed in space, per lane on its own phase, and the pixel traces it as it
+          // moves - the wave itself does not ripple along. One pixel per unit of cargo, so
+          // every pixel of water, SM and HM stays visible as its own; climbing a riser or a
+          // well it runs straight.
+          const wob = p.stage === 1 ? Math.round(Math.sin(p.x * 0.42 + p.lane * 2.1) * 1.1) : 0;
+          cell(p.x, p.y + wob, cargo[p.shade % 3]);
         }
       }
     }
 
-    const api = { build, step, draw, attach, carry, connectCore, lines, stats, flowing, lineFor, contour, BORE, BED, LANES, TAPS };
+    const api = { build, step, draw, attach, carry, connectCore, notifyDamage, lines, stats, flowing, lineFor, contour, BORE, BED, LANES, TAPS };
     return api;
   }
 

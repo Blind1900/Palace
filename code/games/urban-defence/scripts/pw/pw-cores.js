@@ -229,6 +229,7 @@
         if (!holder.wasAlive || holder.dead) return;
         holder.dead = true;
         if (PW.explode) PW.explode(world, particles, { x, y, radius: big ? 30 : 18, power: big ? 2 : 1.3 });
+        if (world.pipes && world.pipes.notifyDamage) world.pipes.notifyDamage(x - 46, x + 46);
         if (particles && F) {
           for (let i = 0; i < 14; i += 1) {
             const h = PW.hash3(x, i, tick), a = (i / 14) * Math.PI * 2;

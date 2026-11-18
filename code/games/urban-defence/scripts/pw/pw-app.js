@@ -114,7 +114,12 @@
       PW.set(world, cx, cy, value);
     }
   }
-  function explode(x, y, radius, power = 1) { return PW.explode(world, particles, { x, y, radius, power }); }
+  function explode(x, y, radius, power = 1) {
+    const r = PW.explode(world, particles, { x, y, radius, power });
+    // (the lines look at the struck columns next tick instead of waiting for the watch window)
+    if (pipes && pipes.notifyDamage) pipes.notifyDamage(x - radius - 14, x + radius + 14);
+    return r;
+  }
   // Dig a raw tunnel box for a side: it joins that side's network if it touches one, otherwise it
   // starts a new network rooted here. Another side's developed lining blocks it.
   let devSpeed = 1, lastDig = '';

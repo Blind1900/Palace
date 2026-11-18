@@ -679,7 +679,11 @@
     WOOD: 65536,
     // PANEL: this back-wall cell is a panel of wall a ruin came down with: it stands only while
     // solid holds it (see pw-stability).
-    PANEL: 131072 });
+    PANEL: 131072,
+    // HOLLOW: this pipe cell is the open inside of the bore (N17F): solid to debris, water and
+    // units, but smoke, fire and hot gas pass through it among the cargo (pw-air/pw-heat read
+    // it; pw-pipes sets and clears it with the bore).
+    HOLLOW: 262144 });
   // Does a pipe fixed to the wall show at open cell (x, y)? Over the wall face (a finished
   // tunnel's too, clamped to it), or across a cave's rock; not behind a fitting, a ladder's rails
   // and rungs, a rail or a belt - but between a ladder's rungs, yes.
