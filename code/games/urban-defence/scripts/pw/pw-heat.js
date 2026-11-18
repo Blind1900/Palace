@@ -353,6 +353,7 @@
     // ---- Flames overlay -------------------------------------------------------------------------------
     const FLAME_COLORS = ['rgba(255,244,190,0.95)', 'rgba(255,200,80,0.92)', 'rgba(244,128,36,0.88)', 'rgba(196,64,24,0.8)'];
     function draw(renderer, time) {
+      glow(renderer);
       if (!burning.size) return;
       const { ctx, camera, view } = renderer;
       const z = camera.zoom, size = Math.max(1, Math.round(z));
@@ -380,6 +381,75 @@
         for (let k = 0; k < list.length; k += 2) ctx.rect(list[k], list[k + 1], size, size);
         ctx.fill();
       }
+    }
+
+    // ---- Glow ---------------------------------------------------------------------------------------
+    // Heat is a modifier on how a cell looks: anything hot enough glows - rock, metal, rubble, a
+    // furnace's charge - its own light added over its colour, a dull red from about GLOW_FROM,
+    // through cherry and orange to yellow and white-hot at GLOW_FULL, dimming as it cools. (Hot
+    // air does not glow: the flames and smoke are their own pixels. Light added, not painted, so
+    // it reads by day and burns bright at night.) Each hot chunk's glow is an image of its hot
+    // cells, made again each heat tick, drawn over the world with additive blending.
+    const GLOW_FROM = 480, GLOW_FULL = 1400;
+    const GLOW_STOPS = [[480, 0, 0, 0], [560, 70, 8, 0], [700, 170, 30, 4], [850, 240, 85, 14], [1000, 255, 150, 50], [1200, 255, 215, 140], [1400, 255, 245, 215]];
+    const GLOW_LUT = new Uint32Array(256);
+    for (let k = 0; k < 256; k += 1) {
+      const t = GLOW_FROM + (GLOW_FULL - GLOW_FROM) * k / 255;
+      let s = 1;
+      while (s < GLOW_STOPS.length - 1 && GLOW_STOPS[s][0] < t) s += 1;
+      const [t0, r0, g0, b0] = GLOW_STOPS[s - 1], [t1, r1, g1, b1] = GLOW_STOPS[s], f = Math.max(0, Math.min(1, (t - t0) / (t1 - t0)));
+      GLOW_LUT[k] = PW.abgr(r0 + (r1 - r0) * f, g0 + (g1 - g0) * f, b0 + (b1 - b0) * f);
+    }
+    const glowImages = new Map();   // chunk -> { canvas, ctx, made (heat tick), w, h, lx, ly, any }
+    function glowImage(c, T) {
+      const r = rects.get(c);
+      let e = glowImages.get(c);
+      const made = Math.floor(tick / EVERY);
+      if (e && e.made === made) return e;
+      if (!e) {
+        const canvas = document.createElement('canvas');
+        canvas.width = CHUNK; canvas.height = CHUNK;
+        e = { canvas, ctx: canvas.getContext('2d'), made: -1, image: null, px: null, lx: 0, ly: 0, w: 0, h: 0, any: false };
+        e.image = e.ctx.createImageData(CHUNK, CHUNK); e.px = new Uint32Array(e.image.data.buffer);
+        glowImages.set(c, e);
+      }
+      e.made = made; e.any = false;
+      if (!r || r[2] < r[0]) return e;
+      const lx0 = Math.max(0, r[0] - 1), ly0 = Math.max(0, r[1] - 1), lx1 = Math.min(CHUNK - 1, r[2] + 1), ly1 = Math.min(CHUNK - 1, r[3] + 1);
+      const w = lx1 - lx0 + 1, h = ly1 - ly0 + 1, px = e.px, scale = 255 / (GLOW_FULL - GLOW_FROM);
+      const cx = (c % chunksX) << CHUNK_SHIFT, cy = ((c / chunksX) | 0) << CHUNK_SHIFT;
+      for (let ly = 0; ly < h; ly += 1) {
+        const row = (cy + ly0 + ly) * W + cx + lx0, trow = (ly0 + ly) << CHUNK_SHIFT;
+        for (let lx = 0; lx < w; lx += 1) {
+          const t = T[trow + lx0 + lx];
+          let v = 0;
+          if (t > GLOW_FROM && !open[mat[row + lx] & ID_MASK]) { v = GLOW_LUT[Math.min(255, ((t - GLOW_FROM) * scale) | 0)]; e.any = true; }
+          px[ly * CHUNK + lx] = v;
+        }
+      }
+      e.lx = lx0; e.ly = ly0; e.w = w; e.h = h;
+      if (e.any) e.ctx.putImageData(e.image, 0, 0, 0, 0, w, h);
+      return e;
+    }
+    function glow(renderer) {
+      const list = world.heatList;
+      if (!list.length) { if (glowImages.size) glowImages.clear(); return; }
+      const { ctx, camera, view } = renderer, z = camera.zoom;
+      const vx0 = camera.x, vy0 = camera.y, vx1 = vx0 + view.width / z, vy1 = vy0 + view.height / z;
+      let drew = false;
+      for (const c of list) {
+        const T = world.heat[c];
+        if (!T) continue;
+        const cx = (c % chunksX) << CHUNK_SHIFT, cy = ((c / chunksX) | 0) << CHUNK_SHIFT;
+        if (cx > vx1 || cy > vy1 || cx + CHUNK < vx0 || cy + CHUNK < vy0) continue;
+        const e = glowImage(c, T);
+        if (!e.any) continue;
+        if (!drew) { ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.imageSmoothingEnabled = false; drew = true; }
+        ctx.drawImage(e.canvas, 0, 0, e.w, e.h, Math.round((cx + e.lx - vx0) * z), Math.round((cy + e.ly - vy0) * z), Math.round(e.w * z), Math.round(e.h * z));
+      }
+      if (drew) ctx.restore();
+      // (images of chunks no longer hot are let go)
+      if (glowImages.size > list.length + 16) for (const c of glowImages.keys()) if (!world.heat[c]) glowImages.delete(c);
     }
 
     // Heat a disc (used by blasts, flame tools and later weapons): `peak` °C at the centre.
