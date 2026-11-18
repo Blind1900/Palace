@@ -70,7 +70,11 @@ for (const s of world.settlements) {
     if (crossing) continue;
     columns += 1;
     for (let y = g + 4; y < top - BED; y += 1) if (NATURAL.includes(id(x, y)) && !PW.getOwner(world, x, y)) soilLeft += 1;
-    if (MADE.includes(id(x, top - BED)) && [1, 2, 3].some((k) => MADE.includes(id(x, bottom + k)))) bedded += 1;
+    // Properly bedded: inside the made ground with made ground running on below - or sleeved
+    // through the building's own foundation gallery between its cores (the god's concrete, F2).
+    const gift = (yy) => [M.FOUNDATION, M.STEEL, M.REINFORCED].includes(id(x, yy)) && PW.getOwner(world, x, yy) > 0;
+    if (gift(top - BED) || gift(bottom + 1)) bedded += 1;
+    else if (MADE.includes(id(x, top - BED)) && [1, 2, 3].some((k) => MADE.includes(id(x, bottom + k)))) bedded += 1;
   }
   check(columns >= 3 && soilLeft <= 8, `${s.side}@${s.site.x0} (${s.style}): made ground fills the street's ground over the bundle (${columns} columns, ${soilLeft} natural cells left)`);
   check(columns > 0 && bedded >= columns * 0.9, `${s.side}@${s.site.x0}: the bundle is bedded inside the made ground, which runs on below it (${bedded}/${columns} columns)`);

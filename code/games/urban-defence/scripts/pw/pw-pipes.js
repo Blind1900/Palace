@@ -183,12 +183,17 @@
       const wisp = tendrilAt(along);
       if (row === 0 || row === BORE - 1) {
         if (wisp) return ((along + row) % 7 === 3) ? WHITE_DIM : INK;
+        // A bolted collar joins the casing segments (your pipeline refs): two bright columns
+        // every 36 cells, with lips into the bed rows (see layColumn).
+        if (collarAt(along)) return tone(row === 0 ? CASING_LIT : CASING_DARK, 1.3);
         if (along % 14 === 0) return tone(row === 0 ? CASING_LIT : CASING_DARK, 1.2);   // a rivet band
         return row === 0 ? CASING_LIT : CASING_DARK;
       }
       if (row === 2 || row === 4) return wisp ? INK : DIVIDER;
+      if (collarAt(along)) return tone(LANES[(row - 1) >> 1].channel, 0.75);   // the lanes pass behind the collar
       return LANES[(row - 1) >> 1].channel;
     }
+    const collarAt = (along) => !tendrilAt(along) && ((along % 36) + 36) % 36 < 2;
     // Lay one bundle cell: in the ground a PIPE cell; across open space underground it is fixed to
     // the wall face; through a core's span it breaches plate and foundation into the bed's socket.
     function layCell(line, x, y, color) {
@@ -196,7 +201,11 @@
       const id = mat[y * W + x] & ID_MASK;
       const cover = id === M.COVER_ROCK || id === M.COVER_WOOD || id === M.COVER_METAL || id === M.COVER_SAND;
       if (PW.mat.open[id] || id === M.WATER || cover) {
-        if (y < world.groundTop[x] && !isTunnel(x, y) && !buildingOwned(x, y)) return false;   // never in the open sky
+        // Across sheltered open space the bundle is fixed to the wall face (A2.6): a tunnel's, a
+        // building's, or any back wall standing there (a terrace's bench wall, a bunker room).
+        // Only bare open sky refuses it - the router bridges where a wall face is, and without
+        // this the laying refused what the route relied on, leaving the line broken in the open.
+        if (y < world.groundTop[x] && !isTunnel(x, y) && !buildingOwned(x, y) && !PW.getLayer(world, 'back', x, y)) return false;
         PW.setLayer(world, 'pipe', x, y, rgb(color));
         return true;
       }
@@ -209,6 +218,14 @@
       // put there - vault plate, plinth, a stage's timber pier, a buttress - painted across it,
       // the structure itself untouched (nothing load-bearing is cut).
       if (spanAt(x, y) && structural[id]) {
+        PW.setLayer(world, 'paint', x, y, rgb(color));
+        PW.setFlag(world, x, y, FLAG.FIXTURE);
+        return true;
+      }
+      // Foundation work (terraced footings, benched fill) is fill, not frame: the bundle sleeves
+      // through it anywhere it crosses, painted over it, nothing load-bearing cut. Without this
+      // the line broke wherever the route clipped a town-edge terrace.
+      if (id === M.FOUNDATION) {
         PW.setLayer(world, 'paint', x, y, rgb(color));
         PW.setFlag(world, x, y, FLAG.FIXTURE);
         return true;
@@ -235,10 +252,15 @@
       if (throughAt(line, x)) return;
       const y = line.ys[x - line.x0];
       const wisp = tendrilAt(x);
+      const collar = collarAt(x);
       for (let b = 1; b <= BED; b += 1) {
-        const sand = (k) => (wisp ? tone(INK, 1 + Math.abs(k)) : tone(SAND, (PW.hash2(x, y + k) & 3) === 0 ? 0.88 : 1));
-        bedCell(x, y - b, sand(-b));
-        bedCell(x, y + BORE - 1 + b, sand(b));
+        // The trench profile (your pipeline refs): fine sand right against the casing, coarser
+        // darker gravel in the outer bed row; a joint collar's lip reaches into the first row.
+        const sand = (k) => (wisp ? tone(INK, 1 + Math.abs(k))
+          : Math.abs(k) >= BED ? tone(SAND, (PW.hash2(x, y + k) & 3) === 0 ? 0.62 : 0.74)
+          : tone(SAND, (PW.hash2(x, y + k) & 3) === 0 ? 0.88 : 1));
+        bedCell(x, y - b, b === 1 && collar ? tone(CASING, 1.2) : sand(-b));
+        bedCell(x, y + BORE - 1 + b, b === 1 && collar ? tone(CASING, 0.78) : sand(b));
       }
       for (let r = 0; r < BORE; r += 1) layCell(line, x, y + r, pipeColor(r, x));
     }
