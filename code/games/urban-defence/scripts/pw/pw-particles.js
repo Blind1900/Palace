@@ -14,7 +14,19 @@
   // anything solid above it and pops when it reaches open air. It never leaves the water.
   // LOOSE: a grain of stuff already loose - running down a slope, falling, blown up off the
   // ground - flies as a grain, never gathered into a chunk (see breakage).
-  const F = Object.freeze({ LAND: 1, DAMAGE: 2, WATER: 4, GLOW: 8, SMOKE: 16, LEAF: 32, BUBBLE: 64, LOOSE: 128 });
+  // SMOKE and FIRE: a pixel of smoke, or of a fireball's flame, after The Powder Toy's gases (our
+  // own code): carried by the air - the weather's wind and a blast's - losing its own speed fast,
+  // rising (fire faster), sliding along what it meets, never into it. Fire glows white-hot, then
+  // yellow, orange, dark red as its life runs out, and dies - as a pixel of smoke, of the colour it
+  // carries, if that colour is not see-through (alpha 0: it leaves nothing). Smoke fades out as its
+  // life runs out.
+  const F = Object.freeze({ LAND: 1, DAMAGE: 2, WATER: 4, GLOW: 8, SMOKE: 16, LEAF: 32, BUBBLE: 64, LOOSE: 128, FIRE: 256 });
+  const FIRE_RISE = 70, SMOKE_RISE = 16;   // cells/s each rises at, in still air
+  const GAS_BRAKE = 7, GAS_LOSS = 3;       // per s: how fast one thrown out loses its own speed, at first and then
+  const SMOKE_LIFE = [2.4, 4.6];           // s: what a fire pixel's smoke lives
+  // (the flame's colour over its life: white-hot first, dark red last)
+  const FLAME = [[255, 252, 236], [255, 240, 170], [255, 214, 104], [255, 178, 60], [248, 136, 40], [226, 96, 30], [184, 64, 26], [124, 40, 22]]
+    .map((c) => PW.abgr(c[0], c[1], c[2]));
   const BUBBLE_RISE = 7;    // cells/s terminal rise speed
 
   function createParticles(world, capacity = 32768) {
@@ -22,7 +34,7 @@
     const px = new Float32Array(capacity), py = new Float32Array(capacity);
     const vx = new Float32Array(capacity), vy = new Float32Array(capacity);
     const life = new Float32Array(capacity), age = new Float32Array(capacity);
-    const cell = new Uint8Array(capacity), flags = new Uint8Array(capacity);
+    const cell = new Uint8Array(capacity), flags = new Uint16Array(capacity);
     const color = new Uint32Array(capacity), owner = new Uint16Array(capacity);
     const painted = new Uint8Array(capacity);   // carries its own colour (a piece of a building)
     // Shock energy of strikes, gathered over 16x16-cell tiles until the vibration system takes it.
@@ -106,7 +118,7 @@
     const CRACK_MIN = 8;          // a chunk of this many cells or more cracks into chunks; smaller, into grains
     const PEND_MAX = 32768;
     const pend = { n: 0, x: new Float32Array(PEND_MAX), y: new Float32Array(PEND_MAX), vx: new Float32Array(PEND_MAX), vy: new Float32Array(PEND_MAX),
-      byte: new Uint8Array(PEND_MAX), rgba: new Uint32Array(PEND_MAX), fl: new Uint8Array(PEND_MAX), life: new Float32Array(PEND_MAX), own: new Uint16Array(PEND_MAX) };
+      byte: new Uint8Array(PEND_MAX), rgba: new Uint32Array(PEND_MAX), fl: new Uint16Array(PEND_MAX), life: new Float32Array(PEND_MAX), own: new Uint16Array(PEND_MAX) };
     const jag = (a, b, amp) => ((PW.hash2(Math.floor(a / 3), b) & 7) / 7 - 0.5) * amp;
     // (the jagged tile the cell (x, y) of a kind breaks off in: its block, cut as the block is cut)
     function tileOf(x, y, kind, rule, out) {
@@ -124,7 +136,7 @@
     // chunks too (slabs of its floors, lumps of its walls), not grain by grain.
     const HOLD_TICKS = 4, HOLD_MAX = 16384;
     const held = { n: 0, x: new Float32Array(HOLD_MAX), y: new Float32Array(HOLD_MAX), vx: new Float32Array(HOLD_MAX), vy: new Float32Array(HOLD_MAX),
-      byte: new Uint8Array(HOLD_MAX), rgba: new Uint32Array(HOLD_MAX), fl: new Uint8Array(HOLD_MAX), life: new Float32Array(HOLD_MAX), own: new Uint16Array(HOLD_MAX) };
+      byte: new Uint8Array(HOLD_MAX), rgba: new Uint32Array(HOLD_MAX), fl: new Uint16Array(HOLD_MAX), life: new Float32Array(HOLD_MAX), own: new Uint16Array(HOLD_MAX) };
     let heldFor = 0;
     function hold(x, y, svx, svy, byte, rgba, fl, lifeSeconds = 6, own = 0) {
       if (held.n >= HOLD_MAX || !(fl & F.LAND) || kindOf(byte) === KIND.NONE) return spawn(x, y, svx, svy, byte, rgba, fl, lifeSeconds, own);
@@ -419,6 +431,38 @@
     }
     const OPEN = PW.mat.open;
     const open = (id, fl) => OPEN[id] === 1 || (id === M.WATER && (fl & F.WATER) === 0);
+    // A pixel of smoke or flame moves as the air takes it (see F): towards the air's own motion and
+    // its rise, losing the speed it was thrown with, a little restless; cell by cell, sliding along
+    // anything not open to it (water too), never into it.
+    const NO_WIND = [0, 0];
+    const gasOpen = (x, y) => {
+      if (x < 1 || x >= W - 1 || y >= H - 1) return false;
+      if (y < 0) return true;
+      const id = mat[(y | 0) * W + (x | 0)] & ID_MASK;
+      return OPEN[id] === 1 && id !== M.WATER;
+    };
+    function stepGas(i, fl, dt) {
+      const fire = (fl & F.FIRE) !== 0;
+      const x = px[i], y = py[i];
+      const wind = world.air && world.air.wind ? world.air.wind(x | 0, y | 0) : NO_WIND;
+      const brake = Math.exp(-(age[i] < 0.4 ? GAS_BRAKE : GAS_LOSS) * dt);
+      // (a flame bursting out spreads first and rises as it slows: the heat lifts it once it has
+      // stopped being thrown)
+      const rise = fire ? FIRE_RISE * Math.min(1, age[i] * 2.5) * (0.4 + life[i] / (age[i] + life[i])) : SMOKE_RISE;
+      const h = PW.hash3(i, (age[i] * 20) | 0, 77), jitter = fire ? 16 : 30;
+      const tx = wind[0], ty = wind[1] - rise;
+      vx[i] = tx + (vx[i] - tx) * brake + ((h & 255) / 255 - 0.5) * jitter * dt;
+      vy[i] = ty + (vy[i] - ty) * brake + ((h >>> 8 & 255) / 255 - 0.5) * jitter * dt;
+      const dx = vx[i] * dt, dy = vy[i] * dt;
+      const steps = Math.max(1, Math.ceil(Math.max(Math.abs(dx), Math.abs(dy))));
+      let cx = x, cy = y, sx = dx / steps, sy = dy / steps;
+      for (let s = 0; s < steps; s += 1) {
+        if (sx) { if (gasOpen(cx + sx, cy)) cx += sx; else { vx[i] *= -0.15; sx = 0; } }
+        if (sy) { if (gasOpen(cx, cy + sy)) cy += sy; else { vy[i] *= -0.15; sy = 0; } }
+      }
+      px[i] = cx; py[i] = cy;
+      if (cy < -H * 0.3) life[i] = 0;
+    }
 
     function step(dt) {
       flushDebris();
@@ -426,10 +470,17 @@
         const fl = flags[i];
         age[i] += dt;
         life[i] -= dt;
-        if (fl & F.SMOKE) {
-          vy[i] -= 30 * dt; vx[i] *= 1 - 0.8 * dt;
-          px[i] += vx[i] * dt; py[i] += vy[i] * dt;
-          if (life[i] <= 0) kill(i);
+        if (fl & (F.SMOKE | F.FIRE)) {
+          if (life[i] <= 0) {
+            // (a flame dies as a pixel of smoke, if it carries one)
+            if ((fl & F.FIRE) && (color[i] >>> 24)) {
+              flags[i] = F.SMOKE; age[i] = 0;
+              life[i] = SMOKE_LIFE[0] + (PW.hash2(i, count) & 255) / 255 * (SMOKE_LIFE[1] - SMOKE_LIFE[0]);
+              vx[i] *= 0.5; vy[i] *= 0.5;
+            } else kill(i);
+            continue;
+          }
+          stepGas(i, fl, dt);
           continue;
         }
         if (fl & F.BUBBLE) {
@@ -645,10 +696,15 @@
         }
         if (x < x0 || x > x1 || y < y0 || y > y1) continue;
         let c = color[i];
-        if (flags[i] & F.SMOKE) {
-          const fade = Math.max(0, Math.min(1, life[i] / 2));
-          if (fade < 0.15 || ((i + (age[i] * 10 | 0)) & 3) === 0) continue;
-          c = c & 0x00ffffff | Math.round(98 * fade) << 24;
+        if (flags[i] & F.FIRE) {
+          // (the flame's colour by how much of its life is gone)
+          c = FLAME[Math.min(FLAME.length - 1, (age[i] / (age[i] + life[i]) * FLAME.length) | 0)];
+        } else if (flags[i] & F.SMOKE) {
+          // (its own shade, see-through as it was made, fading out over its last second and a half)
+          const fade = Math.max(0, Math.min(1, life[i] / 1.5));
+          const a = Math.round((c >>> 24) * fade / 32) * 32;
+          if (a < 24) continue;
+          c = (c & 0x00ffffff | Math.min(255, a) << 24) >>> 0;
         }
         put(c, Math.floor(x), Math.floor(y));
       }

@@ -187,22 +187,19 @@
           particles.spawn(x + 0.5, y + 0.5, vx, vy, breaksTo[id] || M.LOOSE_SOIL, 0, F.LAND, 6);
         }
         // Pulverised earth hangs in the air as a dust cloud.
-        if (PW.mat.terrain[id] && random() < 0.3) PW.set(world, x, y, M.DUST | (1 + (random() < 0.5 ? 1 : 0)) << 6, { quiet: true });
+        if (PW.mat.terrain[id] && random() < DUST_SHARE) PW.set(world, x, y, M.DUST | (1 + (random() < 0.5 ? 1 : 0)) << 6, { quiet: true });
       }
     }
     scorchBuildings(world, cx, cy, r, power);
-    // Sparks (light), then the fireball's heat and the smoke it leaves: real cells, so the heat
-    // can scorch and ignite, and the smoke rises, drifts with the wind and thins out.
-    for (let k = 0; k < 40 + r * 2; k += 1) {
-      const a = random() * Math.PI * 2, sp = (120 + random() * 260) * power;
-      const hot = [[255, 240, 180], [255, 196, 90], [240, 120, 40]][k % 3];
-      particles.spawn(cx, cy, Math.cos(a) * sp, Math.sin(a) * sp - 60, 0, PW.abgr(hot[0], hot[1], hot[2]), F.GLOW, 0.25 + random() * 0.5);
-    }
+    // The fireball, its sparks and shrapnel, and its smoke (see fireball); its heat is real, so it
+    // can scorch and ignite.
     if (world.heatSystem) world.heatSystem.heatDisc(cx, cy, r * 1.15, 380 + 420 * power);
-    smokeBurst(world, cx, cy, r, power, random);
-    if (world.effects) world.effects.push({ kind: 'flash', x: cx, y: cy, radius: r * 2.2, age: 0, life: 0.35 });
-    // A crater (not a blast in the open air) smoulders, feeding a smoke column for a while.
-    if (removed > r) addSmoulder(world, cx, Math.min(H - 2, cy + below), 8 + r * 0.35 * power, r * 1.1);
+    sparks(world, particles, cx, cy, r, power, random);
+    const open = fireball(world, particles, cx, cy, r, power, random);
+    // (the smoke it drives into tunnels and rooms, where it is shut in: see smokeBurst)
+    smokeBurst(world, cx, cy, r, power, random, open);
+    // A crater (not a blast in the open air) smoulders a little while, wisps of smoke curling up.
+    if (removed > r) addSmoulder(world, cx, Math.min(H - 2, cy + below), 3 + r * 0.12 * power, r * 0.8, { puffs: true });
     // Plants that lost their footing or trunk fall; cover that lost its support or most of
     // itself breaks apart. Nothing is left floating over the crater.
     const box = { x0: x0 - 4, y0: y0 - 4, x1: x1 + 4, y1: y1 + 4 };
@@ -227,18 +224,164 @@
     return { removed, damaged };
   }
 
-  // The blast's smoke: a body of gas - as much as the blast made - driven out of the fireball into
-  // the open space round it, nearest first along the ways open to it: round corners, along tunnels,
-  // through rooms and out of their doors and broken windows, never through anything solid. It
-  // comes out fast and ever slower - the share of it out by time t is 1 - e^(-kt), k the air's
-  // brake on it - so in the open it races out as a near-round disc (a few tongues of it reaching
-  // further), and in a tunnel the same smoke, with nowhere else to go, shoots far along it. Where
-  // it has room it spreads thin and patchy; squeezed into a tunnel or a room it fills it, thick.
-  // Laid, it is ordinary smoke: it rises, drifts and thins.
+  // ---- The blast as it looks ------------------------------------------------------------------------
+  // A blast is a fireball: billows of fire bursting out of its core - white-hot at first, a flash,
+  // then mottled yellow and orange with dark red creases, sooting over from the top as they cool -
+  // that brake hard, swell and cool to smoke within a moment, the hottest rising fastest (a big
+  // blast's hot core climbs as a column under its cap). The fire goes out where there is room for
+  // it, as far as there is: on open ground it spreads in a dome flattened along the ground, out of
+  // a crater it shoots up in a cone, beside a wall it is thrown away from it, in a tunnel it races
+  // along it (see openRays). Ahead of it the core drives dark smoke billows outward, and a blast at
+  // the ground sends a low surge rolling out along it, dusty from the earth it threw up. Sparks
+  // and shrapnel fly out of it. Its smoke comes as billows - round, cauliflower-edged puffs, lit on
+  // top and shaded beneath - each moving as a whole: braking, swelling, rising, drifting with the
+  // wind (the weather's and the blast's own: see PW air), held back by the ground and by what
+  // stands, and thinning away. They are drawn only over open air. (Where the blast is shut in - a
+  // tunnel, a room - its smoke is real gas cells instead, flooding along the ways open to it: see
+  // smokeBurst.)
+  const DUST_SHARE = 0.12;       // of the earth a blast blows out, what hangs in the air as dust
+  const BRAKE = 7;               // per second: how hard what is thrown out of the core brakes
+  const RAYS = 48;
+  // How far the open air runs from the blast's middle in each of RAYS directions, up to `reach`
+  // (cells): the way open to its fire.
+  function openRays(world, cx, cy, reach) {
+    const { mat, width: W, height: H } = world, OPEN = PW.mat.open;
+    const out = new Float32Array(RAYS);
+    for (let k = 0; k < RAYS; k += 1) {
+      const a = k / RAYS * Math.PI * 2, dx = Math.cos(a), dy = Math.sin(a);
+      let d = 0;
+      for (; d < reach; d += 1) {
+        const x = Math.round(cx + dx * d), y = Math.round(cy + dy * d);
+        if (x < 1 || x >= W - 1 || y >= H - 1) break;
+        if (y < 0) continue;
+        const id = mat[y * W + x] & ID_MASK;
+        if (!OPEN[id] || id === M.WATER) break;
+      }
+      out[k] = d;
+    }
+    return out;
+  }
+  // (a direction out of the blast, more likely the more room there is that way; with how far)
+  function pickRay(rays, random, power = 2) {
+    let total = 0;
+    for (let k = 0; k < RAYS; k += 1) total += rays[k] ** power;
+    let t = random() * total, k = 0;
+    for (; k < RAYS - 1; k += 1) { t -= rays[k] ** power; if (t <= 0) break; }
+    return { a: (k + random() - 0.5) / RAYS * Math.PI * 2, len: rays[k] };
+  }
+  // (the share of open air round a blast: in the open its smoke is billows, shut in it is gas)
+  function openShare(world, cx, cy, r) {
+    const { mat, width: W, height: H } = world, OPEN = PW.mat.open;
+    let open = 0, n = 0;
+    for (let k = 0; k < 64; k += 1) {
+      const a = k / 64 * Math.PI * 2, d = r * (0.6 + (k & 3) * 0.3);
+      const x = Math.round(cx + Math.cos(a) * d), y = Math.round(cy + Math.sin(a) * d);
+      if (x < 1 || y < 1 || x >= W - 1 || y >= H - 1) continue;
+      n += 1;
+      const id = mat[y * W + x] & ID_MASK;
+      if (OPEN[id] && id !== M.WATER && !(y > world.groundTop[x] && !PW.getLayer(world, 'back', x, y) && (PW.getFlags(world, x, y) & PW.FLAG.TUNNEL))) open += 1;
+    }
+    return n ? open / n : 0;
+  }
+  // A billow: where it is and goes (cells, cells/s), its size now and what it swells to, its heat
+  // (1 white fire .. 0 smoke) and how fast it cools, how thick it is and how long it lasts, and
+  // whether it rolls along the ground.
+  // A billow: a clump of pixels - flame or smoke, each its own particle - in a disc `size` across
+  // at (x, y), thrown (vx, vy) and swelling as it goes (the further out of its middle, the faster
+  // out, at `swell` cells/s at its rim), `fill` of its cells taken. Each pixel is lit or shaded by
+  // where it sits in it - on top lit, beneath in shadow - and a flame carries the shade it will
+  // have as smoke (or none, `smoke` the chance it leaves any). Its rim burns out first.
+  const SOOT_TONES = [[122, 116, 110], [86, 81, 77], [56, 52, 50]];
+  const GREY_TONES = [[150, 145, 139], [111, 106, 101], [74, 70, 67]];
+  const DUST_TONES = [[160, 142, 112], [124, 109, 87], [86, 74, 60]];
+  function billow(particles, random, x, y, vx, vy, size, fill, swell, fl, life, tones, alpha, smoke = 1) {
+    const n = Math.max(3, Math.round(Math.PI * size * size * fill));
+    for (let k = 0; k < n; k += 1) {
+      const a = random() * Math.PI * 2, d = size * Math.sqrt(random());
+      const ox = Math.cos(a) * d, oy = Math.sin(a) * d;
+      const light = -(ox * 0.45 + oy * 0.9) / size + (random() - 0.5) * 0.3;
+      const t = tones[light > 0.28 ? 0 : light > -0.3 ? 1 : 2];
+      const keep = random() < smoke ? alpha : 0;
+      particles.spawn(x + ox, y + oy, vx + ox / size * swell, vy + oy / size * swell, 0,
+        PW.abgr(t[0], t[1], t[2], Math.round(keep * 255)), fl, life * (0.65 + 0.35 * (1 - d / size)) * (0.85 + random() * 0.3));
+    }
+    return n;
+  }
+  function fireball(world, particles, cx, cy, r, power, random) {
+    const F = PW.PARTICLE;
+    const open = openShare(world, cx, cy, r);
+    // (its size: the blast's, and more as there is more room for it - shut in, it is squeezed
+    // along the ways open to it)
+    const R = r * (0.95 + 0.35 * Math.min(2, power)) * (0.6 + 0.4 * Math.sqrt(open));
+    const rays = openRays(world, cx, cy, R * 2.2);
+    // (never more pixels than the particles have room for: a big blast's are sparser)
+    const fill = Math.max(0.12, Math.min(1, (particles.capacity * 0.7 - particles.count) / (R * R * 20)));
+    // The fire bursting out of the core, along the ways open to it - as far as each runs, and more
+    // of it the more room: white-hot as it bursts out (the flash), then yellow, orange, dark red,
+    // and as it dies most of it leaves a sooty pixel of smoke.
+    for (let k = 0, n = 10 + Math.round(r / 3); k < n; k += 1) {
+      const { a, len } = pickRay(rays, random);
+      const out = Math.min(len * 0.85, R * (0.45 + random() * 0.8));
+      const size = Math.min(R * (0.2 + random() * 0.16), Math.max(3, len * 0.45));
+      billow(particles, random, cx + Math.cos(a) * size * 0.3, cy + Math.sin(a) * size * 0.3, Math.cos(a) * out * BRAKE, Math.sin(a) * out * BRAKE,
+        size, 0.85 * fill, size * 2.2, F.FIRE, 0.45 + random() * 0.45 + r / 300, SOOT_TONES, 0.75, 0.6);
+    }
+    // Out in the open, smoke driven ahead of the fire by the core, the same ways out; and at the
+    // ground a low surge rolling out along it each way it is open, dusty off earth.
+    if (open >= 0.35) {
+      for (let k = 0, n = 6 + Math.round(r / 6); k < n; k += 1) {
+        const { a, len } = pickRay(rays, random, 1);
+        const out = Math.min(len * 0.9, R * (1 + random() * 0.6));
+        billow(particles, random, cx, cy, Math.cos(a) * out * BRAKE, Math.sin(a) * out * BRAKE, R * (0.13 + random() * 0.1), 0.45 * fill, R * 0.6,
+          F.SMOKE, 2.2 + random() * 2.2, GREY_TONES, 0.7);
+      }
+      const gx = Math.round(cx), g = world.groundTop[Math.max(0, Math.min(world.width - 1, gx))];
+      if (g - cy < R * 1.1 && g >= cy - 2) {
+        const tones = PW.mat.terrain[PW.get(world, gx, g) & ID_MASK] === 1 ? DUST_TONES : GREY_TONES;
+        for (const d of [-1, 1]) {
+          const along = rays[d > 0 ? 0 : RAYS / 2];
+          if (along < R * 0.4) continue;
+          for (let k = 0, n = 3 + Math.round(r / 10); k < n; k += 1) {
+            const out = Math.min(along * 1.4, R * (0.9 + random() * 1.1 + k * 0.3));
+            const size = R * (0.1 + random() * 0.08);
+            billow(particles, random, cx + d * R * 0.2, g - size, d * out * BRAKE, -random() * R * 0.5, size, 0.45 * fill, R * 0.5,
+              F.SMOKE, 2.5 + random() * 2.5, tones, 0.7);
+          }
+        }
+      }
+    }
+    return open;
+  }
+  // Sparks - bright, fast, arcing out of the fireball - and shrapnel: dark splinters of the casing
+  // flung far and fast, that hurt what they hit and lie where they land.
+  function sparks(world, particles, cx, cy, r, power, random) {
+    const F = PW.PARTICLE;
+    for (let k = 0, n = 60 + r * 3; k < n; k += 1) {
+      const a = random() * Math.PI * 2, sp = (180 + random() * 420) * power;
+      const hot = [[255, 250, 220], [255, 222, 120], [255, 170, 60], [240, 110, 30]][k & 3];
+      const x = cx + Math.cos(a) * r * 0.2, y = cy + Math.sin(a) * r * 0.2;
+      // (a streak: the spark and a dimmer one trailing it)
+      particles.spawn(x, y, Math.cos(a) * sp, Math.sin(a) * sp - 50, 0, PW.abgr(hot[0], hot[1], hot[2]), F.GLOW, 0.2 + random() * 0.6);
+      if (k & 1) particles.spawn(x - Math.cos(a) * 1.5, y - Math.sin(a) * 1.5, Math.cos(a) * sp * 0.97, Math.sin(a) * sp * 0.97 - 50, 0, PW.abgr(hot[0], hot[1] * 0.7, hot[2] * 0.5), F.GLOW, 0.15 + random() * 0.35);
+    }
+    const SHRAPNEL = M.DEBRIS | PW.DEBRIS_KIND.METAL << 6;
+    for (let k = 0, n = Math.round(r * 0.6); k < n; k += 1) {
+      const a = random() * Math.PI * 2, sp = (300 + random() * 360) * power;
+      const c = 46 + (random() * 30 | 0);
+      particles.spawn(cx, cy, Math.cos(a) * sp, Math.sin(a) * sp - 40, SHRAPNEL, PW.abgr(c, c - 2, c - 4), F.LAND | F.DAMAGE, 4);
+    }
+  }
+  // The blast's smoke where it is shut in: a body of gas driven out of the fireball into the space
+  // round it, nearest first along the ways open to it - round corners, along tunnels, through
+  // rooms and out of their doors and broken windows, never through anything solid. It comes out
+  // fast and ever slower - the share of it out by time t is 1 - e^(-kt), k the air's brake on it -
+  // so in a tunnel, with nowhere else to go, it shoots far along it, filling it, thick. Where it
+  // comes out into the open it is the billows' (see fireball): no gas is laid there. Laid, it is
+  // ordinary smoke: it rises, drifts and thins.
   const SMOKE_RATE = 2.36 + 5.31 * PW.mat.advection[M.SMOKE];   // k, per second
   const SMOKE_REACH = 4;         // it goes at most this many times as far as it would in the open
   const ROOMY = 0.7, CRAMPED = 0.45;   // (share of open-air room a ring of it had: see stepSmokeBursts)
-  function smokeBurst(world, cx, cy, r, power, random) {
+  function smokeBurst(world, cx, cy, r, power, random, open = 0) {
     const { mat, width: W, height: H } = world;
     // (the tongues: a few directions in which it carries further)
     const lobes = [];
@@ -257,9 +400,11 @@
       if (x > 0 && y > 0 && x < W - 1 && y < H - 1 && PW.mat.open[mat[y * W + x] & ID_MASK]) { start = y * W + x; break; }
     }
     if (start < 0) return;
+    // (out in the open, its billows carry it: the gas goes only where it is shut in, and is not
+    // looked for far beyond the billows' reach)
     (world.smokeBursts || (world.smokeBursts = [])).push({ cx, cy, reach, seed: PW.hash2(cx | 0, cy | 0),
-      volume: Math.PI * radius * radius * 2.4, used: 0, age: 0, maxD: radius * SMOKE_REACH,
-      buckets: [[start]], dist: new Map([[start, 0]]), b: 0 });
+      volume: Math.PI * radius * radius * 1.6 * (1 - 0.7 * open), used: 0, age: 0, maxD: radius * (open > 0.5 ? 1.6 : SMOKE_REACH),
+      billows: open >= 0.35, buckets: [[start]], dist: new Map([[start, 0]]), b: 0 });
   }
   // Let out as much of each blast's smoke as is due by now: the next rings of open cells out from
   // it (a ring: the cells the same distance out along the ways open to it), each laid when it is
@@ -297,7 +442,8 @@
         const room = Math.min(1, ring.length / Math.max(6, 2 * Math.PI * s.b));
         for (const i of ring) {
           const h = PW.hash2(i, s.seed);
-          if (room > ROOMY && (h & 1023) < 154) continue;          // (in the open: patchy)
+          // (in the open: the billows' - anywhere it is not shut in - or, with none, patchy)
+          if (s.billows ? room >= CRAMPED : room > ROOMY && (h & 1023) < 154) continue;
           const density = room < CRAMPED ? 3 : 2 + ((h >>> 10) & 1);
           const m = mat[i], id = m & ID_MASK;
           if (id === M.AIR) PW.set(world, i % W, (i / W) | 0, M.SMOKE | density << 6, { quiet: true });
@@ -315,9 +461,21 @@
   // a `width` wide patch (the first open cells above it), dying down as it goes. It does not pour
   // out of one spot in a steady jet: it comes in puffs that swell and slacken, from all over a patch
   // that spreads as the rubble smoulders on, thinner as it dies down, and it tails off softly.
-  function addSmoulder(world, x, y, seconds, width) {
+  // (`puffs`: in the open it sends up wisps of billowing smoke rather than gas - a blast's crater)
+  function addSmoulder(world, x, y, seconds, width, options = {}) {
     (world.smoulders || (world.smoulders = [])).push({ x, y, width: Math.max(4, width), life: seconds, left: seconds, n: 0, age: 0,
-      seed: (PW.hash2(x | 0, y | 0) & 1023) / 163 });
+      seed: (PW.hash2(x | 0, y | 0) & 1023) / 163, puffs: !!options.puffs, cloud: null, next: 0 });
+  }
+  // (a wisp of smoke curling up off smouldering ground in the open: a little clump of smoke pixels)
+  function wisp(world, s, f) {
+    const particles = world.particles;
+    if (!particles || particles.count > particles.capacity * 0.8) return;
+    s.n += 1;
+    const h = PW.hash3(s.x | 0, s.n, 3), x = s.x + ((h & 1023) / 1023 - 0.5) * s.width;
+    const y = Math.min(s.y, world.groundTop[Math.max(0, Math.min(world.width - 1, x | 0))] - 2);
+    const random = s.random || (s.random = PW.createRandom(h || 1));
+    billow(particles, random, x, y, ((h >>> 14) & 15) - 7.5, -10 - ((h >>> 18) & 15), 2 + ((h >>> 10) & 7) * 0.4, 0.5, 6,
+      PW.PARTICLE.SMOKE, 2 + f * 2.5, SOOT_TONES, 0.4 + 0.3 * f);
   }
   function stepSmoulders(world, dt) {
     const list = world.smoulders;
@@ -328,8 +486,13 @@
       s.left -= dt; s.age += dt;
       if (s.left <= 0) { list.splice(k, 1); continue; }
       const f = s.left / s.life;
-      const puff = 0.5 + 0.5 * Math.sin(s.age * 2.1 + s.seed) * Math.sin(s.age * 0.83 + s.seed * 1.7);
-      const rate = Math.pow(f, 1.5) * (2 + s.width / 6) * Math.max(0.08, puff);   // smoke cells per tick
+      const swell = 0.5 + 0.5 * Math.sin(s.age * 2.1 + s.seed) * Math.sin(s.age * 0.83 + s.seed * 1.7);
+      // (in the open, as wisps: one now and then, more often while it smoulders hard)
+      if (s.puffs && s.y - 2 <= world.groundTop[Math.max(0, Math.min(W - 1, s.x | 0))] + 4) {
+        if ((s.next -= dt) <= 0) { wisp(world, s, f); s.next = 0.12 + (1 - f) * 0.35 + (1 - swell) * 0.25; }
+        continue;
+      }
+      const rate = Math.pow(f, 1.5) * (2 + s.width / 6) * Math.max(0.08, swell);   // smoke cells per tick
       let n = Math.floor(rate) + ((PW.hash3(s.x | 0, s.n, 11) & 1023) / 1023 < rate % 1 ? 1 : 0);
       const spread = s.width * (1 + (1 - f) * 0.9);
       while (n-- > 0) {
