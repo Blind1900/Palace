@@ -613,13 +613,20 @@
       const path = freshPath(line, Math.max(0, k - 2), Math.min(line.ys.length - 1, k + 2));
       const ny = path.ys[k - path.a];
       const old = line.ys[k];
-      if (Math.abs(ny - old) > 1 && !line.risers.some((rr) => Math.abs(line.x0 + k - rr.x) <= 4)) {
+      // A riser standing here (a pump's, a hopper's) never pins the run (N25F): the level
+      // moves wherever the fresh path goes, the old level is taken up even beside the riser,
+      // and the riser simply re-joins the run below - its vertical laid again down to the new
+      // level. Only the riser's own fresh vertical bore is spared from the take-up.
+      const rr = Math.abs(ny - old) > 1 ? line.risers.find((q) => Math.abs(line.x0 + k - q.x) <= 4) : null;
+      const rY0 = rr ? Math.min(rr.anchorY, ny) : 0, rY1 = rr ? Math.max(rr.anchorY, ny + BORE - 1) : 0;
+      if (Math.abs(ny - old) > 1) {
         // Take up what is left of the old run in this column - the WHOLE span between the old
         // level and the new one (a freshly read path can move the line by storeys; nothing of
         // the abandoned level may stay behind), plus a margin for casing the blast let lie.
         const lo = Math.min(ny, old) - 8, hi = Math.max(ny, old) + BORE + 8;
         for (let y = Math.max(1, lo), x = line.x0 + k; y <= Math.min(H - 2, hi); y += 1) {
           if (y >= ny - 1 && y <= ny + BORE) continue;   // the new bore and its lip stay
+          if (rr && Math.abs(x - rr.x) <= 3 && y >= rY0 - 1 && y <= rY1 + 1) continue;
           if ((mat[y * W + x] & ID_MASK) === M.PIPE && PW.getOwner(world, x, y) === line.owner) {
             PW.set(world, x, y, M.FILL, { quiet: true });
             PW.setFlag(world, x, y, FLAG.HOLLOW, false);
@@ -632,6 +639,10 @@
       line.ys[k] = ny;
       layColumn(line, line.x0 + k);
       layWells(line, Math.max(1, k - 1), Math.min(line.ys.length - 1, k + 1));
+      if (rr) {
+        const fresh = layRiser(line, { x: rr.x, y: rr.anchorY, flow: rr.flow, kind: rr.kind, resource: rr.resource, building: rr.building, op: rr.op });
+        Object.assign(rr, { y0: fresh.y0, y1: fresh.y1, occ: fresh.occ });
+      }
       // The growing end is the pipe stamping its own cross-section outward (N14F/N16F - the
       // user kept the glitch as the feature): a vertical segment of the same bore design at
       // the tip, each step's stamp left standing behind the last, so the reaching end trails
@@ -653,12 +664,14 @@
       if (intactAt(line, line.x0 + k)) {
         clearBroken(line, k);
         // The wreck of the old run in this column is taken up as the end closes over it - a
-        // wide sweep for casing the blast let come to rest anywhere nearby (wells excepted).
+        // wide sweep for casing the blast let come to rest anywhere nearby (wells and the
+        // risers' own verticals excepted).
         for (let r = -26, x = line.x0 + k; r <= BORE + 34; r += 1) {
           if (r >= -1 && r <= BORE) continue;
           const y = ny + r;
           if (y < 1 || y >= H - 1) continue;
           if ((line.wells || []).some((w) => Math.abs(x - w.x) <= 3 && y >= w.y0 && y <= w.y1)) continue;
+          if (line.risers.some((q) => Math.abs(x - q.x) <= 3 && y >= q.y0 - 1 && y <= q.y1 + 1)) continue;
           if ((mat[y * W + x] & ID_MASK) === M.PIPE && PW.getOwner(world, x, y) === line.owner) {
             PW.set(world, x, y, M.FILL, { quiet: true });
             PW.setFlag(world, x, y, FLAG.HOLLOW, false);
@@ -676,7 +689,6 @@
     function sweepAround(line, kA, kB = kA) {
       for (let k = Math.max(0, kA - 44); k <= Math.min(line.ys.length - 1, kB + 44); k += 1) {
         const x = line.x0 + k, y0 = line.ys[k];
-        if (line.risers.some((rr) => Math.abs(x - rr.x) <= 4)) continue;   // a riser is the line's own
         // (the band reaches well above and below: a path re-read mid-growth can wander by
         // storeys, and everything of the line's own left off the final route is garbage)
         for (let r = -70; r <= BORE + 44; r += 1) {
@@ -684,6 +696,9 @@
           const y = y0 + r;
           if (y < 1 || y >= H - 1) continue;
           if ((line.wells || []).some((w) => Math.abs(x - w.x) <= 3 && y >= w.y0 && y <= w.y1)) continue;
+          // (a riser's fresh vertical is the line's own and stays; old casing in its columns
+          // but outside it is wreckage like any other - a pump must not shelter a snarl)
+          if (line.risers.some((q) => Math.abs(x - q.x) <= 3 && y >= q.y0 - 1 && y <= q.y1 + 1)) continue;
           if ((mat[y * W + x] & ID_MASK) === M.PIPE && PW.getOwner(world, x, y) === line.owner) {
             PW.set(world, x, y, M.FILL, { quiet: true });
             PW.setFlag(world, x, y, FLAG.HOLLOW, false);
