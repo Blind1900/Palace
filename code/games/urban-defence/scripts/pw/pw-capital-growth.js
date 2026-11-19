@@ -20,6 +20,8 @@
   const FARM_BRIDGE_MAX = 72;    // ...and only this narrow (a lesser bridge)
   const CAPITAL_BRIDGE_MAX = 1400;
   const GAP0 = 12, GAP_RING = 9, TIGHTEN = 3, GAP_MIN = 7;   // N43: ring gaps and their tightening
+  const APPEND_EVERY = 110;      // growth-seconds before a side's edge creeps out another ring
+  const AGE_PER_LEVEL = 140;     // N48: a building levels up as it stands - one level per this much age
   const CLAIM = 46;              // land a city claims beyond its built edge (where merges happen)
   const RIPEN = 1 / 260;         // crop growth per growth-second: a field ripens in ~4 lab minutes
 
@@ -237,6 +239,7 @@
       const other = claimed(x - 60, x + 60, null);
       if (other) return { ok: false, note: `claimed by ${other.kind} ${other.id}` };
       const city = { id: cities.length + 1, kind, style, x, level: 1, clock: 0, actions: 0,
+        appendClock: { left: APPEND_EVERY, right: APPEND_EVERY },   // the first rings come at once
         rings: { left: [], right: [] }, edge: { left: x, right: x }, capEdge: { left: x, right: x },
         blocked: { left: null, right: null }, fields: [], fieldEdge: { left: x, right: x },
         bridges: [], merged: new Set(), notes: [] };
@@ -266,7 +269,7 @@
       const ring = city.rings[side].length;
       // The spread outruns its upkeep: no more rings than the city's level affords (N44 size).
       if (ring >= city.level + 3) { if (!city.blocked[side]) city.blocked[side] = 'upkeep'; return false; }
-      const lot = { type: 'population', level: 1, ring, side, bornLevel: city.level,
+      const lot = { type: 'population', level: 1, age: 0, ring, side, bornLevel: city.level,
         variant: POP_LOT_VARIANTS[rand.int(0, POP_LOT_VARIANTS.length - 1)], seedN: seedN += 17, owner: 0 };
       const canvas = canvasFor(city, lot);
       const w = bodyWidth(canvas);
@@ -358,26 +361,29 @@
       return edge;
     }
 
-    // N45: the skyline falls off from the centre - a lot may rise only as high as the city's
-    // level, less its ring. Level-ups go to the innermost lot still under its cap. A taller
-    // tower is wider too: it keeps its tightened inner gap (N43), and it and every lot outward
-    // of it re-seat, the chain shuffling out by the width gained - the centre stays packed
-    // while the towers rise.
-    function tryUpgrade(city) {
-      const all = [...city.rings.left, ...city.rings.right].sort((a, b) => a.ring - b.ring);
-      for (const lot of all) {
+    // N48: levels rise with age. A building starts at level 1 when the edge reaches it and
+    // levels up as it stands, so the innermost are the highest for having stood longest, and
+    // the rise rolls outward with time - the N45 skyline is the age gradient made visible.
+    // (A lot never outlevels its city.) A taller tower is wider too: it keeps its tightened
+    // inner gap (N43), and it and every lot outward of it re-seat, the chain shuffling out by
+    // the width gained - the centre stays packed while the towers rise. One building comes of
+    // age per tick, oldest first.
+    function ageLots(city) {
+      for (const lot of [...city.rings.left, ...city.rings.right].sort((a, b) => a.ring - b.ring)) {
         if (lot.type !== 'population') continue;
-        const cap = Math.max(1, city.level - lot.ring);
-        if (lot.level >= cap) continue;
+        const target = Math.min(MAX_LEVEL, city.level, 1 + Math.floor(lot.age / AGE_PER_LEVEL));
+        if (target <= lot.level) continue;
         lot.level += 1;
         lot.canvas = canvasFor(city, lot);
         seatChain(city, lot.side, lot.ring);
         if (!lot.placed) {
           lot.level -= 1; lot.canvas = null;
           seatChain(city, lot.side, Math.min(lot.ring, city.rings[lot.side].length));
-          dbg.push(`upgrade-lost ${lot.side}`);
+          dbg.push(`age-lost ${lot.side}`);
           if (dbg.length > 40) dbg.shift();
+          return false;
         }
+        note(city, `ring ${lot.ring} comes of age: level ${lot.level}`);
         return true;
       }
       return false;
@@ -496,13 +502,13 @@
       if (city.kind === 'capital') {
         const lots = city.rings.left.length + city.rings.right.length;
         if (lots >= city.level * 2 && city.level < MAX_LEVEL) return levelUp(city);
+        // The edge creeps out on its own slow clock; the towers level by age, not here (N48).
         const sides = city.rings.left.length <= city.rings.right.length ? ['left', 'right'] : ['right', 'left'];
-        if (city.actions % 2 === 0) {
-          for (const s of sides) if (tryAppend(city, s)) return true;
-          return tryUpgrade(city);
+        for (const s of sides) {
+          if (city.appendClock[s] < APPEND_EVERY) continue;
+          if (tryAppend(city, s)) { city.appendClock[s] = 0; return true; }
+          city.appendClock[s] = APPEND_EVERY * 0.6;   // blocked: look again a little later
         }
-        if (tryUpgrade(city)) return true;
-        for (const s of sides) if (tryAppend(city, s)) return true;
         return false;
       }
       if (city.kind === 'farm') {
@@ -538,12 +544,17 @@
             if (stage !== field.stage) { field.stage = stage; ST.drawCrop(world, field); }
           }
         }
+        if (city.kind === 'capital') {
+          city.appendClock.left += dt; city.appendClock.right += dt;
+          for (const side of ['left', 'right']) for (const l of city.rings[side]) l.age += dt;
+        }
         city.clock += dt;
         while (city.clock >= GROW_EVERY && heavy < 3) {
           city.clock -= GROW_EVERY;
           if (act(city)) heavy += 1;
         }
         if (city.clock > GROW_EVERY * 4) city.clock = GROW_EVERY * 4;
+        if (city.kind === 'capital' && heavy < 3 && ageLots(city)) heavy += 1;
       }
       for (let i = flashes.length - 1; i >= 0; i -= 1) { flashes[i].age += 1 / 60; if (flashes[i].age > 0.9) flashes.splice(i, 1); }
     }
