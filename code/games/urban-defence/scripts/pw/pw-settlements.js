@@ -678,6 +678,25 @@
       for (const [dx, dy] of [[0, 0], [1, 0], [0, 1], [1, 1]]) PW.setLayer(world, 'back', mx + dx, my + dy, rgb([238, 242, 246]));
     }
   }
+  // N36/N31, from the mine cross-section references: levels connect by INCLINED galleries
+  // with stairs, not only ladders. A stepped decline - two rows down per three columns, about
+  // 34 degrees - dug as overlapping boxes so the development wave flows along it, timber
+  // treads on its floor, climbable like a ladder. Returns the x where it reaches toY.
+  function digIncline(world, net, fromX, fromY, toY, dir) {
+    const CLEAR = 14;
+    let x = fromX, y = fromY;
+    while (y < toY) {
+      const step = Math.min(2, toY - y);
+      PW.tunnels.digBox(world, net, Math.min(x, x + dir * 4), y - CLEAR, Math.max(x, x + dir * 4), y + step, { kind: 'incline', keepOre: true });
+      for (let d = 0; d <= 3; d += 1) {
+        const tx = x + dir * d, ty = y + step;
+        PW.setLayer(world, 'back', tx, ty, rgb(d === 0 ? [112, 86, 54] : [96, 74, 48]));
+        PW.setFlag(world, tx, ty, FLAG.LADDER);
+      }
+      x += dir * 3; y += step;
+    }
+    return x;
+  }
   function mineWorkings(world, layout, from, side, random) {
     if (!from || !from.network || !PW.tunnels) return;
     const net = PW.tunnels.state(world).networks[from.network - 1];
@@ -810,17 +829,19 @@
       const dug = digLeg(wayX, wayY, face - dir, 40, 'drift');
       if (dug && PW.mining) PW.mining.afterDig(world, net, { x0: dug[0], y0: wayY - 39, x1: dug[1], y1: wayY });
       target.worked = (target.worked || 0) + 1;
-      // N36: in time, a deeper working level opens under the face drift - a shaft with its
-      // ladder, a narrow drift along the new level, the way the cross-sections grow downward.
+      // N36: in time, a deeper working level opens under the face drift - reached by an
+      // INCLINED stair gallery (the cross-section references: levels connect by declines,
+      // not only ladders), a narrow drift running along the new level from its foot.
       if (dug) {
         const [bx2, by2, bd] = [Math.round((dug[0] + dug[1]) / 2), wayY, dir];
         plans.push({ at: planAt + 85 + ((bx2 % 7) * 6), fn: () => {
           const yA = by2 - 2, yB = by2 + 54;
-          const clips = (world.props || []).some((p) => !(p.x1 < bx2 - 16 || p.x0 > bx2 + 16 || p.y1 < yA - 4 || p.y0 > yB + 2));
+          const dxTotal = Math.ceil((yB - by2) / 2) * 3 + 6;
+          const ix0 = Math.min(bx2, bx2 + bd * dxTotal), ix1 = Math.max(bx2, bx2 + bd * dxTotal);
+          const clips = (world.props || []).some((p) => !(p.x1 < ix0 - 4 || p.x0 > ix1 + 4 || p.y1 < yA - 4 || p.y0 > yB + 2));
           if (clips) return;
-          PW.tunnels.digBox(world, net, bx2 - 12, yA, bx2 + 12, yB, { kind: 'shaft', keepOre: true });
-          ladder(world, bx2 - 6, yA, yB - 1);
-          digLeg(bx2 - bd * 10, yB, bx2 + bd * 170, 28, 'drift');
+          const footX = digIncline(world, net, bx2, by2, yB, bd);
+          digLeg(footX - bd * 6, yB, footX + bd * 170, 28, 'drift');
         } });
       }
     }
