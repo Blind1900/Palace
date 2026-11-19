@@ -23,6 +23,10 @@
   // each heat tick.)
   const QUENCH = 0.4;
   const HOLLOW = FLAG.HOLLOW || 0;
+  // (the metals that melt, at MELT °C: steel beams and plate, bridge steel, metal cover)
+  const MELT = 1350;
+  const MELTS = new Uint8Array(64);
+  for (const id of [M.STEEL, M.BRIDGE, M.COVER_METAL]) if (id !== undefined) MELTS[id] = 1;
   const quench = (a, b) => (a === M.WATER) !== (b === M.WATER) && !open[a === M.WATER ? b : a];
   const RISE = 0.3;                 // share of hot air's excess carried up per heat tick
   const SMOKE_CHANCE = 0.3;         // per burning cell per heat tick
@@ -341,6 +345,17 @@
           PW.setHeat(world, x, y, t - LATENT);
           stats.boiled += 1;
         }
+        return;
+      }
+      // Metal is the one solid that gives way to heat: hot enough to melt, a cell of steel slumps -
+      // it runs as a heavy, glowing metal slag that piles and spreads where it falls, keeping its
+      // heat, and sets where it cools (see MELTS).
+      if (MELTS[id] && t >= MELT) {
+        const owner = PW.getOwner(world, x, y);
+        PW.set(world, x, y, M.DEBRIS | PW.DEBRIS_KIND.METAL << 6);
+        PW.setHeat(world, x, y, t);
+        stats.melted = (stats.melted || 0) + 1;
+        if (owner > 0 && owner < 50000 && world.onDamage) world.onDamage(owner, 1, x, y);
         return;
       }
       if (t >= SCORCH && terrain[id] && !(PW.getFlags(world, x, y) & FLAG.SCORCH) && hasAir(i, x, y)) {

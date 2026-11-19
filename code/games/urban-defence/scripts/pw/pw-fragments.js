@@ -22,6 +22,7 @@
   // A piece (or a chunk of one) at least RUIN_MIN cells big comes to rest whole where it lands -
   // tilted, misplaced, cracked at its edges - as a ruin, part of the ground.
   const RUIN_MIN = 60;
+  const RUIN_CRACK = 2500;    // a building's piece of more frame than this comes to rest cracked into several
   const FLORA_MIN = 14;       // a piece of a plant with less wood than this comes apart as it falls
   // A building is mostly air. Its weight and strength are in its frame - pillars, floors, outer
   // walls; a cell of back wall (marked THIN in a piece) is a light panel behind its rooms: it goes
@@ -807,6 +808,15 @@
     function finish(p) {
       const [c, s] = cosSin(p);
       if (p.flora) { if (PW.flora) PW.flora.land(world, particles, place(p, p.data, c, s), p); stats.landedPlants = (stats.landedPlants || 0) + 1; return; }
+      // (a great piece of a building does not come to rest whole: its own weight coming down has
+      // cracked it through, and it lies as several ruins, broken along jagged lines)
+      if (!p.flora && (p.owner || p.from) && p.mass >= RUIN_CRACK && p.generation < MAX_CRACKS && list.length < MAX_PIECES - 8) {
+        const ks = [];
+        for (let k = 0; k < p.data.x.length; k += 1) if (p.data.solid[k] || p.data.color[k]) ks.push(k);
+        breakUp(p, ks, Math.max(40, Math.min(90, Math.sqrt(p.mass) / 1.6)), 0.2);
+        stats.restCracked = (stats.restCracked || 0) + 1;
+        return;
+      }
       if (p.mass >= RUIN_MIN && (p.owner || p.from)) ruin(p, c, s);
       else settle(p.data, 0, 0, p);
     }

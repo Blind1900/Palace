@@ -11,6 +11,12 @@
   const PW = window.PW;
   const { M, ID_MASK } = PW;
   const { phase, terrain, breaksTo, cohesion, open } = PW.mat;
+  // Solid made things - a building's frame and foundations, a core, a pipe, a tunnel's lining, a
+  // ruin lying where it fell - and bedrock: never sheared with the ground as it sags (see sinkOne).
+  const RIGID = new Uint8Array(64);
+  for (let id = 0; id < 64; id += 1) if (PW.mat.structural[id]) RIGID[id] = 1;
+  for (const id of [M.PIPE, M.REINFORCED, M.LINING, M.SLAB, M.COURSE, M.CORE, M.RUIN, M.BEDROCK, M.FOUNDATION,
+    M.COVER_ROCK, M.COVER_WOOD, M.COVER_METAL, M.COVER_SAND]) if (id !== undefined) RIGID[id] = 1;
 
   const SETTLE = 8;          // ticks after a disturbance before the ground there is looked at
   const AGAIN = 20;          // and again this long after, while the slide goes on
@@ -505,7 +511,15 @@
           if (s.done[k] < s.target[k]) behind = true;
         }
         for (const r of s.plants) carryPlant(s, r);
-        if (s.owners.length && world.onDamage && (Math.floor(s.age * 2) !== Math.floor((s.age - dt) * 2) || (u >= 1 && !behind))) for (const id of s.owners) world.onDamage(id, 0);
+        // (twice a second, and once it is done: what stands on the sinking ground looks again at
+        // what still holds it - a building, a prop or a rock, a lamp - and stands, or comes down
+        // whole and breaks)
+        if (Math.floor(s.age * 2) !== Math.floor((s.age - dt) * 2) || (u >= 1 && !behind)) {
+          if (s.owners.length && world.onDamage) for (const id of s.owners) world.onDamage(id, 0);
+          const box = { x0: s.x0, y0: s.slip - 300, x1: s.x1, y1: s.yBottom };
+          if (PW.props) PW.props.afterBlast(world, particles, box);
+          if (PW.streetProps) PW.streetProps.afterBlast(world, particles, box, null);
+        }
         if (u < 1 || behind) continue;
         // Sunk as far as it goes: the rest of the hollow is the broken rock's, bulked up.
         if (!fillIn(s)) continue;
@@ -516,22 +530,40 @@
         disturb(s.x0, s.slip - 200, s.x1, s.yBottom, { noTopple: true });
       }
     }
-    // Sink column x of sag s by a cell: everything in it from its top down sinks into the hollow
-    // under it, or - beside the hollow - presses the ground at the hollow's level out sideways into
-    // it. The cells moved; -1 when it cannot sink (nothing of the hollow left to take it).
+    // Sink column x of sag s by a cell: the ground in it sinks into the hollow under it, or -
+    // beside the hollow - presses the ground at the hollow's level out sideways into it. Only the
+    // ground: earth, rock, loose stuff and what lies in it. Anything solid that was made - a
+    // building and its foundations, a core, a pipe, a lining, a ruin, a prop - is a shape of its
+    // own: it is never sheared column by column with the ground. The ground under it sinks away
+    // and it is left over the gap, to stand on what still holds it, or come down whole and break
+    // (see the structure system, the props, the cores). The cells moved; -1 when it cannot sink
+    // (nothing of the hollow left to take it, or something solid right over it).
+    const sinksWith = (x, y, id) => {
+      if (RIGID[id]) return false;
+      const o = PW.getOwner(world, x, y);
+      if (o > 0 && o < 50000) return false;
+      return terrain[id] || phase[id] <= PW.PHASE.POWDER;
+    };
     function sinkOne(s, x) {
-      // (its top: the highest thing standing in it - the ground, a building, its walls, a fitting)
-      let top = world.groundTop[x];
-      for (let y = top - 1, empty = 0; y > 1 && empty < 16; y -= 1) {
-        const busy = (mat[y * W + x] & ID_MASK) !== M.AIR || PW.getLayer(world, 'back', x, y)
-          || (PW.getLayer(world, 'deco', x, y) && !(PW.getFlags(world, x, y) & PW.FLAG.FLORA));
-        if (busy) { top = y; empty = 0; } else empty += 1;
-      }
       let bottom = -1;
       for (let y = world.groundTop[x]; y <= s.yBottom; y += 1) if (s.hollow.has(y * W + x) && open[mat[y * W + x] & ID_MASK]) { bottom = y; break; }
-      if (bottom < 0) {
-        // (beside the hollow: the ground at its level is pressed out into it)
+      const beside = bottom < 0;
+      // (beside the hollow: the ground at its level is pressed out into it)
+      if (beside) {
         bottom = Math.max(world.groundTop[x] + 2, s.slip);
+        if (!sinksWith(x, bottom, mat[bottom * W + x] & ID_MASK)) return -1;
+      }
+      // (its top: up from there through the ground - and any heap lying on it - to the open air
+      // over it, or to the first solid made thing in the way, which stays where it is)
+      let top = bottom;
+      for (let y = bottom - 1; y > 1; y -= 1) {
+        const id = mat[y * W + x] & ID_MASK;
+        if (y < world.groundTop[x] && (id === M.AIR || phase[id] < PW.PHASE.POWDER)) break;   // (the open air over the ground)
+        if (!sinksWith(x, y, id)) break;
+        top = y;
+      }
+      if (top >= bottom) return -1;
+      if (beside) {
         let into = -1;
         while (s.filled < s.fill.length && into < 0) { const i = s.fill[s.filled++]; if (s.hollow.has(i) && open[mat[i] & ID_MASK]) into = i; }
         if (into < 0) return -1;

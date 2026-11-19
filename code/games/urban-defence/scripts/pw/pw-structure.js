@@ -449,7 +449,11 @@
       }
     }
     // The building gives way at row fail.y: a jagged band crumbles and everything above it falls as
-    // one piece - hinging towards the failed side, or dropping into its footprint.
+    // one piece, free - nothing swings it about a hinge. Coming straight down into its footprint
+    // it sinks into it storey by storey; come down on the stump of one side only (the side that
+    // lost its supports gone from under it), that is where it strikes, and the blow turns it over
+    // that way; and wherever it strikes it folds up and breaks apart as its frame lets it (see
+    // pw-fragments' strike, crumple and breaks).
     function collapse(b, fail, S, state) {
       const { at } = S;
       const yf = fail.y;
@@ -467,8 +471,8 @@
       if (piece.length < CRUMBLE_ONLY) { crumble(piece.concat(band)); fail.cells = piece.length + band.length; return; }
       crumble(band);
       for (const i of band) if ((PW.hash2(i, 3) & 7) === 0) fragments.puff(i % W, ((i / W) | 0) - 1, 2, 4, 2);
-      if (fail.reason === 'pancake') fragments.spawn({ cells: piece, owner: b.id, drop: true, floor: yf, base: b.ground, dir: fail.dir, omega: fail.dir * 0.01 });
-      else fragments.spawn({ cells: piece, owner: b.id, pivot: { x: fail.pivotX, y: yf }, base: b.ground, dir: fail.dir, omega: fail.dir * 0.05 });
+      if (fail.reason === 'pancake') fragments.spawn({ cells: piece, owner: b.id, drop: true, floor: yf, base: b.ground, dir: fail.dir });
+      else fragments.spawn({ cells: piece, owner: b.id, floor: yf, base: b.ground, dir: fail.dir });
       fail.cells = piece.length + band.length;
       b.collapses = (b.collapses || 0) + 1;
       (b.failures || (b.failures = [])).push(fail.reason);
