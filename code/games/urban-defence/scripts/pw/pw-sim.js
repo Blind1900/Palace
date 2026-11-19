@@ -171,6 +171,77 @@
       world.emitBubble(x, y);
     }
 
+    // ---- Water against what is in its way ----------------------------------------------------------
+    // Moving water pushes on what it meets, as a flood does. What stands in the open where it runs -
+    // a building's fittings, street furniture, plants - is knocked out of its way: a plant is struck
+    // (its wood snaps if the push is enough for it, its leaves and the grass are stripped and float
+    // off), a fitting or a prop is knocked loose and carried off (a prop then topples whole, see
+    // PW.streetProps). A structure it drives against - a building's walls, floors, glass, timber -
+    // gives way where the push is more than its stuff can take, as under a flying lump (pw-particles'
+    // chip): the cell breaks and is thrown on with the water, its building is told (it may come
+    // down), and the water runs on into the gap. The ground does not wash away, nor do the pipes
+    // (terrain: N38F) or the god's metal. The push is the water's speed: v = sqrt(2 g h) for water
+    // forced out under a head of h cells; a front running free, about 4 m/s.
+    const RUN_SPEED = 60;            // cells/s: a sliding front, a surge
+    const GIVES = 0.15;              // chance a tick that a push enough for it breaks a structure cell
+    const WOOD_PUSH = 120;           // cells/s: a flow slower than this does not strike a plant's wood
+    const { hardness: HARDNESS, breaksTo: BREAKS_TO, terrain: TERRAIN } = PW.mat;
+    const FLORA = PW.FLAG.FLORA, WOOD_FLAG = PW.FLAG.WOOD, CHARRED = PW.FLAG.CHARRED;
+    const breakable = (id) => structural[id] && !TERRAIN[id] && id !== M.PIPE && id !== M.CORE && phase[id] === PHASE.SOLID;
+    function pushOn(j, x, y, d, v) {
+      const id = mat[j] & ID_MASK;
+      if (!breakable(id) || rnd(x, y) >= GIVES) return false;
+      // (as a flying lump's blow, against the stuff's hardness)
+      if (v / 400 < HARDNESS[id] * (0.6 + (PW.hash2(x, y) & 255) / 640) || PW.growing(world, x, y)) return false;
+      const owner = PW.getOwner(world, x, y), paint = PW.getLayer(world, 'paint', x, y);
+      PW.set(world, x, y, M.AIR);
+      const particles = world.particles;
+      if (particles) particles.spawn(x + 0.5, y + 0.5, d * v * 0.5, -10 - (PW.hash3(x, y, world.tick) & 15), BREAKS_TO[id] || M.DEBRIS, paint, PW.PARTICLE.LAND, 6, owner);
+      if (owner > 0 && owner < 50000) {
+        if (particles && particles.listeners.chip) particles.listeners.chip(owner, x, y);
+        else if (world.onDamage) world.onDamage(owner, 1, x, y);
+        if (PW.noteHit) PW.noteHit(owner, v);
+      }
+      stats.waterBroke = (stats.waterBroke || 0) + 1;
+      return true;
+    }
+    // (the cells along a run of water's move - (x + d .. x + d * go, y) - swept of what stands in them)
+    function sweep(x, y, d, go, v) {
+      const cy = y >> CHUNK_SHIFT;
+      for (let s = 1; s <= go; s += 1) {
+        const nx = x + d * s, decos = world.deco[cy * chunksX + (nx >> CHUNK_SHIFT)];
+        if (!decos) continue;
+        const l = (y & CHUNK_MASK) << CHUNK_SHIFT | nx & CHUNK_MASK, color = decos[l];
+        if (color) knock(nx, y, d, v, color);
+      }
+    }
+    function knock(x, y, d, v, color) {
+      const particles = world.particles, F = PW.PARTICLE, f = PW.getFlags(world, x, y);
+      if (f & FLORA) {
+        // (wood: struck by a strong flow - it snaps where the push is enough for it, else it stands -
+        // and stood up to by a weak one; leaves and grass stripped off, floating away)
+        if (f & (WOOD_FLAG | CHARRED)) { if (v >= WOOD_PUSH && PW.flora && PW.flora.strike) PW.flora.strike(world, particles, x, y, v / 200, d, 0); return; }
+        PW.setLayer(world, 'deco', x, y, 0);
+        PW.setFlag(world, x, y, FLORA, false);
+        if (particles && (PW.hash2(x, y) & 1)) particles.spawn(x + 0.5, y + 0.5, d * v * 0.3, -4, 0, color, F.LEAF, 2);
+        return;
+      }
+      // (a fitting or a prop: knocked loose, carried off - timber floats; what is left of a prop is
+      // looked at, and topples whole if it no longer stands)
+      const owner = PW.getOwner(world, x, y);
+      PW.setLayer(world, 'deco', x, y, 0);
+      if (particles && (PW.hash2(x, y) % 3) === 0) particles.spawn(x + 0.5, y + 0.5, d * v * 0.4, -6, M.DEBRIS | (owner ? PW.DEBRIS_KIND.WOOD : PW.DEBRIS_KIND.METAL) << 6, color, F.LAND, 6);
+      if (PW.streetProps) PW.streetProps.struck(world, x, y);
+      if (owner > 0 && owner < 50000 && world.onDamage) world.onDamage(owner, 0, x, y);
+      stats.waterSwept = (stats.waterSwept || 0) + 1;
+    }
+    // (the head of water standing over a cell, up to 128)
+    function headOver(i, y) {
+      let h = 0, j = i - W;
+      while (h < 128 && y - h > 0 && isWater(mat[j])) { h += 1; j -= W; }
+      return h;
+    }
+
     // Water momentum lives in the cell's two variant bits: bit 7 = sliding, bit 6 = direction (+x).
     // Falling water lands sliding; it keeps going until something blocks it, then stops for good.
     const MOVING = 0x80, RIGHT = 0x40;
@@ -187,6 +258,8 @@
         if (isAir(mat[ahead + W])) break;            // ran off an edge: fall from here next tick
       }
       if (go === 0) {
+        // (running into a structure: it pushes on it - see pushOn - and runs into the gap next)
+        if (x + d > 0 && x + d < W - 1 && !isWater(mat[i + d]) && pushOn(i + d, x + d, y, d, RUN_SPEED)) return true;
         // Running into standing water, the push carries through it (like a surge): the cell
         // passes to the far end of the water along its row, if that end is open and within
         // reach, and the front advances there. A wall or a long run spends the momentum.
@@ -194,12 +267,14 @@
         while (k <= PUSH_REACH && isWater(mat[i + d * k])) k += 1;
         const end = i + d * k, ex = x + d * k;
         if (k > 1 && k <= PUSH_REACH && ex > 0 && ex < W - 1 && isAir(mat[end]) && !isAir(mat[end + W])) {
+          sweep(ex - d, y, d, 1, RUN_SPEED);
           move(i, x, y, end, ex, y, 'surge');
           return true;
         }
         mat[i] = M.WATER;   // blocked: momentum spent
         return false;
       }
+      sweep(x, y, d, go, RUN_SPEED);
       move(i, x, y, i + d * go, x + d * go, y, 'slide');
       return true;
     }
@@ -230,7 +305,12 @@
       if (pressed || ceiling) {
         for (let k = 0; k < 2; k += 1) {
           const d = k ? -dir : dir;
-          if (x + d < 1 || x + d >= W - 1 || !isAir(mat[i + d])) continue;
+          if (x + d < 1 || x + d >= W - 1) continue;
+          if (!isAir(mat[i + d])) {
+            // (a structure beside it: the water standing over it presses on it - see pushOn)
+            if (pressed && breakable(mat[i + d] & ID_MASK) && rnd(x + d, y) < GIVES && pushOn(i + d, x + d, y, d, Math.sqrt(280 * headOver(i, y)))) return true;
+            continue;
+          }
           if (ceiling && !isWater(mat[i - d])) continue;
           // Outflow under pressure (Torricelli, v = sqrt(2 g h)): with h cells of water standing
           // above the opening, up to v / 60 cells leave it per tick, each replaced at once from
@@ -241,6 +321,7 @@
             let go = 1;
             while (go < DISPERSE && x + d * (go + 1) > 0 && x + d * (go + 1) < W - 1 && isAir(mat[i + d * (go + 1)])) go += 1;
             mat[i] = M.WATER | MOVING | (d > 0 ? RIGHT : 0);
+            sweep(x, y, d, go, Math.sqrt(280 * Math.max(1, lastHead)));
             move(i, x, y, i + d * go, x + d * go, y, 'squirt');
             if (lastHead > 0) refill(i, x, y);
           }
@@ -262,6 +343,7 @@
           if (nx < 0 || nx >= W || !isAir(mat[i + d * s])) break;
           if (isAir(mat[i + d * s + W])) {
             const go = Math.min(s, DROP_STEP);
+            sweep(x, y, d, go, RUN_SPEED);
             move(i, x, y, i + d * go, x + d * go, y, 'drop');
             return true;
           }
@@ -280,6 +362,7 @@
           let go = 1;
           while (go < SPREAD && x + d * (go + 1) > 0 && x + d * (go + 1) < W - 1
             && isAir(mat[i + d * (go + 1)]) && !isAir(mat[i + d * go + W])) go += 1;
+          sweep(x, y, d, go, RUN_SPEED);
           move(i, x, y, i + d * go, x + d * go, y, 'push');
           return true;
         }

@@ -141,5 +141,33 @@ for (let s = 0; s < 75 && stability.busy(); s += 1) pwApp.stepWorld(60);
 const before = stability.stats.broken;
 pwApp.stepWorld(60 * 5);
 check(stability.stats.broken === before, `ground nobody disturbed stands (${stability.stats.broken - before} cells broke loose by themselves)`);
+
+// 4. Water pushes on what is in its way: a block of water let go beside a street lamp runs down the
+// street and knocks it over; a column of water stood against a tower's wall breaks into it, and
+// none of the water is lost.
+{
+  const sim = pwApp.sim, broke0 = sim.stats.waterBroke || 0;
+  let tried = 0, fell = 0;
+  for (const rec of (world.streetProps || []).filter((r) => r.kind === 'lamp').slice(0, 40)) {
+    if (tried >= 4) break;
+    const gx = rec.x0 - 6, g = world.groundTop[gx];
+    let placed = 0;
+    for (let x = gx - 50; x < gx; x += 1) for (let y = g - 50, top = world.groundTop[x]; y < top; y += 1) if (id(x, y) === M.AIR) { PW.set(world, x, y, M.WATER); placed += 1; }
+    if (placed < 1500) continue;
+    tried += 1;
+    pwApp.stepWorld(60 * 5);
+    if (rec.broken) fell += 1;
+  }
+  check(tried >= 3 && fell >= tried / 2, `a flood running down a street knocks over the lamps in its way (${fell} of ${tried} knocked over, ${sim.stats.waterSwept || 0} fittings, props and plants swept)`);
+  const T = world.buildings.filter((b) => b.type === 'population').sort((a, b) => (b.ground - b.body.top) - (a.ground - a.body.top))[0];
+  if (T) {
+    const water0 = pwApp.countWater();
+    for (let x = T.body.left - 70; x <= T.body.left - 2; x += 1) for (let y = T.ground - 140, top = world.groundTop[x]; y < top; y += 1) if (id(x, y) === M.AIR) PW.set(world, x, y, M.WATER);
+    const water1 = pwApp.countWater();
+    pwApp.stepWorld(60 * 6);
+    const broke = (sim.stats.waterBroke || 0) - broke0;
+    check(broke > 30 && pwApp.countWater() === water1, `water stood against a tower's wall breaks into it, and none of it is lost (${broke} structure cells broken by water; water ${water1} -> ${pwApp.countWater()}, ${water1 - water0} let go)`);
+  }
+}
 pwApp.setPaused(false);
 return { checks, shots: shots.length, holes, stability: stability.stats };
