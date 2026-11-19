@@ -468,6 +468,14 @@
         }
         const id = mat[i] & ID_MASK;
         if (id === M.BEDROCK || (options.keepOre && id === M.ORE)) continue;
+        // N37: a bore the dig crosses is not cut - its casing becomes the wall's own conduit
+        // (the pipe layer), the cell opens for the troopers, and the flow never notices:
+        // the break watch reads the layer as intact and the cargo rides the same rows.
+        if (id === M.PIPE) {
+          const keep = PW.getLayer(world, 'paint', x, y);
+          if (keep) PW.setLayer(world, 'pipe', x, y, keep);
+          PW.setFlag(world, x, y, FLAG.HOLLOW, false);
+        }
         if (id !== M.AIR) PW.set(world, x, y, M.AIR, { quiet: true });
         PW.setLayer(world, 'deco', x, y, 0);
         setL(world, 'tunnelNet', Uint16Array, x, y, net.id);

@@ -683,7 +683,7 @@
   // 34 degrees - dug as overlapping boxes so the development wave flows along it, timber
   // treads on its floor, climbable like a ladder. Returns the x where it reaches toY.
   function digIncline(world, net, fromX, fromY, toY, dir) {
-    const CLEAR = 14;
+    const CLEAR = 20;   // N37: the roof above the stairs stands higher than a drift's
     let x = fromX, y = fromY;
     while (y < toY) {
       const step = Math.min(2, toY - y);
@@ -767,7 +767,9 @@
           // that. (The shaft-first version left permanently raw islands.)
           const wkA = digLeg(Math.min(inX, stop.x), inY, Math.max(inX, stop.x), 30, 'drift');
           if (Math.abs(stop.y - inY) > 16) {
-            PW.tunnels.digBox(world, net, stop.x - 12, Math.min(inY, stop.y) - 2, stop.x + 12, Math.max(inY, stop.y), { kind: 'shaft', keepOre: true });
+            const sy0 = Math.min(inY, stop.y) - 2, sy1 = Math.max(inY, stop.y);
+            PW.tunnels.digBox(world, net, stop.x - 12, sy0, stop.x + 12, sy1, { kind: 'shaft', keepOre: true });
+            ladder(world, stop.x - 6, sy0, sy1 - 1);   // (N37: every shaft climbable on foot)
           }
           const wkB = digLeg(Math.min(stop.x, wayX), wayY, Math.max(stop.x, wayX), 30, 'drift');
           // (a clipped walkway cannot carry the development wave: nothing is dug beyond it)

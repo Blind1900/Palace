@@ -235,6 +235,12 @@
       if (!pipe) return back;
       const flags = flagsChunk ? flagsChunk[local] : 0;
       if (back && (flags & PW.HIDES_PIPE)) return back;
+      // N37: crossing a carved tunnel the conduit is PART of the back wall - blended into it
+      // and dimmed so it reads behind the room, never overlapping it.
+      if (back && (flags & PW.FLAG.CARVED)) {
+        const p = PW.unpack(pipe), b = PW.unpack(back);
+        return PW.abgr((p[0] * 0.5 + b[0] * 0.5) | 0, (p[1] * 0.5 + b[1] * 0.5) | 0, (p[2] * 0.5 + b[2] * 0.5) | 0);
+      }
       if (!(flags & PW.FLAG.DEVELOPED)) return pipe;
       // (along a run: clamps across it; up a riser: clamps round it)
       const along = PW.getLayer(world, 'pipe', x - 3, y) && PW.getLayer(world, 'pipe', x + 3, y) ? x : y;
