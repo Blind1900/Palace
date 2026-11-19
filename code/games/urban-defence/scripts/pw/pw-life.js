@@ -46,6 +46,55 @@
   const LOST_EXPIRE = 60 * 600;   // ticks a place waits for grass and a plant near enough to seed it
   const YOUNG_MAX = 240;          // young plants growing at once, at most
 
+  // The live cells: world cell index -> a value (never 0), in typed arrays - a generation makes
+  // some hundred thousand lookups, far quicker so than in a Map. The cells are listed in the
+  // order they were put in (cells[0..n), -1 where one was taken out; vals alongside), so they are
+  // walked as a Map would walk them, neighbours together; an open-addressed table finds a cell's
+  // place in the list.
+  const EMPTY = -1, GONE = -2;
+  function createCells() {
+    const t = { cells: new Int32Array(1024), vals: new Int32Array(1024), n: 0, size: 0, keys: null, at: null, used: 0, shift: 0 };
+    const table = (cap) => { t.keys = new Int32Array(cap).fill(EMPTY); t.at = new Int32Array(cap); t.used = 0; t.shift = 32 - Math.log2(cap); };
+    table(2048);
+    const home = (i) => Math.imul(i, 0x9e3779b1) >>> t.shift;
+    function find(i) {
+      const K = t.keys, mask = K.length - 1;
+      for (let s = home(i); ; s = (s + 1) & mask) { const k = K[s]; if (k === i) return t.at[s]; if (k === EMPTY) return -1; }
+    }
+    function index(i, p) {
+      const K = t.keys, mask = K.length - 1;
+      let s = home(i);
+      while (K[s] !== EMPTY) s = (s + 1) & mask;
+      K[s] = i; t.at[s] = p; t.used += 1;
+    }
+    t.get = (i) => { const p = find(i); return p < 0 ? 0 : t.vals[p]; };
+    t.has = (i) => find(i) >= 0;
+    t.set = (i, v) => {
+      const p0 = find(i);
+      if (p0 >= 0) { t.vals[p0] = v; return; }
+      if (t.n === t.cells.length) {
+        const c = new Int32Array(t.n * 2), w = new Int32Array(t.n * 2);
+        c.set(t.cells); w.set(t.vals); t.cells = c; t.vals = w;
+      }
+      if ((t.used + 1) * 2 > t.keys.length) {
+        // (the table full enough: laid out again, bigger if the list has grown)
+        table(Math.max(t.keys.length, 1 << Math.ceil(Math.log2((t.size + 1) * 4))));
+        for (let p = 0; p < t.n; p += 1) if (t.cells[p] >= 0) index(t.cells[p], p);
+      }
+      t.cells[t.n] = i; t.vals[t.n] = v;
+      index(i, t.n);
+      t.n += 1; t.size += 1;
+    };
+    t.delete = (i) => {
+      const K = t.keys, mask = K.length - 1;
+      for (let s = home(i); K[s] !== EMPTY; s = (s + 1) & mask) {
+        if (K[s] === i) { t.cells[t.at[s]] = -1; K[s] = GONE; t.size -= 1; return; }
+      }
+    };
+    t.clear = () => { if (t.n) { t.keys.fill(EMPTY); t.used = 0; t.n = 0; t.size = 0; } };
+    return t;
+  }
+
   function createLife(world) {
     const W = world.width;
     let cursor = 0, tick = 0;
@@ -54,15 +103,17 @@
     const topId = (x) => PW.get(world, x, world.groundTop[x]) & ID_MASK;
     // ---- The Game of Life -----------------------------------------------------------------------------
     const H = world.height, mat = world.mat;
-    let live = new Map();         // world cell index -> kind | age << 2 (age in generations)
+    let live = createCells(), spare = createCells();   // world cell index -> kind | age << 2 (age in generations)
     const NEAR = [-W - 1, -W, -W + 1, -1, 1, W - 1, W, W + 1];
     // (can a cell of `kind` live at (x, y)? Open air - air or gas, not inside a building - and,
     // green, in the band just over the ground)
+    const { CHUNK_SHIFT: CS, CHUNK_MASK: CM } = PW, chunksX = world.chunksX, phase = PW.mat.phase, GAS = PW.PHASE.GAS;
     function room(x, y, kind) {
       if (x < 1 || y < 1 || x >= W - 1 || y >= H - 1) return false;
       const id = mat[y * W + x] & ID_MASK;
-      if (id !== M.AIR && PW.mat.phase[id] !== PW.PHASE.GAS) return false;
-      if (PW.getLayer(world, 'back', x, y)) return false;
+      if (id !== M.AIR && phase[id] !== GAS) return false;
+      const backs = world.back[(y >> CS) * chunksX + (x >> CS)];
+      if (backs && backs[(y & CM) << CS | (x & CM)]) return false;
       if (kind === GREEN) { const g = world.groundTop[x]; return y < g && y >= g - GROW_BAND; }
       return true;
     }
@@ -86,33 +137,86 @@
       stats.sprouted = (stats.sprouted || 0) + 1;
       void y;
     }
+    // (the neighbour counts: kept in blocks of 32 x 32 cells, a byte a cell - green's count in its
+    // low four bits, white's in the high four - and each cell whose count comes to three is listed
+    // as it does, so births are looked for only there. A generation is a few passes over the live
+    // cells, however many there are; the blocks are kept for the next one.)
+    const BS = 5, BN = 1 << BS, BM = BN - 1, BW = Math.ceil(W / BN);
+    const NEAR_B = [-BN - 1, -BN, -BN + 1, -1, 1, BN - 1, BN, BN + 1], NEAR_X = [-1, 0, 1, -1, 1, -1, 0, 1], NEAR_Y = [-1, -1, -1, 0, 0, 1, 1, 1];
+    const blocks = new Map(), pool = [];
+    let threes = new Int32Array(4096), nThrees = 0;
+    // (the live cells come round in clusters: the last block looked up is kept to hand)
+    let lastKey = -1, lastBlock = null;
+    function blockOf(x, y) {
+      const key = (y >> BS) * BW + (x >> BS);
+      if (key === lastKey) return lastBlock;
+      let b = blocks.get(key);
+      if (!b) { b = pool.pop() || new Uint8Array(BN * BN); blocks.set(key, b); }
+      lastKey = key; lastBlock = b;
+      return b;
+    }
+    function three(i, kind) {
+      if (nThrees === threes.length) { const t = new Int32Array(nThrees * 2); t.set(threes); threes = t; }
+      threes[nThrees++] = i * 4 + kind;
+    }
+    function countAt(x, y, shift) {
+      const key = (y >> BS) * BW + (x >> BS), b = key === lastKey ? lastBlock : blocks.get(key);
+      if (!b) return 0;
+      lastKey = key; lastBlock = b;
+      return (b[(y & BM) << BS | (x & BM)] >> shift) & 15;
+    }
     // One generation of Life for every live cell at once (each kind counting its own only).
     function generation() {
       if (!live.size) return;
-      const counts = new Map();
-      for (const [i, v] of live) {
-        const kind = v & 3;
-        for (const d of NEAR) { const key = (i + d) * 4 + kind; counts.set(key, (counts.get(key) || 0) + 1); }
+      nThrees = 0;
+      const K = live.cells, V = live.vals, n0 = live.n;
+      for (let s = 0; s < n0; s += 1) {
+        const i = K[s];
+        if (i < 0) continue;
+        const kind = V[s] & 3, add = kind === GREEN ? 1 : 16, shift = kind === GREEN ? 0 : 4;
+        const x = i % W, y = (i / W) | 0, lx = x & BM, ly = y & BM;
+        if (lx > 0 && lx < BM && ly > 0 && ly < BM) {
+          // (inside its block: all eight neighbours are in it too)
+          const b = blockOf(x, y), l = ly << BS | lx;
+          for (let k = 0; k < 8; k += 1) {
+            const c = b[l + NEAR_B[k]] + add;
+            b[l + NEAR_B[k]] = c;
+            if ((c >> shift & 15) === 3) three(i + NEAR[k], kind);
+          }
+        } else {
+          for (let k = 0; k < 8; k += 1) {
+            const nx = x + NEAR_X[k], ny = y + NEAR_Y[k], b = blockOf(nx, ny), l = (ny & BM) << BS | (nx & BM);
+            const c = b[l] + add;
+            b[l] = c;
+            if ((c >> shift & 15) === 3) three(i + NEAR[k], kind);
+          }
+        }
       }
-      const next = new Map();
+      const next = spare;
+      next.clear();
       // (live on with two or three neighbours, where it still has room, not burnt, not too old)
-      for (const [i, v] of live) {
-        const kind = v & 3, age = v >> 2, n = counts.get(i * 4 + kind) || 0;
-        const x = i % W, y = (i / W) | 0;
+      for (let s = 0; s < n0; s += 1) {
+        const i = K[s];
+        if (i < 0) continue;
+        const v = V[s], kind = v & 3, age = v >> 2;
+        const x = i % W, y = (i / W) | 0, n = countAt(x, y, kind === GREEN ? 0 : 4);
         if ((n === 2 || n === 3) && room(x, y, kind) && !(kind === GREEN && age >= GREEN_AGE) && !hot(x, y)) next.set(i, kind | (age + 1) << 2);
       }
-      // (born in an empty cell with exactly three)
-      for (const [key, n] of counts) {
-        if (n !== 3 || next.size >= LIFE_MAX) continue;
-        const i = Math.floor(key / 4), kind = key - i * 4;
-        if (next.has(i) || live.has(i)) continue;
+      // (born in an empty cell with exactly three - still three: a count that went on past it is not)
+      for (let t = 0; t < nThrees && next.size < LIFE_MAX; t += 1) {
+        const key = threes[t], i = key >> 2, kind = key & 3;
         const x = i % W, y = (i / W) | 0;
+        if (countAt(x, y, kind === GREEN ? 0 : 4) !== 3 || live.has(i) || next.has(i)) continue;
         if (room(x, y, kind) && !hot(x, y)) next.set(i, kind);
       }
-      live = next;
+      for (const b of blocks.values()) { b.fill(0); pool.push(b); }
+      blocks.clear(); lastKey = -1; lastBlock = null;
+      spare = live; live = next;
       // (green lying on bare soil grasses it)
-      for (const [i, v] of live) {
-        if ((v & 3) !== GREEN) continue;
+      const LK = live.cells, LV = live.vals;
+      for (let s = 0, n1 = live.n; s < n1; s += 1) {
+        const i = LK[s];
+        if (i < 0 || (LV[s] & 3) !== GREEN) continue;
         const x = i % W, y = (i / W) | 0;
         if (y !== world.groundTop[x] - 1) continue;
         const gid = mat[(y + 1) * W + x] & ID_MASK;
@@ -139,7 +243,11 @@
     }
     // A blast blows away the live cells it reaches.
     function clear(x0, y0, x1, y1) {
-      for (const i of live.keys()) {
+      if (!live.size) return;
+      const K = live.cells;
+      for (let s = 0, n = live.n; s < n; s += 1) {
+        const i = K[s];
+        if (i < 0) continue;
         const x = i % W, y = (i / W) | 0;
         if (x >= x0 && x <= x1 && y >= y0 && y <= y1) live.delete(i);
       }
@@ -150,11 +258,13 @@
       const { ctx, camera, view } = renderer;
       const z = camera.zoom, size = Math.max(1, Math.round(z));
       const x0 = camera.x, y0 = camera.y, x1 = x0 + view.width / z, y1 = y0 + view.height / z;
-      const groups = new Map();
-      for (const [i, v] of live) {
+      const groups = new Map(), K = live.cells, V = live.vals;
+      for (let s = 0, n = live.n; s < n; s += 1) {
+        const i = K[s];
+        if (i < 0) continue;
         const x = i % W, y = (i / W) | 0;
         if (x < x0 - 1 || x > x1 || y < y0 - 1 || y > y1) continue;
-        const kind = v & 3, age = v >> 2;
+        const v = V[s], kind = v & 3, age = v >> 2;
         const c = kind === WHITE ? WHITE_TONE : GREEN_TONES[age < 6 ? 0 : age < 20 ? 1 : 2];
         let list = groups.get(c);
         if (!list) groups.set(c, list = []);
