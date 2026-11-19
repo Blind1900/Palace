@@ -11,9 +11,11 @@ const view = async (name, x, y, zoomIndex) => { pwApp.focus(x, y, zoomIndex); fo
 pwApp.setPaused(true);
 const MADE = new Set([M.FILL, M.SLAB, M.COURSE]);
 const madeAt = (x, y) => MADE.has(PW.get(world, x, y) & 63) && !PW.getOwner(world, x, y);
-// (pipe beds and warning tapes are made ground too, but they are the lines', not the town's layers)
+// (pipe beds and warning tapes are made ground too, but they are the lines', not the town's
+// layers - the bed proper and its darker apron, which on a dive's diagonal lies as scattered
+// single cells that are the line's bedding trail, not town speckle)
 const tone = (c, k) => PW.abgr(Math.min(255, c[0] * k) | 0, Math.min(255, c[1] * k) | 0, Math.min(255, c[2] * k) | 0);
-const lineGround = new Set([tone([170, 156, 118], 1), tone([170, 156, 118], 0.88)]);
+const lineGround = new Set([tone([170, 156, 118], 1), tone([170, 156, 118], 0.88), tone([170, 156, 118], 0.74), tone([170, 156, 118], 0.62)]);
 const layerAt = (x, y) => madeAt(x, y) && !lineGround.has(PW.getLayer(world, 'paint', x, y));
 
 for (const s of world.settlements) {

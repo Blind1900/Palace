@@ -369,7 +369,7 @@
             if ((mat[y * W + x] & ID_MASK) === M.PIPE && PW.getOwner(world, x, y) === line.owner) {
               PW.set(world, x, y, M.FILL, { quiet: true });
               PW.setFlag(world, x, y, FLAG.HOLLOW, false);
-              PW.setLayer(world, 'paint', x, y, rgb(tone(SAND, 0.92)));
+              PW.setLayer(world, 'paint', x, y, rgb(tone(SAND, (PW.hash2(x, y) & 3) === 0 ? 0.88 : 1)));
               PW.setOwner(world, x, y, 0);
             }
             PW.setLayer(world, 'pipe', x, y, 0);
@@ -623,7 +623,7 @@
           if ((mat[y * W + x] & ID_MASK) === M.PIPE && PW.getOwner(world, x, y) === line.owner) {
             PW.set(world, x, y, M.FILL, { quiet: true });
             PW.setFlag(world, x, y, FLAG.HOLLOW, false);
-            PW.setLayer(world, 'paint', x, y, rgb(tone(SAND, 0.92)));
+            PW.setLayer(world, 'paint', x, y, rgb(tone(SAND, (PW.hash2(x, y) & 3) === 0 ? 0.88 : 1)));
             PW.setOwner(world, x, y, 0);
           }
           PW.setLayer(world, 'pipe', x, y, 0);
@@ -662,7 +662,7 @@
           if ((mat[y * W + x] & ID_MASK) === M.PIPE && PW.getOwner(world, x, y) === line.owner) {
             PW.set(world, x, y, M.FILL, { quiet: true });
             PW.setFlag(world, x, y, FLAG.HOLLOW, false);
-            PW.setLayer(world, 'paint', x, y, rgb(tone(SAND, 0.9)));
+            PW.setLayer(world, 'paint', x, y, rgb(tone(SAND, (PW.hash2(x, y) & 3) === 0 ? 0.88 : 1)));
             PW.setOwner(world, x, y, 0);
           }
           PW.setLayer(world, 'pipe', x, y, 0);
@@ -687,7 +687,7 @@
           if ((mat[y * W + x] & ID_MASK) === M.PIPE && PW.getOwner(world, x, y) === line.owner) {
             PW.set(world, x, y, M.FILL, { quiet: true });
             PW.setFlag(world, x, y, FLAG.HOLLOW, false);
-            PW.setLayer(world, 'paint', x, y, rgb(tone(SAND, 0.9)));
+            PW.setLayer(world, 'paint', x, y, rgb(tone(SAND, (PW.hash2(x, y) & 3) === 0 ? 0.88 : 1)));
             PW.setOwner(world, x, y, 0);
             PW.setLayer(world, 'pipe', x, y, 0);
           }
@@ -760,7 +760,7 @@
           if ((mat[yy * W + xx] & ID_MASK) === M.PIPE && PW.getOwner(world, xx, yy) === line.owner) {
             PW.set(world, xx, yy, M.FILL, { quiet: true });
             PW.setFlag(world, xx, yy, FLAG.HOLLOW, false);
-            PW.setLayer(world, 'paint', xx, yy, rgb(tone(SAND, 0.92)));
+            PW.setLayer(world, 'paint', xx, yy, rgb(tone(SAND, (PW.hash2(xx, yy) & 3) === 0 ? 0.88 : 1)));
             PW.setOwner(world, xx, yy, 0);
           }
           if (r >= 0 && r < BORE) PW.setLayer(world, 'pipe', xx, yy, 0);
