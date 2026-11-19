@@ -405,9 +405,10 @@
       heat: new Array(chunkCount).fill(null),
       heatActive: new Uint8Array(chunkCount),
       heatList: [],
+      heatBox: new Int16Array(chunkCount * 4),
       tick: 0,
     };
-    for (let c = 0; c < chunkCount; c += 1) clearSimRect(world, c);
+    for (let c = 0; c < chunkCount; c += 1) { clearSimRect(world, c); clearHeatBox(world, c); }
     return world;
   }
   function clearSimRect(world, c) {
@@ -610,28 +611,32 @@
   // Sparse per-chunk Float32 temperatures (°C). Chunks without an array are at ambient. Chunks that
   // hold heat are listed in heatList for the heat module to diffuse, cool and drop when cold.
   const AMBIENT = 20;
-  // Heat is a modifier on how anything looks: hot enough, it glows - its own light, a dull red
-  // from about GLOW_FROM, through cherry, orange and yellow to white-hot at GLOW_FULL - added to
-  // its colour, and as it cools it goes back to its own colour. (A cell of the grid - see pw-heat's
-  // glow - or a flying pixel - see pw-particles.) glowAt(t): the light at t °C, 0 below GLOW_FROM.
+  // Heat is a property of every pixel and tints it: hot enough, a pixel glows into the heat's
+  // colour - a dull red from about GLOW_FROM, through cherry, orange and yellow to white-hot at
+  // GLOW_FULL - the more the hotter, its own grain showing through until it is white-hot, and as
+  // it cools it goes back to its own colour. (A cell of the grid - see pw-heat's glow - or a
+  // flying pixel - see pw-particles.) glowAt(t): the tint at t °C, its strength in the alpha
+  // byte; 0 below GLOW_FROM. glowing(c, t): colour c tinted so.
   const GLOW_FROM = 480, GLOW_FULL = 1400;
-  const GLOW_STOPS = [[480, 0, 0, 0], [560, 70, 8, 0], [700, 170, 30, 4], [850, 240, 85, 14], [1000, 255, 150, 50], [1200, 255, 215, 140], [1400, 255, 245, 215]];
+  // ([°C, r, g, b, strength]: how hot iron and rock look - after the colours smiths go by)
+  const GLOW_STOPS = [[480, 110, 14, 0, 0], [560, 150, 24, 0, 0.22], [700, 205, 42, 6, 0.5], [850, 245, 96, 16, 0.7], [1000, 255, 160, 52, 0.82],
+    [1200, 255, 222, 140, 0.9], [1400, 255, 248, 228, 0.95]];
   const GLOW_LUT = new Uint32Array(256);
   for (let k = 0; k < 256; k += 1) {
     const t = GLOW_FROM + (GLOW_FULL - GLOW_FROM) * k / 255;
     let s = 1;
     while (s < GLOW_STOPS.length - 1 && GLOW_STOPS[s][0] < t) s += 1;
-    const [t0, r0, g0, b0] = GLOW_STOPS[s - 1], [t1, r1, g1, b1] = GLOW_STOPS[s], f = Math.max(0, Math.min(1, (t - t0) / (t1 - t0)));
-    GLOW_LUT[k] = (255 << 24 | Math.round(b0 + (b1 - b0) * f) << 16 | Math.round(g0 + (g1 - g0) * f) << 8 | Math.round(r0 + (r1 - r0) * f)) >>> 0;
+    const [t0, r0, g0, b0, a0] = GLOW_STOPS[s - 1], [t1, r1, g1, b1, a1] = GLOW_STOPS[s], f = Math.max(0, Math.min(1, (t - t0) / (t1 - t0)));
+    const mixc = (u, v) => Math.round(u + (v - u) * f);
+    GLOW_LUT[k] = (mixc(a0 * 255, a1 * 255) << 24 | mixc(b0, b1) << 16 | mixc(g0, g1) << 8 | mixc(r0, r1)) >>> 0;
   }
   const GLOW_SCALE = 255 / (GLOW_FULL - GLOW_FROM);
   const glowAt = (t) => (t > GLOW_FROM ? GLOW_LUT[Math.min(255, ((t - GLOW_FROM) * GLOW_SCALE) | 0)] : 0);
-  // (colour c with the glow of t °C added to it, channel by channel, up to white)
   function glowing(c, t) {
-    const g = glowAt(t);
-    if (!g) return c;
-    const r = Math.min(255, (c & 255) + (g & 255)), gg = Math.min(255, (c >>> 8 & 255) + (g >>> 8 & 255)), b = Math.min(255, (c >>> 16 & 255) + (g >>> 16 & 255));
-    return ((c >>> 24) << 24 | b << 16 | gg << 8 | r) >>> 0;
+    const g = glowAt(t), a = (g >>> 24) / 255;
+    if (!a) return c;
+    const r = (c & 255) + ((g & 255) - (c & 255)) * a, gg = (c >>> 8 & 255) + ((g >>> 8 & 255) - (c >>> 8 & 255)) * a, b = (c >>> 16 & 255) + ((g >>> 16 & 255) - (c >>> 16 & 255)) * a;
+    return ((c >>> 24) << 24 | Math.round(b) << 16 | Math.round(gg) << 8 | Math.round(r)) >>> 0;
   }
   function heatAt(world, x, y) {
     if (x < 0 || y < 0 || x >= world.width || y >= world.height) return AMBIENT;
@@ -644,11 +649,19 @@
     if (!world.heatActive[c]) { world.heatActive[c] = 1; world.heatList.push(c); }
     return chunk;
   }
+  // (heatBox: for each chunk, the bounds of the cells set since the heat module last worked it -
+  // so it works them wherever they are, and works only them in a chunk that has just warmed)
+  function clearHeatBox(world, c) { const B = world.heatBox, k = c << 2; B[k] = CHUNK; B[k + 1] = CHUNK; B[k + 2] = -1; B[k + 3] = -1; }
   function setHeat(world, x, y, t) {
     if (x < 0 || y < 0 || x >= world.width || y >= world.height) return;
     const c = chunkIndex(world, x, y);
     if (!world.heat[c] && Math.abs(t - AMBIENT) < 0.5) return;
-    heatChunk(world, c)[(y & CHUNK_MASK) << CHUNK_SHIFT | x & CHUNK_MASK] = t;
+    const lx = x & CHUNK_MASK, ly = y & CHUNK_MASK, B = world.heatBox, k = c << 2;
+    heatChunk(world, c)[ly << CHUNK_SHIFT | lx] = t;
+    if (lx < B[k]) B[k] = lx;
+    if (ly < B[k + 1]) B[k + 1] = ly;
+    if (lx > B[k + 2]) B[k + 2] = lx;
+    if (ly > B[k + 3]) B[k + 3] = ly;
   }
   function addHeat(world, x, y, dt) { setHeat(world, x, y, heatAt(world, x, y) + dt); }
   function refreshGroundTop(world, x, from = 0) {
@@ -835,7 +848,7 @@
     createWorld, chunkIndex, inside, markDirty, markWaterDirty, wake, wakeCell, wakeArea, clearSimRect, stir, stirred,
     get, id, set, swapCells, sinkColumn, touchGroundTop, refreshGroundTop, rebuildGroundTop,
     getLayer, setLayer, layerCell, clearPaintAt, isSolid, isOpen, groundBelow, supportBelow, traceShot,
-    getOwner, setOwner, growing, isGrowing, getFlags, setFlag, AMBIENT, heatAt, setHeat, addHeat, heatChunk,
+    getOwner, setOwner, growing, isGrowing, getFlags, setFlag, AMBIENT, heatAt, setHeat, addHeat, heatChunk, clearHeatBox,
     GLOW_FROM, GLOW_FULL, glowAt, glowing,
   });
 })();

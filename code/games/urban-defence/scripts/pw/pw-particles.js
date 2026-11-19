@@ -782,7 +782,7 @@
           if (t > GLOW_FROM) c = mix(c, FLAME[FLAME.length - 1], Math.min(1, (t - GLOW_FROM) / (FIRE_END - GLOW_FROM)));
         } else if (fl & F.GLOW) {
           // (a spark is all light: its colour is its heat; spent, it is gone)
-          if (t > GLOW_FROM) c = PW.glowAt(t);
+          if (t > GLOW_FROM) c = (PW.glowAt(t) | 0xff000000) >>> 0;
           else if (t > AMBIENT + 30) continue;
         } else if (t > GLOW_FROM) c = PW.glowing(c, t);
         put(c, Math.floor(x), Math.floor(y));

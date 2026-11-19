@@ -23,6 +23,20 @@
   // each heat tick.)
   const QUENCH = 0.4;
   const HOLLOW = FLAG.HOLLOW || 0;
+  // How much heat a cell holds for each degree, against rock's (its volumetric heat capacity -
+  // the heat equation's, as the physics references have it): air and the gases little (kept a
+  // little more than real, so a fire's heat still carries), water a great deal, metal more than
+  // rock, wood and earth less.
+  const CAP = new Float32Array(64).fill(1);
+  for (const id of [M.AIR, M.SMOKE, M.STEAM, M.DUST]) CAP[id] = 0.1;
+  CAP[M.WATER] = 2;
+  for (const id of [M.STEEL, M.BRIDGE, M.PIPE, M.COVER_METAL, M.CORE]) if (id !== undefined) CAP[id] = 1.5;
+  for (const id of [M.WOOD, M.COVER_WOOD, M.GRASS, M.TOPSOIL, M.SOIL, M.LOOSE_SOIL, M.ASH, M.SAND]) if (id !== undefined) CAP[id] = 0.7;
+  // (SHARE[a * 64 + b]: what a cell of a gives up, in degrees, for each degree of a flux to a
+  // cell of b - 2 cb / (ca + cb); b gains SHARE[b * 64 + a] of it. Together the two always close
+  // their gap by twice the flux, as with equal capacities, so the exchange stays as stable.)
+  const SHARE = new Float32Array(64 * 64);
+  for (let a = 0; a < 64; a += 1) for (let b = 0; b < 64; b += 1) SHARE[a * 64 + b] = 2 * CAP[b] / (CAP[a] + CAP[b]);
   // (the metals that melt, at MELT °C: steel beams and plate, bridge steel, metal cover)
   const MELT = 1350;
   const MELTS = new Uint8Array(64);
@@ -247,10 +261,20 @@
       for (let n = 0; n < list.length; n += 1) {
         const c = list[n];
         const T = world.heat[c];
-        if (!T) { world.heatActive[c] = 0; rects.delete(c); continue; }
+        if (!T) { world.heatActive[c] = 0; rects.delete(c); PW.clearHeatBox(world, c); continue; }
         const cx = (c % chunksX) << CHUNK_SHIFT, cy = ((c / chunksX) | 0) << CHUNK_SHIFT;
+        // (the warm cells it knew of, and those set since - where heat was added, or carried in
+        // by a moving cell; a chunk just warmed holds only those)
+        const B = world.heatBox, k4 = c << 2;
         let r = rects.get(c);
-        if (!r) { r = [0, 0, CHUNK - 1, CHUNK - 1]; rects.set(c, r); }
+        if (!r) { r = [B[k4], B[k4 + 1], B[k4 + 2], B[k4 + 3]]; rects.set(c, r); }
+        else if (B[k4] <= B[k4 + 2]) {
+          if (B[k4] < r[0]) r[0] = B[k4];
+          if (B[k4 + 1] < r[1]) r[1] = B[k4 + 1];
+          if (B[k4 + 2] > r[2]) r[2] = B[k4 + 2];
+          if (B[k4 + 3] > r[3]) r[3] = B[k4 + 3];
+        }
+        PW.clearHeatBox(world, c);
         // Grow by one cell so heat can spread, then work the rectangle.
         const lx0 = Math.max(0, r[0] - 1), ly0 = Math.max(0, r[1] - 1), lx1 = Math.min(CHUNK - 1, r[2] + 1), ly1 = Math.min(CHUNK - 1, r[3] + 1);
         let nx0 = CHUNK, ny0 = CHUNK, nx1 = -1, ny1 = -1;
@@ -262,13 +286,18 @@
             const id = mat[i] & ID_MASK;
             const k = conduct[id];
             // Right and down neighbours (inside this chunk directly, across edges via the core).
+            // (heat is energy: what passes between two cells warms each by it over its own heat
+            // capacity - hot air hardly warms the rock it touches, and is cooled by it at once;
+            // water takes a great deal to warm - and the pair never overshoot each other)
+            const row = id << 6;
             if (x + 1 < W) {
               const j1 = mat[i + 1] & ID_MASK, kj = conduct[j1], kk = quench(id, j1) ? QUENCH : k < kj ? k : kj;
               const tj = lx < CHUNK - 1 ? T[li + 1] : PW.heatAt(world, x + 1, y);
               const flux = kk * (t - tj);
               if (flux > 0.02 || flux < -0.02) {
-                t -= flux;
-                if (lx < CHUNK - 1) T[li + 1] = tj + flux; else PW.setHeat(world, x + 1, y, tj + flux);
+                t -= flux * SHARE[row | j1];
+                const tn = tj + flux * SHARE[j1 << 6 | id];
+                if (lx < CHUNK - 1) T[li + 1] = tn; else PW.setHeat(world, x + 1, y, tn);
               }
             }
             if (y + 1 < H) {
@@ -276,18 +305,21 @@
               const tj = ly < CHUNK - 1 ? T[li + CHUNK] : PW.heatAt(world, x, y + 1);
               const flux = kk * (t - tj);
               if (flux > 0.02 || flux < -0.02) {
-                t -= flux;
-                if (ly < CHUNK - 1) T[li + CHUNK] = tj + flux; else PW.setHeat(world, x, y + 1, tj + flux);
+                t -= flux * SHARE[row | j1];
+                const tn = tj + flux * SHARE[j1 << 6 | id];
+                if (ly < CHUNK - 1) T[li + CHUNK] = tn; else PW.setHeat(world, x, y + 1, tn);
               }
             }
             // Edges towards neighbours that hold no heat yet (they are not exchanging back).
             if (lx === 0 && x > 0 && !world.heat[c - 1]) {
-              const flux = Math.min(k, conduct[mat[i - 1] & ID_MASK]) * (t - AMBIENT);
-              if (flux > 0.5) { t -= flux; PW.setHeat(world, x - 1, y, AMBIENT + flux); }
+              const j1 = mat[i - 1] & ID_MASK;
+              const flux = Math.min(k, conduct[j1]) * (t - AMBIENT);
+              if (flux * SHARE[row | j1] > 0.5) { t -= flux * SHARE[row | j1]; PW.setHeat(world, x - 1, y, AMBIENT + flux * SHARE[j1 << 6 | id]); }
             }
             if (ly === 0 && y > 0 && !world.heat[c - chunksX]) {
-              const flux = Math.min(k, conduct[mat[i - W] & ID_MASK]) * (t - AMBIENT);
-              if (flux > 0.5) { t -= flux; PW.setHeat(world, x, y - 1, AMBIENT + flux); }
+              const j1 = mat[i - W] & ID_MASK;
+              const flux = Math.min(k, conduct[j1]) * (t - AMBIENT);
+              if (flux * SHARE[row | j1] > 0.5) { t -= flux * SHARE[row | j1]; PW.setHeat(world, x, y - 1, AMBIENT + flux * SHARE[j1 << 6 | id]); }
             }
             let excess = t - AMBIENT;
             if (excess > COLD || excess < -COLD) {
@@ -415,12 +447,13 @@
     }
 
     // ---- Glow ---------------------------------------------------------------------------------------
-    // Heat is a modifier on how a cell looks (see PW.glowAt): anything hot enough glows - rock,
-    // metal, rubble, smoke and dust in the hot air over a fire or a blast - its own light added
-    // over its colour, dimming back to its own colour as it cools. Liquids do not glow: they boil
-    // away first. (Hot air itself is clear: it does not glow. Light added, not painted, so it reads
-    // by day and burns bright at night.) Each hot chunk's glow is an image of its hot cells, made
-    // again each heat tick, drawn over the world with additive blending.
+    // Heat is a property of each cell and tints it (see PW.glowAt): every cell hot enough - rock,
+    // metal, rubble, smoke and dust in the hot air over a fire or a blast - glows into the heat's
+    // colour, cell by cell, as hot as that cell is (the heat passing from cell to cell as it
+    // conducts: see heatTick), and goes back to its own colour as it cools. Liquids do not glow:
+    // they boil away first, and hot air itself is clear. Each hot chunk's tints are an image, one
+    // pixel to a cell, made again each heat tick: each pixel the tint's colour at the tint's
+    // strength, laid over its cell - so the cell's own colour shows through it.
     const GLOW_FROM = PW.GLOW_FROM, glowAt = PW.glowAt, phaseOf = PW.mat.phase;
     const glowImages = new Map();   // chunk -> { canvas, ctx, made (heat tick), w, h, lx, ly, any }
     function glowImage(c, T) {
@@ -469,7 +502,7 @@
         if (cx > vx1 || cy > vy1 || cx + CHUNK < vx0 || cy + CHUNK < vy0) continue;
         const e = glowImage(c, T);
         if (!e.any) continue;
-        if (!drew) { ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.imageSmoothingEnabled = false; drew = true; }
+        if (!drew) { ctx.save(); ctx.imageSmoothingEnabled = false; drew = true; }
         ctx.drawImage(e.canvas, 0, 0, e.w, e.h, Math.round((cx + e.lx - vx0) * z), Math.round((cy + e.ly - vy0) * z), Math.round(e.w * z), Math.round(e.h * z));
       }
       if (drew) ctx.restore();
