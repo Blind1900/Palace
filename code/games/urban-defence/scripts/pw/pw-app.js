@@ -289,7 +289,16 @@
   function frame(now) {
     accumulator = Math.min(accumulator + (now - last) / 1000, DT * 3);
     last = now;
-    if (!paused) while (accumulator >= DT) { stepWorld(1); accumulator -= DT; }
+    // A heavy moment runs the world a touch slow instead of stuttering: once the ticks this
+    // frame have eaten ~12 ms the rest of the backlog is dropped, so one expensive tick can
+    // never snowball into owing two or three more next frame (the perf pass's blast hitch).
+    if (!paused) {
+      const t0 = performance.now();
+      while (accumulator >= DT) {
+        stepWorld(1); accumulator -= DT;
+        if (performance.now() - t0 > 12) { accumulator = 0; break; }
+      }
+    }
     renderer.beginFrame();
     renderer.drawSky();
     renderer.drawBase();

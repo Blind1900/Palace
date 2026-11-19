@@ -604,6 +604,14 @@
       let entry = cache.get(key);
       const version = world.chunkVersion[c];
       if (entry && entry.version === version) { entry.used = frame; return entry; }
+      // Gas-only dirt (chunkHardVersion unmoved: just smoke or dust drifting through) does not
+      // deserve a full re-raster every frame - during a blast that re-rastered nearly every
+      // visible chunk for seconds on end (the perf pass). Deco never shows gas, so it stays
+      // cached outright; the base waits its turn, every third frame, staggered chunk by chunk.
+      const hardV = world.chunkHardVersion;
+      if (entry && entry.canvas && hardV && entry.hardVersion === hardV[c]) {
+        if (layer === 'deco' || (frame + c) % 3 !== 0) { entry.used = frame; return entry; }
+      }
       if (!allowNew || rastersThisFrame >= RASTER_BUDGET) return entry && entry.canvas ? entry : null;
       const rect = world.dirtyRect, o = c * 4;
       if (layer === 'base' && lod === 0 && entry && entry.canvas && rect[o] >= 0) {
@@ -616,6 +624,7 @@
         entry.canvas.getContext('2d').putImageData(image, rx0, ry0);
         rect[o] = -1;
         entry.version = version;
+        if (world.chunkHardVersion) entry.hardVersion = world.chunkHardVersion[c];
         entry.used = frame;
         return entry;
       }
@@ -624,6 +633,7 @@
       const image = layer === 'deco' ? rasterDeco(c, lod) : rasterBase(c, lod);
       if (!entry) { entry = { canvas: null, version, used: frame }; cache.set(key, entry); }
       entry.version = version;
+      if (world.chunkHardVersion) entry.hardVersion = world.chunkHardVersion[c];
       entry.used = frame;
       if (!image) { entry.canvas = null; entry.empty = true; return entry; }
       entry.empty = false;
