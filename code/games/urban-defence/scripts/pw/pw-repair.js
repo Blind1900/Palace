@@ -189,6 +189,16 @@
         } else if (!openish && diggable(now, cell.x, cell.y)) {
           job.pool += HM_PER_DEBRIS * 0.5; stats.dug = (stats.dug || 0) + 1;
         }
+        // Water standing in the wound is never destroyed by the rebuild (PS's flood test:
+        // every cell stamped over a flooded spot deleted a water cell). It is displaced to
+        // the top of its column first, the way the particles' displace() does; shut in with
+        // nowhere to go, the cell waits its turn.
+        if (now === M.WATER) {
+          let top = cell.y;
+          while (top > 1 && (PW.get(world, cell.x, top - 1) & ID_MASK) === M.WATER) top -= 1;
+          if ((PW.get(world, cell.x, top - 1) & ID_MASK) !== M.AIR) return 'skip';
+          PW.set(world, cell.x, top - 1, PW.get(world, cell.x, cell.y), { quiet: true });
+        }
         if (!pay()) return false;
         PW.set(world, cell.x, cell.y, c.mat[i], { quiet: true });
         PW.setLayer(world, 'paint', cell.x, cell.y, c.paint[i]);
