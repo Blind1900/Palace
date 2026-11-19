@@ -802,18 +802,80 @@
       if (PW.debugHitboxes && PW.noteHit) PW.noteHit(ownerId, speed);   // (the hitbox debug view)
     }
 
-    // Draw cell-aligned particles, batched by colour.
+    // Drawing. Close up (a cell a pixel or more on screen) the particles are the pixels of one image
+    // the size of the view, a pixel to a cell, laid over the world scaled as its chunks are: a frame
+    // costs one image however many fly. One see-through over another of a different colour in the
+    // same cell is laid over it (the colour over the one under: src-over), as the fills were - one
+    // fill a colour, so the same colour twice in a cell does not deepen. Far out (several cells to
+    // a pixel), the cells are filled as rectangles, batched by colour.
+    let sheet = null, sheetCtx = null, sheetImage = null, sheetPx = null, sheetW = 0, sheetH = 0;
+    let lastBox = null;
+    function over(s, d) {
+      const sa = (s >>> 24) / 255, da = (d >>> 24) / 255 * (1 - sa), a = sa + da;
+      const ch = (k) => Math.round((((s >>> k) & 255) * sa + ((d >>> k) & 255) * da) / a);
+      return (Math.round(a * 255) << 24 | ch(16) << 16 | ch(8) << 8 | ch(0)) >>> 0;
+    }
     function draw(renderer) {
       const { ctx, camera, view } = renderer;
       const z = camera.zoom;
+      if (z < 1) { drawFills(renderer); return; }
+      const ox = Math.floor(camera.x), oy = Math.floor(camera.y);
+      const bw = Math.ceil(view.width / z) + 2, bh = Math.ceil(view.height / z) + 2;
+      if (!sheet || sheetW < bw || sheetH < bh) {
+        sheetW = Math.max(bw, sheetW); sheetH = Math.max(bh, sheetH);
+        sheet = document.createElement('canvas');
+        sheet.width = sheetW; sheet.height = sheetH;
+        sheetCtx = sheet.getContext('2d');
+        sheetImage = sheetCtx.createImageData(sheetW, sheetH);
+        sheetPx = new Uint32Array(sheetImage.data.buffer);
+        lastBox = null;
+      }
+      const P = sheetPx, SW = sheetW;
+      // (last frame's pixels cleared)
+      if (lastBox) for (let y = lastBox[1]; y <= lastBox[3]; y += 1) P.fill(0, y * SW + lastBox[0], y * SW + lastBox[2] + 1);
+      let bx0 = SW, by0 = sheetH, bx1 = -1, by1 = -1;
+      const put = (c, x, y) => {
+        const a = c >>> 24;
+        if (!a) return;
+        const sx = x - ox, sy = y - oy;
+        if (sx < 0 || sy < 0 || sx >= bw || sy >= bh) return;
+        const k = sy * SW + sx, d = P[k];
+        P[k] = a === 255 || !d ? c : d === c ? d : over(c, d);
+        if (sx < bx0) bx0 = sx; if (sx > bx1) bx1 = sx; if (sy < by0) by0 = sy; if (sy > by1) by1 = sy;
+      };
+      plot(put, camera.x, camera.y, camera.x + view.width / z, camera.y + view.height / z);
+      // (what changed - this frame's pixels and last frame's cleared - goes to the canvas)
+      const box = bx1 >= 0 ? [bx0, by0, bx1, by1] : null;
+      const up = lastBox && box ? [Math.min(lastBox[0], bx0), Math.min(lastBox[1], by0), Math.max(lastBox[2], bx1), Math.max(lastBox[3], by1)] : box || lastBox;
+      if (up) sheetCtx.putImageData(sheetImage, 0, 0, up[0], up[1], up[2] - up[0] + 1, up[3] - up[1] + 1);
+      lastBox = box;
+      if (!box) return;
+      const w = bx1 - bx0 + 1, h = by1 - by0 + 1;
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(sheet, bx0, by0, w, h, Math.round((ox + bx0 - camera.x) * z), Math.round((oy + by0 - camera.y) * z), Math.round(w * z), Math.round(h * z));
+    }
+    function drawFills(renderer) {
+      const { ctx, camera, view } = renderer;
+      const z = camera.zoom;
       const size = Math.max(1, Math.round(z));
-      const x0 = camera.x, y0 = camera.y, x1 = x0 + view.width / z, y1 = y0 + view.height / z;
+      const x0 = camera.x, y0 = camera.y;
       const groups = new Map();
       const put = (c, x, y) => {
         let list = groups.get(c);
         if (!list) { list = []; groups.set(c, list); }
         list.push(Math.round((x - x0) * z), Math.round((y - y0) * z));
       };
+      plot(put, x0, y0, x0 + view.width / z, y0 + view.height / z);
+      for (const [c, list] of groups) {
+        const a = (c >>> 24) / 255;
+        ctx.fillStyle = `rgba(${c & 255},${c >>> 8 & 255},${c >>> 16 & 255},${a})`;
+        ctx.beginPath();
+        for (let k = 0; k < list.length; k += 2) ctx.rect(list[k], list[k + 1], size, size);
+        ctx.fill();
+      }
+    }
+    // Every particle in view (x0, y0)-(x1, y1), as the cells it covers in its colour now: put(c, x, y).
+    function plot(put, x0, y0, x1, y1) {
       for (let i = 0; i < count; i += 1) {
         const x = px[i], y = py[i];
         if (x < x0 - 64 || x > x1 + 64 || y < y0 - 64 || y > y1 + 64) continue;
@@ -844,13 +906,6 @@
           else if (t > AMBIENT + 30) continue;
         } else if (t > GLOW_FROM) c = PW.glowing(c, t);
         put(c, Math.floor(x), Math.floor(y));
-      }
-      for (const [c, list] of groups) {
-        const a = (c >>> 24) / 255;
-        ctx.fillStyle = `rgba(${c & 255},${c >>> 8 & 255},${c >>> 16 & 255},${a})`;
-        ctx.beginPath();
-        for (let k = 0; k < list.length; k += 2) ctx.rect(list[k], list[k + 1], size, size);
-        ctx.fill();
       }
     }
     const api = { spawn, hold, step, draw, drainImpacts, flush: flushDebris, F, stats, listeners, get count() { return count + pend.n + held.n; }, capacity, px, py, vx, vy, flags };

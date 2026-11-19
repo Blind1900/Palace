@@ -402,6 +402,9 @@
       groundTop: new Int32Array(width).fill(height),
       chunkDirty: new Uint8Array(chunkCount),
       chunkVersion: new Uint32Array(chunkCount),
+      // (the same, counting only changes that are not just air and gas trading places or thinning:
+      // smoke and dust drifting through change nothing else in how a chunk is drawn)
+      chunkHardVersion: new Uint32Array(chunkCount),
       // Changed cell rectangle per chunk since the last full-resolution redraw (local coords).
       dirtyRect: new Int16Array(chunkCount * 4).fill(-1),
       // Chunks where something opened up or closed off (daylight in caves and hollows round about
@@ -430,10 +433,12 @@
   function chunkIndex(world, x, y) { return (y >> CHUNK_SHIFT) * world.chunksX + (x >> CHUNK_SHIFT); }
   function inside(world, x, y) { return x >= 0 && y >= 0 && x < world.width && y < world.height; }
 
-  function markDirty(world, x, y, bits = DIRTY_BASE) {
+  // (gasOnly: the change was air or gas becoming air or gas - see chunkHardVersion)
+  function markDirty(world, x, y, bits = DIRTY_BASE, gasOnly = false) {
     const c = chunkIndex(world, x, y);
     world.chunkDirty[c] |= bits;
     world.chunkVersion[c] += 1;
+    if (!gasOnly) world.chunkHardVersion[c] += 1;
     const r = world.dirtyRect, o = c * 4, lx = x & CHUNK_MASK, ly = y & CHUNK_MASK;
     if (r[o] < 0) { r[o] = lx; r[o + 1] = ly; r[o + 2] = lx; r[o + 3] = ly; return; }
     if (lx < r[o]) r[o] = lx; if (ly < r[o + 1]) r[o + 1] = ly;
@@ -552,7 +557,7 @@
     if (passesLight[before] !== passesLight[after]) shapeChanged(world, x, y);
     if (!options || !options.keepPaint) clearPaintAt(world, x, y);
     if (before === M.WATER || after === M.WATER) markWaterDirty(world, x, y);
-    else markDirty(world, x, y);
+    else markDirty(world, x, y, DIRTY_BASE, phase[before] <= PHASE.GAS && phase[after] <= PHASE.GAS);
     if (!options || !options.quiet) wake(world, x, y);
     else if (before !== after && phase[after] >= PHASE.GAS && phase[after] <= PHASE.POWDER) wake(world, x, y);
   }
@@ -606,7 +611,7 @@
     touchGroundTop(world, xj, yj, ai);
     if (passesLight[ai] !== passesLight[bi]) { shapeChanged(world, xi, yi); shapeChanged(world, xj, yj); }
     if (ai === M.WATER || bi === M.WATER) { markWaterDirty(world, xi, yi); markWaterDirty(world, xj, yj); }
-    else { markDirty(world, xi, yi); markDirty(world, xj, yj); }
+    else { const gas = phase[ai] <= PHASE.GAS && phase[bi] <= PHASE.GAS; markDirty(world, xi, yi, DIRTY_BASE, gas); markDirty(world, xj, yj, DIRTY_BASE, gas); }
     // (rubble carries its colours with it as it slides and falls)
     if (phase[ai] === PHASE.POWDER || phase[bi] === PHASE.POWDER) {
       const pi = getLayer(world, 'paint', xi, yi), pj = getLayer(world, 'paint', xj, yj);

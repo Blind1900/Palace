@@ -445,10 +445,36 @@
       if (y >= top) return 0;
       return world.wind * Math.min(2.2, 1 + (top - y) / 300);
     }
+    // A gas moving into air or another gas: nothing about the ground line, the light or the water
+    // changes, so the swap is done here, directly (as swapCells would: the cells, their heat, the
+    // chunks drawn again).
+    const ADVECTION = PW.mat.advection;
+    function moveGas(i, x, y, j, nx, ny) {
+      const b = mat[j];
+      if (phase[b & ID_MASK] > PHASE.GAS) { move(i, x, y, j, nx, ny, 'gas'); return; }
+      stats.kinds.gas = (stats.kinds.gas || 0) + 1;
+      mat[j] = mat[i]; mat[i] = b;
+      PW.markDirty(world, x, y, PW.DIRTY_BASE, true); PW.markDirty(world, nx, ny, PW.DIRTY_BASE, true);
+      const ci = (y >> CHUNK_SHIFT) * chunksX + (x >> CHUNK_SHIFT), cj = (ny >> CHUNK_SHIFT) * chunksX + (nx >> CHUNK_SHIFT);
+      if (world.heat[ci] || world.heat[cj]) {
+        const ta = PW.heatAt(world, x, y), tb = PW.heatAt(world, nx, ny);
+        if (ta !== tb) { PW.setHeat(world, x, y, tb); PW.setHeat(world, nx, ny, ta); }
+      }
+      stampsOf(cj)[(ny & CHUNK_MASK) << CHUNK_SHIFT | nx & CHUNK_MASK] = stamp;
+      PW.wake(world, x, y);
+      PW.wake(world, nx, ny);
+      stats.moves += 1;
+    }
+    // (the eddies' and the parcels' pace are the same over a patch of cells for a while: kept for
+    // the run of cells along a row that share them)
+    let eddyKey = -1, eddyVal = 0, paceKey = -1, paceVal = 0;
+    let airBusy = false;
     function stepGas(i, x, y, id) {
       const m = mat[i];
       let density = m >> 6;
-      const r = rnd(x, y);
+      // (three draws from one hash: ten bits each)
+      const h = PW.hash3(x, y, world.tick);
+      const r = (h & 1023) / 1023;
       if (id === M.STEAM) {
         if (PW.heatAt(world, x, y) < CONDENSE_BELOW && r < 1 / 90) {
           PW.set(world, x, y, M.WATER, { quiet: true });    // condenses: the water is back
@@ -459,32 +485,39 @@
         if (density === 0) { PW.set(world, x, y, M.AIR, { quiet: true }); return true; }
         density -= 1;
         mat[i] = id | density << 6;
-        PW.markDirty(world, x, y);
+        PW.markDirty(world, x, y, PW.DIRTY_BASE, true);
       }
       // The weather's wind, and where a blast has stirred the air, its wind too: each gas goes
       // with the air as much as the element table's `wind` says.
       let wind = windAt(x, y), lift = 0;
-      if (world.air && world.air.busy()) {
-        const a = world.air.at(x, y), k = PW.mat.advection[id];
+      if (airBusy) {
+        const a = world.air.at(x, y), k = ADVECTION[id];
         wind += a[0] * k; lift = -a[1] * k;
       }
       // (a strong updraught or downdraught carries it straight up or down)
       if (Math.abs(lift) > 20 && (PW.hash3(x, y, world.tick + 7) & 1023) / 1023 < Math.min(0.9, Math.abs(lift) / 120)) {
         const j = lift > 0 ? i - W : i + W;
-        if (y > 1 && y < H - 2 && passes(mat[j], id, lift > 0)) { move(i, x, y, j, x, lift > 0 ? y - 1 : y + 1, 'gas'); return true; }
+        if (y > 1 && y < H - 2 && passes(mat[j], id, lift > 0)) { moveGas(i, x, y, j, x, lift > 0 ? y - 1 : y + 1); return true; }
       }
-      const r2 = (PW.hash3(x + 1, y, world.tick) & 1023) / 1023;
-      const r3 = (PW.hash3(x, y + 1, world.tick) & 1023) / 1023;
+      const r2 = (h >>> 10 & 1023) / 1023;
+      const r3 = (h >>> 20 & 1023) / 1023;
       // Smoke billows: besides the wind it is carried sideways in eddies, patches of air (16 by 8
       // cells, changing every second) that each push one way, so a plume widens and wanders as it
       // rises instead of standing in a straight column; thin smoke, cooler, rises slower.
-      const eddy = id === M.SMOKE ? ((PW.hash3(x >> 4, y >> 3, world.tick >> 6) & 1) ? 1 : -1) : 0;
+      let eddy = 0;
+      if (id === M.SMOKE) {
+        const key = ((y >> 3) * 4096 + (x >> 4)) * 64 + ((world.tick >> 6) & 63);
+        if (key !== eddyKey) { eddyKey = key; eddyVal = (PW.hash3(x >> 4, y >> 3, world.tick >> 6) & 1) ? 1 : -1; }
+        eddy = eddyVal;
+      }
       // (smoke, light and warm, goes with the wind more readily than the other gases)
       const side = r3 < Math.min(0.9, Math.abs(wind) / (id === M.SMOKE ? 34 : 40)) ? Math.sign(wind)
         : eddy && r3 < 0.75 ? eddy : (r3 & 1 ? 1 : -1) * ((x + world.tick) & 1 ? 1 : -1);
       // (and parcels of it rise at their own pace, so a cloud's underside is ragged, not a level
       // floor)
-      const pace = 0.65 + 0.7 * ((PW.hash3(x >> 3, y >> 3, world.tick >> 5) & 255) / 255);
+      const pk = ((y >> 3) * 8192 + (x >> 3)) * 64 + ((world.tick >> 5) & 63);
+      if (pk !== paceKey) { paceKey = pk; paceVal = 0.65 + 0.7 * ((PW.hash3(x >> 3, y >> 3, world.tick >> 5) & 255) / 255); }
+      const pace = paceVal;
       let rise = (id === M.SMOKE ? RISE[id] * (0.4 + 0.2 * density) : RISE[id]) * pace;
       // (red-hot - straight out of a fire or a blast, glowing - it is lighter still: it climbs as
       // the flames do until it has cooled to its own colour)
@@ -495,23 +528,23 @@
       // Concentrated clumps pour like rain: in a scattering of columns (changing every second) the
       // thickest gas falls through clear air in streaks hanging under the cloud, until it has
       // thinned enough to rise again.
-      if (density === 3 && y < H - 2 && (PW.hash2(x, world.tick >> 6) & 7) === 0 && r2 < 0.45 && isEmpty(mat[i + W])) {
-        move(i, x, y, i + W, x, y + 1, 'gas');
+      if (density === 3 && y < H - 2 && r2 < 0.45 && (PW.hash2(x, world.tick >> 6) & 7) === 0 && isEmpty(mat[i + W])) {
+        moveGas(i, x, y, i + W, x, y + 1);
         return true;
       }
       const vert = rise > 0 ? -W : W;
       // Up (or down for dust), through air, water or a heavier gas (a lighter one, sinking).
       if (r2 < Math.abs(rise) && y > 0 && y < H - 1) {
         const above = mat[i + vert];
-        if (passes(above, id, rise > 0)) { move(i, x, y, i + vert, x, y + (rise > 0 ? -1 : 1), 'gas'); return true; }
+        if (passes(above, id, rise > 0)) { moveGas(i, x, y, i + vert, x, y + (rise > 0 ? -1 : 1)); return true; }
         // Blocked: slip diagonally.
         const diag = i + vert + side;
-        if (x + side > 0 && x + side < W - 1 && passes(mat[diag], id, rise > 0)) { move(i, x, y, diag, x + side, y + (rise > 0 ? -1 : 1), 'gas'); return true; }
+        if (x + side > 0 && x + side < W - 1 && passes(mat[diag], id, rise > 0)) { moveGas(i, x, y, diag, x + side, y + (rise > 0 ? -1 : 1)); return true; }
       }
       // Sideways: drift with the wind, or spread.
       if (x + side > 0 && x + side < W - 1 && isEmpty(mat[i + side]) && (wind !== 0 || eddy || r2 > 0.6)) {
         // Thick smoke spreads into the cell it leaves behind as it drifts.
-        move(i, x, y, i + side, x + side, y, 'gas');
+        moveGas(i, x, y, i + side, x + side, y);
         if (id !== M.STEAM && density >= 2 && r < 0.25 && isEmpty(mat[i])) {
           mat[i + side] = id | (density - 1) << 6;
           PW.set(world, x, y, id | (density - 2) << 6, { quiet: true });
@@ -582,6 +615,8 @@
       // Wind: a slow swing of up to 14 cells/s (1 m/s) either way, with gusts on top.
       const t = world.tick / 60;
       world.wind = 14 * windNoise(t / 45) + 6 * gustNoise(t / 4);
+      airBusy = !!(world.air && world.air.busy());
+      eddyKey = -1; paceKey = -1;
       const list = world.activeList;
       // Bottom chunk rows first so falling cells are not processed twice.
       list.sort((a, b) => b - a);

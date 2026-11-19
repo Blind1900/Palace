@@ -1626,7 +1626,9 @@
     // ---- Drawing ---------------------------------------------------------------------------------
     // Each world cell the piece covers takes the colour of the piece's cell found by turning back
     // through the piece's rotation (nearest cell), so the piece stays on the cell grid.
-    let canvas = null, ctx2 = null;
+    // (one canvas and one image the size of it, kept and grown as needed: each piece is drawn into
+    // its top-left corner - nothing new is made each frame for each piece)
+    let canvas = null, ctx2 = null, image = null, px32 = null;
     function draw(renderer) {
       if (!list.length) return;
       const { ctx, camera, view } = renderer;
@@ -1646,26 +1648,28 @@
         if (x1 <= x0 || y1 <= y0) continue;
         const iw = Math.ceil((x1 - x0) / step), ih = Math.ceil((y1 - y0) / step);
         if (!canvas || canvas.width < iw || canvas.height < ih) {
+          const cw = Math.max(iw, canvas ? canvas.width : 0), ch = Math.max(ih, canvas ? canvas.height : 0);
           canvas = document.createElement('canvas');
-          canvas.width = Math.max(iw, canvas ? canvas.width : 0); canvas.height = Math.max(ih, canvas ? canvas.height : 0);
+          canvas.width = cw; canvas.height = ch;
           ctx2 = canvas.getContext('2d');
+          image = ctx2.createImageData(cw, ch);
+          px32 = new Uint32Array(image.data.buffer);
         }
-        const image = ctx2.createImageData(iw, ih);
-        const px32 = new Uint32Array(image.data.buffer);
+        const stride = canvas.width;
         const { grid, gw, gh, u0, v0, data } = p;
         for (let j = 0; j < ih; j += 1) {
-          const wy = y0 + j * step + 0.5 - p.py;
+          const wy = y0 + j * step + 0.5 - p.py, row = j * stride;
+          px32.fill(0, row, row + iw);
           for (let i = 0; i < iw; i += 1) {
             const wx = x0 + i * step + 0.5 - p.px;
             const u = Math.floor(wx * c + wy * s), v = Math.floor(-wx * s + wy * c);
             const gu = u - u0, gv = v - v0;
             if (gu < 0 || gv < 0 || gu >= gw || gv >= gh) continue;
             const g = grid[gv * gw + gu];
-            if (g) px32[j * iw + i] = data.color[g - 1];
+            if (g) px32[row + i] = data.color[g - 1];
           }
         }
-        ctx2.clearRect(0, 0, canvas.width, canvas.height);
-        ctx2.putImageData(image, 0, 0);
+        ctx2.putImageData(image, 0, 0, 0, 0, iw, ih);
         ctx.imageSmoothingEnabled = false;
         ctx.drawImage(canvas, 0, 0, iw, ih, Math.round((x0 - vx0) * z), Math.round((y0 - vy0) * z), Math.round(iw * step * z), Math.round(ih * step * z));
       }

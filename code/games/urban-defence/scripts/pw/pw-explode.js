@@ -463,7 +463,7 @@
           const density = room < CRAMPED ? 3 : 2 + ((h >>> 10) & 1);
           const m = mat[i], id = m & ID_MASK;
           if (id === M.AIR) PW.set(world, i % W, (i / W) | 0, M.SMOKE | density << 6, { quiet: true });
-          else if (id === M.SMOKE && (m >> 6) < density) { mat[i] = M.SMOKE | density << 6; PW.markDirty(world, i % W, (i / W) | 0); }
+          else if (id === M.SMOKE && (m >> 6) < density) { mat[i] = M.SMOKE | density << 6; PW.markDirty(world, i % W, (i / W) | 0, PW.DIRTY_BASE, true); }
           else continue;
           s.used += density;
         }
