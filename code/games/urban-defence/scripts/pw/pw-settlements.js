@@ -808,18 +808,28 @@
             }
           }
           if ((guard & 1) === 1 && stop === target) {
-            // Every other leg will widen into a room with a purpose - but not yet (N36): the
-            // workings GROW. The chamber is planned, and when the clock reaches it the narrow
-            // drift here is dug out into the taller room, raw and timbered, developed by the
-            // wave from the walls it grew from - the mine accretes like the cross-sections.
+            // Every other leg widens into a room with a purpose - but not yet (N36): the
+            // corridor is DRIVEN now, a plain narrow drift through the chamber site (so the
+            // way runs on and the path's geometry is what it always was), and the widening
+            // is planned: when the clock reaches it, the drift is dug out into the taller
+            // room, raw and timbered, developed by the wave from the walls it grew from.
             const spec = HALL_ROOMS[roomIdx % HALL_ROOMS.length]; roomIdx += 1;
             const rw = spec.w + random.int(-12, 12);
-            const [roomX, roomY, roomDir] = [wayX, wayY, dir];
-            plans.push({ at: planAt, fn: () => {
-              const room = digLeg(roomX, roomY, roomX + roomDir * rw, spec.h, 'room');
-              if (room) furnishHallRoom(world, spec.kind, room[0], room[1], roomY, spec.h, random);
-            } });
-            planAt += 18;
+            const corridor = digLeg(wayX, wayY, wayX + dir * rw, h, 'drift');
+            if (corridor) {
+              const [roomY, roomDir] = [wayY, dir];
+              plans.push({ at: planAt, fn: () => {
+                // (a chamber never widens up into the surface: fields, streets and the wild
+                // above stay whole - a shallow stretch keeps its plain drift)
+                let gt = 1e9;
+                for (let x = corridor[0]; x <= corridor[1]; x += 10) gt = Math.min(gt, world.groundTop[Math.max(0, Math.min(world.width - 1, x))]);
+                if (roomY - spec.h < gt + 36) return;
+                const room = digLeg(corridor[0], roomY, corridor[1], spec.h, 'room');
+                if (room) furnishHallRoom(world, spec.kind, room[0], room[1], roomY, spec.h, random);
+              } });
+              planAt += 18;
+              wayX = dir > 0 ? corridor[1] : corridor[0];
+            }
           }
         }
       }
