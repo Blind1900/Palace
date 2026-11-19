@@ -102,6 +102,9 @@
           const c = (y >> CHUNK_SHIFT) * world.chunksX + (x >> CHUNK_SHIFT), l = (y & CHUNK_MASK) << CHUNK_SHIFT | (x & CHUNK_MASK);
           const backs = world.back[c], decos = world.deco[c], paints = world.paint[c], owners = world.owner[c];
           const m = mat[i], id = m & ID_MASK;
+          // (a core is held where it is by its own field, as the bedrock is by the earth: no piece
+          // ever carries it off - what falls breaks away around it)
+          if (id === M.CORE) { stats.coreSpared = (stats.coreSpared || 0) + 1; continue; }
           const back = backs ? backs[l] : 0, deco = decos ? decos[l] : 0;
           // A building's back wall is part of its frame: it has weight and it strikes what it
           // falls on. But it is a thin panel: broken up, it leaves far less rubble than the
