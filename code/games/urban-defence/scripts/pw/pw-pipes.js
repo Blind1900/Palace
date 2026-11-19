@@ -340,6 +340,33 @@
         layCell(line, xc + dx, y, corner ? [150, 156, 164] : tone(CASING, 0.7));
       }
     }
+    // One corner of a well as a swept elbow. horiz: which side of the shaft the run lies
+    // (-1 left, +1 right); vert: which way the shaft leaves this level (+1 down, -1 up).
+    // Rings about the inner corner: ring index = BORE - distance, so at the box edges the
+    // rings become the straight cross-sections they meet (casing to casing, lane to lane).
+    function layElbow(line, xc, yLevel, horiz, vert) {
+      const cx = xc + horiz * 3;
+      const cy = yLevel + (vert > 0 ? BORE : -1);
+      for (let x = xc - 3; x <= xc + 3; x += 1) {
+        for (let y = yLevel - 1; y <= yLevel + BORE; y += 1) {
+          const cross = BORE - Math.hypot(x - cx, y - cy);
+          if (cross < -1) {
+            // beyond the sweep: the squared outer corner goes back to the bed
+            if ((mat[y * W + x] & ID_MASK) === M.PIPE && PW.getOwner(world, x, y) === line.owner) {
+              PW.set(world, x, y, M.FILL, { quiet: true });
+              PW.setFlag(world, x, y, FLAG.HOLLOW, false);
+              PW.setLayer(world, 'paint', x, y, rgb(tone(SAND, (PW.hash2(x, y) & 3) === 0 ? 0.88 : 1)));
+              PW.setOwner(world, x, y, 0);
+              PW.setLayer(world, 'pipe', x, y, 0);
+            }
+            continue;
+          }
+          if (cross < 0) continue;   // (the soft ring between arc and bed keeps what it has)
+          const r = Math.max(0, Math.min(BORE - 1, Math.round(cross)));
+          layCell(line, x, y, pipeColor(r, x + y), r > 0 && r < BORE - 1);
+        }
+      }
+    }
     function layWells(line, k0 = 1, k1 = Infinity) {
       const dropped = (line.wells || []).filter((w) => w.k >= k0 && w.k <= k1);
       line.wells = (line.wells || []).filter((w) => w.k < k0 || w.k > k1);
@@ -378,9 +405,15 @@
           const x = xc - 3 + r;
           for (let y = yTop; y <= yBot; y += 1) layCell(line, x, y, pipeColor(r, y), r > 0 && r < BORE - 1);
         }
-        // (flanged where the shaft meets each bore, so the turn reads as one built joint)
-        layFlange(line, xc, yTop - 1);
-        layFlange(line, xc, yBot + 1);
+        // N34: the pipe compensates through the bend - each corner of the well is a swept
+        // elbow (the user's elbow-fitting references), one continuous pipe, never two bores
+        // butted into a squared joint. The corner box is re-tiled as rings about the bend's
+        // tight inner corner - casing sweeping the outside, the lane bands carried round,
+        // casing again at the inner radius - and the squared outer corner beyond the sweep
+        // is given back to the bed, so the silhouette itself turns.
+        const drop = b > a;
+        layElbow(line, xc, Math.min(a, b), drop ? -1 : 1, 1);
+        layElbow(line, xc, Math.max(a, b), drop ? 1 : -1, -1);
         line.wells.push({ k, x: xc, y0: yTop - 1, y1: yBot + 1 });
         stats.wells = (stats.wells || 0) + 1;
       }
