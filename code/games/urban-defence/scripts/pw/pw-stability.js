@@ -512,13 +512,14 @@
         }
         for (const r of s.plants) carryPlant(s, r);
         // (twice a second, and once it is done: what stands on the sinking ground looks again at
-        // what still holds it - a building, a prop or a rock, a lamp - and stands, or comes down
-        // whole and breaks)
+        // what still holds it - a building, a prop or a rock, a lamp, a core - and stands, or
+        // comes down whole and breaks)
         if (Math.floor(s.age * 2) !== Math.floor((s.age - dt) * 2) || (u >= 1 && !behind)) {
           if (s.owners.length && world.onDamage) for (const id of s.owners) world.onDamage(id, 0);
           const box = { x0: s.x0, y0: s.slip - 300, x1: s.x1, y1: s.yBottom };
           if (PW.props) PW.props.afterBlast(world, particles, box);
           if (PW.streetProps) PW.streetProps.afterBlast(world, particles, box, null);
+          if (world.cores && world.cores.supportLost) world.cores.supportLost(box.x0, box.y0, box.x1, box.y1);
         }
         if (u < 1 || behind) continue;
         // Sunk as far as it goes: the rest of the hollow is the broken rock's, bulked up.

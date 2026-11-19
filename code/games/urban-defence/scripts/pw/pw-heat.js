@@ -37,10 +37,11 @@
   // their gap by twice the flux, as with equal capacities, so the exchange stays as stable.)
   const SHARE = new Float32Array(64 * 64);
   for (let a = 0; a < 64; a += 1) for (let b = 0; b < 64; b += 1) SHARE[a * 64 + b] = 2 * CAP[b] / (CAP[a] + CAP[b]);
-  // (the metals that melt, at MELT °C: steel beams and plate, bridge steel, metal cover)
+  // (the metals that melt, at MELT °C: steel beams and plate, bridge steel, metal cover, a pipe's
+  // casing - mended like any break in it. Never a core: the god's metal does not melt)
   const MELT = 1350;
   const MELTS = new Uint8Array(64);
-  for (const id of [M.STEEL, M.BRIDGE, M.COVER_METAL]) if (id !== undefined) MELTS[id] = 1;
+  for (const id of [M.STEEL, M.BRIDGE, M.COVER_METAL, M.PIPE]) if (id !== undefined) MELTS[id] = 1;
   const quench = (a, b) => (a === M.WATER) !== (b === M.WATER) && !open[a === M.WATER ? b : a];
   const RISE = 0.3;                 // share of hot air's excess carried up per heat tick
   const SMOKE_CHANCE = 0.3;         // per burning cell per heat tick
@@ -388,6 +389,7 @@
         PW.setHeat(world, x, y, t);
         stats.melted = (stats.melted || 0) + 1;
         if (owner > 0 && owner < 50000 && world.onDamage) world.onDamage(owner, 1, x, y);
+        if (id === M.PIPE && world.pipes && world.pipes.notifyDamage) world.pipes.notifyDamage(x - 2, x + 2);
         return;
       }
       if (t >= SCORCH && terrain[id] && !(PW.getFlags(world, x, y) & FLAG.SCORCH) && hasAir(i, x, y)) {
