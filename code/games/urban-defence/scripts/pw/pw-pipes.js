@@ -917,7 +917,7 @@
         let nx = p.x + dir;
         // Passing a core on the way: through its bed, in one connector and out the other.
         const between = line.cores.find((c) => Math.abs(nx - c.x) < HOP);
-        if (between) nx = between.x + HOP * dir;
+        if (between) { nx = between.x + HOP * dir; between.flashAt = tick; }
         // A well between the columns: the packet climbs the shaft, a few cells a step,
         // instead of teleporting between the levels.
         const ty = rowOf(line, nx, p.lane);
@@ -1017,6 +1017,66 @@
           // well it runs straight.
           const wob = p.stage === 1 ? Math.round(Math.sin(p.x * 0.42 + p.lane * 2.1) * 1.1) : 0;
           cell(p.x, p.y + wob, cargo[p.shade % 3]);
+        }
+      }
+      // ---- The god's life in the plant (N27F) ---------------------------------------------------------
+      // Quiet black-and-white signs in the energy ball's own language - a white point, a grey
+      // fleck, an ink streak, never more than a few pixels at a time - that read the pipes,
+      // pumps, wells and the repairing stream as living god-machinery over the industrial
+      // plant. All drawn each frame; nothing is written into the world's cells.
+      if (z >= 0.75) {
+        const GWHITE = [238, 242, 246], GDIM = [150, 156, 162], GINK = [10, 10, 12];
+        const tsec = time * 0.001;
+        const mid = BORE >> 1;
+        // (a small still eye with one slow fleck about it: the ball's atom, in miniature)
+        const eye = (x, y, phase) => {
+          put(x, y, GWHITE);
+          const a = tsec * 1.6 + phase;
+          put(x + Math.round(Math.cos(a) * 2.2), y + Math.round(Math.sin(a) * 1.4), GDIM);
+        };
+        for (const line of lines) {
+          if (line.x1 < vx0 || line.x0 > vx1) continue;
+          const span = line.ys.length;
+          // The line's pulse: one white signal glides the run every few seconds, a dim then
+          // inky trail behind it - and it dies at any wound it meets.
+          const lap = Math.max(5, span / 240);
+          const ph = ((line.x0 * 131) % 977) / 977;
+          const k = Math.min(span - 1, Math.floor((((tsec / lap) + ph) % 1) * span));
+          const px = line.x0 + k;
+          if (px >= vx0 && px <= vx1 && !line.broken[k]) {
+            put(px, line.ys[k] + mid, GWHITE);
+            for (let d = 1; d <= 3; d += 1) {
+              const kb = k - d;
+              if (kb >= 0 && !line.broken[kb]) put(line.x0 + kb, line.ys[kb] + mid, d === 1 ? GDIM : GINK);
+            }
+          }
+          // Wellheads and pump mouths keep watch.
+          for (const w of line.wells || []) if (w.x >= vx0 && w.x <= vx1) eye(w.x, w.y0 + 2, w.x & 7);
+          for (const r of line.risers) if (r.kind === 'pump' && r.x >= vx0 && r.x <= vx1) eye(r.x, r.y0 + 3, r.x & 7);
+          // A packet through a core's bed: the connectors blink white as it passes.
+          for (const c of line.cores) {
+            if (!c.flashAt || tick - c.flashAt > 20 || c.x < vx0 - HOP || c.x > vx1 + HOP) continue;
+            const fade = tick - c.flashAt < 10 ? GWHITE : GDIM;
+            for (const s of [-1, 1]) {
+              const k2 = Math.max(0, Math.min(span - 1, c.x + s * HOP - line.x0));
+              put(line.x0 + k2, line.ys[k2] + mid, fade);
+            }
+          }
+        }
+        // The repairing stream: the god's attention rests on each open mouth - a white point
+        // with hair-fine flickering rays, an ink fleck beneath (the feelers, made light).
+        if (stats.broken) {
+          for (const e of openEnds()) {
+            if (e.x < vx0 || e.x > vx1) continue;
+            put(e.x, e.y, GWHITE);
+            const h = PW.hash2(e.x, tick >> 2);
+            for (let i = 0; i < 3; i += 1) {
+              const a = ((h >> (i * 3)) & 7) * (Math.PI / 4);
+              put(e.x + Math.round(Math.cos(a) * (1 + (h >> (i + 9) & 1))),
+                e.y + Math.round(Math.sin(a) * (1 + (h >> (i + 11) & 1))), (h >> i & 1) ? GDIM : GWHITE);
+            }
+            put(e.x + ((h >> 5 & 1) ? 1 : -1), e.y + 2, GINK);
+          }
         }
       }
     }
