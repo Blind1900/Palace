@@ -36,7 +36,9 @@
     const facing = options.facing || 1;
     const random = PW.createRandom(seed);
     const P = STYLES[style];
-    const storeys = populationStoreys(level);
+    // The storeys can be set directly (the growth system's skyline curve spreads wider than the
+    // town generator's); left unset, the town curve holds.
+    const storeys = options.storeys || populationStoreys(level);
     const soldiers = 2 + Math.floor(level / 2);
     const interior = Math.max(INTERIOR_MIN, soldiers * S.SLOT + BAND * 0.6 | 0);
     const extra = { slab: 0, crown: 0, setback: 30, tapered: 30, spire: 30, needle: 30, offset: 56 }[variant] || 0;

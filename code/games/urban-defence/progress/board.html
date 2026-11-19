@@ -68,6 +68,8 @@
   footer { padding: 10px 20px; font-size: 12px; color: var(--dim); display: flex; flex-wrap: wrap; gap: 20px; justify-content: space-between; }
   #zoom { position: fixed; inset: 0; background: rgba(0,0,0,.9); display: none; align-items: center; justify-content: center; cursor: zoom-out; z-index: 10; } #zoom img { max-width: 96vw; max-height: 96vh; image-rendering: pixelated; }
   mark { background: #5a4a1a; color: #fff; }
+  nav button { position: relative; }
+  nav button.new::after { content: ''; position: absolute; top: 5px; right: 5px; width: 8px; height: 8px; border-radius: 50%; background: #e5484d; box-shadow: 0 0 0 2px #1d2128; }
   @media (max-width: 1100px) { .cols { grid-template-columns: 1fr; } aside { position: static; max-height: none; } }
 </style>
 </head>
@@ -189,9 +191,35 @@ function renderHeader() {
   $('#nShots').textContent = ' ' + entries.reduce((n, e) => n + (e.shots ? e.shots.length : 0), 0);
   $('#latest').innerHTML = entries.filter((e) => !/^(Status|Plan):/.test(e.title)).slice(0, 6).map((e) => `<div class="news"><b>${esc(e.title)}</b><small>${esc(e.author || '')} ${esc(e.time)}</small></div>`).join('');
 }
-function renderAll() { renderHeader(); renderChecklist(); renderShots(); renderPerf(); renderBulletin(); renderNews(); showTab(tab); }
+function renderAll() { renderHeader(); renderChecklist(); renderShots(); renderPerf(); renderBulletin(); renderNews(); showTab(tab); updateDots(); }
+// A red dot on a tab means something in it has changed since it was last opened. Each tab's content is
+// fingerprinted; the fingerprint seen when a tab was last open is kept in this browser (localStorage).
+const hash = (t) => { let h = 5381; for (let i = 0; i < t.length; i += 1) h = ((h << 5) + h + t.charCodeAt(i)) | 0; return String(h); };
+const isNews = (e) => !/^(Status|Plan):/.test(e.title);
+const fingerprint = {
+  checklist: () => hash(JSON.stringify(entries.filter((e) => !isNews(e)))),
+  shots: () => hash(JSON.stringify(entries.filter((e) => e.shots).map((e) => [e.title, e.shots.map((s) => s.src)]))),
+  perf: () => hash(texts.perf || ''),
+  bulletin: () => hash(texts.bulletin || ''),
+  news: () => hash(JSON.stringify(entries.filter(isNews).map((e) => e.title))),
+};
+const seenKey = 'board-seen';
+const seen = () => JSON.parse(localStorage.getItem(seenKey) || '{}');
+function markSeen(t) { if (!fingerprint[t]) return; const s = seen(); s[t] = fingerprint[t](); localStorage.setItem(seenKey, JSON.stringify(s)); }
+function updateDots() {
+  const s = seen();
+  for (const t of Object.keys(fingerprint)) {
+    const btn = document.querySelector(`#nav button[data-tab="${t}"]`);
+    if (!btn) continue;
+    // (a tab never opened before starts as seen, so a first visit does not light every tab)
+    if (s[t] === undefined) { s[t] = fingerprint[t](); }
+    btn.classList.toggle('new', t !== tab && s[t] !== fingerprint[t]());
+  }
+  localStorage.setItem(seenKey, JSON.stringify(s));
+}
 function showTab(t) {
-  tab = t; location.hash = t;
+  tab = t; location.hash = t; markSeen(t);
+  for (const b of $$('#nav button')) if (b.dataset.tab === t) b.classList.remove('new');
   for (const b of $$('#nav button')) b.classList.toggle('on', b.dataset.tab === t);
   for (const d of $$('.tab')) d.classList.toggle('on', d.id === 't-' + t);
   $('#left').style.display = $('#right').style.display = t === 'elements' ? 'none' : '';
