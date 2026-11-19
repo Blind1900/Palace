@@ -832,7 +832,8 @@
             for (let y = y0; y <= y1 && !lit; y += 2) for (let x = x0; x <= x1; x += 2) if (voidAt(x, y)) { lit = true; break; }
           }
           if (!lit) continue;
-          if (n !== c) world.chunkVersion[n] += 1;
+          // (a light change is hard dirt: it must not ride the gas throttle for 3 frames)
+          if (n !== c) { world.chunkVersion[n] += 1; if (world.chunkHardVersion) world.chunkHardVersion[n] += 1; }
           rect[n * 4] = -1;
         }
       }
@@ -876,7 +877,12 @@
       ctx.fillStyle = color;
       ctx.fillRect(left, top, extent, Math.max(1, Math.round((gy + size - camera.y) * camera.zoom) - top));
     }
-    function invalidateAll() { for (const c of world.chunkVersion.keys()) world.chunkVersion[c] += 1; }
+    function invalidateAll() {
+      for (const c of world.chunkVersion.keys()) {
+        world.chunkVersion[c] += 1;
+        if (world.chunkHardVersion) world.chunkHardVersion[c] += 1;   // (a style switch redraws NOW)
+      }
+    }
     // The colour a cell is drawn in (a piece of ground lifted out of the world keeps its look).
     function colorAt(x, y) {
       const c = (y >> CHUNK_SHIFT) * world.chunksX + (x >> CHUNK_SHIFT);
