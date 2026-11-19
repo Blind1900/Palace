@@ -118,6 +118,8 @@
     const r = PW.explode(world, particles, { x, y, radius, power });
     // (the lines look at the struck columns next tick instead of waiting for the watch window)
     if (pipes && pipes.notifyDamage) pipes.notifyDamage(x - radius - 14, x + radius + 14);
+    // (and any core or seed near the blast looks at its support - N18O, event-driven)
+    if (cores && cores.supportLost) cores.supportLost(x - radius - 14, y - radius - 14, x + radius + 14, y + radius + 14);
     return r;
   }
   // Dig a raw tunnel box for a side: it joins that side's network if it touches one, otherwise it

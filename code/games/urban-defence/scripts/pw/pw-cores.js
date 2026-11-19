@@ -119,6 +119,40 @@
       stats.risen += 1;
       return true;
     }
+    // N18O: a core with nothing under it comes down WHOLE, held together by its field - the
+    // ground may sink or be blown from under the god's gift, but the gift never bends or
+    // shears with it. One row per step, the same column shuffle as sink, gated on every
+    // column standing over open air; it lands on the first thing that bears any column
+    // (rubble included) and stands there.
+    function fall(core) {
+      // Only the ball's own body falls (x within 7 of the axis): the thin connector filaments
+      // at the unit's edge tear and stay at the rim - the gift torn from its sockets - rather
+      // than hold the whole ball hanging off a floating bed remnant.
+      const s = spans(core).filter(([x]) => Math.abs(x - core.x) <= 7);
+      if (!s.length) return false;
+      for (const [x, , hi] of s) {
+        const below = PW.get(world, x, hi + 1) & ID_MASK;
+        if (below !== M.AIR && PW.mat.phase[below] > PW.PHASE.GAS) return false;
+      }
+      for (const [x, lo, hi] of s) {
+        const displaced = cellAt(x, hi + 1);
+        for (let y = hi + 1; y > lo; y -= 1) put(x, y, cellAt(x, y - 1));
+        put(x, lo, displaced);
+      }
+      core.y += 1;
+      return true;
+    }
+    // The sag's (or any caller's) word that the ground under a region changed: every core and
+    // seed in the box looks at its support on its next step. The physics track calls
+    // world.cores.supportLost(x0, y0, x1, y1) from the sinkhole re-check; blasts are covered
+    // by the free cores' own periodic look.
+    function supportLost(x0, y0, x1, y1) {
+      const mark = (holder) => {
+        if (holder.x + REACH >= x0 && holder.x - REACH <= x1 && holder.y + 14 >= y0 && holder.y - 20 <= y1) holder.checkSupport = tick || 1;
+      };
+      for (const b of world.buildings || []) for (const core of b.cores || []) if (!core.orb) mark(core);
+      for (const s of world.seedCores || []) mark(s);
+    }
     // Sink the core one row towards home: the mirror of rise(). In each of its columns, its cells
     // move down one and the cell that was below goes up over them; loose grit gives way, anything
     // solid stops it until the repair clears the way.
@@ -196,6 +230,19 @@
       }
       stats.cleared += moved;
     }
+    // Does the bed still stand under the home - enough of the building's own cells in the bed
+    // region to bear the unit? homeOpen alone reads an empty VOID as a clear home (nothing
+    // bars the way), and settling into one stamped a floating unit over nothing - the user's
+    // floating grating box (N18O). The repair rebuilds bottom-up, so the bed returns first.
+    function bedStands(b, core) {
+      let n = 0;
+      for (let x = core.x - 6; x <= core.x + 6; x += 1) {
+        for (let y = core.homeY + 7; y <= core.homeY + 12; y += 1) {
+          if (PW.getOwner(world, x, y) === b.id) { n += 1; break; }
+        }
+      }
+      return n >= 4;
+    }
     // Is the core's home region rebuilt and clear - nothing foreign and nothing loose in the
     // vault box it would occupy? (Its own building's cells and open air are what belong there.)
     function homeOpen(b, core) {
@@ -249,12 +296,60 @@
     function step() {
       tick += 1;
       if (tick % 30 === 17) deathWatch();
+      // (a planted seed core over sunk or blown-out ground comes down whole too)
+      for (const s of world.seedCores || []) {
+        if (s.building) continue;
+        if (s.checkSupport || tick % 15 === 7) { s.checkSupport = 0; for (let n = 0; n < 3 && fall(s); n += 1); }
+      }
       for (const b of world.buildings || []) {
         if (!b.cores || !b.cores.length) continue;
         // (a building still going up for the first time is no ruin to expose - its cores are
         // already home in fresh beds; the flag drops once it first stands all but whole)
         if (b.underConstruction && (b.health || 0) >= 0.9) b.underConstruction = false;
         if (b.ruined && !b.coresOpen && !b.underConstruction) expose(b);
+        // N18O support checks. A settled unit whose vault floor is gone from under it is given
+        // up by the vault: its ball is freed and managed again (and falls whole just below).
+        // A free ball over nothing comes down whole - marked by the sag's supportLost, and
+        // looked at on its own every quarter second for the blast cases.
+        for (const core of b.cores) {
+          if (core.orb) continue;
+          // A unit that is the building's - pristine (never risen: homeY unset) or settled -
+          // gives its ball up when the vault floor is gone from under it.
+          const partOf = core.settled || core.homeY === undefined;
+          if (partOf && core.checkSupport) {
+            core.checkSupport = 0;
+            // The unit is held while its own bed still stands under the ball - a rigid deck
+            // spanning a hollow is support (the sag leaves made solids standing). Only when
+            // the bed itself is gone from under the ball is the ball given up.
+            let bears = 0;
+            for (let x = core.x - 6; x <= core.x + 6; x += 1) {
+              for (let y = core.y + 2; y <= core.y + 12; y += 1) {
+                const id = PW.get(world, x, y) & ID_MASK;
+                // (the cradle, the bed, rubble, anything - but never the ball's own matter)
+                if (id !== M.AIR && id !== M.CORE && PW.mat.phase[id] > PW.PHASE.GAS) { bears += 1; break; }
+              }
+            }
+            if (bears < 4) {
+              core.settled = false; core.free = false;
+              if (core.homeY === undefined) core.homeY = core.y;
+              const c = columnOf(core);
+              for (let y = c.top; y <= c.bottom; y += 1) for (let x = c.x0; x <= c.x1; x += 1) {
+                if ((PW.get(world, x, y) & ID_MASK) === M.CORE && PW.getOwner(world, x, y) === b.id) PW.setOwner(world, x, y, 0);
+              }
+              if (!b.coresOpen) b.coresOpen = tick;
+              core.checkSupport = tick;   // (the freed ball looks down next step and falls)
+              if (world.onDamage) world.onDamage(b.id);
+            }
+          } else if (!partOf && core.checkSupport) {
+            // (event-driven only: the sag's re-check and the blast wrapper call supportLost.
+            // A periodic look while free re-read the collapse's churning rubble as voids and
+            // dropped balls into pockets, dancing them against the rise - the suites caught it)
+            core.checkSupport = 0;
+            let fell = 0;
+            while (fell < 3 && fall(core)) fell += 1;
+            if (fell === 3) core.checkSupport = tick;   // still falling: carry on next tick
+          }
+        }
         // A free core goes home as soon as its vault region is rebuilt and clear - the repair
         // works from the bottom up, so the bed is ready long before the ruin is over. Near home
         // it sinks row by row; from high up, or where its own rebuilt storeys stand in the way,
@@ -266,9 +361,13 @@
         if (b.coresOpen && tick % 2 === 0) {
           for (const core of b.cores) {
             if (core.orb || !core.free) continue;
-            if (core.y >= core.homeY) { settle(b, core); continue; }
-            if (core.homeY - core.y <= 30 && homeOpen(b, core) && sink(b, core)) continue;
-            if (homeOpen(b, core)) settle(b, core);
+            // (at or below home - a sink arrived, or a fall carried it past (N18O): it settles
+            // whenever there is a bed to sit on - a wreck-filled vault is still home, as it
+            // always was - but never onto NOTHING: settling over a void stamped the floating
+            // grating box of the user's screenshot)
+            if (core.y >= core.homeY) { if (bedStands(b, core)) settle(b, core); continue; }
+            if (core.y < core.homeY && core.homeY - core.y <= 30 && homeOpen(b, core) && bedStands(b, core) && sink(b, core)) continue;
+            if (homeOpen(b, core) && bedStands(b, core)) settle(b, core);
           }
         }
         // The vaults close only once the ruin is over (while it stands, closing them would only
@@ -283,6 +382,9 @@
         if (!b.coresOpen || tick - b.coresOpen < SETTLE) continue;
         for (const core of b.cores) {
           if (core.orb || core.settled) continue;   // (the base's main core already stands in its open pit; a settled core is the building's again)
+          // (a ball that FELL below its home (N18O) climbs back the way it came - the rise
+          // rule below serves for that too: up through the void and its own wreck towards
+          // the vault, where the go-home branch settles it once the bed stands again)
           if (!core.free && tick % RISE_EVERY === 0) {
             if (exposed(core) || !rise(b, core)) {
               core.free = true;
@@ -342,7 +444,9 @@
         each(s.x, s.y, (s.x * 7 + s.y) & 1023);
       }
     }
-    return { step, expose, exposed, stats, draw };
+    const api = { step, expose, exposed, supportLost, stats, draw };
+    world.cores = api;
+    return api;
   }
 
   PW.createCores = createCores;
