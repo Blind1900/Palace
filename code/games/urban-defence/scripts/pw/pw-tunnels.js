@@ -718,9 +718,21 @@
     void dt;
   }
   // Advance the development waves by dt seconds (budgeted per call).
+  // N36: the workings GROW. A mine's chambers, side rooms and deeper levels are planned at
+  // generation (world.minePlans, sorted by time) and dug as the clock reaches them - the way
+  // a mine cross-section accretes - each fresh dig raw and timbered, developed by the wave
+  // from the drift it grew out of. A plan must never kill the clock.
+  function runPlans(world, T) {
+    const plans = world.minePlans;
+    while (plans && plans.length && plans[0].at <= T.time) {
+      const p = plans.shift();
+      try { p.fn(); } catch (e) { if (!T.planErrors) { T.planErrors = 1; console.warn('mine plan failed', e); } }
+    }
+  }
   function step(world, dt, budget = 2000) {
     const T = state(world);
     T.time += dt;
+    runPlans(world, T);
     repairStep(world, dt);
     let n = 0;
     while (T.pending.size && T.pending.peek() <= T.time && n < budget) {
@@ -729,10 +741,19 @@
     }
     return n;
   }
-  // Develop everything that is due by `time` (tests and fast-forward).
+  // Develop everything that is due by `time` (tests and fast-forward). Plans fire in order as
+  // the clock passes them, each after the development already due - so a chamber dug at its
+  // planned minute grows out of walls the wave has reached by then.
   function advanceTo(world, time) {
     const T = state(world);
     let n = 0;
+    const plans = world.minePlans;
+    while (plans && plans.length && plans[0].at <= time) {
+      const next = plans[0].at;
+      while (T.pending.size && T.pending.peek() <= next) { developCell(world, T.pending.pop()); n += 1; }
+      T.time = Math.max(T.time, next);
+      runPlans(world, T);
+    }
     while (T.pending.size && T.pending.peek() <= time) { developCell(world, T.pending.pop()); n += 1; }
     T.time = Math.max(T.time, time);
     return n;

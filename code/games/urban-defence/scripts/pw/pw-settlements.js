@@ -575,12 +575,67 @@
   // beside the workings but always heading toward ore, and using caves as highways: break in
   // at the nearest reach, carry on from the cave's point nearest the next vein. N12F keeps the
   // headings honest: a body already worked sends the heading on to the next, or to a cave.
+  // N36: the specialised rooms - each with a higher roof than the plain connecting drifts and
+  // its own look (the user's subway / underground / mine-banner references).
   const HALL_ROOMS = [
-    { kind: 'storage', h: 44, w: 130 }, { kind: 'pipes', h: 36, w: 100 }, { kind: 'armoury', h: 36, w: 110 },
+    { kind: 'storage', h: 44, w: 130 }, { kind: 'pipes', h: 36, w: 100 }, { kind: 'processing', h: 42, w: 120 },
+    { kind: 'armoury', h: 36, w: 110 }, { kind: 'mossy', h: 32, w: 95 },
     { kind: 'trash', h: 26, w: 90 }, { kind: 'subliminal', h: 22, w: 70 },
   ];
   function furnishHallRoom(world, kind, x0, x1, floor, h, random) {
     const deco = (x, y, c) => { if ((PW.get(world, x, y) & 63) === M.AIR) PW.setLayer(world, 'deco', x, y, rgb(c)); };
+    // Arch ribs up the walls and across the roof every so often (the underground-railroad and
+    // Euston references): a darker band in the back wall that reads as the room's framing.
+    if (kind !== 'subliminal') {
+      for (let x = x0 + 7; x < x1 - 4; x += 14) {
+        for (let y = floor - h + 1; y <= floor; y += 1) {
+          const nearRoof = y < floor - h + 4;
+          const current = PW.getLayer(world, 'back', x, y);
+          if (!current) continue;
+          const c = PW.unpack(current);
+          PW.setLayer(world, 'back', x, y, rgb([c[0] * 0.72 | 0, c[1] * 0.72 | 0, c[2] * 0.72 | 0]));
+          if (nearRoof) {
+            for (const dx of [-1, 1]) {
+              const c2 = PW.getLayer(world, 'back', x + dx, y);
+              if (c2) { const u = PW.unpack(c2); PW.setLayer(world, 'back', x + dx, y, rgb([u[0] * 0.82 | 0, u[1] * 0.82 | 0, u[2] * 0.82 | 0])); }
+            }
+          }
+        }
+      }
+    }
+    if (kind === 'processing') {
+      // The crusher line (the mine-banner reference): a chute from the roof into two angled
+      // screen decks, an ore bin under the lower end.
+      const cx2 = Math.round((x0 + x1) / 2);
+      for (let dy = 0; dy < Math.min(14, h - 12); dy += 1) {
+        deco(cx2 - 2 + (dy & 1), floor - h + 2 + dy, [88, 92, 98]);
+        deco(cx2 + 2 - (dy & 1), floor - h + 2 + dy, [70, 74, 80]);
+      }
+      for (let d = 0; d < 22; d += 1) {
+        deco(cx2 - 14 + d, floor - 14 + (d >> 1), [120, 112, 92]);
+        deco(cx2 - 10 + d, floor - 8 + (d >> 1) - (d & 1), [104, 96, 78]);
+      }
+      for (let dy = 0; dy < 7; dy += 1) for (let dx = 0; dx < 12; dx += 1) {
+        deco(cx2 + 12 + dx, floor - 1 - dy, dy === 6 || dx === 0 || dx === 11 ? [80, 84, 90] : (dx + dy) % 4 ? [58, 50, 40] : [96, 76, 50]);
+      }
+    } else if (kind === 'mossy') {
+      // The mossy hall: green growth hanging from the roof and creeping the walls, a damp
+      // sheen along the floor (the user's overgrown-tunnel references).
+      for (let x = x0 + 2; x < x1 - 1; x += 1) {
+        const hng = (PW.hash2(x, floor) & 7);
+        if (hng < 5) {
+          for (let d = 0; d <= (hng & 3); d += 1) {
+            const cur = PW.getLayer(world, 'back', x, floor - h + 1 + d);
+            if (cur) PW.setLayer(world, 'back', x, floor - h + 1 + d, rgb([38 + (hng << 2), 84 + ((x * 7) % 24), 40]));
+          }
+          if ((PW.hash2(x, 3) & 3) === 0) deco(x, floor - h + 2 + (hng & 3), [52, 108, 54]);
+        }
+        if ((PW.hash2(x, 9) & 3) === 0) {
+          const cur = PW.getLayer(world, 'back', x, floor);
+          if (cur) PW.setLayer(world, 'back', x, floor, rgb([44, 92, 58]));
+        }
+      }
+    }
     if (kind === 'storage') {
       for (let n = 0; n < 3; n += 1) {
         const bx = x0 + 18 + n * Math.round((x1 - x0 - 36) / 3) + random.int(-6, 6);
@@ -636,6 +691,9 @@
       .sort((p, q) => (Math.abs(p.x - wayX) + Math.abs(p.y - wayY) * 2) - (Math.abs(q.x - wayX) + Math.abs(q.y - wayY) * 2))
       .slice(0, 2);
     let roomIdx = (from.shaft ? from.shaft.x : 0) % HALL_ROOMS.length;
+    // (N36: the growth plans - rooms and a deeper working level dug as the clock reaches them)
+    const plans = world.minePlans || (world.minePlans = []);
+    let planAt = PW.tunnels.state(world).time + 25 + ((from.shaft ? from.shaft.x : wayX) % 13);
     // No box of the workings may cut a cave's standing formations (columns, stalagmites - the
     // grounding rule): a leg or shaft that would clip one is clipped back instead.
     const clearOfProps = (x0, y0, x1, y1) => {
@@ -710,7 +768,7 @@
             const cx2 = wayX + dir * d;
             if ((PW.get(world, cx2, wayY - 10) & 63) === M.AIR && !(PW.getFlags(world, cx2, wayY - 10) & FLAG.TUNNEL)) { run = d + 2; breached = true; break; }
           }
-          const h = 28 + random.int(0, 2) * 8;   // hallways of varying height
+          const h = 28;   // the default drift: simple and narrow, just clearance for a trooper (N36)
           const dug = digLeg(wayX, wayY, wayX + dir * run, h, 'drift');
           if (!dug) { guard = 99; break; }
           wayX = dir > 0 ? dug[1] : dug[0];
@@ -729,14 +787,18 @@
             }
           }
           if ((guard & 1) === 1 && stop === target) {
-            // every other leg widens into a room with a purpose
+            // Every other leg will widen into a room with a purpose - but not yet (N36): the
+            // workings GROW. The chamber is planned, and when the clock reaches it the narrow
+            // drift here is dug out into the taller room, raw and timbered, developed by the
+            // wave from the walls it grew from - the mine accretes like the cross-sections.
             const spec = HALL_ROOMS[roomIdx % HALL_ROOMS.length]; roomIdx += 1;
             const rw = spec.w + random.int(-12, 12);
-            const room = digLeg(wayX, wayY, wayX + dir * rw, spec.h, 'room');
-            if (room) {
-              furnishHallRoom(world, spec.kind, room[0], room[1], wayY, spec.h, random);
-              wayX = dir > 0 ? room[1] : room[0];
-            }
+            const [roomX, roomY, roomDir] = [wayX, wayY, dir];
+            plans.push({ at: planAt, fn: () => {
+              const room = digLeg(roomX, roomY, roomX + roomDir * rw, spec.h, 'room');
+              if (room) furnishHallRoom(world, spec.kind, room[0], room[1], roomY, spec.h, random);
+            } });
+            planAt += 18;
           }
         }
       }
@@ -748,7 +810,21 @@
       const dug = digLeg(wayX, wayY, face - dir, 40, 'drift');
       if (dug && PW.mining) PW.mining.afterDig(world, net, { x0: dug[0], y0: wayY - 39, x1: dug[1], y1: wayY });
       target.worked = (target.worked || 0) + 1;
+      // N36: in time, a deeper working level opens under the face drift - a shaft with its
+      // ladder, a narrow drift along the new level, the way the cross-sections grow downward.
+      if (dug) {
+        const [bx2, by2, bd] = [Math.round((dug[0] + dug[1]) / 2), wayY, dir];
+        plans.push({ at: planAt + 85 + ((bx2 % 7) * 6), fn: () => {
+          const yA = by2 - 2, yB = by2 + 54;
+          const clips = (world.props || []).some((p) => !(p.x1 < bx2 - 16 || p.x0 > bx2 + 16 || p.y1 < yA - 4 || p.y0 > yB + 2));
+          if (clips) return;
+          PW.tunnels.digBox(world, net, bx2 - 12, yA, bx2 + 12, yB, { kind: 'shaft', keepOre: true });
+          ladder(world, bx2 - 6, yA, yB - 1);
+          digLeg(bx2 - bd * 10, yB, bx2 + bd * 170, 28, 'drift');
+        } });
+      }
     }
+    plans.sort((a, b2) => a.at - b2.at);
   }
   // A mine headframe's own shaft: straight down to a nearby vein, or a short sump if none is near.
   function headframeShaft(world, mine, nodes, side) {
