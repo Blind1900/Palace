@@ -287,8 +287,34 @@
       }
       layFlange(line, anchor.x, yA - 1);
       if (yB > lineY + BORE - 1) layFlange(line, anchor.x, yB + 1);
-      else layFlange(line, anchor.x, lineY - 1);
+      // N30: where the vertical tees into the run it is a proper T-piece with a valve (the
+      // user's underground-pipe reference) - never a clogged corner. The junction's lip rows
+      // widen into a socket collar, and a gate-valve body with its handwheel sits on the
+      // vertical arm just off the main, the same casing language as everything else.
+      const xc = anchor.x, fromAbove = anchor.y < lineY;
+      for (const ly of [lineY - 1, lineY + BORE]) {
+        layCell(line, xc - 4, ly, tone(CASING, 1.18));
+        layCell(line, xc + 4, ly, tone(CASING, 1.18));
+      }
+      layCell(line, xc - 4, lineY, [168, 174, 182]);
+      layCell(line, xc + 4, lineY, [168, 174, 182]);
+      const vy = fromAbove ? lineY - 7 : lineY + BORE + 5;
+      if (vy > yA + 2 && vy < yB - 2) {
+        // the valve body: a dark banded block across the vertical arm, bolted
+        for (let r = -4; r <= 4; r += 1) {
+          layCell(line, xc + r, vy, Math.abs(r) === 4 ? [198, 202, 206] : STEEL_DARK);
+          layCell(line, xc + r, vy + 1, Math.abs(r) === 4 ? tone(STEEL, 0.8) : tone(CASING, 0.66));
+        }
+        // the stem and handwheel: a short spindle off the body, a small bright wheel at its end
+        layCell(line, xc + 5, vy, tone(STEEL, 0.9));
+        layCell(line, xc + 6, vy, tone(STEEL, 0.9));
+        layCell(line, xc + 7, vy - 1, [205, 209, 213]);
+        layCell(line, xc + 8, vy, [205, 209, 213]);
+        layCell(line, xc + 7, vy + 1, [205, 209, 213]);
+        layCell(line, xc + 7, vy, STEEL);
+      }
       return { x: anchor.x, y0: yA, y1: yB, anchorY: anchor.y, flow: anchor.flow, kind: anchor.kind, resource: anchor.resource,
+        tTop: lineY - 9, tBot: lineY + BORE + 9,   // (the T-piece and valve hardware live in this band)
         building: anchor.building, op: anchor.op, occ: new Uint8Array(yB - yA + 1), timer: 0, pending: 0 };
     }
     // The run's underground ends are closed with a bolted steel cap.
@@ -642,7 +668,7 @@
       layWells(line, Math.max(1, k - 1), Math.min(line.ys.length - 1, k + 1));
       if (rr) {
         const fresh = layRiser(line, { x: rr.x, y: rr.anchorY, flow: rr.flow, kind: rr.kind, resource: rr.resource, building: rr.building, op: rr.op });
-        Object.assign(rr, { y0: fresh.y0, y1: fresh.y1, occ: fresh.occ });
+        Object.assign(rr, { y0: fresh.y0, y1: fresh.y1, occ: fresh.occ, tTop: fresh.tTop, tBot: fresh.tBot });
       }
       // The growing end is the pipe stamping its own cross-section outward (N14F/N16F - the
       // user kept the glitch as the feature): a vertical segment of the same bore design at
@@ -672,7 +698,8 @@
           const y = ny + r;
           if (y < 1 || y >= H - 1) continue;
           if ((line.wells || []).some((w) => Math.abs(x - w.x) <= 3 && y >= w.y0 && y <= w.y1)) continue;
-          if (line.risers.some((q) => Math.abs(x - q.x) <= 3 && y >= q.y0 - 1 && y <= q.y1 + 1)) continue;
+          if (line.risers.some((q) => (Math.abs(x - q.x) <= 3 && y >= q.y0 - 1 && y <= q.y1 + 1)
+            || (Math.abs(x - q.x) <= 8 && y >= (q.tTop ?? q.y0) && y <= (q.tBot ?? q.y1)))) continue;   // (shaft, and the T-valve's band out to +-8)
           if ((mat[y * W + x] & ID_MASK) === M.PIPE && PW.getOwner(world, x, y) === line.owner) {
             PW.set(world, x, y, M.FILL, { quiet: true });
             PW.setFlag(world, x, y, FLAG.HOLLOW, false);
@@ -699,7 +726,8 @@
           if ((line.wells || []).some((w) => Math.abs(x - w.x) <= 3 && y >= w.y0 && y <= w.y1)) continue;
           // (a riser's fresh vertical is the line's own and stays; old casing in its columns
           // but outside it is wreckage like any other - a pump must not shelter a snarl)
-          if (line.risers.some((q) => Math.abs(x - q.x) <= 3 && y >= q.y0 - 1 && y <= q.y1 + 1)) continue;
+          if (line.risers.some((q) => (Math.abs(x - q.x) <= 3 && y >= q.y0 - 1 && y <= q.y1 + 1)
+            || (Math.abs(x - q.x) <= 8 && y >= (q.tTop ?? q.y0) && y <= (q.tBot ?? q.y1)))) continue;   // (shaft, and the T-valve's band out to +-8)
           if ((mat[y * W + x] & ID_MASK) === M.PIPE && PW.getOwner(world, x, y) === line.owner) {
             PW.set(world, x, y, M.FILL, { quiet: true });
             PW.setFlag(world, x, y, FLAG.HOLLOW, false);

@@ -148,6 +148,8 @@ for (let x = cutX - 90; x < cutX + 90; x += 1) {
   for (let y = water.ys[k] - 60; y < water.ys[k] + 70; y += 1) {
     if (y >= water.ys[k] - 1 && y <= water.ys[k] + BORE) continue;
     if (inWell(x, y)) continue;
+    // (a riser's T-piece and valve hardware reach out to 8 columns within their band - N30)
+    if (water.risers.some((r) => Math.abs(x - r.x) <= 8 && y >= (r.tTop ?? 1e9) && y <= (r.tBot ?? -1))) continue;
     if ((PW.get(world, x, y) & 63) === M.PIPE && PW.getOwner(world, x, y) === water.owner) stray += 1;
   }
 }
