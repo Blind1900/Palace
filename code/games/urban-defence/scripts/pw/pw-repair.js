@@ -191,15 +191,19 @@
         }
         // Water standing in the wound is never destroyed by the rebuild (PS's flood test:
         // every cell stamped over a flooded spot deleted a water cell). It is displaced to
-        // the top of its column first, the way the particles' displace() does; shut in with
-        // nowhere to go, the cell waits its turn.
+        // the top of its column, the way the particles' displace() does; shut in with
+        // nowhere to go, the cell waits its turn. The seat is CHECKED before pay and the
+        // water MOVED only after it - lifting first duplicated a cell every time the HM ran
+        // out between the two (PS's second catch: +27 cells on the same flood).
+        let liftTo = -1;
         if (now === M.WATER) {
           let top = cell.y;
           while (top > 1 && (PW.get(world, cell.x, top - 1) & ID_MASK) === M.WATER) top -= 1;
           if ((PW.get(world, cell.x, top - 1) & ID_MASK) !== M.AIR) return 'skip';
-          PW.set(world, cell.x, top - 1, PW.get(world, cell.x, cell.y), { quiet: true });
+          liftTo = top - 1;
         }
         if (!pay()) return false;
+        if (liftTo >= 0) PW.set(world, cell.x, liftTo, PW.get(world, cell.x, cell.y), { quiet: true });
         PW.set(world, cell.x, cell.y, c.mat[i], { quiet: true });
         PW.setLayer(world, 'paint', cell.x, cell.y, c.paint[i]);
         PW.setOwner(world, cell.x, cell.y, b.id);
