@@ -108,10 +108,26 @@
     // take. (Anything the building owns counts as standing - the bed and the gift below ground
     // are the first sources, so a newborn grows out of its translator exactly as asked.)
     const builtAt = (b, x, y) => PW.getOwner(world, x, y) === b.id;
+    // The blueprint role under a neighbour (-1 outside the blueprint: the bed and the gift,
+    // which count as structure).
+    const roleAt = (b, x, y) => {
+      const c = b.canvas, lx = x - b.ox, ly = y - b.oy;
+      return lx >= 0 && ly >= 0 && lx < c.width && ly < c.height ? c.role[ly * c.width + lx] : -1;
+    };
+    const FLOORY = (r) => r === ROLES.SLAB || r === ROLES.ROOF || r === ROLES.STAIR;
     function ready(b, cell) {
       const { x, y, p } = cell;
       if (p === 0) return builtAt(b, x, y + 1) || builtAt(b, x - 1, y + 1) || builtAt(b, x + 1, y + 1) || builtAt(b, x, y - 1);
       if (p === 1) return builtAt(b, x - 1, y) || builtAt(b, x + 1, y) || builtAt(b, x, y + 1);
+      if (p === 3) {
+        // The side walls follow once the floors reach the ends (N23F): a wall cell climbs its
+        // own wall, stands on a floor, a pillar or the bed, or starts beside the floor that
+        // has just arrived at the building's end - never off the back walls alone.
+        const under = roleAt(b, x, y + 1);
+        if (builtAt(b, x, y + 1) && (under === ROLES.WALL || under === ROLES.FRAME || under === -1 || FLOORY(under))) return true;
+        const side = (nx) => { const r = roleAt(b, nx, y); return builtAt(b, nx, y) && (FLOORY(r) || r === ROLES.WALL); };
+        return side(x - 1) || side(x + 1);
+      }
       return builtAt(b, x - 1, y) || builtAt(b, x + 1, y) || builtAt(b, x, y + 1) || builtAt(b, x, y - 1);
     }
     // Restore one queued cell. Debris in the wound is swept into the recycler first - that is
