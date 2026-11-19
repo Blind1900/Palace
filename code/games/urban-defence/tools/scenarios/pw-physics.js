@@ -104,17 +104,25 @@ check((stability.stats.maxMs || 0) < 8, `looking for ground that lost its footin
     const water0 = pwApp.countWater();
     for (let y = level - 60; y < level - 50; y += 1) for (let x = lx - 30; x < lx - 10; x += 1) PW.set(world, x, y, M.DEBRIS);
     for (let y = level - 60; y < level - 50; y += 1) for (let x = lx + 10; x < lx + 30; x += 1) PW.set(world, x, y, M.ASH);
+    // (and tree debris: wood splinters, lighter than water, and leaves come down onto it)
+    const WOOD = M.DEBRIS | PW.DEBRIS_KIND.WOOD << 6, F = PW.PARTICLE, P = pwApp.particles;
+    for (let y = level - 60; y < level - 50; y += 1) for (let x = lx + 40; x < lx + 60; x += 1) PW.set(world, x, y, WOOD);
+    for (let k = 0; k < 120; k += 1) P.spawn(lx - 60 + (k % 40) + 0.5, level - 40 - Math.floor(k / 40) * 3 + 0.5, 0, 8, 0, PW.abgr(70, 140, 50), F.LEAF, 2);
     pwApp.stepWorld(60 * 8);
-    let deep = 0, nd = 0, high = 0, na = 0;
+    let deep = 0, nd = 0, high = 0, na = 0, nw = 0, wHigh = 0;
     for (let y = level - 80; y < level + 800; y += 1) for (let x = Math.round(lx - lake.half - 100); x <= lx + lake.half + 100; x += 1) {
-      const k = id(x, y);
+      const m = PW.get(world, x, y), k = m & 63;
       // (debris that has rested a while on the bed packs down into rubble)
-      if (k === M.DEBRIS || k === M.RUBBLE) { nd += 1; deep += y - level; } else if (k === M.ASH) { na += 1; high += y - level; }
+      if (m === WOOD) { nw += 1; wHigh += y - level; } else if (k === M.DEBRIS || k === M.RUBBLE) { nd += 1; deep += y - level; } else if (k === M.ASH) { na += 1; high += y - level; }
     }
-    deep = nd ? deep / nd : 0; high = na ? high / na : 0;
+    deep = nd ? deep / nd : 0; high = na ? high / na : 0; wHigh = nw ? wHigh / nw : 0;
+    let afloat = 0;
+    for (let i = 0; i < P.stats.count; i += 1) if (P.flags[i] & F.FLOAT) afloat += 1;
     // (a few flakes of ash may drift off on the wind as it falls)
     check(nd >= 200 && na >= 190 && deep > 20 && high < 1 && pwApp.countWater() === water0,
       `in a lake debris sinks to the bed and ash floats, and no water is lost (${nd} debris and rubble cells on average ${deep.toFixed(0)} cells down, ${na} ash ${(-high).toFixed(0)} cells above the surface, water ${water0} -> ${pwApp.countWater()})`);
+    check(nw >= 190 && wHigh < 1 && afloat >= 100,
+      `tree debris floats: wood splinters lie on the surface and leaves ride it (${nw} wood cells ${(-wHigh).toFixed(0)} cells above the surface on average; ${afloat} leaves afloat, 120 dropped)`);
   }
   const ax = sx + 700, ay = world.groundTop[ax] - 220;
   for (let y = ay - 20; y < ay; y += 1) for (let x = ax - 15; x < ax + 15; x += 1) PW.set(world, x, y, M.SMOKE | 3 << 6);

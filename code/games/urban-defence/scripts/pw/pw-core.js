@@ -302,6 +302,18 @@
   physics([M.STEAM], { buoyancy: 0.8 });
   // (dust from blasts and collapses hangs in the air a long while, settling slowly)
   physics([M.DUST], { buoyancy: -0.12, fade: 1 / 900 });
+  // What a cell weighs by its whole byte, variant and all: what floats and what sinks goes by this.
+  // Wood is lighter than water - splinters of it are debris, but where brick and concrete rubble
+  // sink, wood floats, as charcoal does; leaves are lighter still, and lie on the surface. (Against
+  // water's 30: wood about 0.6 of it, a leaf a third; plants falling whole float by WOOD_WEIGHT.)
+  const WOOD_WEIGHT = 18, LEAF_WEIGHT = 10;
+  const byteWeight = new Uint8Array(256);
+  for (let b = 0; b < 256; b += 1) byteWeight[b] = weight[b & ID_MASK];
+  byteWeight[M.DEBRIS | DEBRIS_KIND.WOOD << 6] = WOOD_WEIGHT;
+  // (floats[byte]: a loose grain lighter than water - it lies on the surface, a thin skin of
+  // flotsam that the light and air of the surface still reach under)
+  const floats = new Uint8Array(256);
+  for (let b = 0; b < 256; b += 1) floats[b] = phase[b & ID_MASK] === PHASE.POWDER && byteWeight[b] < weight[M.WATER] ? 1 : 0;
 
   // ---- Hashing and random numbers ------------------------------------------------------------
   function hash2(x, y) {
@@ -826,7 +838,7 @@
   PW.ID_MASK = ID_MASK;
   PW.mat = { phase, structural, ground, skyline, hardness, breaksTo, passable, stopsShots, terrain, open,
     conduct, ignite, burnTime, burnsTo, palettes, names, weight, blastResist, cohesion, advection, shake,
-    slide, spread, settlesTo, buoyancy, fade, passesLight };
+    slide, spread, settlesTo, buoyancy, fade, passesLight, byteWeight, floats, WOOD_WEIGHT, LEAF_WEIGHT };
   PW.CHUNK = CHUNK;
   PW.CHUNK_SHIFT = CHUNK_SHIFT;
   // The simulation keeps to a few milliseconds a tick (the powder sim, the structure checks, the

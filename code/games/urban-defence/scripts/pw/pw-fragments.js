@@ -628,10 +628,12 @@
           p.gain = (p.gain || 0) * 0.7 + (now - (p.lastMotion ?? now)) * 0.3;
           p.lastMotion = now;
           const gaining = p.age < 1 && p.gain > 1.5;
+          // (a plant floating on the water comes to rest there once it has stopped bobbing)
+          const held = p.age - p.touched < 0.25 || (p.floatedAt !== undefined && p.age - p.floatedAt < 0.25);
           if (now > REST_SPEED * 2 || gaining) p.still = 0;
-          else if (now < REST_SPEED && p.age - p.touched < 0.25 && p.age > 0.3) p.still += dt;
+          else if (now < REST_SPEED && held && p.age > 0.3) p.still += dt;
           if (p.py > H + 400) done = true;
-          else if (p.still > 0.3 || p.age > MAX_AGE || (p.age > 10 && now < 40)) { finish(p); done = true; }
+          else if (p.still > (p.floatedAt !== undefined && p.age - p.floatedAt < 0.25 ? 1.2 : 0.3) || p.age > MAX_AGE || (p.age > 10 && now < 40)) { finish(p); done = true; }
         }
         if (done) list.splice(k, 1);
       }
@@ -835,7 +837,7 @@
       const [c, s] = cosSin(p);
       const pts = p.points, faces = p.faces;
       const c0 = Math.cos(was.angle), s0 = Math.sin(was.angle);
-      let crushed = 0, smashed = 0, n = 0, sx = 0, sy = 0, fx = 0, fy = 0, hs = 0, wet = 0;
+      let crushed = 0, smashed = 0, n = 0, sx = 0, sy = 0, fx = 0, fy = 0, hs = 0, wet = 0, wsx = 0, tested = 0;
       let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity, nb = 0;
       const [mid] = toWorld(p, c, s, p.gx, p.gy);   // (what it crushes is squeezed out away from this)
       weakest = -1; nTouched = 0;
@@ -846,10 +848,11 @@
         if (p.flora && !p.grid[p.ptCell[k >> 1]]) continue;
         const [wx, wy] = toWorld(p, c, s, pts[k], pts[k + 1]);
         const x = Math.floor(wx), y = Math.floor(wy);
+        tested += 1;
         if (!blocking(x, y)) {
           if (x < 1 || y < 1 || x >= W - 1 || y >= H - 1) continue;
-          // (in water: see soak)
-          if ((mat[y * W + x] & ID_MASK) === M.WATER) { if (wet < WET_MAX) { wetAt[wet * 2] = x; wetAt[wet * 2 + 1] = y; } wet += 1; }
+          // (in water: see soak, and for a plant buoy)
+          if ((mat[y * W + x] & ID_MASK) === M.WATER) { if (wet < WET_MAX) { wetAt[wet * 2] = x; wetAt[wet * 2 + 1] = y; } wet += 1; wsx += wx; }
           // Whatever stands in the open where it passes is swept away: trees and bushes are
           // knocked down, lamps, railings and furniture smashed. (A falling plant breaks twigs
           // and thin branches only with its trunk and stoutest limbs.)
@@ -923,7 +926,10 @@
           blowOut(Math.min(lx, rx), Math.max(lx, rx), footY, Math.max(60, p.vy), 0.4);
         }
       }
-      if (wet && !p.flora) soak(p, wet, pts.length / 2, h);
+      if (wet) {
+        if (p.flora) buoy(p, wet / Math.max(1, tested), wsx / wet, h);
+        soak(p, wet, p.flora ? tested : pts.length / 2, h);
+      }
       if (nb && grind(p, nb, c, s, mid)) return true;
       if (!n) { p.jam = 0; return false; }
       wentN = Math.min(n, OUTLINE_MAX);
@@ -1003,6 +1009,18 @@
     let weakest = -1;
     // (where its outline is in water)
     const WET_MAX = 64, wetAt = new Int32Array(WET_MAX * 2);
+    // A plant is lighter than water (PW.mat.WOOD_WEIGHT against water's): the water it pushes aside
+    // holds it up, as much as the share of it under the surface (its outline's share in the water),
+    // so it floats with some of it out, bobbing, the water damping it (see soak); and the lift is
+    // at the middle of what is under, so it turns to lie along the water. (`bx`: that middle's x.)
+    const WOOD_LIFT = PW.mat.weight[M.WATER] / PW.mat.WOOD_WEIGHT;
+    function buoy(p, share, bx, h) {
+      const lift = G * share * WOOD_LIFT;
+      const [cx] = centre(p);
+      p.vy -= lift * h;
+      p.omega -= (bx - cx) * lift / Math.max(1, p.inertia / p.mass) * h;
+      p.floatedAt = p.age;
+    }
     // In water a piece is held back by the water it pushes aside - the more of it is in, the more
     // - and where it comes in fast the water splashes up and out round it.
     function soak(p, wet, outline, h) {

@@ -62,8 +62,11 @@
     const isAir = (m) => OPEN[m & ID_MASK] === 1;
     const isWater = (m) => (m & ID_MASK) === M.WATER;
     const isEmpty = (m) => (m & ID_MASK) === M.AIR;
-    // (a fluid - air, a gas or a liquid - lighter than `id`: what it can fall, sink or slide into)
-    const lighter = (m, id) => phase[m & ID_MASK] <= PHASE.LIQUID && weight[m & ID_MASK] < weight[id];
+    // (a fluid - air, a gas or a liquid - lighter than a grain weighing `w`: what it can fall, sink
+    // or slide into. A grain's weight is its whole byte's: a wood splinter floats - see
+    // PW.mat.byteWeight)
+    const BYTE_WEIGHT = PW.mat.byteWeight;
+    const lighter = (m, w) => phase[m & ID_MASK] <= PHASE.LIQUID && weight[m & ID_MASK] < w;
     const isLiquid = (m) => phase[m & ID_MASK] === PHASE.LIQUID;
 
     // The water column standing on a cell that just fell `d` rows follows it in the same tick:
@@ -294,6 +297,20 @@
       PW.stir(world, x, y, x, y);
       return true;
     }
+    // A grain floating on the water (lighter than it: ash, wood) drifts on the surface: the wind
+    // over the water carries it along - at about a quarter of the wind's speed, as flotsam goes -
+    // until it fetches up against the shore or the flotsam ahead of it. (Becalmed, it lies still.)
+    const WATER_WEIGHT = weight[M.WATER];
+    const DRIFT = 0.25 / 60;          // chance a tick, per cell/s of wind, that it drifts a cell
+    function drift(i, x, y) {
+      const wind = windAt(x, y);
+      if (!wind) return false;
+      const d = wind > 0 ? 1 : -1;
+      if (x + d < 0 || x + d >= W || !isAir(mat[i + d]) || !isLiquid(mat[i + W + d])) return false;
+      if (rnd(x, y) >= Math.abs(wind) * DRIFT) { PW.wakeCell(world, x, y); return false; }
+      move(i, x, y, i + d, x + d, y, 'drift');
+      return true;
+    }
     function stepPowder(i, x, y, id) {
       if (y + 1 >= H) return false;
       const below = mat[i + W];
@@ -308,12 +325,13 @@
         return true;
       }
       // Heavier than the liquid under it: it sinks, and the liquid rises past it. Lighter than the
-      // liquid over it (ash in water): it floats up.
+      // liquid over it (ash, wood in water): it floats up.
+      const w = BYTE_WEIGHT[mat[i]];
       if (isLiquid(below)) {
-        if (weight[below & ID_MASK] < weight[id]) { move(i, x, y, i + W, x, y + 1, 'sink'); return true; }
-        return false;   // (floating)
+        if (weight[below & ID_MASK] < w) { move(i, x, y, i + W, x, y + 1, 'sink'); return true; }
+        return drift(i, x, y);   // (floating)
       }
-      if (y >= 1 && isLiquid(mat[i - W]) && weight[mat[i - W] & ID_MASK] > weight[id] && rnd(x, y) < 0.5) {
+      if (y >= 1 && isLiquid(mat[i - W]) && weight[mat[i - W] & ID_MASK] > w && rnd(x, y) < 0.5) {
         move(i, x, y, i - W, x, y - 1, 'float');
         return true;
       }
@@ -322,6 +340,15 @@
       // stands)
       const slides = rnd(x, y) < SLIDE[id];
       if (!SLIDE[id]) return false;
+      // (a floating raft does not stand in a heap: what lies on the floating grains spreads out over
+      // the water beside them)
+      if (w < WATER_WEIGHT && slides) {
+        const d = ((x * 7 + y + world.tick) & 1) ? 1 : -1;
+        for (const s of [d, -d]) {
+          if (x + s < 0 || x + s >= W) continue;
+          if (isAir(mat[i + s]) && isLiquid(mat[i + W + s]) && weight[mat[i + W + s] & ID_MASK] > w) { move(i, x, y, i + s, x + s, y); return true; }
+        }
+      }
       // At rest it holds, even standing straight up, until it is stirred (see PW.stir): shaken,
       // landed on, moved about - or in water, or caught by a gust strong enough for its weight.
       if (!PW.stirred(world, x, y) && !isLiquid(mat[i - W]) && !gusted(x, y, id)) return false;
@@ -329,7 +356,7 @@
       for (let k = 0; k < 2; k += 1) {
         const d = k ? -dir : dir, nx = x + d;
         if (nx < 0 || nx >= W) continue;
-        if (lighter(mat[i + d], id) && lighter(mat[i + W + d], id)) {
+        if (lighter(mat[i + d], w) && lighter(mat[i + W + d], w)) {
           if (slides) {
             // (over the edge of a slope steeper than it can lie on - nothing under where it slides
             // to - it runs on down with its own momentum: see run)
@@ -349,8 +376,8 @@
           const d = k ? -dir : dir, nx = x + (reach + 1) * d;
           if (nx < 0 || nx >= W) continue;
           let open = true;
-          for (let s = 1; s <= reach + 1 && open; s += 1) open = lighter(mat[i + s * d], id);
-          if (open && lighter(mat[i + W + (reach + 1) * d], id)) {
+          for (let s = 1; s <= reach + 1 && open; s += 1) open = lighter(mat[i + s * d], w);
+          if (open && lighter(mat[i + W + (reach + 1) * d], w)) {
             if (slides) { move(i, x, y, i + d, x + d, y); PW.stir(world, x + d, y, x + d, y); return true; }
             PW.wakeCell(world, x, y);
             return false;
@@ -535,7 +562,8 @@
           let j = i + W, depth = 0;
           while (j < W * H && COMPACTS_TO[mat[j] & ID_MASK] >= 0 && depth < 512) { j += W; depth += 1; }
           const base = j < W * H ? mat[j] & ID_MASK : M.BEDROCK;
-          if (!skyline[base] || structural[base]) continue;
+          // (not floating on water: what floats stays loose)
+          if (!skyline[base] || structural[base] || phase[base] === PHASE.LIQUID) continue;
           PW.set(world, x, y, COMPACTS_TO[id] | (mat[i] & 0xc0), { quiet: true, keepPaint: true });
           converted += 1;
         }

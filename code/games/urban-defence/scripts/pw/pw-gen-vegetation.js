@@ -703,6 +703,9 @@
   const AIR_DRAG = 6e-4;
   // (what holds a plant up: anything powder or heavier - ground, rock, a rubble heap)
   const holds = (world, x, y) => PW.mat.phase[PW.get(world, x, y) & ID_MASK] >= PW.PHASE.POWDER;
+  // (what a fallen plant lies on: ground or rubble - or water, which its wood floats on; a plant
+  // still standing is held only by its ground)
+  const bears = (world, x, y) => PW.mat.phase[PW.get(world, x, y) & ID_MASK] >= PW.PHASE.LIQUID;
   // How thick the wood is at each cell of a plant's box: its stem's girth, the shortest of the runs
   // of wood through it - across, up and down, and along both diagonals (a diagonal run is √2 as
   // long a cell) - up to 15.
@@ -1034,7 +1037,7 @@
     for (let k = 0; k < n; k += 1) {
       if (kind[k] !== 1 || adrift) continue;
       const wx = left + (k % w), wy = top + ((k / w) | 0);
-      if ((record.fallen || wy >= record.row - 6) && holds(world, wx, wy + 1)) { label[k] = 1; queue.push(k); }
+      if (record.fallen ? bears(world, wx, wy + 1) : wy >= record.row - 6 && holds(world, wx, wy + 1)) { label[k] = 1; queue.push(k); }
     }
     const spread = (q0, test) => {
       for (let q = q0; q < queue.length; q += 1) {
@@ -1297,7 +1300,7 @@
       return n;
     }
     if (!r.rest) return -1;
-    for (let k = 0; k < r.rest.length; k += 2) if (holds(world, r.rest[k], r.rest[k + 1] + 1)) n += 1;
+    for (let k = 0; k < r.rest.length; k += 2) if (bears(world, r.rest[k], r.rest[k + 1] + 1)) n += 1;
     return n;
   }
   function footing(world) {
@@ -1477,8 +1480,13 @@
   const REST_POINTS = 24;       // places it lies on, kept to look at again (see footing)
   function land(world, particles, data, piece) {
     const { mat, width: W, height: H } = world;
+    // (one come to rest floating lies in the water as it floated, its wood and leaves part under
+    // the surface: see pw-fragments' buoy)
+    const floating = !!piece && piece.floatedAt !== undefined && piece.age - piece.floatedAt < 0.5;
     const room = (x, y, wood) => {
-      if (x < 1 || y < 1 || x >= W - 1 || y >= H - 1 || (mat[y * W + x] & ID_MASK) !== M.AIR || PW.getLayer(world, 'back', x, y)) return false;
+      if (x < 1 || y < 1 || x >= W - 1 || y >= H - 1 || PW.getLayer(world, 'back', x, y)) return false;
+      const id = mat[y * W + x] & ID_MASK;
+      if (id !== M.AIR && !(floating && id === M.WATER)) return false;
       if (!PW.getLayer(world, 'deco', x, y)) return true;
       const f = PW.getFlags(world, x, y);
       return wood && (f & PW.FLAG.FLORA) !== 0 && !woodFlag(f);
@@ -1512,7 +1520,7 @@
     for (let j = 0; j < kept.length; j += 2) {
       const x = kept[j], y = kept[j + 1], k = (y - y0) * width + (x - x0);
       mask[k >> 3] |= 1 << (k & 7);
-      if (woodFlag(PW.getFlags(world, x, y)) && holds(world, x, y + 1)) lies.push(x, y);
+      if (woodFlag(PW.getFlags(world, x, y)) && bears(world, x, y + 1)) lies.push(x, y);
     }
     const rest = [];
     for (let k = 0, stride = Math.ceil(lies.length / 2 / REST_POINTS) * 2; k < lies.length; k += stride) rest.push(lies[k], lies[k + 1]);

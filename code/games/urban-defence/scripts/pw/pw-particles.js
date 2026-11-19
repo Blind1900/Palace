@@ -5,7 +5,7 @@
 (function () {
   const PW = window.PW;
   const { M, ID_MASK } = PW;
-  const { phase, structural, hardness, breaksTo, palettes, weight, advection } = PW.mat;
+  const { phase, structural, hardness, breaksTo, palettes, weight, advection, byteWeight: BYTE_WEIGHT, LEAF_WEIGHT } = PW.mat;
 
   const GRAVITY = 260;      // cells/s^2 (about 1.9 g at 7 cm per cell: snappy but readable)
   const MAX_SPEED = 1500;   // cells/s: nothing flies faster
@@ -14,13 +14,20 @@
   // anything solid above it and pops when it reaches open air. It never leaves the water.
   // LOOSE: a grain of stuff already loose - running down a slope, falling, blown up off the
   // ground - flies as a grain, never gathered into a chunk (see breakage).
+  // FLOAT: a leaf lying on water, lighter than it (PW.mat.LEAF_WEIGHT): it rides the surface,
+  // drifting with the wind over the water, until it is waterlogged (SOAKED) and sinks slowly
+  // through the water to lie on the bottom a while (see floatLeaf).
   // SMOKE and FIRE: a pixel of smoke, or of a fireball's flame, after The Powder Toy's gases (our
   // own code): carried by the air - the weather's wind and a blast's - losing its own speed fast,
   // rising (fire faster), sliding along what it meets, never into it. Fire glows white-hot, then
   // yellow, orange, dark red as its life runs out, and dies - as a pixel of smoke, of the colour it
   // carries, if that colour is not see-through (alpha 0: it leaves nothing). Smoke fades out as its
   // life runs out.
-  const F = Object.freeze({ LAND: 1, DAMAGE: 2, WATER: 4, GLOW: 8, SMOKE: 16, LEAF: 32, BUBBLE: 64, LOOSE: 128, FIRE: 256 });
+  const F = Object.freeze({ LAND: 1, DAMAGE: 2, WATER: 4, GLOW: 8, SMOKE: 16, LEAF: 32, BUBBLE: 64, LOOSE: 128, FIRE: 256, FLOAT: 512, SOAKED: 1024 });
+  const FLOAT_LIFE = [14, 30];             // s a leaf floats before it is waterlogged
+  const SOAKED_LIFE = 10;                  // s a waterlogged leaf goes on sinking, at most
+  const SOAKED_WEIGHT = 45;                // a waterlogged leaf, against water's 30: it sinks, slowly
+  const FLOAT_DRIFT = 0.25;                // share of the wind's speed what floats drifts at (as pw-sim's)
   const FIRE_RISE = 70, SMOKE_RISE = 16;   // cells/s each rises at, in still air
   const GAS_BRAKE = 7, GAS_LOSS = 3;       // per s: how fast one thrown out loses its own speed, at first and then
   const SMOKE_LIFE = [2.4, 4.6];           // s: what a fire pixel's smoke lives
@@ -408,7 +415,7 @@
       let cx = Math.max(1, Math.min(W - 2, Math.floor(x))), cy = Math.min(H - 1, Math.floor(y));
       for (let k = 0; k < 400 && cy >= 0; k += 1, cy -= 1) {
         const id = mat[cy * W + cx] & ID_MASK;
-        const sinks = (fl & F.WATER) === 0 && phase[id] === PW.PHASE.LIQUID && weight[id] < weight[byte & ID_MASK];
+        const sinks = (fl & F.WATER) === 0 && phase[id] === PW.PHASE.LIQUID && weight[id] < BYTE_WEIGHT[byte];
         if (OPEN[id] || (sinks && displace(cx, cy))) {
           // Rubble and earth landing on a heap roll off it, down its slope, so falling debris builds
           // a heap spreading out wide rather than a column: earth settles at about 45°, building
@@ -516,6 +523,47 @@
         }
       }
     }
+    // A leaf on the water (FLOAT) keeps to the top of it: it rides the surface, drifting with the
+    // wind over the water and turned this way and that by the ripples, and stops at the shore. Its
+    // time up, it is waterlogged (SOAKED): heavier than the water now, it sinks, swaying. (The
+    // water gone from under it, it falls on as any leaf does.)
+    const isWet = (x, y) => x > 0 && x < W - 1 && y >= 0 && y < H && phase[mat[y * W + x] & ID_MASK] === PW.PHASE.LIQUID;
+    // (the top water cell of the column at x by row y - at it, or just under it through the open:
+    // -1 if there is none, or the leaf is deep under it)
+    function surfaceNear(x, y) {
+      if (isWet(x, y)) {
+        let s = y;
+        while (s > 0 && y - s < 4 && isWet(x, s - 1)) s -= 1;
+        return isWet(x, s - 1) ? -1 : s;
+      }
+      for (let d = 1; d <= 3 && y + d < H; d += 1) {
+        if (isWet(x, y + d)) return y + d;
+        if (!OPEN[mat[(y + d) * W + x] & ID_MASK]) break;
+      }
+      return -1;
+    }
+    function floatAt(i, x, y) {
+      const s = surfaceNear(x, y);
+      if (s < 0) return false;
+      flags[i] = (flags[i] | F.FLOAT) & ~F.SOAKED;
+      py[i] = s + 0.2; vy[i] = 0; vx[i] *= 0.3;
+      life[i] = FLOAT_LIFE[0] + (PW.hash2(i, count) & 255) / 255 * (FLOAT_LIFE[1] - FLOAT_LIFE[0]);
+      return true;
+    }
+    function floatLeaf(i, dt) {
+      const x = px[i] | 0, s = surfaceNear(x, py[i] | 0);
+      if (s < 0) { flags[i] &= ~F.FLOAT; vx[i] = 0; vy[i] = 1; return; }
+      if (life[i] <= 0) {
+        flags[i] = (flags[i] & ~F.FLOAT) | F.SOAKED;
+        life[i] = SOAKED_LIFE * (0.6 + (i & 3) * 0.13); py[i] = s + 0.6; vy[i] = 2;
+        return;
+      }
+      const target = (world.wind || 0) * FLOAT_DRIFT + Math.sin(age[i] * 1.3 + i * 2.1) * 1.5;
+      vx[i] += (target - vx[i]) * Math.min(1, 2 * dt);
+      const nx = px[i] + vx[i] * dt, ns = surfaceNear(nx | 0, s);
+      if (ns >= 0 && Math.abs(ns - s) <= 1) { px[i] = nx; py[i] = ns + 0.2; }
+      else { vx[i] = 0; py[i] = s + 0.2; }
+    }
     function step(dt) {
       flushDebris();
       intoMouths();
@@ -571,6 +619,8 @@
           if (here !== M.WATER || life[i] <= 0) kill(i);   // reached air: pop
           continue;
         }
+        // (a leaf on the water rides it: see floatLeaf)
+        if (fl & F.FLOAT) { floatLeaf(i, dt); continue; }
         // (a leaf lying on something - stopped dead there - stays till its time is up, unless what
         // it lies on is gone)
         if ((fl & F.LEAF) && vx[i] === 0 && vy[i] === 0) {
@@ -581,8 +631,10 @@
           }
         }
         // What it is, and what it is flying through. In a liquid the weight of what it pushes
-        // aside holds it up: a stone sinks slower, ash floats up (the element table's weights).
+        // aside holds it up: a stone sinks slower, ash and wood float up, a leaf too until it is
+        // waterlogged (the element table's weights, by the whole byte: see PW.mat.byteWeight).
         const own = cell[i] & ID_MASK;
+        const ownWeight = fl & F.LEAF ? (fl & F.SOAKED ? SOAKED_WEIGHT : LEAF_WEIGHT) : own ? BYTE_WEIGHT[cell[i]] : 0;
         const around = (() => {
           const cx = px[i] | 0, cy = py[i] | 0;
           return cy >= 0 && cy < H && cx >= 0 && cx < W ? mat[cy * W + cx] & ID_MASK : M.AIR;
@@ -591,7 +643,7 @@
         // (a hot lump in water is quenched: its heat goes into the water about it, which boils)
         if (inLiquid && temp[i] > 100) { PW.addHeat(world, px[i] | 0, py[i] | 0, (temp[i] - 100) * 0.5); temp[i] = 100 + (temp[i] - 100) * 0.5; }
         let g = GRAVITY * (fl & F.LEAF ? 0.25 : 1);
-        if (inLiquid && own && !(fl & F.WATER)) g *= 1 - weight[around] / Math.max(1, weight[own]);
+        if (inLiquid && ownWeight && !(fl & F.WATER)) g *= 1 - weight[around] / ownWeight;
         const buoyant = g < 0;
         vy[i] += g * dt;
         // Drag: what the air takes hold of most (the table's `wind`) is slowed most - ash and
@@ -631,7 +683,8 @@
         const nx = x + vx[i] * dt, ny = y + vy[i] * dt;
         const steps = Math.max(1, Math.ceil(Math.max(Math.abs(nx - x), Math.abs(ny - y))));
         const sx = (nx - x) / steps, sy = (ny - y) / steps;
-        let removed = false;
+        let removed = false, floated = false;
+        const leafy = (fl & (F.LEAF | F.SOAKED)) === F.LEAF;
         for (let s = 0; s < steps; s += 1) {
           const tx = x + sx, ty = y + sy;
           const cx = Math.floor(tx), cy = Math.floor(ty);
@@ -642,6 +695,11 @@
           if (cy < 0) { x = tx; y = ty; continue; }          // above the grid: open sky
           if (cy >= H) { kill(i); removed = true; break; }
           const id = mat[cy * W + cx] & ID_MASK;
+          // (a leaf coming down onto water lies on it; one come up through it rides it: FLOAT)
+          if (leafy && ((phase[id] === PW.PHASE.LIQUID && !inLiquid) || (buoyant && OPEN[id]))) {
+            px[i] = tx;
+            if (floatAt(i, cx, buoyant ? Math.floor(y) : cy)) { floated = true; break; }
+          }
           // (floating up, it stops at the surface and rests there)
           if (buoyant && OPEN[id]) {
             if (land(i, x, y)) { kill(i); removed = true; break; }
@@ -713,7 +771,7 @@
           if (!(fl & (F.LAND | F.WATER)) && speed < 30) { kill(i); removed = true; }
           break;
         }
-        if (removed) continue;
+        if (removed || floated) continue;
         px[i] = x; py[i] = y;
         if (life[i] <= 0) {
           // (a leaf still in the air drifts on down until it comes to the ground: nothing hangs in
