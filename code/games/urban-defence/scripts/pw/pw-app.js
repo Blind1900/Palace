@@ -194,6 +194,8 @@
       if (button.dataset.action === 'pause') { paused = !paused; button.classList.toggle('on', paused); }
       if (button.dataset.action === 'develop') { devSpeed = devSpeed === 1 ? 20 : 1; button.classList.toggle('on', devSpeed > 1); }
       if (button.dataset.action === 'step') stepWorld(1);
+      // (the physics debug view: hitboxes, green to red by how hard they are struck - see pw-fragments)
+      if (button.dataset.action === 'hitbox') { PW.debugHitboxes = !PW.debugHitboxes; button.classList.toggle('on', PW.debugHitboxes); }
     });
     const size = toolbar.querySelector('#brush-size');
     if (size) size.addEventListener('input', () => { brush = Number(size.value); });
@@ -299,6 +301,7 @@
     particles.draw(renderer);
     if (life.draw) life.draw(renderer);
     if (cores && cores.draw) cores.draw(renderer, now);
+    if (PW.debugHitboxes && fragments && fragments.drawHitboxes) fragments.drawHitboxes(renderer);
     PW.drawEffects(world, renderer, (now - (frame.prev || now)) / 1000);
     frame.prev = now;
     frames += 1;

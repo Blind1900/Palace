@@ -23,6 +23,10 @@
   // tilted, misplaced, cracked at its edges - as a ruin, part of the ground.
   const RUIN_MIN = 60;
   const RUIN_CRACK = 2500;    // a building's piece of more frame than this comes to rest cracked into several
+  // (the hitbox debug view: a blow this hard, cells/s, shows red; it fades at HIT_FADE per second)
+  const HIT_FULL = 300, HIT_FADE = 1.2;
+  const touched = new Int32Array(480);   // (the outline points touching in a contact test - debug view only)
+  let nTouched = 0, lastFelt = 0;
   const FLORA_MIN = 14;       // a piece of a plant with less wood than this comes apart as it falls
   // A building is mostly air. Its weight and strength are in its frame - pillars, floors, outer
   // walls; a cell of back wall (marked THIN in a piece) is a light panel behind its rooms: it goes
@@ -831,7 +835,7 @@
       let crushed = 0, smashed = 0, n = 0, sx = 0, sy = 0, fx = 0, fy = 0, hs = 0, wet = 0;
       let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity, nb = 0;
       const [mid] = toWorld(p, c, s, p.gx, p.gy);   // (what it crushes is squeezed out away from this)
-      weakest = -1;
+      weakest = -1; nTouched = 0;
       for (let k = 0; k < pts.length; k += 2) {
         // (the storeys of it already crushed under its hinge are gone; a plant's branches snapped
         // off it)
@@ -891,6 +895,7 @@
         }
         if (n < OUTLINE_MAX) { went[n * 2] = wx - ox; went[n * 2 + 1] = wy - oy; }
         n += 1; sx += wx; sy += wy; hs += hardness[mat[y * W + x] & ID_MASK];
+        if (PW.debugHitboxes && nTouched < OUTLINE_MAX) touched[nTouched++] = k >> 1;
         // (a plant: the thinnest wood it struck with - see snapBranch)
         if (p.flora && (weakest < 0 || p.ptGirth[k >> 1] < p.ptGirth[weakest >> 1])) weakest = k;
         if (wx < bx0) bx0 = wx; if (wx > bx1) bx1 = wx; if (wy < by0) by0 = wy; if (wy > by1) by1 = wy;
@@ -920,7 +925,14 @@
       if (!n) { p.jam = 0; return false; }
       wentN = Math.min(n, OUTLINE_MAX);
       stepH = h;
-      return strike(p, sx / n, sy / n, fx / n, fy / n, hs / n, Math.hypot(bx1 - bx0, by1 - by0));
+      const gone = strike(p, sx / n, sy / n, fx / n, fy / n, hs / n, Math.hypot(bx1 - bx0, by1 - by0));
+      // (the debug view: how hard each outline point that touched was struck - see drawHitboxes)
+      if (PW.debugHitboxes) {
+        if (!p.hitV || p.hitV.length !== pts.length / 2) { p.hitV = new Float32Array(pts.length / 2); p.hitT = new Float32Array(pts.length / 2); }
+        for (let q = 0; q < nTouched; q += 1) { const j = touched[q]; if (lastFelt >= p.hitV[j] * Math.exp(-(time - p.hitT[j]) * HIT_FADE)) { p.hitV[j] = lastFelt; p.hitT[j] = time; } }
+      }
+      nTouched = 0;
+      return gone;
     }
     // A piece does not slide on through what it has bitten into - the ground, another building:
     // where it is moving into it, its own cells round each point that bit in are ground off,
@@ -1092,6 +1104,7 @@
     function strike(p, wx, wy, fx, fy, hard = 0.5, spread = 0) {
       const hx = Math.floor(wx), hy = Math.floor(wy);
       const [vx, vy] = velocityAt(p, wx, wy);
+      lastFelt = Math.hypot(vx, vy);
       // A big piece coming straight down into its own footprint sinks into it storey by storey.
       if (p.mode === 'drop' && p.mass >= SPLIT_MIN * 4 && Math.abs(vx) < Math.abs(vy) * 0.6 && Math.abs(p.angle) < 0.6) { sink(p, vx, vy, wx, wy, hx, hy); return true; }
       // A plant: if the thinnest wood that took the blow cannot bear its share of it - of the blow
@@ -1134,6 +1147,7 @@
       const invM = 1 / p.mass, invI = 1 / Math.max(1, p.inertia);
       const rn = rx * ny - ry * nx;
       const firm = 0.55 + hard, felt = hit * firm;
+      lastFelt = felt;
       // (a plant's wood and leaves take the blow up: it does not bounce)
       const j = (1 + (felt > CRUMBLE_SPEED && !p.flora ? BOUNCE * (0.4 + hard * 1.2) : 0)) * hit / (invM + rn * rn * invI);
       const tx = -ny, ty = nx, vt = vx * tx + vy * ty, rt = rx * ty - ry * tx;
@@ -1237,6 +1251,7 @@
     function blow(hx, hy, vx, vy, hit, energy, fx, fy, along, hard = 0.5, rock = false, heavy = true) {
       stats.shattered += 1;
       const speed = hit;
+      if (PW.debugHitboxes) noteHit(PW.getOwner(world, hx, hy), hit);
       // (soft ground takes the blow in a dent, its clods thrown up; rock hardly)
       if (PW.mat.terrain[mat[hy * W + hx] & ID_MASK]) dent(hx, hy, energy * Math.max(0.1, 1.3 - hard * 1.5), vx);
       // The shock of it shakes the ground around, and the ground it struck is looked at for what
@@ -1635,7 +1650,78 @@
       }
     }
 
-    return { spawn, step, draw, blast, list, stats, puff };
+    // ---- The hitbox debug view (the toolbar's HITBOX) --------------------------------------------------
+    // Drawn over the world when PW.debugHitboxes is on: each standing building's frame outline,
+    // each falling piece's contact outline (the points it is tested against the world with), and
+    // each ruin's outline - every one from green to red by how hard it was struck lately (the
+    // blow felt, cells/s, fading over a second or so). Off, it costs nothing.
+    function noteHit(owner, v) {
+      if (!owner || owner >= 50000) return;
+      const hits = world.hits || (world.hits = new Map());
+      const h = hits.get(owner), now = time;
+      if (!h || v >= h.v * Math.exp(-(now - h.t) * HIT_FADE)) hits.set(owner, { v, t: now });
+    }
+    PW.noteHit = noteHit;
+    const HIT_COLORS = Array.from({ length: 9 }, (_, k) => {
+      const t = k / 8, a = t < 0.5 ? [70, 230, 90] : [240, 220, 60], b = t < 0.5 ? [240, 220, 60] : [240, 40, 40], f = t < 0.5 ? t * 2 : (t - 0.5) * 2;
+      return `rgb(${Math.round(a[0] + (b[0] - a[0]) * f)},${Math.round(a[1] + (b[1] - a[1]) * f)},${Math.round(a[2] + (b[2] - a[2]) * f)})`;
+    });
+    const hitLevel = (v, t) => (v > 0 ? Math.max(0, Math.min(8, Math.round(v * Math.exp(-(time - t) * HIT_FADE) / HIT_FULL * 8))) : 0);
+    let hitDraws = 0;
+    // (the outline of what an owner holds in a box - its frame, or a ruin's cells - as cell
+    // indices, made again every so often while it is in view)
+    function outline(rec, x0, y0, x1, y1, inside) {
+      if (rec._hit && hitDraws - rec._hit.at < 30) return rec._hit.cells;
+      const cells = [];
+      x0 = Math.max(1, x0); y0 = Math.max(1, y0); x1 = Math.min(W - 2, x1); y1 = Math.min(H - 2, y1);
+      for (let y = y0; y <= y1; y += 1) for (let x = x0; x <= x1; x += 1) {
+        if (!inside(x, y)) continue;
+        if (!inside(x - 1, y) || !inside(x + 1, y) || !inside(x, y - 1) || !inside(x, y + 1)) cells.push(y * W + x);
+      }
+      rec._hit = { at: hitDraws, cells };
+      return cells;
+    }
+    function drawHitboxes(renderer) {
+      hitDraws += 1;
+      const { ctx, camera, view } = renderer;
+      const z = camera.zoom, size = Math.max(1, Math.round(z));
+      const vx0 = camera.x - 2, vy0 = camera.y - 2, vx1 = camera.x + view.width / z + 2, vy1 = camera.y + view.height / z + 2;
+      const groups = HIT_COLORS.map(() => []);
+      const put = (lev, x, y) => { if (x >= vx0 && x <= vx1 && y >= vy0 && y <= vy1) groups[lev].push(Math.round((x - camera.x) * z), Math.round((y - camera.y) * z)); };
+      // Standing buildings: their frame.
+      for (const b of world.buildings || []) {
+        if (b.body.right < vx0 || b.body.left > vx1 || b.body.top > vy1 || b.ground + 60 < vy0) continue;
+        const cells = outline(b, b.body.left - 6, b.body.top - 6, b.body.right + 6, b.ground + 60,
+          (x, y) => PW.getOwner(world, x, y) === b.id && structural[mat[y * W + x] & ID_MASK]);
+        const h = world.hits && world.hits.get(b.id), lev = h ? hitLevel(h.v, h.t) : 0;
+        for (const i of cells) put(lev, i % W, (i / W) | 0);
+      }
+      // Ruins lying where they fell.
+      for (const r of world.ruins || []) {
+        if (r.x1 < vx0 || r.x0 > vx1 || r.y1 < vy0 || r.y0 > vy1) continue;
+        const cells = outline(r, r.x0, r.y0, r.x1, r.y1, (x, y) => (mat[y * W + x] & ID_MASK) === M.RUIN);
+        const h = world.hits && world.hits.get(r.from), lev = h ? hitLevel(h.v, h.t) : 0;
+        for (const i of cells) put(lev, i % W, (i / W) | 0);
+      }
+      // Falling pieces: the points of their outline, each by how hard it struck.
+      for (const p of list) {
+        const [c, s] = cosSin(p), pts = p.points;
+        for (let k = 0; k < pts.length; k += 2) {
+          const [wx, wy] = toWorld(p, c, s, pts[k], pts[k + 1]);
+          put(p.hitV ? hitLevel(p.hitV[k >> 1], p.hitT[k >> 1]) : 0, wx, wy);
+        }
+      }
+      for (let g = 0; g < groups.length; g += 1) {
+        const l = groups[g];
+        if (!l.length) continue;
+        ctx.fillStyle = HIT_COLORS[g];
+        ctx.beginPath();
+        for (let k = 0; k < l.length; k += 2) ctx.rect(l[k], l[k + 1], size, size);
+        ctx.fill();
+      }
+    }
+
+    return { spawn, step, draw, blast, drawHitboxes, list, stats, puff };
   }
 
   PW.createFragments = createFragments;

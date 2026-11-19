@@ -741,6 +741,7 @@
       spawn(cx + 0.5, cy + 0.5, vx[i] * 0.4 + jitter, vy[i] * 0.3 - 30, breaksTo[id] || M.DEBRIS, 0, F.LAND, 5, ownerId);
       stats.chipped += 1;
       if (listeners.chip) listeners.chip(ownerId, cx, cy);
+      if (PW.debugHitboxes && PW.noteHit) PW.noteHit(ownerId, speed);   // (the hitbox debug view)
     }
 
     // Draw cell-aligned particles, batched by colour.
