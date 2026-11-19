@@ -17,8 +17,6 @@
   const RISE_EVERY = 1;     // ticks per row risen (60 rows a second: up through a tower's heap in seconds)
   const SWEEP_EVERY = 6;    // ticks between sweeps once a core stands in the open
   const PER_SWEEP = 80;     // cells a core throws off per sweep (a heap can rain down on it)
-  const GATHER_EVERY = 2;   // ticks between the field drawing its scattered matter back in
-  const PER_GATHER = 10;    // crumbs gathered per pass
   const REACH = 13;         // the core unit with its connector sockets: 13 cells either side of its axis
 
   function createCores(world, particles) {
@@ -69,22 +67,13 @@
     // bed stays put when the ball rises - only the ball travels, so nothing of the plate drags
     // up with it and scrambles the climb (the user's rise glitch).
     const own = (x, y) => (PW.get(world, x, y) & ID_MASK) === M.CORE && !PW.getOwner(world, x, y);
-    // Each column of the core: its topmost and lowest cell. Only the run of cells joined to the
-    // ball about core.y counts - stray crumbs of core metal flung up the column by a falling
-    // piece are not the ball, and must not stretch its spans (they made the ball drag crumb
-    // towers with it and read itself as buried - the no-hinge collapse stall).
+    // Each column of the core: its topmost and lowest cell.
     function spans(core) {
       const c = columnOf(core), out = [];
       for (let x = c.x0; x <= c.x1; x += 1) {
-        let seed = -1, best = 1e9;
-        for (let y = c.top; y <= c.bottom; y += 1) {
-          if (own(x, y)) { const d = Math.abs(y - core.y); if (d < best) { best = d; seed = y; } }
-        }
-        if (seed < 0 || best > 9) continue;
-        let lo = seed, hi = seed;
-        for (let y = seed - 1, gap = 0; y >= c.top && gap <= 2; y -= 1) { if (own(x, y)) { lo = y; gap = 0; } else gap += 1; }
-        for (let y = seed + 1, gap = 0; y <= c.bottom && gap <= 2; y += 1) { if (own(x, y)) { hi = y; gap = 0; } else gap += 1; }
-        out.push([x, lo, hi]);
+        let lo = -1, hi = -1;
+        for (let y = c.top; y <= c.bottom; y += 1) if (own(x, y)) { if (lo < 0) lo = y; hi = y; }
+        if (lo >= 0) out.push([x, lo, hi]);
       }
       return out;
     }
@@ -129,33 +118,6 @@
       core.y -= 1;
       stats.risen += 1;
       return true;
-    }
-    // The ball's field holds it together (the user's design): any of its matter knocked out of
-    // the ball - crumbs ground sideways or flung up the shaft by a falling piece - is drawn
-    // back in, a few cells a tick, into the nearest open seat about the centre. Without this a
-    // landing piece could shred the ball into a cloud of crumbs spread over twenty rows that
-    // could neither read itself exposed nor settle (the no-hinge collapse stall).
-    function gather(core) {
-      const c = columnOf(core);
-      let drawn = 0;
-      for (let y = c.top; y <= c.bottom && drawn < PER_GATHER; y += 1) {
-        for (let x = c.x0; x <= c.x1 && drawn < PER_GATHER; x += 1) {
-          if (!own(x, y) || (Math.abs(x - core.x) <= 7 && Math.abs(y - core.y) <= 7)) continue;
-          let seat = null;
-          for (let r = 0; r <= 6 && !seat; r += 1) {
-            for (let dy = -r; dy <= r && !seat; dy += 1) for (let dx = -r; dx <= r && !seat; dx += 1) {
-              if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
-              if (open(core.x + dx, core.y + dy)) seat = [core.x + dx, core.y + dy];
-            }
-          }
-          if (!seat) return;
-          put(seat[0], seat[1], cellAt(x, y));
-          PW.set(world, x, y, M.AIR);
-          PW.setLayer(world, 'paint', x, y, 0);
-          PW.setOwner(world, x, y, 0);
-          drawn += 1;
-        }
-      }
     }
     // Sink the core one row towards home: the mirror of rise(). In each of its columns, its cells
     // move down one and the cell that was below goes up over them; loose grit gives way, anything
@@ -301,9 +263,7 @@
           for (const core of b.cores) {
             if (core.orb || !core.free) continue;
             if (core.y >= core.homeY) { settle(b, core); continue; }
-            // (only towards a home that is ready: sinking through its own rubble at a vault
-            // still full of wreckage, then rising again, kept a buried ball bouncing for ever)
-            if (core.homeY - core.y <= 30 && homeOpen(b, core) && sink(b, core)) continue;
+            if (core.homeY - core.y <= 30 && sink(b, core)) continue;
             if (homeOpen(b, core)) settle(b, core);
           }
         }
@@ -319,7 +279,6 @@
         if (!b.coresOpen || tick - b.coresOpen < SETTLE) continue;
         for (const core of b.cores) {
           if (core.orb || core.settled) continue;   // (the base's main core already stands in its open pit; a settled core is the building's again)
-          if (tick % GATHER_EVERY === 0) gather(core);
           if (!core.free && tick % RISE_EVERY === 0) {
             if (exposed(core) || !rise(b, core)) {
               core.free = true;
