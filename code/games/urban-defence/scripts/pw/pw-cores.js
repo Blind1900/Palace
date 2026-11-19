@@ -258,12 +258,16 @@
         // A free core goes home as soon as its vault region is rebuilt and clear - the repair
         // works from the bottom up, so the bed is ready long before the ruin is over. Near home
         // it sinks row by row; from high up, or where its own rebuilt storeys stand in the way,
-        // its field carries it home in one move (the settle snap).
+        // its field carries it home in one move (the settle snap). It only descends towards a
+        // vault that is READY: sinking blind at an unready one buried it, the sweep un-freed
+        // it, rise dug it back to the open, and it traded the same three rows for ever (PS's
+        // trace of the no-hinge seed-7 stall - the loop was 1803F/1806/1803F once a second).
+        // Standing exposed, it holds its ground until the repair opens the way.
         if (b.coresOpen && tick % 2 === 0) {
           for (const core of b.cores) {
             if (core.orb || !core.free) continue;
             if (core.y >= core.homeY) { settle(b, core); continue; }
-            if (core.homeY - core.y <= 30 && sink(b, core)) continue;
+            if (core.homeY - core.y <= 30 && homeOpen(b, core) && sink(b, core)) continue;
             if (homeOpen(b, core)) settle(b, core);
           }
         }
