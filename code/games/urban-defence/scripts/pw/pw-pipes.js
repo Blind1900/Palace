@@ -562,6 +562,25 @@
       dirtyPending = false;
       stats.broken = lines.reduce((n, l) => n + (l.brokenCount || 0), 0);
     }
+    // The open mouths of the bore where a line is broken, for the physics track's N17F gas
+    // rule: grid smoke reaching a break becomes smoke pixels entering the pipe here. A mouth
+    // is an intact column beside a broken one, reported at the bore's centre row. Only hurt
+    // lines are walked, and only their hurt span, so the call costs nothing while whole.
+    function openEnds() {
+      const ends = [];
+      for (const line of lines) {
+        if (!line.brokenCount || !line.hurt) continue;
+        const kE = line.broken.length - 1;
+        const k0 = Math.max(0, line.hurt.k0 - 1), k1 = Math.min(kE, line.hurt.k1 + 1);
+        for (let k = k0; k <= k1; k += 1) {
+          if (line.broken[k]) continue;
+          if ((k > 0 && line.broken[k - 1]) || (k < kE && line.broken[k + 1])) {
+            ends.push({ x: line.x0 + k, y: line.ys[k] + (BORE >> 1) });
+          }
+        }
+      }
+      return ends;
+    }
     // A blast tells the lines where it struck: those columns are looked at next tick instead
     // of waiting for the window to come round.
     function notifyDamage(x0, x1) {
@@ -1002,7 +1021,7 @@
       }
     }
 
-    const api = { build, step, draw, attach, carry, connectCore, notifyDamage, lines, stats, flowing, lineFor, contour, BORE, BED, LANES, TAPS };
+    const api = { build, step, draw, attach, carry, connectCore, notifyDamage, openEnds, lines, stats, flowing, lineFor, contour, BORE, BED, LANES, TAPS };
     return api;
   }
 
