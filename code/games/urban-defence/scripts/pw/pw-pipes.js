@@ -1024,6 +1024,25 @@
         // through a long war and the heap grew until the browser died (PS's soak).
         const kn = nx - line.x0;
         if (kn < 0 || kn >= line.broken.length || line.broken[kn]) {
+          // N38: before anything else the pixel PUSHES OUT - the stream blasts the debris
+          // choking its mouth, a few cells per arriving pixel, so a buried end eats itself
+          // free while the regrowth reaches for the far side.
+          const my = rowOf(line, p.x, p.lane);
+          let cleared = 0;
+          for (let d = 1; d <= 4 && cleared < 3; d += 1) {
+            const tx = p.x + dir * d;
+            if (tx < 1 || tx >= W - 1) break;
+            for (let r = -1; r <= 1 && cleared < 3; r += 1) {
+              const ty = my + r;
+              if (ty < 1 || ty >= H - 1) continue;
+              const id2 = mat[ty * W + tx] & ID_MASK;
+              if (id2 === M.DEBRIS || id2 === M.RUBBLE || id2 === M.SAND || id2 === M.ASH
+                || id2 === M.LOOSE_SOIL || id2 === M.LOOSE_STONE) {
+                PW.set(world, tx, ty, M.AIR, { quiet: true });
+                cleared += 1;
+              }
+            }
+          }
           line.occ[laneOf(line, p.x, p.lane)] = 0;
           if (line.atCol) line.atCol.delete(p.lane * W + p.x);
           p.done = true;

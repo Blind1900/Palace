@@ -414,14 +414,30 @@
       };
       const vx0 = camera.x - 20, vx1 = camera.x + view.width / z + 20, vy0 = camera.y - 20, vy1 = camera.y + view.height / z + 20;
       const WHITE = [238, 242, 246], DIM = [168, 174, 180];
+      // N38: the white energy is a LIGHT EQUATION, not scripted sprites - a standing-wave
+      // field over the ball whose interference breathes and orbits like an atom's shells:
+      //   I(r, th, t) = |sin(k r - w t)| * |cos(m th + phi(t))| * pole(th)
+      // radial vibration x angular lobes, the lobes slowly precessing, everything brighter
+      // towards the poles (the god's rule: the lightning crowds the poles). Drawn additively
+      // per cell of the ball's disc; the old electrons and streaks fall out of the equation
+      // itself - bright knots race the shells and spikes stand off the poles.
       const each = (x, y, seed) => {
-        for (let e = 0; e < 2; e += 1) {
-          const a = t * (0.9 + e * 0.7) + seed * 2.09 + e * 2.6;
-          const ex = x + Math.cos(a) * (6.5 + e * 2.5);
-          const ey = y + Math.sin(a) * (3.2 + e * 1.3) * (e ? -1 : 1);
-          put(ex, ey, WHITE, 0.95);
-          put(ex - Math.cos(a), ey - Math.sin(a) * 0.5, DIM, 0.45);
+        const ph = seed * 0.37;
+        for (let dy = -8; dy <= 8; dy += 1) {
+          for (let dx = -8; dx <= 8; dx += 1) {
+            const r = Math.hypot(dx, dy);
+            if (r > 8.4 || r < 1.2) continue;
+            const th = Math.atan2(dy, dx);
+            const radial = Math.sin(r * 1.85 - t * 2.4 + ph);
+            const lobes = Math.cos(3 * th + Math.sin(t * 0.6 + ph) * 2.2);
+            const pole = 0.45 + 1.25 * Math.pow(Math.abs(Math.sin(th)), 3);
+            let I = Math.abs(radial) * Math.abs(lobes) * pole * Math.max(0, 1 - r / 9);
+            if (I < 0.34) continue;
+            I = Math.min(1, I);
+            put(x + dx, y + dy, I > 0.72 ? WHITE : DIM, I * I);
+          }
         }
+        // (a vibration spike off a pole now and then: the equation's overdriven moment)
         const phase = Math.floor(t * 2.3) + seed;
         if (((Math.imul(phase, 2654435761) >>> 27) & 7) < 2) {
           const up = (phase & 1) ? -1 : 1;

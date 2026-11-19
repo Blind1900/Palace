@@ -139,6 +139,10 @@
       const hh = splay(t);
       for (let k = -hh; k <= hh; k += 1) {
         const id = PW.get(world, cx, cy + k) & ID_MASK;
+        // N38: the opening stops at the hill it is cut in - where the sloped face falls away
+        // early, nothing is painted into the open air beyond it, so no dark slab ever juts
+        // out of the mountainside at the mouth's top end or corner.
+        if (id === M.AIR && !PW.getLayer(world, 'back', cx, cy + k) && !(PW.getFlags(world, cx, cy + k) & FLAG.CARVED)) continue;
         if (id !== M.AIR) PW.set(world, cx, cy + k, M.AIR, { quiet: true });
         PW.setLayer(world, 'deco', cx, cy + k, 0);
         const rib = (t % 6) === 1;
