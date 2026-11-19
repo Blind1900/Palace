@@ -227,7 +227,8 @@
       // cell then; (px, py) is where that anchor's corner is now.
       const piece = { data, n, mass, inertia, grid, gw, gh, u0, v0, points, faces, owner: spec.owner || 0, from: spec.from || spec.owner || 0, generation: spec.generation || 0,
         ox0: ax, oy0: ay, px: ax, py: ay, gx: cx - ax, gy: cy - ay, angle: 0, omega: spec.omega || 0, vx: spec.vx || 0, vy: spec.vy || 0,
-        mode: spec.pivot ? 'hinge' : spec.drop ? 'drop' : 'fly', dir: spec.dir || 1, age: 0, flora: !!spec.flora,
+        mode: spec.flex ? 'flex' : spec.pivot ? 'hinge' : spec.drop ? 'drop' : 'fly', dir: spec.dir || 1, age: 0, flora: !!spec.flora,
+        spring: spec.flex ? spec.flex.spring : 0, damp: spec.flex ? spec.flex.damp : 0,
         yf: spec.pivot ? spec.pivot.y : spec.floor || 0, crushedRows: 0, base: spec.base ?? H, h0: spec.h0 || gh, still: 0, touched: -1, sunk: spec.sunk || 0,
         hollow: heavy + thin ? thin / (heavy + thin) : 0 };
       if (parent) {
@@ -399,7 +400,7 @@
         const k = Math.min(PW.flora.AIR_DRAG * p.area * rel / p.mass, 0.5 / h);
         const fx = k * rx, fy = k * ry;
         const [cx, cy] = centre(p);
-        if (p.mode === 'hinge') {
+        if (pinned(p)) {
           const r2 = (cx - p.hx) ** 2 + (cy - p.hy) ** 2;
           p.omega += ((ax - p.hx) * fy - (ay - p.hy) * fx) / (p.inertia / p.mass + r2) * h;
         } else {
@@ -441,7 +442,10 @@
         py = dy / d * v;
       }
       if (!best) return;
-      if (p.mode === 'hinge') {
+      if (p.mode === 'flex') {
+        // (a bent limb is swung by the wave, either way)
+        p.omega += px / Math.max(20, Math.hypot(cx - p.hx, cy - p.hy));
+      } else if (p.mode === 'hinge') {
         // (a push sideways on a top standing over its pivot tips it on over, the way it falls)
         if (Math.sign(px) !== p.dir) return;
         p.omega += px / Math.max(20, p.hy - cy);
@@ -524,15 +528,17 @@
     // The piece's centre of mass in the world.
     const centre = (p) => { const [c, s] = cosSin(p); return toWorld(p, c, s, p.gx, p.gy); };
     function velocityAt(p, wx, wy) {
-      if (p.mode === 'hinge') return [-p.omega * (wy - p.hy), p.omega * (wx - p.hx)];
+      if (pinned(p)) return [-p.omega * (wy - p.hy), p.omega * (wx - p.hx)];
       const [cx, cy] = centre(p);
       return [p.vx - p.omega * (wy - cy), p.vy + p.omega * (wx - cx)];
     }
     const motion = (p) => {
       // (a plant's leaves reach far out round its wood: its turning is reckoned at its wood)
       const reach = p.flora ? Math.min(20, Math.hypot(p.gw, p.gh) / 2) : Math.hypot(p.gw, p.gh) / 2;
-      return p.mode === 'hinge' ? Math.abs(p.omega) * (Math.hypot(p.rx, p.ry) + reach) : Math.hypot(p.vx, p.vy) + Math.abs(p.omega) * reach;
+      return pinned(p) ? Math.abs(p.omega) * (Math.hypot(p.rx, p.ry) + reach) : Math.hypot(p.vx, p.vy) + Math.abs(p.omega) * reach;
     };
+    // (swinging about a pin: a hinging top, a bent limb)
+    function pinned(p) { return p.mode === 'hinge' || p.mode === 'flex'; }
     const was = { px: 0, py: 0, angle: 0 };
     function step(dt) {
       const t0 = performance.now();
@@ -551,7 +557,19 @@
         let done = false;
         for (let s = 0; s < sub && !done; s += 1) {
           was.px = p.px; was.py = p.py; was.angle = p.angle;
-          if (p.flora) airDrag(p, h);
+          // (a bent limb's damping is the air's on its leaves already: see its spring)
+          if (p.flora && p.mode !== 'flex') airDrag(p, h);
+          if (p.mode === 'flex') {
+            // A limb of a standing plant, bent: pinned where it grows from the stouter wood, its
+            // own spring brings it back, ringing down (its stiffness and damping: see PW.flora's
+            // bend). It passes through what it swings by.
+            p.omega += (-p.spring * p.angle - p.damp * p.omega) * h;
+            p.angle += p.omega * h;
+            const c = Math.cos(p.angle), sn = Math.sin(p.angle);
+            p.px = p.hx + p.rx * c - p.ry * sn;
+            p.py = p.hy + p.rx * sn + p.ry * c;
+            continue;
+          }
           if (p.mode === 'hinge') {
             // Its weight crushes what it stands on as it leans (see pancake); and gravity's turning
             // moment about the pivot, plus the lean towards the failed side, turns it over.
@@ -581,6 +599,15 @@
             p.px = cx - (p.gx * c - p.gy * sn); p.py = cy - (p.gx * sn + p.gy * c);
           }
           done = contact(p, h);
+        }
+        if (p.mode === 'flex') {
+          // (rung down - or ringing on too long - it is put back as it grew)
+          if ((p.age > 0.2 && Math.abs(p.angle) < 0.004 && Math.abs(p.omega) < 0.03) || p.age > 8) {
+            p.angle = 0; p.omega = 0;
+            if (PW.flora && PW.flora.unflex) PW.flora.unflex(world, p.data);
+            list.splice(k, 1);
+          }
+          continue;
         }
         if (!done && p.reshape) done = remake(p);
         if (!done && p.footTouch) { p.footTouch = false; if (p.mode === 'hinge') eatFoot(p); }

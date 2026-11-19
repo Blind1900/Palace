@@ -1120,12 +1120,14 @@
   // heavy piece of a building). Leaves are not knocked off - what flies through a crown passes
   // through it. Wood breaks where it is struck if the blow is enough for its thickness (a twig
   // easily, a bough to a hard blow, a trunk only to a heavy one; charred wood far more easily),
-  // snapping cleanly across the stem; what it held up falls next tick, with its leaves.
+  // snapping cleanly across the stem; what it held up falls next tick, with its leaves. A blow
+  // too light to break it bends it: the limb struck swings back from it about where it joins the
+  // stouter wood it grows on, and springs back (see bend). (fx, fy: which way the blow goes.)
   const isWood = (world, x, y) => {
     const c = PW.getLayer(world, 'deco', x, y), f = PW.getFlags(world, x, y);
     return c !== 0 && (f & PW.FLAG.FLORA) !== 0 && woodFlag(f);
   };
-  function strike(world, particles, x, y, power = 1) {
+  function strike(world, particles, x, y, power = 1, fx = 0, fy = 1) {
     const record = recordAt(world, x, y);
     if (!record) return false;
     if (!isWood(world, x, y)) return true;
@@ -1139,8 +1141,105 @@
       for (const r of world.floraIndex ? world.floraIndex.get(x >> 7) || [] : []) {
         if (!r.felled && x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height) dirty.add(r);
       }
-    }
+    } else if (!charred && power >= across * BEND_FROM) bend(world, record, x, y, power / across, fx, fy);
     return true;
+  }
+  // A limb bends under a blow and springs back. The limb is the wood out from the struck cell's
+  // stem's joint - where it grows from wood half again as stout - that is no stouter than it there,
+  // within reach of the joint (and its sub-limbs, twigs and leaves); it is lifted out as a piece
+  // pinned at the joint on a spring (see pw-fragments' flex): the blow sets it swinging, the stiffer
+  // the thicker (a twig whips, a bough barely stirs - stiffness goes with girth cubed), and it
+  // rings down and is put back as it grew. (One limb of a plant swings at a time.)
+  const BEND_FROM = 0.12;       // a blow this share of what would snap the wood bends it
+  const BEND_SPIN = 2.2;        // rad/s a blow that would just snap a twig sets it swinging at
+  const BEND_LEAVES = 6;        // cells out from its wood its leaves go with it
+  const BENDS_PER_TICK = 4;
+  function bend(world, record, x, y, share, fx, fy) {
+    if (!world.fragments || record.felled || record.fallen) return;
+    if (world.bendTick !== world.tick) { world.bendTick = world.tick; world.bends = 0; }
+    if (world.bends >= BENDS_PER_TICK) return;
+    world.bends += 1;
+    // (one limb of a plant swings at a time: the plant is busy until it has rung down)
+    if (record.flexing && world.fragments.list.includes(record.flexing)) return;
+    const box = cellsOf(world, record), { left, top, w, h, n, kind } = box;
+    const kh = (y - top) * w + (x - left);
+    if (kh < 0 || kh >= n || kind[kh] !== 1) return;
+    const girth = box.girth || (box.girth = girthOf(kind, w, h));
+    const woodKs = [];
+    for (let k = 0; k < n; k += 1) if (kind[k] === 1) woodKs.push(k);
+    const stemAt = stems(kind, girth, w, h, trunkFoot(record, box, woodKs));
+    let most = 1;
+    for (const k of woodKs) if (stemAt[k] > most) most = stemAt[k];
+    const g0 = Math.max(1, stemAt[kh]);
+    if (g0 >= Math.max(3, most * 0.67)) return;   // (the trunk does not bend so)
+    // (out from the struck cell towards the foot, along ever-stouter wood, to where the stem is
+    // half again as stout: the joint)
+    let joint = kh, guard = 0;
+    for (let g = g0; guard < 400; guard += 1) {
+      const jx = joint % w, jy = (joint / w) | 0;
+      let best = -1, bestG = g;
+      for (let dy = -1; dy <= 1; dy += 1) for (let dx = -1; dx <= 1; dx += 1) {
+        const nx = jx + dx, ny = jy + dy, j = ny * w + nx;
+        if (nx < 0 || ny < 0 || nx >= w || ny >= h || kind[j] !== 1) continue;
+        if (stemAt[j] > bestG || (stemAt[j] === bestG && best < 0 && ny > jy)) { best = j; bestG = stemAt[j]; }
+      }
+      if (best < 0 || bestG >= g0 * 1.5) break;
+      joint = best; g = bestG;
+    }
+    // (the limb: its wood out from the joint no stouter than it, then its leaves)
+    const jx = joint % w, jy = (joint / w) | 0, reach2 = (14 + 8 * g0) ** 2;
+    const mine = new Uint8Array(n), ks = [joint];
+    mine[joint] = 1;
+    for (let q = 0; q < ks.length; q += 1) {
+      const kx = ks[q] % w, ky = (ks[q] / w) | 0;
+      for (let dy = -1; dy <= 1; dy += 1) for (let dx = -1; dx <= 1; dx += 1) {
+        const nx = kx + dx, ny = ky + dy, j = ny * w + nx;
+        if (nx < 0 || ny < 0 || nx >= w || ny >= h || mine[j] || kind[j] !== 1 || stemAt[j] > g0 || (nx - jx) ** 2 + (ny - jy) ** 2 > reach2) continue;
+        mine[j] = 1; ks.push(j);
+      }
+    }
+    if (ks.length < 14) return;
+    const wood = ks.length;
+    // (its leaves: those within a few cells of its wood - a crown's leaves all touch, so not all
+    // that touch it)
+    let edge = ks.slice();
+    for (let d = 0; d < BEND_LEAVES && edge.length; d += 1) {
+      const next = [];
+      for (const k of edge) {
+        const kx = k % w, ky = (k / w) | 0;
+        for (let dy = -1; dy <= 1; dy += 1) for (let dx = -1; dx <= 1; dx += 1) {
+          const nx = kx + dx, ny = ky + dy, j = ny * w + nx;
+          if (nx < 0 || ny < 0 || nx >= w || ny >= h || mine[j] || kind[j] !== 2) continue;
+          mine[j] = 1; ks.push(j); next.push(j);
+        }
+      }
+      edge = next;
+    }
+    // (the swing the blow sets going: about the joint, the way the blow turns it, the less the
+    // stiffer the limb - and how fast it rings, the faster the stiffer)
+    const px = left + jx + 0.5, py = top + jy + 0.5, rx = x + 0.5 - px, ry = y + 0.5 - py;
+    const turn = Math.sign(rx * fy - ry * fx) || 1;
+    const omega = turn * Math.min(3, BEND_SPIN * share * 3 / Math.max(1, Math.sqrt(wood / 40)));
+    const ring = Math.max(5, Math.min(16, 3 + 2.5 * g0));
+    const data = lift(world, box, ks, [joint]);
+    data.record = record;
+    record.flexing = world.fragments.spawn({ data, flora: true, pivot: { x: px, y: py }, flex: { spring: ring * ring, damp: 2 * 0.22 * ring }, omega });
+    if (!record.flexing) unflex(world, data);
+  }
+  // A limb that has rung down is put back as it grew - where it still has room; a plant felled
+  // meanwhile lets it fall instead.
+  function unflex(world, data) {
+    const record = data.record;
+    if (record) record.flexing = null;
+    if (!record || record.felled) { fall(world, null, data, null); return; }
+    for (let j = 0; j < data.x.length; j += 1) {
+      const x = data.x[j], y = data.y[j];
+      if ((PW.get(world, x, y) & ID_MASK) !== M.AIR || PW.getLayer(world, 'deco', x, y)) continue;
+      PW.setLayer(world, 'deco', x, y, data.color[j]);
+      PW.setFlag(world, x, y, PW.FLAG.FLORA);
+      PW.setFlag(world, x, y, PW.FLAG.WOOD, data.byte[j] !== 0);
+      PW.setFlag(world, x, y, PW.FLAG.CHARRED, data.byte[j] === 2);
+    }
   }
   // The wood at (x, y): how far it runs across and up, and which is its thickness.
   function stem(world, x, y) {
@@ -1629,6 +1728,6 @@
 
   PW.generateVegetation = generateVegetation;
 
-  PW.flora = { plant, fell, regenerate, afterBlast, strike, settle, step, recordAt, shed, land, cut, makeGround, frozenGround, FLAT, tuft, bendReach, AIR_DRAG, loose, splitPiece };
+  PW.flora = { plant, fell, regenerate, afterBlast, strike, settle, step, recordAt, shed, land, cut, makeGround, frozenGround, FLAT, tuft, bendReach, AIR_DRAG, loose, splitPiece, unflex };
   PW.vegetation = { broadleaf, conifer, birch, bush, deadTree, boulder, reeds, stamp, createSprite, foliage, limb, trim, spanDrop, spanRise };
 })();
