@@ -176,6 +176,21 @@
           }
         }
       }
+      // N37: between neighbouring beds of the same town the line runs straight ON - a shelf
+      // from connector to connector - instead of diving back to depth and climbing again.
+      // The V-jog beside every cabinet read as a break at the user's close look.
+      const sorted = [...cores].sort((a, b) => a.x - b.x);
+      for (let i = 0; i + 1 < sorted.length; i += 1) {
+        const a = sorted[i], b = sorted[i + 1];
+        if (b.x - a.x > 140) continue;
+        const Ta = a.y - 3, Tb = b.y - 3;
+        const s0 = a.x + SPAN, s1 = b.x - SPAN;
+        for (let x = s0; x <= s1; x += 1) {
+          const k = x - x0;
+          if (k < 0 || k >= ys.length) continue;
+          ys[k] = Math.round(Ta + (Tb - Ta) * ((x - s0) / Math.max(1, s1 - s0)));
+        }
+      }
     }
 
     // ---- The bundle itself -----------------------------------------------------------------------------
@@ -317,12 +332,16 @@
         tTop: lineY - 9, tBot: lineY + BORE + 9,   // (the T-piece and valve hardware live in this band)
         building: anchor.building, op: anchor.op, occ: new Uint8Array(yB - yA + 1), timer: 0, pending: 0 };
     }
-    // The run's underground ends are closed with a bolted steel cap.
+    // The run's underground ends are closed with a bolted blind flange, its outer face domed -
+    // a cap the eye reads as BUILT shut, not as the pipe cut off mid-ground (N37).
     function capEnd(line, side) {
       const endX = side > 0 ? line.x1 : line.x0, y = line.ys[side > 0 ? line.ys.length - 1 : 0];
-      for (let c = 1; c <= 2; c += 1) for (let r = -1; r <= BORE; r += 1) {
-        const lip = r === -1 || r === BORE, bolt = c === 1 && (r === 1 || r === BORE - 2);
-        layCell(line, endX + side * c, y + r, lip ? STEEL_DARK : bolt ? [200, 204, 206] : c === 2 ? tone(STEEL, 0.86) : STEEL);
+      for (let c = 1; c <= 3; c += 1) for (let r = -1; r <= BORE; r += 1) {
+        const lip = r === -1 || r === BORE;
+        if (c === 3 && (r <= 0 || r >= BORE - 1)) continue;   // (shoulders cut: a domed face)
+        if (lip && c === 3) continue;
+        const bolt = c === 1 && (r === 1 || r === BORE - 2);
+        layCell(line, endX + side * c, y + r, lip ? STEEL_DARK : bolt ? [200, 204, 206] : c === 3 ? tone(STEEL, 0.7) : c === 2 ? tone(STEEL, 0.86) : STEEL);
       }
       stats.caps += 1;
     }

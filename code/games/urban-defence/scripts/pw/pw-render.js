@@ -298,7 +298,11 @@
           }
           if ((h & 1023) === 0 || (h & 1023) === 1) return toned(pebble, dk * grainTone(g) >> 8);
           const band = ((((y + bandWobble[x]) / 27) | 0) % 3 + 3) % 3;
-          const k = (BAND_TONES[band] * dk >> 8) * grainTone(g) >> 8;
+          // The banding fades with depth (N37): near the surface the horizons read as soil
+          // layers, but repeated to the world's bottom they became mechanical stripes.
+          let bt = BAND_TONES[band];
+          if (depth > 140) bt += (256 - bt) * Math.min(256, depth - 140) >> 8;
+          const k = (bt * dk >> 8) * grainTone(g) >> 8;
           return soil && tinted[id] ? soilShade(palettes[id][(m >> 6) * 2 + (h & 1)], x, y, k) : shade(palettes[id][(m >> 6) * 2 + (h & 1)], k);
         }
         if (id === M.TOPSOIL && y > 5) {
