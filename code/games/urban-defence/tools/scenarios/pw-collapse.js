@@ -34,7 +34,25 @@ for (let x = A.body.left + 6; x <= A.body.right - 6; x += 14) pwApp.explode(x, A
 for (let x = B.body.left + 8; x <= (B.body.left + B.body.right) / 2; x += 12) pwApp.explode(x, B.ground - 16, 15, 1.3);
 const times = [];
 let maxPieces = 0;
-const run = (seconds) => { for (let k = 0; k < seconds * 60; k += 1) { pwApp.stepWorld(1); times.push(structure.stats.ms + fragments.stats.ms); maxPieces = Math.max(maxPieces, fragments.list.length); } };
+// (every 10 ticks: of each falling piece of a building, the share of its frame lying inside the
+// natural ground - it must never sink into it, nor fall through it)
+let worstSunk = 0, sunkNote = '';
+const sunkIn = () => {
+  for (const p of fragments.list) {
+    if (p.flora || p.mode === 'flex') continue;
+    const c = Math.cos(p.angle), s = Math.sin(p.angle), ox = p.ox0 - 0.5, oy = p.oy0 - 0.5;
+    let frame = 0, inside = 0;
+    for (let k = 0; k < p.data.x.length; k += 1) {
+      if (p.data.solid[k] !== 1) continue;
+      const u = p.data.x[k] - ox, v = p.data.y[k] - oy, x = Math.floor(p.px + u * c - v * s), y = Math.floor(p.py + u * s + v * c);
+      frame += 1;
+      const k2 = id(x, y);
+      if (PW.mat.terrain[k2] && k2 !== M.RUIN && PW.mat.phase[k2] === PW.PHASE.SOLID && PW.getOwner(world, x, y) !== p.owner) inside += 1;
+    }
+    if (frame >= 20 && inside / frame > worstSunk) { worstSunk = inside / frame; sunkNote = `${inside} of ${frame} frame cells`; }
+  }
+};
+const run = (seconds) => { for (let k = 0; k < seconds * 60; k += 1) { pwApp.stepWorld(1); times.push(structure.stats.ms + fragments.stats.ms); maxPieces = Math.max(maxPieces, fragments.list.length); if (k % 10 === 0) sunkIn(); } };
 run(1.2);
 await view('co-implode', (A.body.left + A.body.right) / 2, A.ground - heightOf(A) * 0.5, 3);
 await view('co-tip', (B.body.left + B.body.right) / 2, B.ground - heightOf(B) * 0.5, 3);
@@ -51,6 +69,10 @@ check(B.health < 0.25 && (B.failures || []).some((r) => r === 'crushed' || r ===
 // rubble; one that tips over shatters into chunks where it lands)
 check(maxPieces >= 2 && (fragments.stats.chunks > 0 || (fragments.stats.crushSteps || 0) > 3), `the falling building breaks into rigid pieces that break apart as they land (${maxPieces} pieces at once, ${fragments.stats.chunks} chunks, ${fragments.stats.crushSteps || 0} storeys crushed as it sank)`);
 check(fragments.list.length === 0, `everything has come to rest after 30 s (${fragments.list.length} pieces still moving)`);
+// (N40O: falling buildings never sink into the ground; they come apart as they fall - shedding
+// their loosest cells, the parts that no longer hang together going their own ways)
+check(worstSunk < 0.1, `no falling piece sinks into the ground (at worst ${(worstSunk * 100).toFixed(0)}% of a piece's frame in it${sunkNote ? `: ${sunkNote}` : ''})`);
+check((fragments.stats.shed || 0) > 0 && (fragments.stats.parted || 0) > 0, `falling buildings come apart as they fall (${fragments.stats.shed || 0} cells shaken loose in the air, ${fragments.stats.parted || 0} parts gone their own ways)`);
 // Nothing floats: structure still standing is joined to the ground, and no back wall or fitting
 // hangs without what held it.
 const damaged = world.buildings.filter((b) => b.health !== undefined && b.health < 1);
@@ -113,4 +135,34 @@ const p95 = times[Math.floor(times.length * 0.95)];
 check(p95 < 3, `collapse simulation stays in budget (p95 ${p95.toFixed(2)} ms, max ${times[times.length - 1].toFixed(2)} ms)`);
 await view('co-after-implode', (A.body.left + A.body.right) / 2, A.ground - 120, 3);
 await view('co-after-tip', (B.body.left + B.body.right) / 2, B.ground - 120, 3);
+// A small lump of building - too small to grind - come to lie pressed into the ground (as a chunk
+// broken off a piece that was) is worked back out of it, never sinking on into it (N40O: lumps
+// like this used to fall through the ground).
+{
+  // (on dry, flat, firm natural ground, out in the wilds)
+  const firm = (x) => { const k = id(x, world.groundTop[x]); return PW.mat.terrain[k] && PW.mat.phase[k] === PW.PHASE.SOLID; };
+  let lx = -1;
+  for (const zone of pwApp.layout.wilds) for (let x = zone.x0 + 100; x < zone.x1 - 100 && lx < 0; x += 7) {
+    let flat = true;
+    for (let d = -12; d <= 20 && flat; d += 1) flat = firm(x + d) && Math.abs(world.groundTop[x + d] - world.groundTop[x]) <= 2;
+    if (flat) lx = x;
+  }
+  const lg = world.groundTop[lx];
+  const cells = [];
+  for (let y = lg - 140; y < lg - 133; y += 1) for (let x = lx; x < lx + 9; x += 1) { PW.set(world, x, y, M.CONCRETE, { quiet: true }); cells.push(y * world.width + x); }
+  const lump = fragments.spawn({ cells, vx: 0, vy: 30 });
+  if (lump) lump.py += 136;   // (3 of its 7 rows in the ground)
+  // (how far down its lowest cell goes, while it is a piece, against the ground's top there)
+  let deepest = -Infinity;
+  for (let k = 0; k < 60 * 3 && lump && fragments.list.includes(lump); k += 1) {
+    pwApp.stepWorld(1);
+    const c = Math.cos(lump.angle), s = Math.sin(lump.angle);
+    for (let q = 0; q < lump.data.x.length; q += 1) {
+      if (lump.data.solid[q] !== 1) continue;
+      const u = lump.data.x[q] - lump.ox0 + 0.5, v = lump.data.y[q] - lump.oy0 + 0.5;
+      deepest = Math.max(deepest, Math.floor(lump.py + u * s + v * c) - lg);
+    }
+  }
+  check(!!lump && deepest <= 3, `a small lump lying pressed into the ground is worked back out of it, never sinking through (its lowest cell at most ${deepest} rows into the ground, from 3)`);
+}
 return { checks, stats: { fragments: fragments.stats, structure: structure.stats } , shots: shots.length };

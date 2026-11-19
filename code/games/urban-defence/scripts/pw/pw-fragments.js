@@ -18,7 +18,13 @@
   const SPLIT_MIN = 300;      // pieces at least this big can crack into chunks
   const CHUNK_MIN = 36;       // chunks smaller than this turn straight into debris
   const MAX_PIECES = 100;
-  const OUTLINE_MAX = 480;    // contact points tested per sub-step
+  const OUTLINE_MAX = 720;    // contact points tested per sub-step
+  const GHOSTS = 0.15;        // share of its outline over cells no longer there before it is made over,
+  const RESHAPE_EVERY = 0.2;  // ...no oftener than this (s)
+  const RESHAPE_LOST = 0.005; // share of its weight lost (any way) before it is made over, in case it hangs in parts now
+  const BIG_REMAKE = 2000;    // frame cells: pieces this big are made over one a tick at most
+  const PARTS_EVERY = 0.25;   // s: how often a piece losing cells is looked at for hanging in parts
+  const PARTS_NOW = 20000;    // grid cells: a piece's box bigger than this is looked at the tick after it is made
   // A piece (or a chunk of one) at least RUIN_MIN cells big comes to rest whole where it lands -
   // tilted, misplaced, cracked at its edges - as a ruin, part of the ground.
   const RUIN_MIN = 60;
@@ -168,7 +174,7 @@
         if (mass < CHUNK_MIN || heavy < CHUNK_MIN / 2) { settle(here(), spec.vx || 0, spec.vy || 0); return null; }
         if (list.length >= MAX_PIECES) { settle(here(), spec.vx || 0, spec.vy || 0); return null; }
       }
-      const cx = sx / mass, cy = sy / mass;
+      let cx = sx / mass, cy = sy / mass;
       const ax = Math.floor(cx), ay = Math.floor(cy);
       // Local grid around the anchor cell (ax, ay), for drawing and contact.
       let u0 = Infinity, v0 = Infinity, u1 = -Infinity, v1 = -Infinity;
@@ -176,69 +182,58 @@
       const gw = u1 - u0 + 1, gh = v1 - v0 + 1, N = gw * gh;
       const grid = new Int32Array(N);
       for (let k = 0; k < n; k += 1) grid[(Y[k] - ay - v0) * gw + (X[k] - ax - u0)] = k + 1;
+      // A piece is what hangs together. Cells of it not joined to the rest - a chunk cut across a
+      // room, what crushing or grinding has left either side of a gap - are pieces of their own,
+      // each going its own way: what has come apart is never one body. (A plant comes apart by
+      // branch instead: see PW.flora.splitPiece.)
+      // (its greatest part goes on as this piece; the others are pieces of their own, made from
+      // their cells - none of it is copied over again but them)
+      // (a great one is looked at on the ticks after, one a tick, not in the moment it breaks away
+      // with everything else - see step)
+      const partsLater = !spec.flora && !spec.pivot && !spec.flex && !spec.joined && N > PARTS_NOW;
+      if (!spec.flora && !spec.pivot && !spec.flex && !spec.joined && !partsLater) {
+        const parts = partsOf(grid, gw, gh, SOL);
+        if (parts) {
+          const weights = parts.map((ks) => { let w = 0; for (const k of ks) w += wOf(k); return w; });
+          let main = 0;
+          for (let q = 1; q < parts.length; q += 1) if (weights[q] > weights[main]) main = q;
+          if (weights[main] < CHUNK_MIN) {
+            for (const ks of parts) spawn({ ...spec, cells: null, data: pick(data, ks), joined: true });
+            stats.parted = (stats.parted || 0) + parts.length;
+            return null;
+          }
+          for (let q = 0; q < parts.length; q += 1) {
+            if (q === main) continue;
+            spawn({ ...spec, cells: null, data: pick(data, parts[q]), joined: true });
+            for (const k of parts[q]) { grid[(Y[k] - ay - v0) * gw + (X[k] - ax - u0)] = 0; SOL[k] = 0; data.color[k] = 0; }
+          }
+          stats.parted = (stats.parted || 0) + parts.length - 1;
+          mass = 0; sx = 0; sy = 0;
+          for (const k of parts[main]) { const w = wOf(k); if (!w) continue; mass += w; sx += (X[k] + 0.5) * w; sy += (Y[k] + 0.5) * w; }
+          cx = sx / mass; cy = sy / mass;
+        }
+      }
       // What it strikes with is its frame - pillars, floors, outer walls (a tree's wood). A
       // building is mostly air: its rooms are open, the back wall only a panel behind them, so
       // what it falls on can come into its rooms (and a piece hollow enough breaks up the easier).
       // (a building's piece is tens of thousands of cells, made over again as it is crushed: all
       // of this is flat arrays, read by grid index)
-      const frame = new Uint8Array(N);
-      for (let g = 0; g < N; g += 1) if (grid[g] && SOL[grid[g] - 1] === 1) frame[g] = 1;
-      // (the open space outside it: everything not frame reached from the edges of its box)
-      const outside = new Uint8Array(N), fill = new Int32Array(N);
-      let tail = 0;
-      for (let gu = 0; gu < gw; gu += 1) for (const g of [gu, N - gw + gu]) if (!frame[g] && !outside[g]) { outside[g] = 1; fill[tail++] = g; }
-      for (let gv = 1; gv < gh - 1; gv += 1) for (const g of [gv * gw, gv * gw + gw - 1]) if (!frame[g] && !outside[g]) { outside[g] = 1; fill[tail++] = g; }
-      for (let q = 0; q < tail; q += 1) {
-        const g = fill[q], gu = g % gw;
-        if (gu > 0 && !frame[g - 1] && !outside[g - 1]) { outside[g - 1] = 1; fill[tail++] = g - 1; }
-        if (gu < gw - 1 && !frame[g + 1] && !outside[g + 1]) { outside[g + 1] = 1; fill[tail++] = g + 1; }
-        if (g >= gw && !frame[g - gw] && !outside[g - gw]) { outside[g - gw] = 1; fill[tail++] = g - gw; }
-        if (g < N - gw && !frame[g + gw] && !outside[g + gw]) { outside[g + gw] = 1; fill[tail++] = g + gw; }
-      }
-      // Outline: frame cells with an open side (where it touches the world first), and which way
-      // each faces (out through its open sides). Its outer faces are tested closely, the faces of
-      // its rooms more sparsely.
-      // (kept as cell index and which of its sides are frame - left 1, right 2, top 4, bottom 8)
-      const outer = new Int32Array(n), inner = new Int32Array(n);
-      let outers = 0, inners = 0, inertia = 0;
+      let inertia = 0;
       const gcx = cx - ax, gcy = cy - ay;
       for (let k = 0; k < n; k += 1) {
         const wgt = wOf(k);
         if (!wgt) continue;
-        const u = X[k] - ax, v = Y[k] - ay;
-        inertia += wgt * ((u + 0.5 - gcx) ** 2 + (v + 0.5 - gcy) ** 2);
-        if (SOL[k] !== 1) continue;
-        const gu = u - u0, gv = v - v0, g = gv * gw + gu;
-        const l = gu > 0 && frame[g - 1] === 1, r = gu < gw - 1 && frame[g + 1] === 1;
-        const t = gv > 0 && frame[g - gw] === 1, b = gv < gh - 1 && frame[g + gw] === 1;
-        if (l && r && t && b) continue;
-        const out = (!l && (gu === 0 || outside[g - 1] === 1)) || (!r && (gu === gw - 1 || outside[g + 1] === 1))
-          || (!t && (gv === 0 || outside[g - gw] === 1)) || (!b && (gv === gh - 1 || outside[g + gw] === 1));
-        const e = k << 4 | (l ? 1 : 0) | (r ? 2 : 0) | (t ? 4 : 0) | (b ? 8 : 0);
-        if (out) outer[outers++] = e; else inner[inners++] = e;
+        inertia += wgt * ((X[k] - ax + 0.5 - gcx) ** 2 + (Y[k] - ay + 0.5 - gcy) ** 2);
       }
-      const picked = [];
-      for (const [set, count, share] of [[outer, outers, 0.75], [inner, inners, 0.25]]) {
-        const stride = Math.max(1, Math.ceil(count / (OUTLINE_MAX * share)));
-        for (let q = 0; q < count; q += stride) {
-          const e = set[q], k = e >> 4;
-          picked.push(X[k] - ax + 0.5, Y[k] - ay + 0.5, (e & 1 ? 0 : -1) + (e & 2 ? 0 : 1), (e & 4 ? 0 : -1) + (e & 8 ? 0 : 1));
-        }
-      }
-      const points = new Float32Array(picked.length / 2), faces = new Float32Array(picked.length / 2);
-      for (let k = 0, j = 0; k < picked.length; k += 4, j += 2) {
-        points[j] = picked[k]; points[j + 1] = picked[k + 1];
-        const len = Math.hypot(picked[k + 2], picked[k + 3]) || 1;
-        faces[j] = picked[k + 2] / len; faces[j + 1] = picked[k + 3] / len;
-      }
+      const { points, faces, ptCell } = outlineOf(grid, gw, gh, u0, v0, data, ax, ay);
       // data.x/y are world cells as they were when the piece was formed, (ox0, oy0) its anchor
       // cell then; (px, py) is where that anchor's corner is now.
-      const piece = { data, n, mass, inertia, grid, gw, gh, u0, v0, points, faces, owner: spec.owner || 0, from: spec.from || spec.owner || 0, generation: spec.generation || 0,
+      const piece = { data, n, mass, inertia, grid, gw, gh, u0, v0, points, faces, ptCell, owner: spec.owner || 0, from: spec.from || spec.owner || 0, generation: spec.generation || 0,
         ox0: ax, oy0: ay, px: ax, py: ay, gx: cx - ax, gy: cy - ay, angle: 0, omega: spec.omega || 0, vx: spec.vx || 0, vy: spec.vy || 0,
         mode: spec.flex ? 'flex' : spec.pivot ? 'hinge' : spec.drop ? 'drop' : 'fly', dir: spec.dir || 1, age: 0, flora: !!spec.flora,
         spring: spec.flex ? spec.flex.spring : 0, damp: spec.flex ? spec.flex.damp : 0,
         yf: spec.pivot ? spec.pivot.y : spec.floor || 0, crushedRows: 0, base: spec.base ?? H, h0: spec.h0 || gh, still: 0, touched: -1, sunk: spec.sunk || 0,
-        hollow: heavy + thin ? thin / (heavy + thin) : 0 };
+        hollow: heavy + thin ? thin / (heavy + thin) : 0, shapeMass: mass, partsDue: partsLater };
       if (parent) {
         const [c, s] = cosSin(parent);
         [piece.px, piece.py] = toWorld(parent, c, s, ax - parent.ox0, ay - parent.oy0);
@@ -267,6 +262,162 @@
       return piece;
     }
 
+    // A piece's outline: its frame cells with an open side (where it touches the world first), and
+    // which way each faces (out through its open sides), and the cell of its grid under each (one
+    // ground off, crushed or shaken loose is no longer there to strike with - see contact). Its
+    // outer faces are tested closely, the faces of its rooms more sparsely. (A building's piece is
+    // tens of thousands of cells, its outline made again as it crumbles: flat arrays, kept and
+    // reused, read by grid index.)
+    const OUT = { frame: new Uint8Array(0), outside: new Uint8Array(0), fill: new Int32Array(0), outer: new Int32Array(0), inner: new Int32Array(0) };
+    function outlineOf(grid, gw, gh, u0, v0, data, ax, ay) {
+      const N = gw * gh, n = data.x.length, X = data.x, Y = data.y, SOL = data.solid;
+      if (OUT.frame.length < N) { OUT.frame = new Uint8Array(N); OUT.outside = new Uint8Array(N); OUT.fill = new Int32Array(N); }
+      if (OUT.outer.length < n) { OUT.outer = new Int32Array(n); OUT.inner = new Int32Array(n); }
+      const { frame, outside, fill, outer, inner } = OUT;
+      frame.fill(0, 0, N); outside.fill(0, 0, N);
+      for (let g = 0; g < N; g += 1) if (grid[g] && SOL[grid[g] - 1] === 1) frame[g] = 1;
+      // (the open space outside it: everything not frame reached from the edges of its box)
+      let tail = 0;
+      for (let gu = 0; gu < gw; gu += 1) for (const g of [gu, N - gw + gu]) if (!frame[g] && !outside[g]) { outside[g] = 1; fill[tail++] = g; }
+      for (let gv = 1; gv < gh - 1; gv += 1) for (const g of [gv * gw, gv * gw + gw - 1]) if (!frame[g] && !outside[g]) { outside[g] = 1; fill[tail++] = g; }
+      for (let q = 0; q < tail; q += 1) {
+        const g = fill[q], gu = g % gw;
+        if (gu > 0 && !frame[g - 1] && !outside[g - 1]) { outside[g - 1] = 1; fill[tail++] = g - 1; }
+        if (gu < gw - 1 && !frame[g + 1] && !outside[g + 1]) { outside[g + 1] = 1; fill[tail++] = g + 1; }
+        if (g >= gw && !frame[g - gw] && !outside[g - gw]) { outside[g - gw] = 1; fill[tail++] = g - gw; }
+        if (g < N - gw && !frame[g + gw] && !outside[g + gw]) { outside[g + gw] = 1; fill[tail++] = g + gw; }
+      }
+      // (each kept as cell index and which of its sides are frame - left 1, right 2, top 4, bottom 8)
+      let outers = 0, inners = 0;
+      for (let k = 0; k < n; k += 1) {
+        if (SOL[k] !== 1) continue;
+        const u = X[k] - ax, v = Y[k] - ay, gu = u - u0, gv = v - v0, g = gv * gw + gu;
+        if (grid[g] !== k + 1) continue;
+        const l = gu > 0 && frame[g - 1] === 1, r = gu < gw - 1 && frame[g + 1] === 1;
+        const t = gv > 0 && frame[g - gw] === 1, b = gv < gh - 1 && frame[g + gw] === 1;
+        if (l && r && t && b) continue;
+        const out = (!l && (gu === 0 || outside[g - 1] === 1)) || (!r && (gu === gw - 1 || outside[g + 1] === 1))
+          || (!t && (gv === 0 || outside[g - gw] === 1)) || (!b && (gv === gh - 1 || outside[g + gw] === 1));
+        const e = k << 4 | (l ? 1 : 0) | (r ? 2 : 0) | (t ? 4 : 0) | (b ? 8 : 0);
+        if (out) outer[outers++] = e; else inner[inners++] = e;
+      }
+      const picked = [];
+      for (const [set, count, share] of [[outer, outers, 0.75], [inner, inners, 0.25]]) {
+        const stride = Math.max(1, Math.ceil(count / (OUTLINE_MAX * share)));
+        for (let q = 0; q < count; q += stride) {
+          const e = set[q], k = e >> 4;
+          picked.push(X[k] - ax + 0.5, Y[k] - ay + 0.5, (e & 1 ? 0 : -1) + (e & 2 ? 0 : 1), (e & 4 ? 0 : -1) + (e & 8 ? 0 : 1));
+        }
+      }
+      const points = new Float32Array(picked.length / 2), faces = new Float32Array(picked.length / 2);
+      const ptCell = new Int32Array(picked.length / 4);
+      for (let k = 0, j = 0; k < picked.length; k += 4, j += 2) {
+        points[j] = picked[k]; points[j + 1] = picked[k + 1];
+        const len = Math.hypot(picked[k + 2], picked[k + 3]) || 1;
+        faces[j] = picked[k + 2] / len; faces[j + 1] = picked[k + 3] / len;
+        ptCell[j >> 1] = (Math.floor(points[j + 1]) - v0) * gw + (Math.floor(points[j]) - u0);
+      }
+      return { points, faces, ptCell };
+    }
+    // (a piece that has lost cells: its outline made again from what is left of it, where it is -
+    // the hitbox debug view's strike marks start afresh)
+    function reoutline(p) {
+      const o = outlineOf(p.grid, p.gw, p.gh, p.u0, p.v0, p.data, p.ox0, p.oy0);
+      p.points = o.points; p.faces = o.faces; p.ptCell = o.ptCell; p.hitV = null;
+      p.outlinedAt = time;
+      stats.reoutlined = (stats.reoutlined || 0) + 1;
+    }
+    // (the separate parts of a piece - each a list of its cells' indices - or null when it is all
+    // one. Its frame and its back wall hold it together, cell to cell, corners too; a fitting or a
+    // lick of paint holds nothing, and goes with the part it is on)
+    const PART_LABEL = { buf: new Int32Array(0), queue: new Int32Array(0) };
+    function partsOf(grid, gw, gh, solid) {
+      const N = gw * gh;
+      if (PART_LABEL.buf.length < N) { PART_LABEL.buf = new Int32Array(N); PART_LABEL.queue = new Int32Array(N); }
+      const lab = PART_LABEL.buf, queue = PART_LABEL.queue;
+      lab.fill(0, 0, N);
+      let parts = 0;
+      const flood = (head, tail, holds) => {
+        while (head < tail) {
+          const g = queue[head++], u = g % gw, v = (g / gw) | 0;
+          for (let dv = -1; dv <= 1; dv += 1) for (let du = -1; du <= 1; du += 1) {
+            const nu = u + du, nv = v + dv;
+            if ((!du && !dv) || nu < 0 || nv < 0 || nu >= gw || nv >= gh) continue;
+            const j = nv * gw + nu, k = grid[j] - 1;
+            if (k >= 0 && !lab[j] && (!holds || solid[k])) { lab[j] = lab[g]; queue[tail++] = j; }
+          }
+        }
+        return tail;
+      };
+      for (let g0 = 0; g0 < N; g0 += 1) {
+        const k = grid[g0] - 1;
+        if (k < 0 || lab[g0] || !solid[k]) continue;
+        parts += 1;
+        queue[0] = g0; lab[g0] = parts;
+        flood(0, 1, true);
+      }
+      if (parts <= 1) return null;
+      // (the fittings and paint: each patch of them goes with the part it touches - or the first,
+      // touching none)
+      for (let g0 = 0; g0 < N; g0 += 1) {
+        if (!grid[g0] || lab[g0]) continue;
+        let head = 0, tail = 0, label = 0;
+        queue[tail++] = g0; lab[g0] = -1;
+        while (head < tail) {
+          const g = queue[head++], u = g % gw, v = (g / gw) | 0;
+          for (let dv = -1; dv <= 1; dv += 1) for (let du = -1; du <= 1; du += 1) {
+            const nu = u + du, nv = v + dv;
+            if ((!du && !dv) || nu < 0 || nv < 0 || nu >= gw || nv >= gh) continue;
+            const j = nv * gw + nu;
+            if (!grid[j]) continue;
+            if (lab[j] > 0) { if (!label) label = lab[j]; } else if (!lab[j]) { lab[j] = -1; queue[tail++] = j; }
+          }
+        }
+        for (let q = 0; q < tail; q += 1) lab[queue[q]] = label || 1;
+      }
+      const lists = Array.from({ length: parts }, () => []);
+      for (let g = 0; g < N; g += 1) if (grid[g]) lists[(lab[g] || 1) - 1].push(grid[g] - 1);
+      return lists;
+    }
+    // A falling piece of a building comes apart as it goes, not one block until it lands: what is
+    // barely held at its edges - a cell with few of its neighbours left in it, the more readily
+    // the weaker its stuff (glass, timber, brick before concrete) - is shaken loose as it falls
+    // and turns, the more the faster it turns and the harder it was struck, and goes on by itself
+    // as rubble. So it crumbles a pixel at a time from the moment it breaks loose, and the faces it
+    // is left with are worked at in their turn (its outline is made over as it goes: see contact).
+    const SHED = 2;               // per second: an edge cell held by one neighbour comes loose, falling still
+    const SHED_SPIN = 1.5;        // ...times more for each 10 cells/s its far edge swings about its middle
+    const SHED_SHAKE = 8;         // ...at most this many times more
+    const SHED_EVERY = 3;         // ticks between looks at a piece's edges (each for that long)
+    function shed(p, dt) {
+      const { grid, gw, gh, data, ptCell } = p;
+      const [c, s] = cosSin(p);
+      const spin = Math.abs(p.omega) * Math.hypot(gw, gh) / 2;
+      const blow = (p.feltV || 0) * Math.exp(-(p.age - (p.feltAt || 0)) * 3);
+      const shake = Math.min(SHED_SHAKE, 1 + spin / 10 * SHED_SPIN + blow / 60);
+      let lost = 0, n = 0;
+      for (let j = 0; j < ptCell.length; j += 1) {
+        const g = ptCell[j], k = grid[g] - 1;
+        if (k < 0 || data.solid[k] !== 1) continue;
+        const gu = g % gw, gv = (g / gw) | 0;
+        let held = 0;
+        for (let dv = -1; dv <= 1; dv += 1) for (let du = -1; du <= 1; du += 1) {
+          const nu = gu + du, nv = gv + dv;
+          if ((du || dv) && nu >= 0 && nv >= 0 && nu < gw && nv < gh && grid[nv * gw + nu]) held += 1;
+        }
+        const loose = (8 - held) / 8;
+        if (random() >= SHED * loose * loose * shake / (0.25 + hardness[data.byte[k] & ID_MASK]) * dt) continue;
+        const [x, y] = toWorld(p, c, s, data.x[k] - p.ox0 + 0.5, data.y[k] - p.oy0 + 0.5);
+        const [vx, vy] = velocityAt(p, x, y);
+        particles.spawn(x, y, vx + (random() - 0.5) * 24, vy + (random() - 0.5) * 24, debrisOf(data.byte[k]), data.color[k] || 0, F.LAND | F.DAMAGE, 6);
+        lost += weightOf(data.solid[k]);
+        grid[g] = 0; data.solid[k] = 0; data.color[k] = 0;
+        n += 1;
+      }
+      if (!n) return;
+      p.mass = Math.max(1, p.mass - lost);
+      stats.shed = (stats.shed || 0) + n;
+    }
     // A falling plant's wood holds only as much as its girth lets it. Where it strikes something,
     // the wood that took the blow - the thinnest it struck with - bears its share of it; if that is
     // more than the wood can bear (its strength goes with the girth of the stem it hangs from,
@@ -551,6 +702,8 @@
     function step(dt) {
       const t0 = performance.now();
       time += dt;
+      // (a great piece is made over at most one a tick: the rest wait their turn - see reshape)
+      let bigRemakes = 0;
       for (let k = list.length - 1; k >= 0; k -= 1) {
         const p = list[k];
         p.age += dt;
@@ -617,7 +770,33 @@
           }
           continue;
         }
-        if (!done && p.reshape) done = remake(p);
+        // (a building's piece in the air crumbles at its edges - see shed; once it has come down
+        // on something, what breaks off it is what the blow breaks - see strike)
+        if (!done && !p.flora && (p.mode === 'fly' || p.mode === 'drop') && ((world.tick || 0) + k) % SHED_EVERY === 0 && p.age - p.touched > 0.25 && motion(p) > REST_SPEED) shed(p, dt * SHED_EVERY);
+        // A plant that lost branches is made over at once. A building's piece that has lost cells -
+        // shaken loose, ground or crushed off, folded up - has its outline made again from what is
+        // left (see reoutline), and is looked at for hanging in parts now: if it does, it is made
+        // over, each part a piece of its own (see spawn). (No oftener than RESHAPE_EVERY and
+        // PARTS_EVERY, however fast it crumbles; a great piece one a tick.)
+        if (!done && p.reshape && p.flora) done = remake(p);
+        else if (!done && !p.flora) {
+          const big = p.mass >= BIG_REMAKE, turn = !big || bigRemakes < 1;
+          // (one sinking storey by storey into its own footprint loses only its bottom: it is
+          // looked at when first made, and again once it goes free)
+          const lost = p.mode !== 'drop' && p.mass < p.shapeMass * (1 - RESHAPE_LOST);
+          if (turn && (p.partsDue || lost) && (p.partsDue || time - (p.partsAt ?? -1) >= PARTS_EVERY)) {
+            p.partsAt = time; p.partsDue = false;
+            if (big) bigRemakes += 1;
+            const parts = partsOf(p.grid, p.gw, p.gh, p.data.solid);
+            if (parts) done = detach(p, parts);
+            else p.shapeMass = p.mass;
+          }
+          if (!done && p.reshape && turn && time - (p.outlinedAt ?? -1) >= RESHAPE_EVERY) {
+            if (big) bigRemakes += 1;
+            p.reshape = false;
+            reoutline(p);
+          }
+        }
         if (!done && p.footTouch) { p.footTouch = false; if (p.mode === 'hinge') eatFoot(p); }
         if (!done) {
           // At rest on what it lies on (barely moving, and touching something lately) for a moment:
@@ -808,7 +987,8 @@
     function rebuild(p) {
       const ks = [];
       for (let k = 0; k < p.data.x.length; k += 1) if (p.data.solid[k] || p.data.color[k]) ks.push(k);
-      spawn({ data: pick(p.data, ks), parent: p, inherit: true, owner: p.owner, from: p.from, generation: p.generation, h0: p.h0, floor: p.yf, base: p.base, dir: p.dir });
+      // (one coming straight down into its own footprint goes on doing so - see sink)
+      spawn({ data: pick(p.data, ks), parent: p, inherit: true, owner: p.owner, from: p.from, generation: p.generation, h0: p.h0, floor: p.yf, base: p.base, dir: p.dir, drop: p.mode === 'drop', sunk: p.sunk });
       return true;
     }
     // A piece come to rest: a big enough one lies where it is as a ruin, a small one heaps as
@@ -833,19 +1013,42 @@
     // building as it swings down into it; anything else it strikes pushes back on it where they
     // touch (see strike). True when the piece is gone (come to rest, broken up, or replaced by what
     // is left of it).
+    // (the points of its outline that touched something this sub-step: how many, their middle,
+    // which way what they struck faces, how hard it is, and their spread - see touch)
+    let tN = 0, tSX = 0, tSY = 0, tFX = 0, tFY = 0, tHS = 0, tBX0 = 0, tBY0 = 0, tBX1 = 0, tBY1 = 0;
+    function touch(p, k, wx, wy, x, y, ox, oy, c, s) {
+      if (tN < OUTLINE_MAX) { went[tN * 2] = wx - ox; went[tN * 2 + 1] = wy - oy; }
+      tN += 1; tSX += wx; tSY += wy; tHS += hardness[mat[y * W + x] & ID_MASK];
+      if (PW.debugHitboxes && nTouched < OUTLINE_MAX) touched[nTouched++] = k >> 1;
+      // (a plant: the thinnest wood it struck with - see snapBranch)
+      if (p.flora && (weakest < 0 || p.ptGirth[k >> 1] < p.ptGirth[weakest >> 1])) weakest = k;
+      if (wx < tBX0) tBX0 = wx; if (wx > tBX1) tBX1 = wx; if (wy < tBY0) tBY0 = wy; if (wy > tBY1) tBY1 = wy;
+      // (which way the surface it struck faces there - out through its open sides - and, less,
+      // the other way from the side of the piece that struck it)
+      let gx = 0, gy = 0;
+      for (let dy = -1; dy <= 1; dy += 1) for (let dx = -1; dx <= 1; dx += 1) if ((dx || dy) && !blocking(x + dx, y + dy)) { gx += dx; gy += dy; }
+      const gl = Math.hypot(gx, gy);
+      if (gl > 0) { tFX += gx / gl; tFY += gy / gl; }
+      const faces = p.faces;
+      tFX -= (faces[k] * c - faces[k + 1] * s) * 0.5; tFY -= (faces[k] * s + faces[k + 1] * c) * 0.5;
+    }
+    const biteAt = new Float32Array(OUTLINE_MAX * 4);
+    let embedded = false;          // (this sub-step: it lies in what it struck, not just against it)
     function contact(p, h) {
       const [c, s] = cosSin(p);
-      const pts = p.points, faces = p.faces;
+      const pts = p.points;
       const c0 = Math.cos(was.angle), s0 = Math.sin(was.angle);
-      let crushed = 0, smashed = 0, n = 0, sx = 0, sy = 0, fx = 0, fy = 0, hs = 0, wet = 0, wsx = 0, tested = 0;
-      let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity, nb = 0;
+      let crushed = 0, smashed = 0, wet = 0, wsx = 0, tested = 0, ghosts = 0, nb = 0;
+      tN = 0; tSX = 0; tSY = 0; tFX = 0; tFY = 0; tHS = 0; tBX0 = Infinity; tBY0 = Infinity; tBX1 = -Infinity; tBY1 = -Infinity;
+      embedded = false;
       const [mid] = toWorld(p, c, s, p.gx, p.gy);   // (what it crushes is squeezed out away from this)
       weakest = -1; nTouched = 0;
       for (let k = 0; k < pts.length; k += 2) {
         // (the storeys of it already crushed under its hinge are gone; a plant's branches snapped
-        // off it)
+        // off it; a cell of it crushed, ground off or shaken loose - no longer there to strike with
+        // until its outline is made over: see reshape)
         if (p.stage === 'self' && p.mode === 'hinge' && pts[k + 1] >= -p.ry) continue;
-        if (p.flora && !p.grid[p.ptCell[k >> 1]]) continue;
+        if (!p.grid[p.ptCell[k >> 1]]) { ghosts += 1; continue; }
         const [wx, wy] = toWorld(p, c, s, pts[k], pts[k + 1]);
         const x = Math.floor(wx), y = Math.floor(wy);
         tested += 1;
@@ -896,23 +1099,13 @@
         // (bitten into it - already inside it, or deep in it - it grinds off there: see grind. A
         // plant does not grind: it is pushed back out like anything it strikes)
         if (!p.flora && (inside || (blocking(x - 1, y) && blocking(x + 1, y) && blocking(x, y - 1) && blocking(x, y + 1)))) {
-          if (nb < OUTLINE_MAX) bites[nb++] = k;
+          if (nb < OUTLINE_MAX) { bites[nb] = k; const q = nb * 4; biteAt[q] = wx; biteAt[q + 1] = wy; biteAt[q + 2] = ox; biteAt[q + 3] = oy; nb += 1; }
           continue;
         }
-        if (n < OUTLINE_MAX) { went[n * 2] = wx - ox; went[n * 2 + 1] = wy - oy; }
-        n += 1; sx += wx; sy += wy; hs += hardness[mat[y * W + x] & ID_MASK];
-        if (PW.debugHitboxes && nTouched < OUTLINE_MAX) touched[nTouched++] = k >> 1;
-        // (a plant: the thinnest wood it struck with - see snapBranch)
-        if (p.flora && (weakest < 0 || p.ptGirth[k >> 1] < p.ptGirth[weakest >> 1])) weakest = k;
-        if (wx < bx0) bx0 = wx; if (wx > bx1) bx1 = wx; if (wy < by0) by0 = wy; if (wy > by1) by1 = wy;
-        // (which way the surface it struck faces there - out through its open sides - and, less,
-        // the other way from the side of the piece that struck it)
-        let gx = 0, gy = 0;
-        for (let dy = -1; dy <= 1; dy += 1) for (let dx = -1; dx <= 1; dx += 1) if ((dx || dy) && !blocking(x + dx, y + dy)) { gx += dx; gy += dy; }
-        const gl = Math.hypot(gx, gy);
-        if (gl > 0) { fx += gx / gl; fy += gy / gl; }
-        fx -= (faces[k] * c - faces[k + 1] * s) * 0.5; fy -= (faces[k] * s + faces[k + 1] * c) * 0.5;
+        touch(p, k, wx, wy, x, y, ox, oy, c, s);
       }
+      // (its outline has many points over cells no longer there: it is made over from what is left)
+      if (ghosts >= Math.max(3, (pts.length >> 1) * GHOSTS) && !p.flora) p.reshape = true;
       if (crushed && p.mode === 'hinge') p.omega *= Math.max(0.9, 1 - crushed * 0.001);   // crushing the stump slows the swing
       if (smashed) { const f = Math.max(0.85, 1 - smashed * 3 / p.mass); p.vx *= f; p.vy *= f; p.omega *= f; stats.smashed = (stats.smashed || 0) + smashed; }
       if (crushed && p.mode === 'drop') {
@@ -930,11 +1123,27 @@
         if (p.flora) buoy(p, wet / Math.max(1, tested), wsx / wet, h);
         soak(p, wet, p.flora ? tested : pts.length / 2, h);
       }
-      if (nb && grind(p, nb, c, s, mid)) return true;
+      if (nb) {
+        const ground = grind(p, nb, c, s, mid);
+        if (ground === true) return true;
+        // (where it ground nothing off - too small a piece to, worn as far as it wears, or only
+        // resting there - what it is in is struck like anything else, and puts it back out: a
+        // piece never sinks on through the ground)
+        if (!ground) {
+          for (let b = 0; b < nb; b += 1) {
+            const q = b * 4, wx = biteAt[q], wy = biteAt[q + 1];
+            touch(p, bites[b], wx, wy, Math.floor(wx), Math.floor(wy), biteAt[q + 2], biteAt[q + 3], c, s);
+          }
+          // (and one lying in it - come to rest pressed into it, or broken off a piece that was -
+          // is worked back out of it, a cell a sub-step: see strike)
+          embedded = true;
+        }
+      }
+      const n = tN;
       if (!n) { p.jam = 0; return false; }
       wentN = Math.min(n, OUTLINE_MAX);
       stepH = h;
-      const gone = strike(p, sx / n, sy / n, fx / n, fy / n, hs / n, Math.hypot(bx1 - bx0, by1 - by0));
+      const gone = strike(p, tSX / n, tSY / n, tFX / n, tFY / n, tHS / n, Math.hypot(tBX1 - tBX0, tBY1 - tBY0));
       // (the debug view: how hard each outline point that touched was struck - see drawHitboxes)
       if (PW.debugHitboxes) {
         if (!p.hitV || p.hitV.length !== pts.length / 2) { p.hitV = new Float32Array(pts.length / 2); p.hitT = new Float32Array(pts.length / 2); }
@@ -990,16 +1199,52 @@
       p.mass = Math.max(1, p.mass - lost);
       p.worn = (p.worn || 0) + lost;
       stats.ground = (stats.ground || 0) + n;
-      if (p.mode === 'hinge') { p.eaten += n; return false; }
+      { const [gx, gy] = toWorld(p, c, s, points[bites[0]], points[bites[0] + 1]); crushedAt(gx, gy, n, p.from || p.owner); }
+      // (the cells it ground off, when it was not made over: see contact)
+      if (p.mode === 'hinge') { p.eaten += n; return n; }
       p.grit = (p.grit || 0) + n;
-      if (p.grit < GRIND_REMAKE || time - (p.remadeAt ?? -1) < GRIND_EVERY) return false;
+      if (p.grit < GRIND_REMAKE || time - (p.remadeAt ?? -1) < GRIND_EVERY) return n;
+      remadeFrom(p);
+      return true;
+    }
+    // A piece found hanging in parts: its greatest part goes on as it is, where it is, as it was
+    // moving; each of the others breaks away as a piece of its own, moving as that part of it was.
+    // (Its greatest part keeps its cells: only the lesser ones are copied out. True when nothing
+    // of it is left worth a piece: it was made over whole - see remadeFrom.)
+    function detach(p, parts) {
+      const { data, grid, gw, u0, v0, ox0, oy0 } = p;
+      const weights = parts.map((ks) => { let w = 0; for (const k of ks) w += weightOf(data.solid[k]); return w; });
+      let main = 0;
+      for (let q = 1; q < parts.length; q += 1) if (weights[q] > weights[main]) main = q;
+      if (weights[main] < CHUNK_MIN) return remadeFrom(p);
+      for (let q = 0; q < parts.length; q += 1) {
+        if (q === main) continue;
+        const kid = spawn({ data: pick(data, parts[q]), parent: p, inherit: true, owner: p.owner, from: p.from, generation: p.generation, h0: p.h0,
+          floor: p.yf, base: p.base, dir: p.dir, drop: p.mode === 'drop', sunk: p.sunk, joined: true });
+        if (kid) Object.assign(kid, { age: p.age, touched: p.touched, still: p.still, m0: p.m0, worn: p.worn, crumpled: p.crumpled });
+        for (const k of parts[q]) { grid[(data.y[k] - oy0 - v0) * gw + (data.x[k] - ox0 - u0)] = 0; data.solid[k] = 0; data.color[k] = 0; }
+      }
+      stats.parted = (stats.parted || 0) + parts.length - 1;
+      // (what is left: its weight, its middle and how it turns, moving on as it was)
+      const [c, s] = cosSin(p);
+      let mass = 0, sx = 0, sy = 0;
+      for (const k of parts[main]) { const w = weightOf(data.solid[k]); mass += w; sx += (data.x[k] - ox0 + 0.5) * w; sy += (data.y[k] - oy0 + 0.5) * w; }
+      const gx = sx / mass, gy = sy / mass;
+      const [wx, wy] = toWorld(p, c, s, gx, gy);
+      if (!pinned(p)) { [p.vx, p.vy] = velocityAt(p, wx, wy); }
+      let inertia = 0;
+      for (const k of parts[main]) { const w = weightOf(data.solid[k]); inertia += w * ((data.x[k] - ox0 + 0.5 - gx) ** 2 + (data.y[k] - oy0 + 0.5 - gy) ** 2); }
+      Object.assign(p, { mass, gx, gy, inertia: Math.max(1, inertia), shapeMass: mass });
+      reoutline(p);
+      return false;
+    }
+    // Make a piece over from what is left of it (after it was ground, or shook cells loose - see
+    // reshape): its parts that still hang together go on, each as a piece of its own, just as they
+    // were moving - with its age, its rest and its wear.
+    function remadeFrom(p) {
       const before = list.length;
       rebuild(p);
-      if (list.length > before) {
-        // (the same piece going on, less what it lost: its age, its rest and its wear go with it)
-        const q = list[list.length - 1];
-        Object.assign(q, { remadeAt: time, age: p.age, touched: p.touched, still: p.still, m0: p.m0, worn: p.worn, crumpled: p.crumpled });
-      }
+      for (let k = before; k < list.length; k += 1) Object.assign(list[k], { remadeAt: time, age: p.age, touched: p.touched, still: p.still, m0: p.m0, worn: p.worn, crumpled: p.crumpled });
       return true;
     }
     // (how far each point that struck something moved this sub-step)
@@ -1150,6 +1395,9 @@
       const fl = Math.hypot(fx, fy);
       const [nx, ny] = fl > 0.3 ? [fx / fl, fy / fl] : normalAt(hx, hy, vx, vy);
       const hit = -(vx * nx + vy * ny);
+      // (a lump too small to grind lying in what it struck - see contact - is worked back out of it,
+      // a cell a tick; a greater piece grinds where it bites, and rests where it lies)
+      if (embedded && p.mass < GRIND_FLOOR && p.embedTick !== world.tick) { p.embedTick = world.tick; p.px += nx; p.py += ny; }
       if (hit <= 0) return false;            // (touching it, but already moving off it)
       // (it does not sink into what it struck: it is put back out, the way that faces, as far as
       // it went in this sub-step - going on turning and sliding as it was)
@@ -1169,6 +1417,8 @@
       const rn = rx * ny - ry * nx;
       const firm = 0.55 + hard, felt = hit * firm;
       lastFelt = felt;
+      // (how hard it was struck, and when: it shakes it - see shed)
+      if (felt > (p.feltV || 0) * Math.exp(-(p.age - (p.feltAt || 0)) * 3)) { p.feltV = felt; p.feltAt = p.age; }
       // (a plant's wood and leaves take the blow up: it does not bounce)
       const j = (1 + (felt > CRUMBLE_SPEED && !p.flora ? BOUNCE * (0.4 + hard * 1.2) : 0)) * hit / (invM + rn * rn * invI);
       const tx = -ny, ty = nx, vt = vx * tx + vy * ty, rt = rx * ty - ry * tx;
@@ -1240,7 +1490,7 @@
         jet(ex, ey - 2, Math.round(10 + Math.min(80, folded.length / 30)), tx * side * go, ty * side * go - 15, 0.4);
         if (world.air) world.air.gust(ex + tx * side * 12, ey - 6, 24, tx * side * go * 0.8, ty * side * go * 0.8 - 10);
       }
-      if (folded.length > 400) smoulder(wx, wy, 24 + Math.min(30, folded.length / 300), 20 + Math.sqrt(folded.length) * 0.6);
+      crushedAt(wx, wy, folded.length, p.from || p.owner);
       // What is left comes on into the space, slowed by as much as the folding took up: the more
       // of its frame folded, the more of its speed into what it struck is spent.
       const piece = spawn({ data: pick(d, rest), parent: p, inherit: true, owner: p.owner, from: p.from, generation: p.generation, h0: p.h0, floor: p.yf, base: p.base, sunk: p.sunk });
@@ -1415,7 +1665,7 @@
       puff(hx, hy - 2, Math.min(900, Math.round(band * Math.sqrt(p.mass) / 2)), 30 + Math.sqrt(p.mass) * 1.2, 10 + band);
       if (world.stability) world.stability.shock(hx, hy, crushedKs.length * speed * speed / 40);
       // (the crushed storeys smoulder in the heap)
-      if (crushedKs.length > 400) smoulder(hx, hy, 24 + Math.min(30, crushedKs.length / 300), 20 + Math.sqrt(crushedKs.length) * 0.6);
+      crushedAt(hx, hy, crushedKs.length, p.from || p.owner);
     }
     // A floor coming down drives the air out from under it: dust and grit blast out of both its
     // sides (x0..x1) at row y, low along the ground - the faster it comes down, the harder.
@@ -1438,13 +1688,34 @@
         stats.dust += 1;
       }
     }
+    // (cells of a building crushed at (x, y) - folded, ground, crushed under a piece: its heap
+    // smoulders once enough of it has been crushed, however many pieces it came down in - one
+    // great piece or a shower of small ones - the longer the more of it; see SMOULDER_CELLS)
+    const crushedHeaps = new Map();
+    const SMOULDER_CELLS = 400;
+    function crushedAt(x, y, cells, from = 0) {
+      if (cells <= 0) return;
+      const key = from ? -from : (Math.floor(y) >> 6) * 1024 + (Math.floor(x) >> 6);
+      if (crushedHeaps.size > 4096 && !crushedHeaps.has(key)) crushedHeaps.clear();
+      // (all that has been crushed there so far: the more, the longer and wider it smoulders - each
+      // patch of its heap smouldering already as long as the whole of it calls for)
+      let h = crushedHeaps.get(key);
+      if (!h) crushedHeaps.set(key, h = { n: 0, spots: [] });
+      h.n += cells;
+      if (h.n < SMOULDER_CELLS) return;
+      const seconds = 24 + Math.min(30, h.n / 300);
+      const s = smoulder(x, y, seconds, 20 + Math.sqrt(h.n) * 0.6);
+      if (s && !h.spots.includes(s)) h.spots.push(s);
+      for (const t of h.spots) { t.left = Math.max(t.left, seconds - t.age); t.life = Math.max(t.life, seconds); }
+    }
     // (rubble smouldering at (x, y): one patch for the heap, however many pieces came down on it)
     function smoulder(x, y, seconds, width) {
-      if (!PW.addSmoulder) return;
+      if (!PW.addSmoulder) return null;
       for (const s of world.smoulders || []) {
-        if (Math.abs(s.x - x) < 60 && Math.abs(s.y - y) < 60) { s.left = Math.max(s.left, seconds); s.life = Math.max(s.life, seconds); s.width = Math.max(s.width, width); return; }
+        if (Math.abs(s.x - x) < 60 && Math.abs(s.y - y) < 60) { s.left = Math.max(s.left, seconds); s.life = Math.max(s.life, seconds); s.width = Math.max(s.width, width); return s; }
       }
       PW.addSmoulder(world, x, y, seconds, width);
+      return world.smoulders ? world.smoulders[world.smoulders.length - 1] : null;
     }
     // Break a piece into chunks about S across (of its cells `ks`) along jagged lines - running
     // along its own courses, as built - each going on from just where it was, turned as it was,
@@ -1516,7 +1787,14 @@
         }
         const byte = data.byte[j];
         const edge = !here.has(i - 1) || !here.has(i + 1) || !here.has(i - W) || !here.has(i + W);
-        const room = !blocking(x, y);
+        let room = !blocking(x, y);
+        // (lying in a heap of loose rubble, it pushes the rubble out of its way: it lies in the heap)
+        if (!room && phase[mat[i] & ID_MASK] === PW.PHASE.POWDER && (byte & ID_MASK) !== M.GLASS) {
+          const loose = mat[i], paint = PW.getLayer(world, 'paint', x, y);
+          PW.set(world, x, y, M.AIR);
+          particles.spawn(x + 0.5, y - 0.5, (random() - 0.5) * 40, -25 - random() * 35, loose, paint, F.LAND | F.LOOSE, 5);
+          room = true;
+        }
         if ((byte & ID_MASK) === M.GLASS || !room || (edge && (PW.hash2(x, y) & 3) === 0)) {
           if (rubbleFrom(data.solid[j], x, y)) particles.spawn(x + 0.5, y - 0.5, (random() - 0.5) * 60 * SPILL, -(20 + random() * 40) * LOFT, debrisOf(byte), data.color[j] || 0, F.LAND, 6);
           else if ((q & 7) === 0) puff(x, y, 1);
