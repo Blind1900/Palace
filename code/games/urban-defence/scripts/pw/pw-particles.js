@@ -461,10 +461,14 @@
     // its rise, losing the speed it was thrown with, a little restless; cell by cell, sliding along
     // anything not open to it (water too), never into it.
     const NO_WIND = [0, 0];
+    // (and the hollow inside of a supply pipe's bore: smoke and flame pass along it among the
+    // cargo, up its wells and out where it is broken - see pw-pipes' FLAG.HOLLOW)
+    const HOLLOW = PW.FLAG.HOLLOW || 0;
     const gasOpen = (x, y) => {
       if (x < 1 || x >= W - 1 || y >= H - 1) return false;
       if (y < 0) return true;
       const id = mat[(y | 0) * W + (x | 0)] & ID_MASK;
+      if (id === M.PIPE) return HOLLOW !== 0 && (PW.getFlags(world, x | 0, y | 0) & HOLLOW) !== 0;
       return OPEN[id] === 1 && id !== M.WATER;
     };
     function stepGas(i, fl, dt) {
@@ -490,8 +494,31 @@
       if (cy < -H * 0.3) life[i] = 0;
     }
 
+    // Smoke lying at a broken pipe's open mouth is drawn into its bore (see pipes.openEnds): a
+    // pixel of it at a time goes in as a pixel of smoke, and travels the bore as the others do.
+    let mouthTick = 0;
+    function intoMouths() {
+      if (!HOLLOW || !world.pipes || !world.pipes.openEnds || (mouthTick += 1) % 15) return;
+      const ends = world.pipes.openEnds();
+      for (let e = 0; e < ends.length && e < 24; e += 1) {
+        const { x, y } = ends[e];
+        // (the bore runs on to one side of the mouth; the break is the other)
+        const dir = gasOpen(x + 1, y) && (mat[y * W + x + 1] & ID_MASK) === M.PIPE ? 1 : gasOpen(x - 1, y) && (mat[y * W + x - 1] & ID_MASK) === M.PIPE ? -1 : 0;
+        if (!dir) continue;
+        for (let k = 1; k <= 4; k += 1) for (let dy = -2; dy <= 2; dy += 1) {
+          const sx = x - dir * k, sy = y + dy, m = mat[sy * W + sx];
+          if ((m & ID_MASK) !== M.SMOKE) continue;
+          const shade = 70 + ((3 - (m >> 6)) * 20);
+          const heat = PW.heatAt(world, sx, sy);
+          PW.set(world, sx, sy, M.AIR, { quiet: true });
+          spawnNow(x + 0.5, y + 0.5, dir * 24, 0, 0, PW.abgr(shade, shade - 4, shade - 8, 200), F.SMOKE, 2.4, 0, heat);
+          k = 5; break;
+        }
+      }
+    }
     function step(dt) {
       flushDebris();
+      intoMouths();
       const keepSpark = Math.exp(-dt / COOL_SPARK), keepDebris = Math.exp(-dt / COOL_DEBRIS);
       for (let i = count - 1; i >= 0; i -= 1) {
         const fl = flags[i];
