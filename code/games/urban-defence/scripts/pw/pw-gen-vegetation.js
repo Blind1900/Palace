@@ -1348,6 +1348,9 @@
         const id = mat[wy * W + wx] & ID_MASK;
         if (id !== M.AIR && !(u.water && id === M.WATER)) continue;
         if (id === M.AIR && PW.getLayer(world, 'back', wx, wy)) continue;
+        // (a cell already drawn - a bent limb put back in place, a neighbour's crown - wins:
+        // what is filled stays, the unveiled cell is dropped)
+        if (PW.getLayer(world, 'deco', wx, wy)) continue;
         PW.setLayer(world, 'deco', wx, wy, color);
         PW.setFlag(world, wx, wy, PW.FLAG.FLORA);
         if (wood) PW.setFlag(world, wx, wy, PW.FLAG.WOOD);
