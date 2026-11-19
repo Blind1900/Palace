@@ -216,20 +216,23 @@
           // tunnels to find (step H).
           const shaftX = xR - facing * (SHELL + 4);
           const shaftTop = ground, shaftBottom = ground + 60;
+          // N35: the shaft and its junction stub are BUILT works, not black cuts - the user's
+          // screenshot read them as core matter severed from the generation. The shaft is
+          // lined through the rock, its back the tunnel-lab tone; the stub below is a carved,
+          // lit chamber in the same language as every mine room, waiting for step H.
+          const T = PW.settlementTools;
+          PW.bunkers.reinforce(world, shaftX - 7, shaftTop - S.DOOR_H, shaftX + 7, shaftBottom + 26, id);
           for (let y = shaftTop - S.DOOR_H; y <= shaftBottom; y += 1) {
             for (let dx = -7; dx <= 7; dx += 1) {
               if (PW.get(world, shaftX + dx, y) & ID_MASK) PW.set(world, shaftX + dx, y, M.AIR, { quiet: true });
-              PW.setLayer(world, 'back', shaftX + dx, y, rgb([22, 24, 26]));
+              const tk = Math.abs(dx) >= 6 ? 0.62 : 0.78;
+              PW.setLayer(world, 'back', shaftX + dx, y, rgb([T.TUNNEL.back[0] * tk, T.TUNNEL.back[1] * tk, T.TUNNEL.back[2] * tk]));
               PW.setLayer(world, 'deco', shaftX + dx, y, 0);
             }
           }
           PW.settlementTools.ladder(world, shaftX - 6, shaftTop - S.DOOR_H + 4, shaftBottom - 2);
-          for (let y = shaftBottom + 1; y <= shaftBottom + 24; y += 1) {
-            for (let dx = -16; dx <= 16; dx += 1) {
-              if (PW.get(world, shaftX + dx, y) & ID_MASK) PW.set(world, shaftX + dx, y, M.AIR, { quiet: true });
-              PW.setLayer(world, 'back', shaftX + dx, y, rgb([22, 24, 26]));
-            }
-          }
+          T.carveBox(world, shaftX - 16, shaftBottom + 2, shaftX + 16, shaftBottom + 24, id, 4);
+          T.tunnelLamps(world, shaftX - 16, shaftX + 16, shaftBottom + 4, 64);
           PW.setFlag(world, shaftX, shaftBottom + 12, FLAG.TUNNEL);
           // (a passage from the gallery door to the shaft)
           for (let y = ground - S.DOOR_H; y < ground; y += 1) {

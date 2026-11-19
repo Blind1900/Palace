@@ -1315,20 +1315,20 @@
       if (coreXs.every((cx) => Math.abs(cand - cx) >= 20)) { shaftX = cand; break; }
     }
     const shaftBottom = g2.y1 + 50;
+    // N35: the shaft is lined and its junction stub is a carved, lit chamber - built works in
+    // the tunnel-lab language, never a black cut the eye reads as severed core matter.
+    PW.bunkers.reinforce(world, shaftX - 7, Y - S.DOOR_H, shaftX + 7, shaftBottom + 26, id);
     for (let y = Y - S.DOOR_H; y <= shaftBottom; y += 1) {
       for (let dx = -7; dx <= 7; dx += 1) {
         if (PW.get(world, shaftX + dx, y) & 63) PW.set(world, shaftX + dx, y, M.AIR, { quiet: true });
-        PW.setLayer(world, 'back', shaftX + dx, y, rgb([22, 24, 26]));
+        const tk = Math.abs(dx) >= 6 ? 0.62 : 0.78;
+        PW.setLayer(world, 'back', shaftX + dx, y, rgb([TUNNEL.back[0] * tk | 0, TUNNEL.back[1] * tk | 0, TUNNEL.back[2] * tk | 0]));
         PW.setLayer(world, 'deco', shaftX + dx, y, 0);
       }
     }
     ladder(world, shaftX - 6, Y - S.DOOR_H + 4, shaftBottom - 2);
-    for (let y = shaftBottom + 1; y <= shaftBottom + 24; y += 1) {
-      for (let dx = -16; dx <= 16; dx += 1) {
-        if (PW.get(world, shaftX + dx, y) & 63) PW.set(world, shaftX + dx, y, M.AIR, { quiet: true });
-        PW.setLayer(world, 'back', shaftX + dx, y, rgb([22, 24, 26]));
-      }
-    }
+    carveBox(world, shaftX - 16, shaftBottom + 2, shaftX + 16, shaftBottom + 24, id, 4);
+    tunnelLamps(world, shaftX - 16, shaftX + 16, shaftBottom + 4, 64);
     PW.setFlag(world, shaftX, shaftBottom + 12, FLAG.TUNNEL);
     // The portal on the home flank: cut from the command gallery out to daylight, then the cast
     // concrete frame round the mouth (the Cheyenne portal of your refs).
