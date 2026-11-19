@@ -510,6 +510,10 @@
     // (which cells of its box the plant was drawn into, a bit each: what a blow or a fire later
     // takes from it is worked out from these, without drawing the plant again)
     const mask = new Uint8Array((sprite.width * sprite.height + 7) >> 3);
+    // unveil (N23F): the cells are not drawn now but queued in growing order - the wood from
+    // the base upward, then the leaves - and laid a few per tick, so a regrowing plant climbs
+    // out of its ground the way a building grows instead of appearing whole.
+    const grows = options.unveil ? [] : null;
     for (let sy = 0; sy < sprite.height; sy += 1) {
       const wy = top + sy;
       if (wy < 0 || wy >= H) continue;
@@ -521,10 +525,14 @@
         const id = mat[wy * W + wx] & ID_MASK;
         if (id !== M.AIR && !(options.water && id === M.WATER)) continue;
         if (id === M.AIR && PW.getLayer(world, 'back', wx, wy)) continue;
-        PW.setLayer(world, 'deco', wx, wy, color);
-        PW.setFlag(world, wx, wy, PW.FLAG.FLORA);   // plant matter: it can burn
         const k = sy * sprite.width + sx;
-        if (sprite.wood && sprite.wood[k]) PW.setFlag(world, wx, wy, PW.FLAG.WOOD);
+        const wood = !!(sprite.wood && sprite.wood[k]);
+        if (grows) grows.push({ k, color, wood });
+        else {
+          PW.setLayer(world, 'deco', wx, wy, color);
+          PW.setFlag(world, wx, wy, PW.FLAG.FLORA);   // plant matter: it can burn
+          if (wood) PW.setFlag(world, wx, wy, PW.FLAG.WOOD);
+        }
         mask[k >> 3] |= 1 << (k & 7);
         if (foot) {
           const k = wx - footX0;
@@ -536,7 +544,13 @@
       const rooted = new Set(base.roots);
       for (let k = 0; k < foot.length; k += 1) if (!rooted.has(base.from + k)) foot[k] = -1;
     }
-    return { x: left, y: top, width: sprite.width, height: sprite.height, foot, footX0, mask };
+    let unveil = null;
+    if (grows) {
+      grows.sort((a, b) => (b.wood - a.wood) || (b.k - a.k));
+      unveil = { idx: Int32Array.from(grows, (g) => g.k), color: Uint32Array.from(grows, (g) => g.color),
+        wood: Uint8Array.from(grows, (g) => g.wood ? 1 : 0), i: 0, n: grows.length, water: !!options.water };
+    }
+    return { x: left, y: top, width: sprite.width, height: sprite.height, foot, footX0, mask, unveil };
   }
 
   // Generate a plant against the ground at column x, stamp it and keep a record (with the ground
@@ -549,12 +563,16 @@
     const wet = type === 'reeds';
     const ground = makeGround(world, x, row, wet);
     const sprite = GENERATORS[type](PW.createRandom(seed), size, ground, options.look);
-    const placed = stamp(world, sprite, x, row, { water: wet });
+    const placed = stamp(world, sprite, x, row, { water: wet, unveil: options.unveil });
     const record = { kind: CATEGORY[type], type, anchorX: x, row, seed, size, look: options.look || null,
       profile: ground.freeze(), x: placed.x, y: placed.y, width: placed.width, height: placed.height,
       foot: placed.foot, footX0: placed.footX0, mask: placed.mask,
       trunk: sprite.trunk ? { x0: x, y0: row - 3, x1: Math.round(x + sprite.trunk.dx), y1: Math.round(row + sprite.trunk.dy) } : null };
     (world.flora || (world.flora = [])).push(record);
+    if (placed.unveil && placed.unveil.n) {
+      record.unveil = placed.unveil;
+      (world.floraUnveiling || (world.floraUnveiling = [])).push(record);
+    }
     return record;
   }
   function regenerate(record) {
@@ -1310,9 +1328,38 @@
     }
     if (lost.length > LOST_MAX) lost.splice(0, lost.length - LOST_MAX);
   }
+  // A plant stamped with unveil grows into view a few cells a tick: the wood from the base
+  // upward - trunk, boughs, branches - then the leaves filling the crown, the same pattern the
+  // buildings grow by (N23F). Struck, felled or uprooted part-grown, it stops where it stands.
+  const UNVEIL_BUDGET = 32;
+  function unveilStep(world) {
+    const list = world.floraUnveiling;
+    if (!list || !list.length) return;
+    const { mat, width: W, height: H } = world;
+    let budget = UNVEIL_BUDGET;
+    for (let i = 0; i < list.length && budget > 0;) {
+      const r = list[i], u = r.unveil;
+      if (!u || r.felled || r.fallen || !(world.flora || []).includes(r)) { r.unveil = null; list.splice(i, 1); continue; }
+      while (u.i < u.n && budget > 0) {
+        const k = u.idx[u.i], color = u.color[u.i], wood = u.wood[u.i];
+        u.i += 1;
+        const wx = r.x + (k % r.width), wy = r.y + ((k / r.width) | 0);
+        if (wx < 0 || wx >= W || wy < 0 || wy >= H) continue;
+        const id = mat[wy * W + wx] & ID_MASK;
+        if (id !== M.AIR && !(u.water && id === M.WATER)) continue;
+        if (id === M.AIR && PW.getLayer(world, 'back', wx, wy)) continue;
+        PW.setLayer(world, 'deco', wx, wy, color);
+        PW.setFlag(world, wx, wy, PW.FLAG.FLORA);
+        if (wood) PW.setFlag(world, wx, wy, PW.FLAG.WOOD);
+        budget -= 1;
+      }
+      if (u.i >= u.n) { r.unveil = null; list.splice(i, 1); } else i += 1;
+    }
+  }
   // The plants struck or shaken lately settle (a couple of milliseconds' worth a tick).
   function step(world, particles) {
     footing(world);
+    unveilStep(world);
     const dirty = world.floraDirty;
     if (!dirty || !dirty.size) return 0;
     let n = 0, felled = 0;

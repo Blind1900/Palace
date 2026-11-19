@@ -286,7 +286,7 @@
           if (!takes(x, kind)) continue;
           const full = type === spot.type ? spot.size : parent.size * (0.8 + (PW.hash2(x, 7) & 15) / 75);
           const size = Math.max(SEEDLING_MIN[kind], full * SEEDLING[kind]);
-          const record = PW.flora.plant(world, type, x, { size, seed: PW.hash3(x, tick, 31) || 1, look: type === spot.type ? spot.look || undefined : parent.look || undefined });
+          const record = PW.flora.plant(world, type, x, { size, seed: PW.hash3(x, tick, 31) || 1, look: type === spot.type ? spot.look || undefined : parent.look || undefined, unveil: true });
           record.grow = { full: Math.max(size, full), at: world.tick || 0 };
           (world.floraYoung || (world.floraYoung = [])).push(record);
           lost.splice(lostAt, 1);
@@ -326,7 +326,7 @@
       // (its ground gone from under it: the plants' footing sees to it)
       if (Math.abs(row - r.row) > 3) { r.grow.at = world.tick || 0; youngAt += 1; return; }
       uproot(r);
-      const next = PW.flora.plant(world, r.type, x, { row, size, seed: r.seed, look: r.look || undefined });
+      const next = PW.flora.plant(world, r.type, x, { row, size, seed: r.seed, look: r.look || undefined, unveil: true });
       stats.grown = (stats.grown || 0) + 1;
       if (size < r.grow.full) { next.grow = { full: r.grow.full, at: world.tick || 0 }; young[youngAt] = next; youngAt += 1; }
       else young.splice(youngAt, 1);
