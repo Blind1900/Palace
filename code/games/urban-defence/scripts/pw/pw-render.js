@@ -216,7 +216,10 @@
     gasAlpha[M.SMOKE] = [0.18, 0.3, 0.4, 0.49];
     gasAlpha[M.STEAM] = [0.18, 0.3, 0.42, 0.55];
     gasAlpha[M.DUST] = [0.24, 0.4, 0.55, 0.68];
-    const OPEN = PW.mat.open;
+    // (floats, by full cell byte: flotsam - wood debris, leaves - lies ON the water, so the
+    // depth field and the surface line read it as open rather than as a roof over deep water;
+    // the zero fallback keeps this inert until the physics track's floats table ships)
+    const OPEN = PW.mat.open, FLOATS = PW.mat.floats || new Uint8Array(256);
 
     // Colour of one cell for the base layer (0 = transparent sky). waterDepth counts the water
     // cells from the surface down to this one (1 = the surface cell).
@@ -511,8 +514,8 @@
           waterRun[tx] = isWater ? waterRun[tx] + (ty === 0 ? 1 : step) : 0;
           let run = waterRun[tx];
           if (isWater && depth) {
-            // The bright surface line only where open air is directly above.
-            run = y > 0 && OPEN[mat[(y - 1) * W + x] & ID_MASK] ? 1
+            // The bright surface line only where open air (or flotsam riding it) is directly above.
+            run = y > 0 && (OPEN[mat[(y - 1) * W + x] & ID_MASK] || FLOATS[mat[(y - 1) * W + x]]) ? 1
               : Math.max(2, Math.round(depth[(y - depthY0) * depthW + (x - depthX0)] / 3));
           }
           const color = baseColor(x, y, paintChunk, backChunk, run, pipeChunk, flagsChunk);
@@ -542,9 +545,9 @@
       for (let y = py0, k = 0; y <= py1; y += 1) {
         const row = y * W;
         for (let x = px0; x <= px1; x += 1, k += 1) {
-          const id = mat[row + x] & ID_MASK;
-          d[k] = OPEN[id] ? 0 : WATER_FAR;
-          block[k] = !OPEN[id] && id !== M.WATER ? 1 : 0;
+          const m = mat[row + x], id = m & ID_MASK, open = OPEN[id] || FLOATS[m];
+          d[k] = open ? 0 : WATER_FAR;
+          block[k] = !open && id !== M.WATER ? 1 : 0;
         }
       }
       for (let y = 0; y < h; y += 1) for (let x = 0; x < w; x += 1) {
