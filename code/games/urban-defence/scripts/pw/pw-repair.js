@@ -143,7 +143,8 @@
       const q = job.queue;
       const kill = (idx, cell) => { q[idx] = null; job.dead = (job.dead || 0) + 1; job.seen.delete(cell.back ? -cell.i - 1 : cell.i); };
       const compact = () => {
-        if ((job.dead || 0) > 2048 && job.dead * 3 > q.length) { job.queue = q.filter(Boolean); job.dead = 0; job.rot = 0; }
+        // (the old 2048 floor let a small job sit at 1322 entries, 1321 of them dead, for ever)
+        if ((job.dead || 0) > 128 && job.dead * 3 > q.length) { job.queue = q.filter(Boolean); job.dead = 0; job.rot = 0; }
       };
       const pay = () => {
         if (job.pool >= 1 / CELLS_PER_HM) { job.pool -= 1 / CELLS_PER_HM; return true; }
@@ -270,6 +271,15 @@
         const risen = PW.REBUILD_RUINS && b.ruined && (!!b.underConstruction
           || (b.cores || []).some((core) => core.free || core.settled) || !!b.coresHome);
         if (b.ruined && !risen) continue;
+        // A parked job stood down starved: its queue and seen set are let go (tens of
+        // thousands of entries per tower - the long war's memory leak, PS's soak). It wakes
+        // when HM reaches its side's stock, or when fresh damage calls notify (scanCol 0),
+        // and the scan rebuilds its work from the blueprint.
+        if (job.parked) {
+          const stock = world.stock && world.stock[b.side];
+          if (job.scanCol === 0 || (stock && stock.hm >= 1)) { job.parked = false; job.scanCol = 0; }
+          else continue;
+        }
         if (job.scanCol < b.canvas.width) scan(b, job);
         if (job.queue.length - (job.dead || 0) <= 0) {
           if (job.scanCol >= b.canvas.width) {
@@ -297,9 +307,19 @@
           if (job.recycleBudget >= 1) { recycle(b, job, Math.floor(job.recycleBudget)); job.recycleBudget %= 1; }
         }
         job.budget = Math.min(alive * CELLS_PER_HM * 2, (job.budget || 0) + dt * alive * CELLS_PER_HM / RATE);
+        const before = stats.restored + stats.backRestored + stats.recycled + (stats.dug || 0);
         while (job.budget >= 1) {
           if (!restore(b, job)) break;
           job.budget -= 1;
+        }
+        // Starved and still for half a minute - no cell placed, cleared or recycled, no HM in
+        // the pool or the stock - the crews stand down and the job's memory is let go.
+        if (stats.restored + stats.backRestored + stats.recycled + (stats.dug || 0) !== before) job.idle = 0;
+        else if ((job.idle = (job.idle || 0) + 1) > 1800 && job.pool < 1 / CELLS_PER_HM
+          && !(world.stock && world.stock[b.side] && world.stock[b.side].hm >= 1)) {
+          job.queue = []; job.seen = new Set(); job.dead = 0; job.rot = 0; job.sinceReady = 0;
+          job.scanCol = b.canvas.width; job.parked = true; job.idle = 0;
+          b.growing = false;
         }
       }
     }

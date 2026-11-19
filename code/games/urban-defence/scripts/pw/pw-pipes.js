@@ -32,6 +32,7 @@
   const BED = 2;                     // sand bed rows above and below the bundle
   const SMOOTH = 28;                 // a line's bends are eased over this many columns each way
   const HOIST = 40;                  // cells per second up and down the few risers left
+  const MAX_PACKETS = 1500;          // cargo in transit per line, at most (PS's soak backstop)
   const SPAN = 20;                   // half-width of a core's pass-through span
   const RAMP = 14;                   // columns over which the line eases to a connector row
   const HOP = 11;                    // the bed itself: the bundle vanishes into one port, out the other
@@ -830,6 +831,9 @@
       return out;
     }
     function spawnAt(line, resource, source) {
+      // (backstop: however the war goes, a line never holds more cargo than this - the sources
+      // hold their feed back rather than bury the lane; the clog rule drains jams from the front)
+      if (line.packets.length >= MAX_PACKETS) { stats.choked = (stats.choked || 0) + 1; return false; }
       const targets = destinations(line, resource);
       if (!targets.length) return false;
       const lane = LANE_OF[resource];
@@ -933,6 +937,22 @@
         // Passing a core on the way: through its bed, in one connector and out the other.
         const between = line.cores.find((c) => Math.abs(nx - c.x) < HOP);
         if (between) { nx = between.x + HOP * dir; between.flashAt = tick; }
+        // Arrived at a broken end: the cargo IS the mend's supply (the user's N15F design,
+        // wired at last - it was written in the comments and never in the code). The HM that
+        // clogs here fuels the regrowth; water runs out into the hole; SM merges into the
+        // ground. Nothing waits at a wound for ever - unwired, packets piled without bound
+        // through a long war and the heap grew until the browser died (PS's soak).
+        const kn = nx - line.x0;
+        if (kn < 0 || kn >= line.broken.length || line.broken[kn]) {
+          line.occ[laneOf(line, p.x, p.lane)] = 0;
+          if (line.atCol) line.atCol.delete(p.lane * W + p.x);
+          p.done = true;
+          if (p.resource === 'hm') { line.fuel = (line.fuel || 0) + 1; line.fedAt = tick; stats.clogged = (stats.clogged || 0) + 1; }
+          // (water and SM just drain into the torn ground - no standing water appears: the
+          // pump only measured the lake, so cargo materialising as cells would mint water)
+          else stats.spilled += 1;
+          return true;
+        }
         // A well between the columns: the packet climbs the shaft, a few cells a step,
         // instead of teleporting between the levels.
         const ty = rowOf(line, nx, p.lane);
