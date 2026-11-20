@@ -1,5 +1,17 @@
 [
  {
+  "title": "Fable: seed cities thread onto the supply bundle - the network grows with the city (c4b35f5, N2/N3 slice 2)",
+  "author": "Fable",
+  "time": "2026-11-20 (after slice 1)",
+  "note": "The boundary slice 1 declared is gone: dropping a seed OVER the buried supply line is now exactly how it is meant to work. Every lot the growth engine places threads its vault cores onto its faction's bundle by the worldgen rule - the line grows out to the newcomer, or the stretch is taken up and re-laid through its connectors, which in the same breath heals any cut the lot's foundation work just made landing over it. And every lot the engine takes back out (a level-up re-seat, the centre tightening) releases first: its span licences die, its cores come off the threading, the laid pipe stays - it is the line's - and cargo already bound for a removed core delivers to the side's stock at the old port. The seed takes the nearest town's faction side along with its style. The proof: a capital dropped at x3256, directly over seed 7's left line beside the first town, grew to LEVEL 7 - the shot shows the bundle visibly threading every tower's core bed along the street and diving at the shore toward the lake pump, the world's pipe count nearly doubled - with the line WHOLE through the whole city and zero stale threading after all its own re-seats. Even a lesser bridge gave way mid-growth over the pond, exactly as N56 says it should. Matrix 18/18 on seeds 7, 3 and 11. This is N3's pipe-spreading pillar standing; next come the worldgen towns adopting the engine, miners digging to ore, cities detecting and linking (N58's joints in the world), and N4's thresholds gating growth on what the bundle actually delivers.",
+  "shots": [
+   {
+    "src": "shots/n3-city-threaded.png",
+    "caption": "CAPITAL 2 - LV 7, grown over the left bundle: the line threads every tower's core bed along the street and dives at the shore toward the pump; 45 cores joined the network as it grew"
+   }
+  ]
+ },
+ {
   "title": "Fable: drop a seed, a capital grows - the growth system lives in the real world (752b2e2, N2/N3 slice 1)",
   "author": "Fable",
   "time": "2026-11-20 (after N64)",
@@ -1756,13 +1768,13 @@
       "name": "Growth and economy",
       "items": [
        {
-        "text": "Seeds: drop one in your vision, it grows a core and a level-1 building. STATUS: live in pixel-world (752b2e2) - the SEED C/F/M tools drop one and the growth engine raises a capital, farm or base from it (slice 1; keeps clear of standing towns and the buried lines until the pipe-threading slice). The 'in your vision' gate lands with the unit/vision milestones (M5/M6).",
+        "text": "Seeds: drop one in your vision, it grows a core and a level-1 building. STATUS: live in pixel-world (752b2e2 + c4b35f5) - the SEED C/F/M tools drop one anywhere open (standing towns and military ground still refuse), the growth engine raises a capital, farm or base from it, and its lots thread onto the faction's bundle as they place. The 'in your vision' gate lands with the unit/vision milestones (M5/M6).",
         "step": "G",
         "id": "N2",
         "owner": "F"
        },
        {
-        "text": "City growth: capital, roads and pipe spreading, level-ups, tunnels through mountains, bridges; miners digging tunnel networks out to ore through caves; cities detecting each other and linking. STATUS: slice 1 live (752b2e2) - the whole lab engine (rings, levels, earthworks, skyline, farms, military spread, merge joints) grows seed cities in the real world. Next slices: pipe threading (connect on place, release on re-seat - unlocks the inhabited band and feeds the cities), then the worldgen towns adopting the engine, miners-to-ore and city linking.",
+        "text": "City growth: capital, roads and pipe spreading, level-ups, tunnels through mountains, bridges; miners digging tunnel networks out to ore through caves; cities detecting each other and linking. STATUS: slices 1+2 live (752b2e2, c4b35f5) - the whole lab engine grows seed cities in the real world, and their lots thread onto the faction's supply bundle as they place (connect on place, release on re-seat; the line heals its own cuts through the newcomers' connectors). Anywhere is seedable now. Next: worldgen towns adopting the engine, miners-to-ore, city detect-and-link (N58 joints in the world), N4 economy gates.",
         "step": "H",
         "id": "N3",
         "owner": "F"
