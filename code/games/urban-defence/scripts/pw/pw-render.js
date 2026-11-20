@@ -491,7 +491,10 @@
       if (lod > 0) buildLight(x0, y0, x0 + CHUNK - 1, y0 + CHUNK - 1, step);
       else if (lx0 === 0 && ly0 === 0 && lx1 === CHUNK - 1 && ly1 === CHUNK - 1) {
         if (buildLight(x0, y0, x0 + CHUNK - 1, y0 + CHUNK - 1, 1)) {
-          const stored = new Uint8Array(CHUNK * CHUNK);
+          // (reuse the chunk's own darkness buffer: a blast's flicker re-rasters the same
+          // chunks every few ticks, and a fresh 16 KB each time was most of the GC stall
+          // the physics track measured - 18 MB over one blast's slow seconds)
+          const stored = chunkDark.get(c) || new Uint8Array(CHUNK * CHUNK);
           for (let ly = 0; ly < CHUNK; ly += 1) for (let lx = 0; lx < CHUNK; lx += 1) stored[(ly << CHUNK_SHIFT) + lx] = darknessAt(x0 + lx, y0 + ly);
           chunkDark.set(c, stored);
           Object.assign(field, { stored, sx: x0, sy: y0 });
