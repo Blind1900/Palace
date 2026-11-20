@@ -116,7 +116,8 @@
     const T = state(world);
     const id = T.networks.length + 1;
     const style = info.style || (world.styles && world.styles[info.side]) || 'modern';
-    const net = { id, side: info.side, style, building: info.building || 0, root: { x: Math.round(info.x), y: Math.round(info.y) },
+    const net = { id, side: info.side, style, use: info.use || 'military', building: info.building || 0,
+      root: { x: Math.round(info.x), y: Math.round(info.y) },
       rate: info.rate || RATE, owner: OWNER_BASE + id, cells: 0, developed: 0, lined: 0 };
     T.networks.push(net);
     return net;
@@ -188,11 +189,81 @@
     return DIGITS[digit][(4 - sy) * 3 + (sx < 3 ? sx : sx - 4)] === '1';
   }
   function devBack(net, seg, x, y) {
+    if (net.use === 'civic') return civicBack(net, seg, x, y);
     return (net.style === 'asian' ? asianBack : net.style === 'gothic' ? gothicBack : modernBack)(net, seg, x, y);
   }
   function liningColor(net, x, y, depth, facing, rise) {
+    if (net.use === 'civic') return civicLining(net, x, y, depth, facing, rise);
     return (net.style === 'asian' ? asianLining : net.style === 'gothic' ? gothicLining : modernLining)(net, x, y, depth, facing, rise);
   }
+
+  // ---- Civic (N53): the population tunnel. A wide, high bore in smooth pale concrete, read
+  // from the memorial-tunnel references: glossy tiled wainscot with a dark trim line, a
+  // CONTINUOUS light strip along the crown, a handrail, green exit signs after each frame,
+  // and little else - clean where the military bores are cluttered with duct and cable.
+  const CIVIC = { back: [164, 166, 168], ring: [146, 148, 150], ringLight: [182, 184, 186],
+    tile: [198, 206, 210], tileDark: [176, 186, 192], tileJoint: [142, 152, 158], trim: [88, 94, 100],
+    kerb: [122, 124, 126], tube: [248, 250, 240], housing: [108, 112, 118], glow: [255, 250, 220],
+    exit: [66, 198, 108], exitDark: [34, 120, 66], rail: [158, 162, 166], stencil: [224, 227, 230] };
+  function civicBack(net, seg, x, y) {
+    if (seg.kind === 'shaft') {
+      const along = mod(y - net.root.y, RING);
+      let c = along === 0 ? CIVIC.ring : along === 1 ? CIVIC.ringLight : CIVIC.back;
+      const fromLeft = x - seg.x0;
+      if (fromLeft >= 2 && fromLeft <= 3) c = fromLeft === 2 ? CIVIC.trim : CIVIC.rail;   // handrail down the shaft
+      const ly = net.root.y + Math.round((y - net.root.y - RING / 2) / LAMP_PITCH) * LAMP_PITCH + RING / 2;
+      const lx = seg.x1 - 6;
+      if (Math.abs(x - lx) <= 1 && Math.abs(y - ly) <= 3) return Math.abs(x - lx) === 1 ? CIVIC.housing : CIVIC.tube;
+      const glow = Math.max(0, 1 - Math.hypot(x - lx, (y - ly) * 0.7) / 30);
+      return glow > 0 ? mix(c, CIVIC.glow, glow * glow * 0.4) : c;
+    }
+    const top = seg.y0, bottom = seg.y1, height = bottom - top + 1;
+    const rise = bottom - y, fromTop = y - top, along = x - net.root.x;
+    // The light strip, continuous along the crown, a housing joint every ring.
+    if (fromTop === 0) return CIVIC.housing;
+    if (fromTop === 1) return mod(along, RING) < 2 ? CIVIC.housing : CIVIC.tube;
+    let c;
+    const ring = mod(along, RING);
+    c = ring === 0 ? CIVIC.ring : ring === 1 ? CIVIC.ringLight : CIVIC.back;
+    // Tiled wainscot to a third of the height, a dark trim line over it, the kerb at the foot.
+    const wain = Math.max(14, Math.round(height / 3));
+    if (rise <= 1) c = CIVIC.kerb;
+    else if (rise === wain) c = CIVIC.trim;
+    else if (rise < wain) {
+      const row = Math.floor((bottom - y) / 4), shift = (row & 1) * 3;
+      c = mod(y, 4) === 3 || mod(x + shift, 6) === 0 ? CIVIC.tileJoint
+        : (PW.hash2(Math.floor((x + shift) / 6), row) & 7) === 0 ? CIVIC.tileDark : CIVIC.tile;
+    }
+    // The handrail along the wainscot, on a bracket every so often.
+    if (rise === wain - 6) c = CIVIC.rail;
+    else if (rise === wain - 7 && mod(along, 14) === 0) c = CIVIC.trim;
+    // A green exit sign after each bulkhead frame.
+    const b = mod(along, BULKHEAD);
+    if (b >= 20 && b < 29 && fromTop >= 6 && fromTop < 11) {
+      const inner = b >= 21 && b < 28 && fromTop >= 7 && fromTop < 10;
+      c = inner ? ((b === 24 || (b >= 22 && b <= 26 && fromTop === 8)) ? CIVIC.stencil : CIVIC.exit) : CIVIC.exitDark;
+    }
+    if (sectorDigit(net, along, b - 40, rise - 5)) c = tone(CIVIC.trim, 0.9);
+    // The crown curves away: shadow grades the top rows into the arch.
+    if (fromTop >= 2 && fromTop < 9 && c === CIVIC.back) c = tone(c, 0.74 + (fromTop - 2) * 0.04);
+    const lx = net.root.x + Math.round((along - LAMP_PITCH / 2) / LAMP_PITCH) * LAMP_PITCH + LAMP_PITCH / 2;
+    const glow = Math.max(0, 1 - Math.hypot((x - lx) * 0.5, fromTop - 2) / 44);
+    return glow > 0 ? mix(c, CIVIC.glow, glow * glow * 0.5) : c;
+  }
+  function civicLining(net, x, y, depth, facing, rise) {
+    if (facing === 'floor' && depth <= 2) {
+      // Broad pale paving slabs with a contrast joint, flush and clean.
+      return depth === 2 ? CIVIC.trim : mod(x + (Math.floor(y / 4) & 1) * 8, 16) === 0 ? CIVIC.tileJoint
+        : tone(CIVIC.ringLight, (PW.hash2(x >> 4, y >> 2) & 3) === 0 ? 0.95 : 1.02);
+    }
+    let c = tone(CIVIC.ring, depth <= 1 ? 1.12 : depth === 2 ? 1.02 : 0.9);
+    if (facing === 'wall' && depth <= 2 && rise >= 0 && rise < 4) c = depth <= 1 ? CIVIC.tileDark : CIVIC.tileJoint;   // tiled skirting
+    return c;
+  }
+  // N53: the two bores' proportions, for whoever digs them - the army's galleries run narrow
+  // and low, the population's wide and high-crowned (the dig tool and the base generators use
+  // military; the city growth will dig civic).
+  const PROFILES = Object.freeze({ military: { width: 60, height: 36 }, civic: { width: 76, height: 48 } });
 
   // ---- Asian: brick, lime plaster and timber, lacquered gates and paper lanterns ----------------------
   const A = ASIAN;
@@ -841,6 +912,6 @@
     return record;
   }
 
-  PW.tunnels = { RATE, LINE, SET_PITCH, RIB_PITCH, createNetwork, digBox, claimCell, step, advanceTo, networkAt, networkOfOwner, stats, state, damaged,
+  PW.tunnels = { RATE, LINE, SET_PITCH, RIB_PITCH, PROFILES, createNetwork, digBox, claimCell, step, advanceTo, networkAt, networkOfOwner, stats, state, damaged,
     netAt, devAtOf, rawBack, devBack, caveBase };
 })();
