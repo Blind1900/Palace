@@ -23,9 +23,14 @@
   // its own way. Colours only: the walls keep their materials and their exact widths.
   const MIL_TINT = { modern: [96, 102, 110], gothic: [84, 86, 94], asian: [100, 102, 92] };
   const MIL_SEAM = { modern: [54, 58, 64], gothic: [46, 48, 54], asian: [56, 58, 50] };
-  function milPlate(style, d, total, rise, x, y) {
-    const base = MIL_TINT[style] || MIL_TINT.modern;
-    const seam = MIL_SEAM[style] || MIL_SEAM.modern;
+  // N59: the plating takes its setting's tone - gunmetal in the city, olive-khaki among the
+  // farms, stone-grey in the mountains (the fixed worldgen passes no setting and keeps the
+  // city tone exactly).
+  const SETTING_TINT = { farm: [104, 100, 78], mountain: [98, 98, 94] };
+  const SETTING_SEAM = { farm: [58, 55, 42], mountain: [54, 54, 50] };
+  function milPlate(style, d, total, rise, x, y, setting) {
+    const base = (setting && SETTING_TINT[setting]) || MIL_TINT[style] || MIL_TINT.modern;
+    const seam = (setting && SETTING_SEAM[setting]) || MIL_SEAM[style] || MIL_SEAM.modern;
     const course = Math.floor(rise / 12);
     const stagger = (course & 1) * 9;
     const seamRow = rise % 12 === 0;
@@ -47,6 +52,8 @@
     // kind that holds a mountain top or a pass.
     const hangar = variant !== 'outpost';
     const vertical = !!options.vertical;   // N57: the growth system's taller, narrower proportions
+    const setting = options.setting || null;   // N59: 'farm' | 'mountain' dress the base for its ground
+    const sTint = (setting && SETTING_TINT[setting]) || MIL_TINT[style] || MIL_TINT.modern;
     const rearStoreys = { compound: 2, fortress: 3, command: 4, bastion: 1, outpost: 2 }[variant] + (level >= 5 ? 1 : 0) + (vertical ? 1 : 0);
     const rearWidth = 140;
     const hw = vertical ? HANGAR_VERTICAL_WIDTH : HANGAR.width;
@@ -83,7 +90,7 @@
         const side = lx === left ? -1 : 1;
         for (let d = 0; d < S.WALL; d += 1) {
           const wx = X(lx - side * d);
-          for (let y = floorRow(k + 1); y < fRow; y += 1) K.solid(c, wx, y, P.wallMat, milPlate(style, d, S.WALL, fRow - 1 - y, wx, y), ROLE.WALL);
+          for (let y = floorRow(k + 1); y < fRow; y += 1) K.solid(c, wx, y, P.wallMat, milPlate(style, d, S.WALL, fRow - 1 - y, wx, y, setting), ROLE.WALL);
         }
       }
       // N52: the glazing is embrasure slits - two long horizontal cuts per storey, dark glass
@@ -171,7 +178,7 @@
         const wx = X(hangarRight - d);
         for (let y = wallTop; y < ground; y += 1) {
           if (y >= ground - HANGAR.door) continue;
-          K.solid(c, wx, y, M.STEEL, milPlate(style, d, HANGAR.wall, ground - 1 - y, wx, y), ROLE.WALL);
+          K.solid(c, wx, y, M.STEEL, milPlate(style, d, HANGAR.wall, ground - 1 - y, wx, y, setting), ROLE.WALL);
         }
         // Door frame, with a warning light either side of the lintel (N52).
         K.solid(c, wx, ground - HANGAR.door - 1, M.STEEL, d === 1 || d === HANGAR.wall - 2 ? MIL_AMBER : P.ornament, ROLE.FRAME);
@@ -180,7 +187,7 @@
       for (let d = 0; d < HANGAR.wall; d += 1) {
         const wx = X(hangarLeft + d);
         for (let y = wallTop; y < ground - S.FLOOR; y += 1) {
-          if (!K.isSolid(c, wx, y)) K.solid(c, wx, y, P.wallMat, milPlate(style, d, HANGAR.wall, ground - 1 - y, wx, y), ROLE.WALL);
+          if (!K.isSolid(c, wx, y)) K.solid(c, wx, y, P.wallMat, milPlate(style, d, HANGAR.wall, ground - 1 - y, wx, y, setting), ROLE.WALL);
         }
       }
       // Inner door between rear block and hangar.
@@ -227,15 +234,42 @@
     // each storey's slab - amber at the ground, cool cyan above, the hyper-military read.
     {
       const w0 = rearRoof.left, w1 = rearRoof.right;
+      const sSeam = (setting && SETTING_SEAM[setting]) || MIL_SEAM[style] || MIL_SEAM.modern;
       for (let s = 0; s < 7; s += 1) {
         for (let d = 0; d <= s; d += 1) {
-          const col = tone(MIL_TINT[style] || MIL_TINT.modern, d === s ? 1.2 : 0.95);
+          const col = tone(sTint, d === s ? 1.2 : 0.95);
           K.solidIfEmpty(c, w0 + s, roofTop - 1 - d, M.STEEL, col, ROLE.ORNAMENT);
           K.solidIfEmpty(c, w1 - s, roofTop - 1 - d, M.STEEL, col, ROLE.ORNAMENT);
         }
       }
       for (let x = w0 + 8; x <= w1 - 8; x += 1) {
-        K.solidIfEmpty(c, x, roofTop - 2, M.STEEL, tone(MIL_SEAM[style] || MIL_SEAM.modern, (x & 7) === 0 ? 1.5 : 1.1), ROLE.ORNAMENT);
+        K.solidIfEmpty(c, x, roofTop - 2, M.STEEL, tone(sSeam, (x & 7) === 0 ? 1.5 : 1.1), ROLE.ORNAMENT);
+      }
+      // N59: the base dresses for where it stands - its detail joins the land's own.
+      if (setting === 'farm' && hangar) {
+        for (const [bx, bw] of [[hangarLeft + 54, 11], [hangarLeft + 68, 9]]) {    // hay bales by the door wall
+          for (let dx = 0; dx < bw; dx += 1) for (let dy = 1; dy <= 6 - Math.abs(dx - (bw >> 1)) / 2; dy += 1) {
+            K.solidIfEmpty(c, X(bx + dx), ground - dy, M.COVER_WOOD, tone([188, 160, 92], (dx + dy) % 3 ? 1 : 0.86), ROLE.ORNAMENT);
+          }
+        }
+        for (let x = rearRoof.left + 4; x <= rearRoof.right - 4; x += 2) {         // camo net over the roof
+          if ((x & 6) === 0) continue;
+          K.deco(c, x, roofTop - 3 - ((x >> 1) % 3), [96, 108, 66]);
+        }
+      } else if (setting === 'mountain') {
+        for (const lxBase of [rearLeft, rearRight]) {                              // stone revetment at the feet
+          const side2 = lxBase === rearLeft ? -1 : 1;
+          for (let d = 0; d < S.WALL; d += 1) for (let dy = 1; dy <= 7; dy += 1) {
+            const wx = X(lxBase - side2 * d), wy = ground - dy;
+            const i = wy * c.width + wx;
+            if (c.role[i] === ROLE.WALL) c.paint[i] = K.pack(tone([128, 126, 120], (wx + (dy >> 1)) % 5 === 0 ? 0.78 : 1 - d * 0.05));
+          }
+        }
+        if (hangar) for (const [rx, rw] of [[hangarLeft + 46, 8], [hangarLeft + 60, 5]]) {   // fallen rock kept in the bay
+          for (let dx = 0; dx < rw; dx += 1) for (let dy = 1; dy <= 4 - Math.abs(dx - (rw >> 1)); dy += 1) {
+            K.solidIfEmpty(c, X(rx + dx), ground - dy, M.COVER_ROCK, tone([118, 116, 110], (dx ^ dy) & 1 ? 1 : 0.85), ROLE.ORNAMENT);
+          }
+        }
       }
       for (let k = 0; k < rearStoreys; k += 1) {
         const f = rearFloors[k];

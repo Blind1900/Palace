@@ -134,7 +134,10 @@
         lot.type === 'farm' ? Math.max(1, Math.min(6, lot.level)) : Math.max(1, Math.min(7, lot.level));
       const opts = { style: city.style, level, variant: lot.variant, seed: lot.seedN, facing: lot.side === 'left' ? 1 : -1 };
       if (lot.type === 'population' && lot.ring >= 0) opts.storeys = skylineStoreys(level);
-      if (lot.type === 'military') opts.vertical = true;   // N57: taller bases, narrower hangars
+      if (lot.type === 'military') {
+        opts.vertical = true;   // N57: taller bases, narrower hangars
+        if (city.setting && city.setting !== 'urban') opts.setting = city.setting;   // N59: dressed for its ground
+      }
 
       let cv = T[lot.type](opts);
       // N55: a militarised tower is rebuilt bulkier - armour skin, steel floors, gunmetal.
@@ -292,7 +295,20 @@
         if (kind === 'military' && other.kind === 'capital') return militariseDrop(other, x);
         return { ok: false, note: `claimed by ${other.kind} ${other.id}` };
       }
-      const city = { id: cities.length + 1, kind, style, x, level: 1, clock: 0, actions: 0,
+      let setting = null;
+      if (kind === 'military') {
+        // N59: the base reads its ground - mountains at hand, fields or a farm nearby, else urban
+        const nearMtn = barrierIn(x - 140, x + 140);
+        let farmish = false;
+        for (let dx = -300; dx <= 300 && !farmish; dx += 12) {
+          const gx = x + dx;
+          if (gx < 4 || gx >= world.width - 4) continue;
+          if (PW.getFlags(world, gx, world.groundTop[gx]) & FLAG.FIELD) farmish = true;
+        }
+        if (!farmish) for (const o of cities) if (o.kind === 'farm' && Math.abs(o.x - x) < 700) farmish = true;
+        setting = nearMtn && nearMtn.kind === 'mountain' ? 'mountain' : farmish ? 'farm' : 'urban';
+      }
+      const city = { id: cities.length + 1, kind, style, x, setting, level: 1, clock: 0, actions: 0,
         appendClock: { left: APPEND_EVERY, right: APPEND_EVERY },   // the first rings come at once
         infillClock: 0,
         rings: { left: [], right: [] }, edge: { left: x, right: x }, capEdge: { left: x, right: x },
@@ -429,18 +445,34 @@
         far = cursor + dir * (w + 6);
         if (barrierIn(cursor, far)) { city.blocked[side] = 'mountain'; return false; }
       }
-      const other = claimed(cursor, far, city);
-      if (other) {
-        city.blocked[side] = 'merged';
+      // Claims: a military base never stops the town (N59) - the spread passes it and grows
+      // alongside, holding beyond it as its own land mass. Any other claim merges as before.
+      for (let hops = 0; hops < 2; hops += 1) {
+        const other = claimed(cursor, cursor + dir * (w + 6), city);
+        if (!other) break;
+        if (other.kind !== 'military' || city.kind === 'military') {
+          city.blocked[side] = 'merged';
+          if (!city.merged.has(other.id)) {
+            city.merged.add(other.id); other.merged.add(city.id);
+            const oside = other.x > city.x ? 'left' : 'right';
+            other.blocked[oside] = 'merged';
+            paveSegment(city, city.edge[side], dir > 0 ? other.edge.left : other.edge.right);
+            note(city, `merged with ${other.kind} ${other.id}`); note(other, `merged with ${city.kind} ${city.id}`);
+          }
+          return false;
+        }
+        cursor = dir > 0 ? other.edge.right + CLAIM + 6 : other.edge.left - CLAIM - 6;
+        lot.massEdge = cursor;
         if (!city.merged.has(other.id)) {
           city.merged.add(other.id); other.merged.add(city.id);
-          const oside = other.x > city.x ? 'left' : 'right';
-          other.blocked[oside] = 'merged';
-          paveSegment(city, city.edge[side], dir > 0 ? other.edge.left : other.edge.right);
-          note(city, `merged with ${other.kind} ${other.id}`); note(other, `merged with ${city.kind} ${city.id}`);
+          note(city, 'the town grows alongside the base');
         }
-        return false;
+        const past = cursor + dir * (w + 6);
+        if (Math.min(cursor, past) < 80 || Math.max(cursor, past) > world.width - 80) { city.blocked[side] = 'edge'; return false; }
+        const b2 = barrierIn(cursor, past);
+        if (b2) { city.blocked[side] = b2.kind; return false; }
       }
+      far = cursor + dir * (w + 6);
       lot.canvas = canvas;
       lot.owner = allotOwner();
       const center = cursor + dir * (w / 2 + 2);
@@ -493,11 +525,15 @@
         const w = bodyWidth(canvas);
         if (best.room < w + 2 * GAP_MIN + 6) { dbg.push(`infill-tight ${side} room${best.room} need${w + 2 * GAP_MIN + 6}`); if (dbg.length > 40) dbg.shift(); continue; }
         if (barrierIn(best.inner, best.outer)) { dbg.push(`infill-barrier ${side}`); if (dbg.length > 40) dbg.shift(); continue; }
+        const center = Math.round((best.inner + best.outer) / 2);
+        // N59: never fill into a military base's claim - a span across the base reads as one
+        // huge gap, and an infill once planted a tower mid-claim
+        const midC = claimed(center - (w >> 1) - 6, center + (w >> 1) + 6, city);
+        if (midC) { dbg.push(`infill-claimed ${side}`); if (dbg.length > 40) dbg.shift(); continue; }
         lot.canvas = canvas;
         lot.gapWant = GAP_MIN + rand.int(2, 10);
         lot.massEdge = best.i === 0 ? null : lots[best.i - 1].massEdge;
         lot.owner = allotOwner();
-        const center = Math.round((best.inner + best.outer) / 2);
         if (!placeLot(city, lot, center)) { world.buildings.pop(); continue; }
         lots.splice(best.i, 0, lot);
         lots.forEach((l, k) => { l.ring = k; });
@@ -526,6 +562,25 @@
           if (dir > 0 ? cursor < edge + GAP_MIN : cursor > edge - GAP_MIN) return null;
         } else {
           cursor = dir > 0 ? b.x1 + 8 : b.x0 - 8;   // born beyond it: the bridge or road is laid
+        }
+      }
+      // N59: a military base in the way of a re-seat - the town holds short of its claim
+      // when the slot fits, and otherwise passes beyond it; it never builds over the base
+      // (the base's growing claim used to swallow re-seated lots).
+      if (cursor !== null && city.kind !== 'military') {
+        const span0 = Math.min(cursor, cursor + dir * (w + 6)), span1 = Math.max(cursor, cursor + dir * (w + 6));
+        const milC = (() => { const o = claimed(span0, span1, city); return o && o.kind === 'military' ? o : null; })();
+        if (milC) {
+          const cl = milC.edge.left - CLAIM - 4, cr = milC.edge.right + CLAIM + 4;
+          if (dir > 0) {
+            const hold = Math.min(cursor, cl - (w + 6));
+            if (hold >= edge + GAP_MIN) cursor = hold;
+            else { cursor = cr; lot.massEdge = cursor; }
+          } else {
+            const hold = Math.max(cursor, cr + (w + 6));
+            if (hold <= edge - GAP_MIN) cursor = hold;
+            else { cursor = cl; lot.massEdge = cursor; }
+          }
         }
       }
       let center = cursor === null ? lot.x : cursor + dir * (w / 2 + 2);
@@ -666,6 +721,12 @@
       }
       const other = claimed(from, to, city);
       if (other) {
+        if (other.kind === 'military') {
+          // N59: the base never stops the farm - the fields pass it and carry on beyond
+          city.fieldEdge[side] = dir > 0 ? other.edge.right + CLAIM + 4 : other.edge.left - CLAIM - 4;
+          if (!city.merged.has(other.id)) { city.merged.add(other.id); other.merged.add(city.id); note(city, 'the fields pass the base'); }
+          return true;
+        }
         city.blocked[side] = 'merged';
         if (!city.merged.has(other.id)) { city.merged.add(other.id); other.merged.add(city.id); note(city, `fields meet ${other.kind} ${other.id}`); }
         return false;
@@ -796,10 +857,26 @@
     // N57: the bases of population and farm buildings adapt to the military's terrain changes
     // as it grows - a neighbour whose facing lots sit on reshaped ground re-seats there.
     function adaptNeighbours(milCity) {
+      const clL = milCity.edge.left - CLAIM, clR = milCity.edge.right + CLAIM;
       for (const other of cities) {
         if (other === milCity || other.kind === 'military') continue;
         const side = other.x < milCity.x ? 'right' : 'left';
         const lots = other.rings[side];
+        // N59: the base grew - lots held beyond it move their hold out with it, and any lot
+        // the new works now reach under re-seats clear of them.
+        for (const lot of lots) {
+          if (lot.massEdge == null) continue;
+          if (lot.massEdge > clL && lot.massEdge < clR) lot.massEdge = other.x < milCity.x ? clR + 6 : clL - 6;
+        }
+        for (let i = 0; i < lots.length; i += 1) {
+          const lot = lots[i];
+          if (!lot.placed) continue;
+          if (lot.placed.worksR >= clL && lot.placed.worksL <= clR) {
+            seatChain(other, side, lot.ring);
+            note(other, 'the town makes room for the base');
+            break;
+          }
+        }
         for (let i = Math.max(0, lots.length - 2); i < lots.length; i += 1) {
           const lot = lots[i];
           if (!lot.placed || lot.groundSig === undefined) continue;
