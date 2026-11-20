@@ -376,13 +376,15 @@
   const VOLUTE = [206, 210, 212], VOLUTE_MID = [170, 174, 176], VOLUTE_RIM = [118, 122, 126];
   const MOTOR = [42, 150, 110], MOTOR_LIT = [70, 186, 140], MOTOR_DARK = [26, 104, 76], GUARD = [214, 160, 40];
   const PUMP_STEEL = [122, 130, 136], PUMP_DARK = [66, 70, 76];
-  function lakePump(world, lake, towardX, style, owner, taken = () => false) {
+  // Where a pump would sit on this lake: wholly under the lake floor, where the floor over it
+  // is gentle, nearest the given shore (under the deepest spot, if the floor is uneven
+  // everywhere). Split out of lakePump for N62: a lake that already has its one pump still
+  // RESERVES the strip a second would have taken, so the wild growth sees the same world.
+  function pumpSite(world, lake, towardX, taken = () => false) {
     const near = towardX < lake.x ? -1 : 1, shore = near < 0 ? lake.left : lake.right;
     const bedAt = (x) => PW.supportBelow(world, x, world.groundTop[x], true);
     const wetAt = (x) => (PW.get(world, x, world.groundTop[x]) & 63) === M.WATER;
     const reach = CHAMBER.half + CHAMBER.wall;
-    // Where: wholly under the lake floor, where the floor over it is gentle, nearest the farm's
-    // shore (under the deepest spot, if the floor is uneven everywhere).
     let best = null, deepest = null;
     for (let x = lake.left + reach + 4; x <= lake.right - reach - 4; x += 2) {
       if (taken(x)) continue;
@@ -400,7 +402,13 @@
     }
     const at = best || deepest;
     if (!at) return null;
-    const cx = at.x;
+    return { cx: at.x, near, low: at.low, left: at.x - reach, right: at.x + reach };
+  }
+  function lakePump(world, lake, towardX, style, owner, taken = () => false) {
+    const site = pumpSite(world, lake, towardX, taken);
+    if (!site) return null;
+    const near = site.near, cx = site.cx;
+    const bedAt = (x) => PW.supportBelow(world, x, world.groundTop[x], true);
     const put = (x, y, id, color) => {
       PW.set(world, x, y, id, { quiet: true });
       PW.setLayer(world, 'paint', x, y, rgb(color));
@@ -409,7 +417,7 @@
     const { half, height, wall, cover } = CHAMBER;
     // Rows: the roof slab under `cover` rows of ground below the lowest bed point, the chamber, its
     // floor slab.
-    const roof = at.low + cover, top = roof + wall, floor = top + height - 1;
+    const roof = site.low + cover, top = roof + wall, floor = top + height - 1;
     const back = (x, y, c) => {
       if ((PW.get(world, x, y) & 63) !== M.AIR) PW.set(world, x, y, M.AIR, { quiet: true });
       PW.setLayer(world, 'back', x, y, rgb(c));
@@ -1308,10 +1316,22 @@
         }
         const lake = layout.lakes.filter((item) => item.left !== undefined)
           .sort((p, q) => Math.abs(p.x - b.body.left) - Math.abs(q.x - b.body.left))[0];
+        // N62: only one water pump per body of water - the first farm to reach a lake builds
+        // THE pump (with its own small core, N50); every later farm shares the water through
+        // the bundle instead of sinking a second chamber under the same basin. The strip a
+        // second pump WOULD have taken stays reserved all the same, so the wild growth grows
+        // the same world it always did (its serial stream reshuffled the whole map's trees
+        // otherwise, and one such reshuffle left a flood eroding forever on seed 7).
         if (lake && Math.abs(lake.x - b.body.left) < 2200) {
           const inUse = (spans) => (x) => spans.some(([a, c]) => x >= a - 8 && x <= c + 8);
           const taken = (x) => inUse(footprints)(x) || world.settlements.some((s) => inUse(s.footprints || [])(x));
-          b.pump = lakePump(world, lake, b.body.left, style, b.id, taken);
+          if (lake.pumpOwner) {
+            const site = pumpSite(world, lake, b.body.left, taken);
+            if (site) footprints.push([site.left, site.right]);
+          } else {
+            b.pump = lakePump(world, lake, b.body.left, style, b.id, taken);
+            if (b.pump) lake.pumpOwner = b.id;
+          }
           if (b.pump) {
             footprints.push(b.pump.span);
             // N50: the pump's own small core joins the farm's cores (orb: it minds itself in
