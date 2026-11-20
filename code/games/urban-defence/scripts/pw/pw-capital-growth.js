@@ -92,7 +92,16 @@
 
     // ---- Owners and records ------------------------------------------------------------------
     // Each building owns a slot in world.buildings (structure, cores and blasts find it there).
-    const emptyRecord = (id) => ({ id, cores: [], floors: [], stairs: [], doors: [], slots: [], panels: [], devices: [], windows: [], health: 1 });
+    // An emptied slot (a dismantled lot) must still look like a building to every engine sweep:
+    // pw-structure's collapse walks ALL records reading body/works (a body-less placeholder
+    // crashed the frame when the user blasted near a dismantled lot), and analyse/repair read
+    // the canvas. The empty record lives far off-world with a one-cell canvas.
+    const EMPTY_CANVAS = { width: 1, height: 1, ground: 0, body: { left: 0, right: 0, top: 0, bottom: 0 },
+      mat: new Uint16Array(1), back: new Uint32Array(1), deco: new Uint32Array(1), paint: new Uint32Array(1), role: new Uint8Array(1),
+      floors: [], stairs: [], doors: [], slots: [], panels: [], cores: [], devices: [], windows: [], storage: [], lamps: [] };
+    const emptyRecord = (id) => ({ id, canvas: EMPTY_CANVAS, ox: -9999, oy: 0, ground: 0,
+      cores: [], floors: [], stairs: [], doors: [], slots: [], panels: [], devices: [], windows: [], storage: [],
+      health: 0, body: { left: -9999, right: -9998, top: 0, bottom: 0 }, works: [-9999, -9998] });
     function allotOwner() { const id = world.buildings.length + 1; world.buildings.push(emptyRecord(id)); return id; }
 
     function clearSimAround(x0, y0, x1, y1) {
@@ -119,11 +128,14 @@
     // default: the widest building, not the tallest (N33).
     const skylineStoreys = (level) => Math.max(4, Math.round(1.6 + level * 2.5));
     function canvasFor(city, lot) {
-      const level = lot.type === 'military' ? Math.max(2, Math.min(5, 1 + lot.level)) :
+      const level = lot.type === 'military' ? (lot.variant === 'tower' ? Math.max(1, Math.min(6, lot.level)) : Math.max(2, Math.min(5, 1 + lot.level))) :
         lot.type === 'farm' ? Math.max(1, Math.min(6, lot.level)) : Math.max(1, Math.min(7, lot.level));
       const opts = { style: city.style, level, variant: lot.variant, seed: lot.seedN, facing: lot.side === 'left' ? 1 : -1 };
       if (lot.type === 'population' && lot.ring >= 0) opts.storeys = skylineStoreys(level);
-      return T[lot.type](opts);
+      let cv = T[lot.type](opts);
+      // N55: a militarised tower is rebuilt bulkier - armour skin, steel floors, gunmetal.
+      if (lot.mil && lot.type === 'population' && PW.militarise) cv = PW.militarise(cv, city.style);
+      return cv;
     }
     const bodyWidth = (canvas) => canvas.body.right - canvas.body.left + 1;
 
@@ -243,7 +255,12 @@
       const b = barrierIn(x - 40, x + 40);
       if (b && (b.kind === 'water' || kind !== 'military')) return { ok: false, note: b.kind === 'water' ? 'open water' : 'mountain: only military digs in here' };
       const other = claimed(x - 60, x + 60, null);
-      if (other) return { ok: false, note: `claimed by ${other.kind} ${other.id}` };
+      if (other) {
+        // N55: the military is the most versatile - dropped inside a capital's claim it
+        // squeezes a hangar tower into a gap, or merges into the nearest tower outright.
+        if (kind === 'military' && other.kind === 'capital') return militariseDrop(other, x);
+        return { ok: false, note: `claimed by ${other.kind} ${other.id}` };
+      }
       const city = { id: cities.length + 1, kind, style, x, level: 1, clock: 0, actions: 0,
         appendClock: { left: APPEND_EVERY, right: APPEND_EVERY },   // the first rings come at once
         infillClock: 0,
@@ -538,7 +555,7 @@
     // age per tick, oldest first.
     function ageLots(city) {
       for (const lot of [...city.rings.left, ...city.rings.right].sort((a, b) => a.ring - b.ring)) {
-        if (lot.type !== 'population') continue;
+        if (lot.type !== 'population' && !(lot.type === 'military' && lot.variant === 'tower')) continue;
         if (city.blocked[lot.side] === 'edge') continue;   // pinned at the map's edge: no room to grow
         const target = Math.min(MAX_LEVEL, city.level, 1 + Math.floor(lot.age / AGE_PER_LEVEL));
         if (target <= lot.level) continue;
@@ -553,6 +570,19 @@
           return false;
         }
         note(city, `ring ${lot.ring} comes of age: level ${lot.level}`);
+        // N55: the military spreads along as it grows - every other level, the armour takes
+        // the next tower over, and the merged bases tie themselves together below grade.
+        if ((lot.mil || lot.variant === 'tower') && lot.level % 2 === 0) {
+          const lots = city.rings[lot.side];
+          const next = [lots[lot.ring - 1], lots[lot.ring + 1]].find((n) => n && n.placed && n.type === 'population' && !n.mil);
+          if (next) {
+            next.mil = true; next.canvas = null;
+            seatChain(city, lot.side, Math.min(lot.ring, next.ring));
+            if (!next.placed) { next.mil = false; next.canvas = null; seatChain(city, lot.side, Math.min(lot.ring, next.ring)); }
+            else note(city, 'the armour spreads to the next tower');
+          }
+        }
+        if (lot.mil || lot.variant === 'tower') layPodiums(city, lot.side);
         return true;
       }
       return false;
@@ -640,6 +670,75 @@
       city.fieldEdge[side] = dir > 0 ? lot.placed.worksR + 4 : lot.placed.worksL - 4;
       city.edge[side] = dir > 0 ? Math.max(city.edge[side], lot.placed.worksR) : Math.min(city.edge[side], lot.placed.worksL);
       return true;
+    }
+
+    // N55: dropped into the city, the military squeezes a vertical hangar between buildings
+    // if a gap takes it, and otherwise merges into the nearest population tower - the tower
+    // militarised: bulkier, harder walls and floors, an armour layer over its bones.
+    function militariseDrop(city, x) {
+      for (const side of ['left', 'right']) {
+        const dir = side === 'left' ? -1 : 1;
+        const lots = city.rings[side];
+        for (let i = 0; i < lots.length; i += 1) {
+          if (!lots[i].placed) continue;
+          const inner = i === 0 ? city.capEdge[side] : (dir > 0 ? lots[i - 1].placed.worksR : lots[i - 1].placed.worksL);
+          const outer = dir > 0 ? lots[i].placed.worksL : lots[i].placed.worksR;
+          if (dir > 0 ? outer <= inner : outer >= inner) continue;
+          const lo = Math.min(inner, outer), hi = Math.max(inner, outer);
+          if (x < lo + 20 || x > hi - 20) continue;            // the drop must point into this gap
+          if (hi - lo < 116 + 2 * GAP_MIN) continue;           // the tower needs its slot
+          const lot = { type: 'military', level: Math.max(1, city.level - 2), age: 0, ring: i, side, bornLevel: city.level,
+            variant: 'tower', seedN: seedN += 17, owner: 0, gapWant: GAP_MIN + rand.int(2, 8) };
+          lot.canvas = canvasFor(city, lot);
+          lot.massEdge = i === 0 ? null : lots[i - 1].massEdge;
+          lot.owner = allotOwner();
+          if (!placeLot(city, lot, Math.round((lo + hi) / 2))) { world.buildings.pop(); continue; }
+          lots.splice(i, 0, lot);
+          lots.forEach((l, k) => { l.ring = k; });
+          layPodiums(city, side);
+          note(city, 'a hangar tower squeezes in between the buildings');
+          return { ok: true, city };
+        }
+      }
+      let best = null;
+      for (const side of ['left', 'right']) for (const l of city.rings[side]) {
+        if (l.type !== 'population' || l.mil || !l.placed) continue;
+        if (!best || Math.abs(l.x - x) < Math.abs(best.x - x)) best = l;
+      }
+      if (!best) return { ok: false, note: 'no tower to militarise' };
+      best.mil = true; best.canvas = null;
+      seatChain(city, best.side, best.ring);
+      if (!best.placed) { best.mil = false; best.canvas = null; seatChain(city, best.side, Math.min(best.ring, city.rings[best.side].length)); return { ok: false, note: 'the works would not fit' }; }
+      layPodiums(city, best.side);
+      note(city, 'a tower is militarised: armour over its bones');
+      return { ok: true, city };
+    }
+    // N55: the bases of armoured neighbours merge - an armoured tie below grade redesigns the
+    // ground between them into one defensive footing, a hazard seam at the surface.
+    function layPodiums(city, side) {
+      const lots = city.rings[side];
+      const armoured = (l) => l && l.placed && (l.mil || l.variant === 'tower');
+      for (let i = 0; i + 1 < lots.length; i += 1) {
+        const a = lots[i], b2 = lots[i + 1];
+        if (!armoured(a) || !armoured(b2)) continue;
+        const [L, R] = a.placed.worksR < b2.placed.worksR ? [a, b2] : [b2, a];
+        const x0 = L.placed.worksR + 1, x1 = R.placed.worksL - 1;
+        if (x1 - x0 < 2 || x1 - x0 > 160) continue;
+        for (let x = x0; x <= x1; x += 1) {
+          const g = world.groundTop[x];
+          // the apron is FLUSH with the grade - the grass row becomes plate, no step to climb
+          for (let y = g; y <= g + 5; y += 1) {
+            const id = PW.get(world, x, y) & 63;
+            if (id === M.FOUNDATION) break;
+            if (id !== M.GRASS && id !== M.TOPSOIL && id !== M.SOIL) continue;
+            PW.set(world, x, y, M.FOUNDATION, Q);
+            const hazard = y === g && (x & 7) < 3;
+            PW.setLayer(world, 'paint', x, y, PW.abgr ? PW.abgr(...(hazard ? [196, 164, 58, 255] : y === g ? [96, 100, 106, 255] : ((x + y) & 1) ? [74, 78, 84, 255] : [64, 67, 73, 255])) : 0);
+          }
+          PW.setLayer(world, 'deco', x, g - 1, 0);   // the grass blades over the apron are cleared
+        }
+        clearSimAround(x0, world.groundTop[x0] - 2, x1, world.groundTop[x1] + 8);
+      }
     }
 
     // ---- Military ----------------------------------------------------------------------------

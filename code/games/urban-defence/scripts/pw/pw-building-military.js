@@ -466,9 +466,212 @@
     return c;
   }
 
+  // ---- N55: the vertical hangar tower ------------------------------------------------------------
+  // A hangar turned on end, for squeezing in between a city's buildings: a narrow armoured
+  // shaft of stacked bays - mechs below, jets racked above - a lift at the rear tying them,
+  // a tall lift-door at the street, and the N52 cap of chamfers, parapet and mast on top.
+  // It is NOT in MILITARY_VARIANTS: worldgen picks from that list, and this design is the
+  // growth system's (the lab asks for it by name).
+  function militaryTower(options) {
+    const style = options.style, level = options.level || 2, facing = options.facing || 1;
+    const seed = options.seed || 1;
+    const P = STYLES[style];
+    const bodyWidth = 104, margin = 24, coreDepth = K.VAULT_DEPTH + 3;
+    const bays = level >= 3 ? 2 : 1;
+    const bayClear = [92, 72];                        // mechs stand in the ground bay
+    const machine = 26 + (level >= 5 ? 14 : 0);       // the plant floor on top grows with level
+    let top = 0;
+    for (let b = 0; b < bays; b += 1) top += bayClear[b] + S.SLAB;
+    top += machine + 12;
+    const width = bodyWidth + margin * 2, height = top + coreDepth + 20;
+    const ground = height - coreDepth - 1;
+    const c = K.createCanvas(width, height, ground);
+    c.meta = { type: 'military', style, level, variant: 'tower', facing, seed };
+    const X = (lx) => facing > 0 ? margin + lx : margin + bodyWidth - 1 - lx;
+    const left = 0, right = bodyWidth - 1, WALL = S.WALL + 2;   // harder, thicker walls
+    const innerL = Math.min(X(left + WALL), X(right - WALL)), innerR = Math.max(X(left + WALL), X(right - WALL));
+    const DOOR_H = 70;
+    // Bays from the ground up: dark ribbed backs, a floor slab over each.
+    let row = ground;
+    const bayFloors = [];
+    for (let b = 0; b < bays; b += 1) {
+      const clear = bayClear[b], floorY = row;
+      K.rect(c, innerL, floorY - clear, innerR, floorY - 1, (x, y) => {
+        const rise = floorY - 1 - y;
+        const rib = Math.abs(x - innerL) % 26 < 2;
+        let col = tone(P.frame, rib ? 0.36 : 0.3);
+        if (rise < 3) col = (Math.floor(x / 8) % 2) ? [230, 196, 60] : [40, 40, 44];
+        K.back(c, x, y, col);
+      });
+      for (let lx = left + WALL + 14; lx < right - WALL - 10; lx += 36) K.ceilingLamp(c, style, X(lx), floorY - clear + 2);
+      bayFloors.push({ y: floorY, clear });
+      c.floors.push({ storey: b, y: floorY, left: innerL, right: innerR });
+      row = floorY - clear - S.SLAB;
+      for (let x = innerL; x <= innerR; x += 1) for (let r = 0; r < S.SLAB; r += 1) {
+        K.solid(c, x, row + r, M.STEEL, K.slabColor(style, r, x, row + r), b === bays - 1 ? ROLE.SLAB : ROLE.SLAB);
+      }
+    }
+    // The machine floor and roof.
+    const machTop = row - machine;
+    K.rect(c, innerL, machTop, innerR, row - 1, (x, y) => K.back(c, x, y, tone(P.frame, (x + y) % 9 === 0 ? 0.42 : 0.34)));
+    for (let lx = left + WALL + 6; lx < right - WALL - 6; lx += 22) K.FURNITURE.console(c, Math.min(X(lx), X(lx + 16)), row, P);
+    for (let x = innerL; x <= innerR; x += 1) for (let r = 0; r < S.SLAB; r += 1) {
+      K.solid(c, x, machTop - 1 - r, M.STEEL, K.slabColor(style, r, x, machTop - 1 - r), ROLE.ROOF);
+    }
+    // Walls in plate armour, with slit lights per bay.
+    for (const lx of [left, right]) {
+      const side = lx === left ? -1 : 1;
+      for (let d = 0; d < WALL; d += 1) {
+        const wx = X(lx - side * d);
+        for (let y = machTop - 1 - S.SLAB; y < ground; y += 1) {
+          if (lx === right && y >= ground - DOOR_H && d >= 2) continue;    // the lift door opening
+          if (!K.isSolid(c, wx, y)) K.solid(c, wx, y, M.STEEL, milPlate(style, d, WALL, ground - 1 - y, wx, y), ROLE.WALL);
+        }
+      }
+      for (const f of bayFloors) {
+        for (let d = 0; d < WALL; d += 1) for (let y = f.y - f.clear + 10; y <= f.y - f.clear + 13; y += 1) {
+          if (!(lx === right && y >= ground - DOOR_H)) K.solid(c, X(lx - side * d), y, M.GLASS, mix([26, 30, 36], P.lamp, y === f.y - f.clear + 11 ? 0.5 : 0.22), ROLE.GLASS);
+        }
+      }
+    }
+    // The lift door: recessed plating, hazard jambs, warning lights at the lintel.
+    for (let y = ground - DOOR_H; y < ground; y += 1) {
+      for (let d = 0; d < 2; d += 1) K.solid(c, X(right - d), y, M.STEEL, ((y >> 2) & 1) ? tone(MIL_TINT[style] || MIL_TINT.modern, 0.8) : tone(MIL_SEAM[style] || MIL_SEAM.modern, 1.1), ROLE.WALL);
+    }
+    for (let d = 0; d < 4; d += 1) K.solid(c, X(right - d), ground - DOOR_H - 1, M.STEEL, d === 1 || d === 2 ? MIL_AMBER : P.ornament, ROLE.FRAME);
+    c.doors.push({ x: X(right), side: facing, top: ground - DOOR_H, bottom: ground - 1 });
+    // The lift at the rear: platform rails up through the bays, cables to the machine floor.
+    const liftX = left + WALL + 5;
+    for (let y = machTop + 2; y < ground; y += 1) {
+      if ((ground - y) % 4 === 0) { K.deco(c, X(liftX), y, [96, 100, 108]); K.deco(c, X(liftX + 7), y, [96, 100, 108]); }
+      K.deco(c, X(liftX + 3), y, (y & 7) ? [60, 64, 70] : [84, 88, 96]);
+    }
+    for (let lx = liftX; lx <= liftX + 7; lx += 1) K.solid(c, X(lx), ground - 1, M.PLATFORM, [104, 108, 116], ROLE.STAIR);
+    // The N52 cap: chamfer wedges, parapet, mast.
+    const w0 = innerL - WALL, w1 = innerR + WALL, roofTop = machTop - S.SLAB;
+    for (let s = 0; s < 7; s += 1) for (let d = 0; d <= s; d += 1) {
+      const col = tone(MIL_TINT[style] || MIL_TINT.modern, d === s ? 1.2 : 0.95);
+      K.solidIfEmpty(c, w0 + s, roofTop - 1 - d, M.STEEL, col, ROLE.ORNAMENT);
+      K.solidIfEmpty(c, w1 - s, roofTop - 1 - d, M.STEEL, col, ROLE.ORNAMENT);
+    }
+    for (let x = w0 + 8; x <= w1 - 8; x += 1) K.solidIfEmpty(c, x, roofTop - 2, M.STEEL, tone(MIL_SEAM[style] || MIL_SEAM.modern, (x & 7) === 0 ? 1.5 : 1.1), ROLE.ORNAMENT);
+    const mx = Math.round(w0 + (w1 - w0) * 0.3);
+    for (let dy = 0; dy <= 21; dy += 1) K.solidIfEmpty(c, mx, roofTop - 1 - dy, M.STEEL, (dy % 5) === 0 ? tone(MIL_SEAM.modern, 1.4) : [72, 76, 84], ROLE.ORNAMENT);
+    K.deco(c, mx, roofTop - 24, [255, 92, 72]);
+    // Amber strip at the street, cyan above, as the bases wear them.
+    for (let x = innerL + 2; x <= innerR - 2; x += 1) {
+      if ((x - innerL) % 6 < 3) K.deco(c, x, ground - DOOR_H - 3, MIL_AMBER);
+      if (bays > 1 && (x - innerL) % 6 < 3) K.deco(c, x, bayFloors[0].y - bayFloors[0].clear - S.SLAB - 2, tone(MIL_CYAN, 0.8));
+    }
+    K.core(c, X(Math.round(bodyWidth / 2)), ground);
+    K.corePillars(c, style);
+    K.bakeLights(c, style);
+    c.hangar = { left: innerL, right: innerR, top: ground - bayClear[0], bottom: ground - 1,
+      door: { x: X(right), top: ground - DOOR_H, bottom: ground - 1 }, spawn: { x: X(left + WALL + 26), y: ground } };
+    c.body = { left: Math.min(X(left), X(right)), right: Math.max(X(left), X(right)), top: 0, bottom: ground - 1 };
+    return c;
+  }
+
+  // ---- N55: militarise a population tower ---------------------------------------------------------
+  // The military building merges into the building it militarises: the tower grows bulkier -
+  // an armour skin plates the outer walls (the body widens), every floor gains a steel
+  // under-layer, the roof takes the chamfer-and-parapet cap, and the walls go gunmetal.
+  function militarise(src, style) {
+    const pad = 7;
+    const c = K.createCanvas(src.width + pad * 2, src.height, src.ground);
+    for (let y = 0; y < src.height; y += 1) for (let x = 0; x < src.width; x += 1) {
+      const i = y * src.width + x, j = y * c.width + (x + pad);
+      c.mat[j] = src.mat[i]; c.back[j] = src.back[i]; c.deco[j] = src.deco[i];
+      c.paint[j] = src.paint[i]; c.role[j] = src.role[i];
+    }
+    const sx = (p) => ({ ...p, x: p.x + pad });
+    c.meta = { ...src.meta, militarised: true };
+    c.floors = src.floors.map((f) => ({ ...f, left: f.left + pad, right: f.right + pad }));
+    c.stairs = src.stairs.map((s) => ({ ...s, from: s.from + pad, to: s.to + pad }));
+    c.doors = src.doors.map((d) => ({ ...d, x: d.x + pad }));
+    c.slots = src.slots.map(sx); c.panels = src.panels.map(sx); c.devices = src.devices.map(sx);
+    c.windows = src.windows.map(sx); c.storage = (src.storage || []).map(sx);
+    c.lamps = (src.lamps || []).map(sx);
+    c.cores = src.cores.map((k) => ({ ...k, x: k.x + pad, vault: k.vault && { ...k.vault, x0: k.vault.x0 + pad, x1: k.vault.x1 + pad } }));
+    c.body = { ...src.body, left: src.body.left + pad, right: src.body.right + pad };
+    const tint = MIL_TINT[style] || MIL_TINT.modern;
+    // The whole tower goes to war: walls gunmetal, glazing darkened to armoured glass, and
+    // the rooms behind it blacked out to military lighting - a militarised tower must read
+    // at a glance, and the glow of civilian interiors through the windows was what read.
+    for (let i = 0; i < c.mat.length; i += 1) {
+      if (c.paint[i]) {
+        if (c.role[i] === ROLE.WALL) c.paint[i] = K.pack(mix(PW.unpack(c.paint[i]), tint, 0.55));
+        else if (c.role[i] === ROLE.GLASS) c.paint[i] = K.pack(mix(PW.unpack(c.paint[i]), [38, 44, 52], 0.6));
+      }
+      if (c.back[i]) c.back[i] = K.pack(mix(PW.unpack(c.back[i]), [30, 34, 42], 0.55));
+      if (c.deco[i]) c.deco[i] = K.pack(mix(PW.unpack(c.deco[i]), [40, 44, 52], 0.4));
+    }
+    // The armour skin: plate columns against the outer walls wherever the body has solid wall
+    // beside them, and a steel under-layer beneath every floor slab.
+    const solidNear = (x, y, dir) => {
+      for (let k = 1; k <= 3; k += 1) { const i = y * c.width + x + dir * k; if (c.mat[i] && (c.role[i] === ROLE.WALL || c.role[i] === ROLE.GLASS)) return true; }
+      return false;
+    };
+    for (let y = 8; y < c.ground; y += 1) {
+      for (let d = 0; d < pad - 1; d += 1) {
+        const lx = c.body.left - 1 - d, rx = c.body.right + 1 + d;
+        if (solidNear(c.body.left, y, 1) || solidNear(c.body.left + 1, y, 1)) {
+          if (!c.mat[y * c.width + lx]) K.solid(c, lx, y, M.STEEL, milPlate(style, d, pad - 1, c.ground - 1 - y, lx, y), ROLE.WALL);
+        }
+        if (solidNear(c.body.right, y, -1) || solidNear(c.body.right - 1, y, -1)) {
+          if (!c.mat[y * c.width + rx]) K.solid(c, rx, y, M.STEEL, milPlate(style, d, pad - 1, c.ground - 1 - y, rx, y), ROLE.WALL);
+        }
+      }
+    }
+    // Armour belts: plate stubs protruding at every floor line, on the facades only (never
+    // across the rooms, never over the ground storey's doors).
+    for (const f of c.floors) {
+      if (f.y >= c.ground - 2) continue;
+      for (const [bx0, bx1] of [[c.body.left - pad + 2, c.body.left + 3], [c.body.right - 3, c.body.right + pad - 2]]) {
+        for (let x = Math.max(2, bx0); x <= Math.min(c.width - 3, bx1); x += 1) {
+          for (let r = 0; r < 2; r += 1) {
+            const i = (f.y - r) * c.width + x;
+            if (c.role[i] === ROLE.GLASS || !c.mat[i]) {
+              c.mat[i] = M.STEEL; c.role[i] = ROLE.WALL;
+              c.paint[i] = K.pack(tone(tint, r === 1 ? 1.14 : 0.82));
+            }
+          }
+        }
+      }
+    }
+    for (const f of c.floors) {
+      // find each column's slab around the floor row and steel the row beneath it
+      for (let x = f.left; x <= f.right; x += 1) {
+        for (let y = f.y - 2; y <= f.y + S.SLAB + 2 && y < c.ground; y += 1) {
+          const i = y * c.width + x;
+          if (c.role[i] !== ROLE.SLAB && c.role[i] !== ROLE.ROOF) continue;
+          if (c.role[i + c.width] === ROLE.SLAB || c.role[i + c.width] === ROLE.ROOF) continue;   // not the lowest slab row yet
+          const j = i + c.width;
+          if (!c.mat[j]) { c.mat[j] = M.STEEL; c.role[j] = ROLE.SLAB; c.paint[j] = K.pack(tone(tint, 0.8)); }
+          break;
+        }
+      }
+    }
+    // The chamfer-and-parapet cap on the roof line.
+    let roofY = c.ground;
+    for (let y = 0; y < c.ground; y += 1) { if (c.mat[y * c.width + Math.round((c.body.left + c.body.right) / 2)]) { roofY = y; break; } }
+    for (let s = 0; s < 6; s += 1) for (let d = 0; d <= s; d += 1) {
+      const col = tone(tint, d === s ? 1.2 : 0.95);
+      K.solidIfEmpty(c, c.body.left + s, roofY - 1 - d, M.STEEL, col, ROLE.ORNAMENT);
+      K.solidIfEmpty(c, c.body.right - s, roofY - 1 - d, M.STEEL, col, ROLE.ORNAMENT);
+    }
+    c.body.left -= pad - 1; c.body.right += pad - 1;
+    return c;
+  }
+
+  function military(options) {
+    return options.variant === 'tower' ? militaryTower(options) : militaryBase(options);
+  }
+
   PW.buildingTypes = PW.buildingTypes || {};
-  PW.buildingTypes.military = militaryBase;
+  PW.buildingTypes.military = military;
   PW.buildingTypes.core = coreBunker;
   PW.MILITARY_VARIANTS = MILITARY_VARIANTS;
   PW.HANGAR = HANGAR;
+  PW.militarise = militarise;
 })();
