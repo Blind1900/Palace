@@ -218,8 +218,11 @@
   //   bare soil ravels on a steep face, rock and buildings stand (glass cracks).
   // How things move (every moving cell, in the grid or flying, goes by these):
   // slide: the chance a resting grain runs off a slope each tick (dry sand always, building
-  //   rubble often, so its heaps are rough). spread: cells farther out it still runs to where the
-  //   ground falls away (rubble settles flatter than 45 degrees). settlesTo: what loose stuff
+  //   rubble often, so its heaps are rough). repose: the steepest slope a heap of it stands at,
+  //   as [rise, run] in cells - its angle of repose, as measured for the dry stuff: sand 2 in 3
+  //   (34 degrees), earth and ash 3 in 4 (37), broken stone 5 in 6 (40), rubble 3 in 4 (37). A
+  //   grain on a steeper slope runs off it - in the grid, or landing, or rolling where it lands
+  //   (see pw-sim's stepPowder, pw-particles). settlesTo: what loose stuff
   //   resting on natural ground for a while packs down into. buoyancy: how fast a gas rises (cells
   //   per tick, as a chance; below zero it sinks). fade: the chance a gas thins each tick.
   //   Heavier sinks through lighter: grains sink through water unless lighter than it (ash floats),
@@ -227,7 +230,8 @@
   //   (gravity, drag and the wind, as the table says), and lands back in the grid.
   const weight = new Uint8Array(64), blastResist = new Float32Array(64), cohesion = new Uint8Array(64);
   const advection = new Float32Array(64), shake = new Float32Array(64);
-  const slide = new Float32Array(64), spread = new Uint8Array(64), settlesTo = new Int16Array(64).fill(-1);
+  const slide = new Float32Array(64), settlesTo = new Int16Array(64).fill(-1);
+  const reposeRise = new Uint8Array(64).fill(1), reposeRun = new Uint8Array(64).fill(1);
   const buoyancy = new Float32Array(64), fade = new Float32Array(64);
   const physics = (ids, props) => { for (const id of ids) {
     if (props.weight !== undefined) weight[id] = props.weight;
@@ -236,7 +240,7 @@
     if (props.advection !== undefined) advection[id] = props.advection;
     if (props.shake !== undefined) shake[id] = props.shake;
     if (props.slide !== undefined) slide[id] = props.slide;
-    if (props.spread !== undefined) spread[id] = props.spread;
+    if (props.repose !== undefined) { reposeRise[id] = props.repose[0]; reposeRun[id] = props.repose[1]; }
     if (props.settlesTo !== undefined) settlesTo[id] = props.settlesTo;
     if (props.buoyancy !== undefined) buoyancy[id] = props.buoyancy;
     if (props.fade !== undefined) fade[id] = props.fade;
@@ -293,11 +297,11 @@
   physics([M.CLAY, M.FILL], { shake: 0.01 });
   physics([M.GLASS], { shake: 0.6 });
   // Movement.
-  physics([M.SAND], { slide: 1 });
-  physics([M.ASH], { slide: 0.8, weight: 20 });   // (light and fluffy: it floats on water)
-  physics([M.LOOSE_SOIL], { slide: 0.6, settlesTo: M.SOIL });
-  physics([M.LOOSE_STONE], { slide: 0.45, settlesTo: M.GRAVEL });
-  physics([M.DEBRIS], { slide: 0.7, spread: 1, settlesTo: M.RUBBLE });
+  physics([M.SAND], { slide: 1, repose: [2, 3] });
+  physics([M.ASH], { slide: 0.8, weight: 20, repose: [3, 4] });   // (light and fluffy: it floats on water)
+  physics([M.LOOSE_SOIL], { slide: 0.6, settlesTo: M.SOIL, repose: [3, 4] });
+  physics([M.LOOSE_STONE], { slide: 0.45, settlesTo: M.GRAVEL, repose: [5, 6] });
+  physics([M.DEBRIS], { slide: 0.7, settlesTo: M.RUBBLE, repose: [3, 4] });
   physics([M.SMOKE], { buoyancy: 0.65, fade: 1 / 150 });
   physics([M.STEAM], { buoyancy: 0.8 });
   // (dust from blasts and collapses hangs in the air a long while, settling slowly)
@@ -843,7 +847,7 @@
   PW.ID_MASK = ID_MASK;
   PW.mat = { phase, structural, ground, skyline, hardness, breaksTo, passable, stopsShots, terrain, open,
     conduct, ignite, burnTime, burnsTo, palettes, names, weight, blastResist, cohesion, advection, shake,
-    slide, spread, settlesTo, buoyancy, fade, passesLight, byteWeight, floats, WOOD_WEIGHT, LEAF_WEIGHT };
+    slide, reposeRise, reposeRun, settlesTo, buoyancy, fade, passesLight, byteWeight, floats, WOOD_WEIGHT, LEAF_WEIGHT };
   PW.CHUNK = CHUNK;
   PW.CHUNK_SHIFT = CHUNK_SHIFT;
   // The simulation keeps to a few milliseconds a tick (the powder sim, the structure checks, the

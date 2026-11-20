@@ -22,7 +22,7 @@
   const DISPERSE = 8;            // cells pressurised water squirts sideways per tick
   const PUSH_REACH = 48;         // how far a surge carries through standing water
   const COMPACT_TICKS = 600;     // 10 s at 60 Hz
-  const { slide: SLIDE, spread: SPREADS, settlesTo: COMPACTS_TO, buoyancy: RISE, fade: FADE } = PW.mat;
+  const { slide: SLIDE, reposeRise: REPOSE_RISE, reposeRun: REPOSE_RUN, settlesTo: COMPACTS_TO, buoyancy: RISE, fade: FADE } = PW.mat;
 
   function createSim(world) {
     const { mat, width: W, height: H, chunksX } = world;
@@ -636,15 +636,18 @@
           return false;
         }
       }
-      // Some (building rubble) spread out flatter: they also slide along a slope that falls away
-      // farther out (a heap settles at about 1 in 2, not 45°).
-      for (let reach = 1; reach <= SPREADS[id]; reach += 1) {
+      // A heap of most stuff stands flatter than 45 degrees (its angle of repose: `rise` cells down
+      // over `run` cells out - see PW.mat): a slope falling away more steeply than that farther
+      // out runs it off too, a cell along it at a time.
+      const rise = REPOSE_RISE[id], reach = REPOSE_RUN[id];
+      if (reach > 1 && y + rise < H) {
         for (let k = 0; k < 2; k += 1) {
-          const d = k ? -dir : dir, nx = x + (reach + 1) * d;
+          const d = k ? -dir : dir, nx = x + reach * d;
           if (nx < 0 || nx >= W) continue;
           let open = true;
-          for (let s = 1; s <= reach + 1 && open; s += 1) open = lighter(mat[i + s * d], w);
-          if (open && lighter(mat[i + W + (reach + 1) * d], w)) {
+          for (let s = 1; s <= reach && open; s += 1) open = lighter(mat[i + s * d], w);
+          for (let s = 1; s <= rise && open; s += 1) open = lighter(mat[i + s * W + reach * d], w);
+          if (open) {
             if (slides) { move(i, x, y, i + d, x + d, y); PW.stir(world, x + d, y, x + d, y); return true; }
             PW.wakeCell(world, x, y);
             return false;

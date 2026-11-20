@@ -81,15 +81,22 @@ check((stability.stats.maxMs || 0) < 8, `looking for ground that lost its footin
 {
   const countIn = (x0, y0, x1, y1, kind) => { let n = 0; for (let y = y0; y <= y1; y += 1) for (let x = x0; x <= x1; x += 1) if (id(x, y) === kind) n += 1; return n; };
   // (dry ground, well away from water: no shore sand sliding into a lake inside the count)
-  let sx = 0, best = Infinity;
+  // (and the next flattest, well away from it, for a heap of rubble)
+  const sites = [];
   for (const zone of layout.wilds) for (let x = zone.x0 + 200; x < zone.x1 - 200; x += 23) {
     if (layout.lakes.some((l) => Math.abs(x - l.x) < l.half + 260)) continue;
     let lo = Infinity, hi = -Infinity, wet = false;
     for (let d = -80; d <= 80; d += 4) { lo = Math.min(lo, world.groundTop[x + d]); hi = Math.max(hi, world.groundTop[x + d]); if (id(x + d, world.groundTop[x + d]) === M.WATER) wet = true; }
-    if (!wet && hi - lo < best) { best = hi - lo; sx = x; }
+    if (!wet) sites.push({ x, rough: hi - lo });
   }
+  sites.sort((a, b) => a.rough - b.rough);
+  const sx = sites.length ? sites[0].x : 0;
+  const rx = (sites.find((s) => Math.abs(s.x - sx) > 600) || { x: sx + 600 }).x;
   const g = world.groundTop[sx], box = [sx - 200, g - 400, sx + 200, g + 40];
   const sand0 = countIn(...box, M.SAND);
+  // (the ground under each column before, to measure the heap on)
+  const base = new Map();
+  for (let x = sx - 200; x <= sx + 200; x += 1) base.set(x, world.groundTop[x]);
   let poured = 0;
   for (let y = g - 260; y < g - 230; y += 1) for (let x = sx - 20; x < sx + 20; x += 1) if (id(x, y) === M.AIR) { PW.set(world, x, y, M.SAND); poured += 1; }
   const flown0 = pwApp.sim.stats.flown;
@@ -99,6 +106,43 @@ check((stability.stats.maxMs || 0) < 8, `looking for ground that lost its footin
   for (let x = sx - 60; x <= sx + 60; x += 1) top = Math.min(top, world.groundTop[x]);
   check(pwApp.sim.stats.flown - flown0 >= poured * 0.9 && landed === poured && g - top > 15,
     `sand let go high up flies down and lands as a heap, every grain (${pwApp.sim.stats.flown - flown0} of ${poured} flew, ${landed} landed, heap ${g - top} cells high)`);
+  // (a heap's flanks: from where it stands four fifths of its height to where it stands a fifth,
+  // each side - dry sand stands at about 34 degrees, broken rubble about 37; dropped from high up,
+  // a little less)
+  // (m: what the heap is of - and what it packs down into, lying a while)
+  const flanksOf = (m, cx, baseOf) => {
+    const of = (k) => k === m || k === PW.mat.settlesTo[m];
+    const heapAt = (x) => { const b = baseOf(x); for (let y = b - 200; y < b; y += 1) if (of(id(x, y))) return b - y; return 0; };
+    let h = 0, px = cx;
+    for (let x = cx - 150; x <= cx + 150; x += 1) { const v = heapAt(x); if (v > h) { h = v; px = x; } }
+    const flanks = [-1, 1].map((d) => {
+      let xa = px, xb = px;
+      for (let x = px; Math.abs(x - px) < 190; x += d) { const v = heapAt(x); if (v >= h * 0.8) xa = x; if (v >= h * 0.2) xb = x; }
+      return Math.atan(h * 0.6 / Math.max(1, Math.abs(xb - xa))) * 180 / Math.PI;
+    });
+    return { h, flanks, text: `flanks ${flanks.map((a) => a.toFixed(0)).join(' and ')} degrees, ${h} cells high` };
+  };
+  {
+    const sand = flanksOf(M.SAND, sx, (x) => base.get(x));
+    check(sand.flanks.every((a) => a >= 28 && a <= 39), `sand let fall in a mass heaps at its angle of repose (${sand.text}; dry sand about 34)`);
+    // (and a stream of rubble poured from high up: each lump strikes the heap and runs on down it
+    // only while the slope is steeper than the heap stands at)
+    const rBase = new Map();
+    // (clear sky over it: no tree or cliff in the stream's way)
+    for (let x = rx - 160; x <= rx + 160; x += 1) for (let y = world.groundTop[rx] - 210; y < world.groundTop[x]; y += 1) {
+      if (PW.mat.open[id(x, y)] !== 1) PW.set(world, x, y, M.AIR, { quiet: true });
+      PW.setLayer(world, 'deco', x, y, 0); PW.setFlag(world, x, y, PW.FLAG.FLORA, false);
+    }
+    for (let x = rx - 200; x <= rx + 200; x += 1) rBase.set(x, world.groundTop[x]);
+    const rg = world.groundTop[rx];
+    for (let t = 0; t < 60 * 10; t += 1) {
+      for (let k = -1; k <= 1; k += 1) if (id(rx + k, rg - 200) === M.AIR) PW.set(world, rx + k, rg - 200, M.DEBRIS);
+      pwApp.stepWorld(1);
+    }
+    pwApp.stepWorld(60 * 6);
+    const rubble = flanksOf(M.DEBRIS, rx, (x) => rBase.get(x));
+    check(rubble.h > 15 && rubble.flanks.every((a) => a >= 28 && a <= 42), `rubble poured in a stream from high up heaps at its angle of repose (${rubble.text}; broken rubble about 37)`);
+  }
   const lake = layout.lakes.slice().sort((a, b) => b.half - a.half)[0];
   if (lake) {
     const lx = Math.round(lake.x), level = world.groundTop[lx];

@@ -5,11 +5,13 @@
 (function () {
   const PW = window.PW;
   const { M, ID_MASK } = PW;
-  const { phase, structural, hardness, breaksTo, palettes, weight, advection, byteWeight: BYTE_WEIGHT, LEAF_WEIGHT } = PW.mat;
+  const { phase, structural, hardness, breaksTo, palettes, weight, advection, byteWeight: BYTE_WEIGHT, LEAF_WEIGHT, reposeRise: REPOSE_RISE, reposeRun: REPOSE_RUN } = PW.mat;
 
   const GRAVITY = 260;      // cells/s^2 (about 1.9 g at 7 cm per cell: snappy but readable)
   const MAX_SPEED = 1500;   // cells/s: nothing flies faster
   const SLIDE_KEEP = 0.94;  // share of its speed rubble keeps each time it strikes the slope it runs down
+  const RUN_FROM = 30;      // cells/s a grain landing on a slope steeper than its heap's sets off down it at
+  const FLAT_KEEP = 0.7;    // share of its speed along the ground it keeps each time it strikes the flat, or a gentle slope
   // BUBBLE: air in water. It rises (buoyancy against drag gives ~0.5 m/s), wobbles, slides along
   // anything solid above it and pops when it reaches open air. It never leaves the water.
   // LOOSE: a grain of stuff already loose - running down a slope, falling, blown up off the
@@ -301,6 +303,19 @@
       const c = PW.unpack(rgba);
       return PW.abgr(Math.min(255, c[0] * k), Math.min(255, c[1] * k), Math.min(255, c[2] * k));
     };
+    // Would a grain of `id` set down at (gx, gy), on what is under it, lie on a slope steeper than
+    // a heap of it stands at, `d` way (its angle of repose: `rise` cells down over `run` cells out -
+    // see PW.mat)? A step of two beside it is steeper than any; and more than `rise` down within
+    // `run` cells out. Then it runs on down it.
+    function steeper(gx, gy, d, id, fl) {
+      const free = (x, y) => x >= 1 && x < W - 1 && y >= 0 && y < H - 1 && open(mat[y * W + x] & ID_MASK, fl);
+      if (free(gx + d, gy) && free(gx + d, gy + 1)) return true;
+      const rise = REPOSE_RISE[id], run = REPOSE_RUN[id];
+      if (run < 2) return false;
+      for (let s = 1; s <= run; s += 1) if (!free(gx + s * d, gy)) return false;
+      for (let s = 1; s <= rise; s += 1) if (!free(gx + run * d, gy + s)) return false;
+      return true;
+    }
     // A chunk come to rest with its anchor at (x, y): its cells into the grid, from its bottom row
     // up. It lies there whole, a lump the shape it broke off in - each of its cells where it is,
     // on what it came down on (held as loose stuff lying still is: see pw-sim) - but for what of
@@ -468,20 +483,24 @@
         const sinks = (fl & F.WATER) === 0 && phase[id] === PW.PHASE.LIQUID && weight[id] < BYTE_WEIGHT[byte];
         if (OPEN[id] || (sinks && displace(cx, cy))) {
           // Rubble and earth landing on a heap roll off it, down its slope, so falling debris builds
-          // a heap spreading out wide rather than a column: earth settles at about 45°, building
-          // rubble flatter, about 1 in 3.
+          // a heap spreading out wide rather than a column - to the slope a heap of it stands at
+          // (its angle of repose: see PW.mat): rolling on off a step of two beside it, or a slope
+          // falling away more than `rise` within `run` cells out.
           if (!(fl & F.WATER) && OPEN[id] && phase[byte & ID_MASK] !== PW.PHASE.GAS) {
-            const first = (cx + cy) & 1 ? 1 : -1, reach = (byte & ID_MASK) === M.DEBRIS ? 3 : 1;
+            const first = (cx + cy) & 1 ? 1 : -1, rise = REPOSE_RISE[byte & ID_MASK], run = REPOSE_RUN[byte & ID_MASK];
             const free = (x, y) => x >= 1 && x < W - 1 && y < H - 1 && OPEN[mat[y * W + x] & ID_MASK];
+            const far = (d) => {
+              if (run < 2) return false;
+              for (let s = 1; s <= run; s += 1) if (!free(cx + s * d, cy)) return false;
+              for (let s = 1; s <= rise; s += 1) if (!free(cx + run * d, cy + s)) return false;
+              return true;
+            };
             for (let roll = 0; roll < 160; roll += 1) {
               if (free(cx, cy + 1)) { cy += 1; continue; }
               let moved = false;
               for (const d of [first, -first]) {
-                for (let k = 1; k <= reach && !moved; k += 1) {
-                  if (!free(cx + d * k, cy)) break;
-                  if (free(cx + d * k, cy + 1)) { cx += d * k; cy += 1; moved = true; }
-                }
-                if (moved) break;
+                if (free(cx + d, cy) && free(cx + d, cy + 1)) { cx += d; cy += 1; moved = true; break; }
+                if (far(d)) { cx += d; moved = true; break; }
               }
               if (!moved) break;
             }
@@ -780,13 +799,25 @@
           // Rubble and earth striking a slope do not bounce: they run on down it, a stream of
           // rock and earth that keeps its speed on a steep slope, loses it on a gentle one and
           // spreads to a stop at the foot, throwing up dust as it goes.
-          let downhill = 0;
+          let downhill = 0, braking = false;
           if (!blockedX && (fl & F.LAND) && vy[i] > 0) {
             const row = cy * W, l = open(mat[row + cx - 1] & ID_MASK, fl), r = open(mat[row + cx + 1] & ID_MASK, fl);
             downhill = l && r ? (Math.sign(vx[i]) || (i & 1 ? 1 : -1)) : l ? -1 : r ? 1 : 0;
+            // (on a slope no steeper than the heap of its stuff stands at - see steeper - it brakes
+            // as it would hopping along the flat, and stops where it strikes once it is slow)
+            if (downhill && !steeper(Math.floor(x), Math.floor(y), downhill, cell[i] & ID_MASK, fl)) {
+              if (Math.abs(vx[i]) * FLAT_KEEP >= RUN_FROM) braking = true;
+              else {
+                if (land(i, x, y)) { kill(i); removed = true; break; }
+                downhill = 0;
+              }
+            }
           }
           if (downhill) {
-            const run = Math.max(speed * SLIDE_KEEP, 30);
+            // (what it carried along the slope it keeps; the speed it fell at is spent in the heap
+            // it strikes - a grain dropped from high up starts down the slope no faster than one
+            // set going there: the heap's own run, a little more for a hard knock)
+            const run = braking ? Math.abs(vx[i]) * FLAT_KEEP : Math.max(Math.abs(vx[i]) * SLIDE_KEEP, RUN_FROM + Math.min(RUN_FROM, Math.abs(vy[i]) * 0.1));
             vx[i] = downhill * run; vy[i] = 12;
             x = cx + 0.5 + downhill; y = cy - 0.5;
             if (run > 110 && (PW.hash3(cx, cy, age[i] * 60 | 0) & 7) === 0 && open(mat[(cy - 3) * W + cx] & ID_MASK, fl) && (mat[(cy - 3) * W + cx] & ID_MASK) === M.AIR) {
@@ -794,7 +825,7 @@
             }
             break;
           }
-          if (blockedX) { vx[i] = -vx[i] * 0.25; vy[i] *= 0.75; } else { vy[i] = -vy[i] * 0.25; vx[i] *= 0.7; }
+          if (blockedX) { vx[i] = -vx[i] * 0.25; vy[i] *= 0.75; } else { vy[i] = -vy[i] * 0.25; vx[i] *= FLAT_KEEP; }
           // (a leaf come down onto something lies on it a while - the rest of its life - before
           // it is gone)
           if ((fl & F.LEAF) && !blockedX && speed < 60) { vx[i] = 0; vy[i] = 0; life[i] = Math.max(life[i], 2 + (i & 3) * 0.5); break; }
