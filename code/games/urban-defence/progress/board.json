@@ -1955,7 +1955,8 @@
         "id": "N60",
         "owner": "F",
         "step": "N44",
-        "text": "Capital growth lab (capital-lab.html) runs smoothly under heavy development and explosions: it crashes today when many buildings grow and blasts go off at once. Keep the lab steady at its controllable speeds (frame time and memory held in check, growth and blasts spread over ticks)."
+        "text": "Capital growth lab (capital-lab.html) runs smoothly under heavy development and explosions: it crashes today when many buildings grow and blasts go off at once. Keep the lab steady at its controllable speeds (frame time and memory held in check, growth and blasts spread over ticks). DONE - growth half earlier (storm cover, heavy-work gating, blast ring), physics half in PS's P2 (9564f8e: one long frame at the blast at most, worst tick 81 -> 40 ms). Re-verified at the current tip on seeds 7 AND 11: six cities, 35-42 lots, twelve simultaneous blasts at growth x20 - tick p95 17-20 ms, worst moment 54/140 ms (the old repro killed the browser), heap +16/+50 MB over the storm, and growth carries straight on (44 -> 50 records in the minute after).",
+        "done": true
        },
        {
         "id": "N62",
