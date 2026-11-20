@@ -202,6 +202,9 @@
           const id = PW.get(world, x, y) & ID_MASK;
           if (id === M.PIPE) continue;   // the bundle's socket stays
           if (id !== M.AIR && !LOOSE[id] && PW.getOwner(world, x, y) !== b.id && PW.getOwner(world, x, y) !== 0) continue;
+          // Flood water in the vault is never destroyed by the re-seat: it leaves as a water
+          // particle (PS's catch on the N42O flood - 17 cells vanished under a settling core).
+          if (id === M.WATER && particles) particles.spawn(x + 0.5, y + 0.5, 0, -30, M.WATER, 0, F.WATER, 6);
           PW.set(world, x, y, c.mat[i], { quiet: true });
           PW.setLayer(world, 'paint', x, y, c.paint[i]);
           PW.setOwner(world, x, y, b.id);
