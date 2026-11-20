@@ -167,7 +167,7 @@ check(stability.stats.broken === before, `ground nobody disturbed stands (${stab
   const T = towers[0], T2 = towers.find((b) => Math.abs(b.body.left - T.body.left) > 800);
   if (T && T2) {
     const P = pwApp.particles;
-    const spray = () => { let n = 0; for (let i = 0; i < P.count; i += 1) if (P.flags[i] & P.F.WATER) n += 1; return n; };
+    const spray = () => P.airWater();
     const water = () => pwApp.countWater() + spray();
     const flood = (b, h) => { for (let x = b.body.left - 70; x <= b.body.left - 2; x += 1) for (let y = b.ground - h, top = world.groundTop[x]; y < top; y += 1) if (id(x, y) === M.AIR) PW.set(world, x, y, M.WATER); };
     const water0 = water();

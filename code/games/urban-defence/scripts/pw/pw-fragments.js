@@ -905,6 +905,7 @@
     const PUSH_MASS = 1500;       // a piece of more frame (or wood) than this is pushed the less, as its weight
     const PUSH_TICKS = 90;        // a blast throws back what comes away up to this long after it
     const PUSH_REACH = 4;         // ...out to this many times its radius
+    const PUSH_SPIN = 0.25;       // share of its push a building's piece is turned by, at its edge
     function pushed(p, only = null) {
       const log = only ? [only] : world.blastLog;
       if (!log || !log.length) return;
@@ -934,9 +935,10 @@
         p.omega += px / Math.max(20, p.hy - cy);
       } else {
         // (free, it is thrown - and, pushed hardest high up where the wave meets the most of it,
-        // turned over away from the blast)
+        // turned over away from the blast: a plant, its crown taking the wave, end over end; a
+        // building's piece, the wave on its face all but through its middle, by PUSH_SPIN of that)
         p.vx += px; p.vy += Math.min(py, 0) - Math.abs(px) * 0.15;
-        p.omega += px / Math.max(30, Math.hypot(p.gw, p.gh) * 0.5);
+        p.omega += (p.flora ? 1 : PUSH_SPIN) * px / Math.max(30, Math.hypot(p.gw, p.gh) * 0.5);
       }
       stats.pushed = (stats.pushed || 0) + 1;
     }
@@ -1132,7 +1134,9 @@
             if (big) bigRemakes += 1;
             const parts = partsOf(p.grid, p.gw, p.gh, p.data.solid);
             if (parts) done = detach(p, parts);
-            else p.shapeMass = p.mass;
+            else regather(p, null);
+            // (shaken down to too little frame to hold together, it comes apart as rubble - see spawn)
+            if (!done && p.mass < CHUNK_MIN) { finish(p); done = true; }
           }
           if (!done && p.reshape && turn && time - (p.outlinedAt ?? -1) >= RESHAPE_EVERY) {
             if (big) bigRemakes += 1;
@@ -1358,10 +1362,11 @@
     // is left of it).
     // (the points of its outline that touched something this sub-step: how many, their middle,
     // which way what they struck faces, how hard it is, and their spread - see touch)
-    let tN = 0, tSX = 0, tSY = 0, tFX = 0, tFY = 0, tHS = 0, tBX0 = 0, tBY0 = 0, tBX1 = 0, tBY1 = 0;
+    let tN = 0, tSX = 0, tSY = 0, tFX = 0, tFY = 0, tHS = 0, tBX0 = 0, tBY0 = 0, tBX1 = 0, tBY1 = 0, tLoose = 0;
     function touch(p, k, wx, wy, x, y, ox, oy, c, s) {
       if (tN < OUTLINE_MAX) { went[tN * 2] = wx - ox; went[tN * 2 + 1] = wy - oy; at[tN * 2] = wx; at[tN * 2 + 1] = wy; }
       tN += 1; tSX += wx; tSY += wy; tHS += hardness[mat[y * W + x] & ID_MASK];
+      if (phase[mat[y * W + x] & ID_MASK] === PW.PHASE.POWDER) tLoose += 1;
       if (PW.debugHitboxes && nTouched < OUTLINE_MAX) touched[nTouched++] = k >> 1;
       // (a plant: the thinnest wood it struck with - see snapBranch)
       if (p.flora && (weakest < 0 || p.ptGirth[k >> 1] < p.ptGirth[weakest >> 1])) weakest = k;
@@ -1382,7 +1387,7 @@
       const pts = p.points;
       const c0 = Math.cos(was.angle), s0 = Math.sin(was.angle);
       let crushed = 0, smashed = 0, wet = 0, wsx = 0, tested = 0, ghosts = 0, nb = 0;
-      tN = 0; tSX = 0; tSY = 0; tFX = 0; tFY = 0; tHS = 0; tBX0 = Infinity; tBY0 = Infinity; tBX1 = -Infinity; tBY1 = -Infinity;
+      tN = 0; tSX = 0; tSY = 0; tFX = 0; tFY = 0; tHS = 0; tBX0 = Infinity; tBY0 = Infinity; tBX1 = -Infinity; tBY1 = -Infinity; tLoose = 0;
       embedded = false;
       const [mid] = toWorld(p, c, s, p.gx, p.gy);   // (what it crushes is squeezed out away from this)
       weakest = -1; nTouched = 0;
@@ -1411,12 +1416,14 @@
         // anything else)
         const ox = was.px + pts[k] * c0 - pts[k + 1] * s0, oy = was.py + pts[k] * s0 + pts[k + 1] * c0;
         const inside = Math.floor(ox) === x && Math.floor(oy) === y;
-        // Loose debris is ploughed aside by a swinging or fast piece rather than landed on.
+        // Loose debris is ploughed aside by a swinging or fast piece rather than landed on - and
+        // what it throws aside takes its share of the piece's motion there (see plough).
         if (phase[mat[y * W + x] & ID_MASK] === PW.PHASE.POWDER && (inside || p.mode === 'hinge' || Math.hypot(...velocityAt(p, wx, wy)) > 70)) {
           const byte = mat[y * W + x];
           PW.set(world, x, y, M.AIR);
           const [vx, vy] = velocityAt(p, wx, wy);
           particles.spawn(x + 0.5, y + 0.5, vx * 0.6 + (random() - 0.5) * 60, Math.min(vy, 0) * 0.4 - 20 - random() * 40, byte, 0, F.LAND | F.LOOSE, 5);
+          if (!pinned(p)) plough(p, wx, wy, vx, vy);
           continue;
         }
         const own = p.owner && PW.getOwner(world, x, y) === p.owner;
@@ -1490,7 +1497,11 @@
       if (!n) { p.jam = 0; return false; }
       wentN = Math.min(n, OUTLINE_MAX);
       stepH = h;
-      const gone = strike(p, tSX / n, tSY / n, tFX / n, tFY / n, tHS / n, Math.hypot(tBX1 - tBX0, tBY1 - tBY0));
+      // (how wide a face it rests on, for its turning: what it touches, or - come down in loose
+      // rubble or earth, which gives under it and closes round it - as wide as it is: see strike)
+      const spread = Math.hypot(tBX1 - tBX0, tBY1 - tBY0);
+      faceSpan = Math.max(spread, tLoose / n * 2 * Math.sqrt(p.inertia / p.mass));
+      const gone = strike(p, tSX / n, tSY / n, tFX / n, tFY / n, tHS / n, spread);
       // (the debug view: how hard each outline point that touched was struck - see drawHitboxes)
       if (PW.debugHitboxes) {
         if (!p.hitV || p.hitV.length !== pts.length / 2) { p.hitV = new Float32Array(pts.length / 2); p.hitT = new Float32Array(pts.length / 2); }
@@ -1572,18 +1583,23 @@
         for (const k of parts[q]) { grid[(data.y[k] - oy0 - v0) * gw + (data.x[k] - ox0 - u0)] = 0; data.solid[k] = 0; data.color[k] = 0; }
       }
       stats.parted = (stats.parted || 0) + parts.length - 1;
-      // (what is left: its weight, its middle and how it turns, moving on as it was)
-      const [c, s] = cosSin(p);
-      let mass = 0, sx = 0, sy = 0;
-      for (const k of parts[main]) { const w = weightOf(data.solid[k]); mass += w; sx += (data.x[k] - ox0 + 0.5) * w; sy += (data.y[k] - oy0 + 0.5) * w; }
-      const gx = sx / mass, gy = sy / mass;
-      const [wx, wy] = toWorld(p, c, s, gx, gy);
-      if (!pinned(p)) { [p.vx, p.vy] = velocityAt(p, wx, wy); }
-      let inertia = 0;
-      for (const k of parts[main]) { const w = weightOf(data.solid[k]); inertia += w * ((data.x[k] - ox0 + 0.5 - gx) ** 2 + (data.y[k] - oy0 + 0.5 - gy) ** 2); }
-      Object.assign(p, { mass, gx, gy, inertia: Math.max(1, inertia), shapeMass: mass });
+      regather(p, parts[main]);
       reoutline(p);
       return false;
+    }
+    // (what is left of a piece - its cells `ks`, or all it still has: its weight, its middle and how
+    // it turns, moving on as it was)
+    function regather(p, ks) {
+      const { data, ox0, oy0 } = p, n = ks ? ks.length : data.x.length;
+      let mass = 0, sx = 0, sy = 0;
+      for (let q = 0; q < n; q += 1) { const k = ks ? ks[q] : q, w = weightOf(data.solid[k]); if (!w) continue; mass += w; sx += (data.x[k] - ox0 + 0.5) * w; sy += (data.y[k] - oy0 + 0.5) * w; }
+      if (!mass) return;
+      const gx = sx / mass, gy = sy / mass;
+      const [c, s] = cosSin(p), [wx, wy] = toWorld(p, c, s, gx, gy);
+      if (!pinned(p)) { [p.vx, p.vy] = velocityAt(p, wx, wy); }
+      let inertia = 0;
+      for (let q = 0; q < n; q += 1) { const k = ks ? ks[q] : q, w = weightOf(data.solid[k]); if (w) inertia += w * ((data.x[k] - ox0 + 0.5 - gx) ** 2 + (data.y[k] - oy0 + 0.5 - gy) ** 2); }
+      Object.assign(p, { mass, gx, gy, inertia: Math.max(1, inertia), shapeMass: mass });
     }
     // Make a piece over from what is left of it (after it was ground, or shook cells loose - see
     // reshape): its parts that still hang together go on, each as a piece of its own, just as they
@@ -1596,7 +1612,7 @@
     }
     // (how far each point that struck something moved this sub-step, and where it is)
     const went = new Float32Array(OUTLINE_MAX * 2), at = new Float32Array(OUTLINE_MAX * 2);
-    let wentN = 0, stepH = 1 / 60;
+    let wentN = 0, stepH = 1 / 60, faceSpan = 0;
     // (a plant: its outline point with the thinnest wood that struck something this sub-step)
     let weakest = -1;
     // (where its outline is in water)
@@ -1710,6 +1726,7 @@
     const SNAP_SPEED = 30;        // a long piece landing across something narrow (a ridge, a rock, a
     const SNAP_SLENDER = 2.2;     // building's corner) snaps over it, if it is this many times as
                                   // long as it is thick
+    const BREAK_SPIN = 0.25;      // share of a blow's turn the parts of what it breaks take with them
     const MAX_AGE = 24;
     // (wx, wy): the middle of where it touches; (fx, fy): which way, all told, what it struck
     // pushes back on it there; hard: how hard that is (the element table's hardness); spread: how
@@ -1785,9 +1802,17 @@
         if (crumple(p, wx, wy, nx, ny, felt, spread, vt)) return true;
       }
       const jt = Math.max(-FRICTION * j, Math.min(FRICTION * j, -vt / (invM + rt * rt * invI)));
-      const ix = j * nx + jt * tx, iy = j * ny + jt * ty;
+      const ix = j * nx + jt * tx, iy = j * ny + jt * ty, omega0 = p.omega;
       p.vx += ix * invM; p.vy += iy * invM;
       p.omega += (rx * iy - ry * ix) * invI;
+      // It lies on a face, not a point: the push spreads over all of the face that touches, as it
+      // must to keep that face flush, and turns the piece about it only once the turning is more
+      // than the push can hold across the face (its middle to either edge). So what lands flat
+      // stays flat and slides to a stop, what lands on a corner tips over it, and what has its
+      // weight out past the edge it rests on tips over that edge - nothing rolls on a face; and
+      // come down in a heap of rubble, which closes round it, it stops turning (see faceSpan).
+      const flat = j * faceSpan / 2 * invI;
+      p.omega = Math.abs(p.omega) <= flat ? 0 : p.omega - Math.sign(p.omega) * flat;
       // (a falling tree or bough turns and slides over what it strikes until it lies still - see
       // finish - never set spinning by it, and breaks nothing: one tree coming down does not set
       // off the next)
@@ -1799,7 +1824,14 @@
       if (felt < SNAP_SPEED) return false;
       // A blow: what it struck feels it, and the piece breaks where it took it.
       if (felt >= CRUMBLE_SPEED && p.crumpled !== world.tick) blow(hx, hy, vx, vy, hit, j * hit, tx * fwd, ty * fwd, Math.abs(vt), hard, !p.owner && !p.from && !p.flora, p.mass >= GROW_HEAVY);
-      return breaks(p, wx, wy, vx, vy, nx, ny, felt, hard, spread);
+      // (what breaks under the blow spends it in breaking: the parts it comes apart into are not
+      // swung round as the whole would have been, pivoting on what it struck - they take only
+      // BREAK_SPIN of that turn, and each strikes on by itself)
+      const omega1 = p.omega;
+      p.omega = omega0 + (omega1 - omega0) * BREAK_SPIN;
+      if (breaks(p, wx, wy, vx, vy, nx, ny, felt, hard, spread)) return true;
+      p.omega = omega1;
+      return false;
     }
     // A building is a box of thin floors and walls round open rooms. Where it lands hard, the rooms
     // nearest the blow give way - their floors and walls fold in, bursting out of the sides of the
@@ -1858,6 +1890,24 @@
       }
       stats.crumples = (stats.crumples || 0) + 1;
       return true;
+    }
+    // A piece ploughing through loose rubble throws it aside: each cell it throws takes the momentum
+    // it is given out of the piece, at the point that threw it - so a piece comes to a stop in a
+    // heap, and one turning as it ploughs is slowed in its turning. (A cell of rubble weighs some
+    // PLOUGH_WEIGHT cells of a building's frame, which is mostly air; it is thrown on at about
+    // PLOUGH_THROW of the speed of what struck it.)
+    const PLOUGH_WEIGHT = 3, PLOUGH_THROW = 0.6;
+    function plough(p, wx, wy, vx, vy) {
+      const v = Math.hypot(vx, vy);
+      if (v < 1e-3) return;
+      const [cx, cy] = centre(p), rx = wx - cx, ry = wy - cy, ux = vx / v, uy = vy / v;
+      const invM = 1 / p.mass, invI = 1 / Math.max(1, p.inertia), rn = rx * uy - ry * ux;
+      // (as the point strikes a lump that moves off with it: never more than stops the point)
+      const m = PLOUGH_WEIGHT * PLOUGH_THROW, k = m / (1 + m * (invM + rn * rn * invI));
+      const ix = -ux * v * k, iy = -uy * v * k;
+      p.vx += ix * invM; p.vy += iy * invM;
+      p.omega += (rx * iy - ry * ix) * invI;
+      stats.ploughed = (stats.ploughed || 0) + 1;
     }
     // Which way the surface at (x, y) faces: away from the solid cells about it (deep inside
     // something, back the way the piece came).
@@ -2178,7 +2228,9 @@
     // (a cell of rubble or ruin put down where water is: the water is pushed up out of its way, to
     // the surface - never lost)
     function put(x, y, byte) {
-      if ((mat[y * W + x] & ID_MASK) === M.WATER) particles.spawn(x + 0.5, y + 0.5, 0, -30, M.WATER, 0, F.WATER, 6);
+      // (steam there condenses on it: a drop of water as well)
+      const there = mat[y * W + x] & ID_MASK;
+      if (there === M.WATER || there === M.STEAM) particles.spawn(x + 0.5, y + 0.5, 0, -30, M.WATER, 0, F.WATER, 6);
       PW.set(world, x, y, byte);
       PW.stir(world, x, y, x, y);   // (rubble just come down settles to its slope)
     }

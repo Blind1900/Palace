@@ -93,8 +93,9 @@
     function spawnNow(x, y, svx, svy, byte, rgba, fl, lifeSeconds = 6, own = 0, heat = 0) {
       if (!heat) heat = fl & F.FIRE ? FIRE_HOT : fl & (F.SMOKE | F.LEAF | F.BUBBLE) ? AMBIENT : heatHere(x, y);
       if (count >= capacity) {
-        // Over capacity: settle land particles straight into the grid, drop cosmetic ones.
-        if (fl & (F.LAND | F.WATER)) deposit(x, y, byte, fl, rgba, heat);
+        // Over capacity: settle land particles straight into the grid, drop cosmetic ones. (Water
+        // is never dropped: shut in, it goes to the nearest open cell.)
+        if ((fl & (F.LAND | F.WATER)) && !deposit(x, y, byte, fl, rgba, heat) && (fl & F.WATER)) depositNear(x, y, byte, fl, rgba, heat);
         return -1;
       }
       const i = count++;
@@ -398,6 +399,22 @@
       if (chunkOf[i] >= 0) { depositChunk(i, Math.floor(x), Math.floor(y)); return true; }
       return deposit(x, y, cell[i], flags[i], painted[i] ? color[i] : 0, temp[i]);
     }
+    const landNear = (i, x, y) => depositNear(x, y, cell[i], flags[i], painted[i] ? color[i] : 0, temp[i]);
+    // (into the nearest open cell within NEAR_REACH round (x, y), ring by ring)
+    const NEAR_REACH = 48;
+    function depositNear(x, y, byte, fl, paint, heat) {
+      const cx = Math.floor(x), cy = Math.floor(y);
+      for (let r = 1; r <= NEAR_REACH; r += 1) {
+        for (let d = -r; d <= r; d += 1) {
+          for (const [ox, oy] of [[d, -r], [d, r], [-r, d], [r, d]]) {
+            const nx = cx + ox, ny = cy + oy;
+            if (nx < 1 || ny < 1 || nx >= W - 1 || ny >= H - 1 || !OPEN[mat[ny * W + nx] & ID_MASK]) continue;
+            return deposit(nx + 0.5, ny + 0.5, byte, fl, paint, heat);
+          }
+        }
+      }
+      return false;
+    }
     // A grain coming to rest in water takes the place of the water it lands in, and that water
     // goes up to the top of the column it stands in: the surface rises by the grain's volume.
     // (false where the water is shut in and cannot rise)
@@ -405,8 +422,22 @@
       let top = cy;
       while (top > 0 && phase[mat[(top - 1) * W + cx] & ID_MASK] === PW.PHASE.LIQUID && cy - top < 512) top -= 1;
       if (top === 0 || !OPEN[mat[(top - 1) * W + cx] & ID_MASK]) return false;
+      clearGas(cx, top - 1);
       PW.set(world, cx, top - 1, mat[cy * W + cx]);
       return true;
+    }
+    // Smoke, dust or steam lying where something comes to rest is pushed out of its way, not lost:
+    // up through the cloud to clear air over it, or, in a thick cloud, out to its side. (Steam with
+    // nowhere to go condenses there as a drop of water: the water is never lost.)
+    function clearGas(cx, cy) {
+      const there = mat[cy * W + cx];
+      if (phase[there & ID_MASK] !== PW.PHASE.GAS) return;
+      for (let up = cy - 1; up > 0 && cy - up <= 200; up -= 1) if ((mat[up * W + cx] & ID_MASK) === M.AIR) { PW.set(world, cx, up, there, { quiet: true }); return; }
+      for (let k = 1; k <= 160; k += 1) for (const sx of [cx - k, cx + k]) {
+        if (sx > 0 && sx < W - 1 && (mat[cy * W + sx] & ID_MASK) === M.AIR) { PW.set(world, sx, cy, there, { quiet: true }); return; }
+      }
+      if ((there & ID_MASK) === M.STEAM) { spawn(cx + 0.5, cy + 0.5, 0, -20, M.WATER, 0, F.WATER, 6); return; }
+      stats.gasLost = (stats.gasLost || 0) + 1;
     }
     // Put a landed particle into the first open cell at or above (x, y): air, or water it is heavy
     // enough to sink in (a light one rests on the surface). (A grain that came to rest and was
@@ -436,17 +467,8 @@
               if (!moved) break;
             }
           }
-          // (smoke or dust lying there is pushed up out of its way, not lost)
-          const there = mat[cy * W + cx];
-          if (phase[there & ID_MASK] === PW.PHASE.GAS) {
-            // (up through the cloud to clear air over it; in a thick cloud, out to its side)
-            let moved = false;
-            for (let up = cy - 1; up > 0 && cy - up <= 200 && !moved; up -= 1) if ((mat[up * W + cx] & ID_MASK) === M.AIR) { PW.set(world, cx, up, there, { quiet: true }); moved = true; }
-            for (let k = 1; k <= 160 && !moved; k += 1) for (const sx of [cx - k, cx + k]) {
-              if (!moved && sx > 0 && sx < W - 1 && (mat[cy * W + sx] & ID_MASK) === M.AIR) { PW.set(world, sx, cy, there, { quiet: true }); moved = true; }
-            }
-            stats.gasLost = (stats.gasLost || 0) + (moved ? 0 : 1);
-          }
+          // (smoke, dust or steam lying there is pushed out of its way, not lost)
+          clearGas(cx, cy);
           PW.set(world, cx, cy, byte);
           keepHeat(cx, cy, heat);
           // (landing, it stirs the heap it lands on: the heap settles to its slope)
@@ -780,7 +802,11 @@
             const cx = Math.floor(x), cy = Math.floor(y) + 1;
             if (cy < H && cx > 0 && cx < W - 1 && OPEN[mat[cy * W + cx] & ID_MASK]) { life[i] = 0.5; continue; }
           }
-          if (fl & (F.LAND | F.WATER)) land(i, x, y);
+          // (a drop of water shut in where it ends - buried by a heap, closed in by what was built
+          // over it - comes out into the nearest open cell round it; with none, it waits and
+          // tries again: the water is never lost)
+          if ((fl & F.WATER) && !land(i, x, y) && !landNear(i, x, y)) { life[i] = 1; continue; }
+          if ((fl & F.LAND) && !(fl & F.WATER)) land(i, x, y);
           kill(i);
         }
       }
@@ -908,7 +934,10 @@
         put(c, Math.floor(x), Math.floor(y));
       }
     }
-    const api = { spawn, hold, step, draw, drainImpacts, flush: flushDebris, F, stats, listeners, get count() { return count + pend.n + held.n; }, capacity, px, py, vx, vy, flags };
+    // (the drops of water in the air: what the world's water is short of while they fly - they are
+    // never gathered or held, so they are all among the live particles)
+    const airWater = () => { let n = 0; for (let i = 0; i < count; i += 1) if (flags[i] & F.WATER) n += 1; return n; };
+    const api = { spawn, hold, step, draw, drainImpacts, flush: flushDebris, F, stats, listeners, get count() { return count + pend.n + held.n; }, airWater, capacity, px, py, vx, vy, flags };
     return api;
   }
 

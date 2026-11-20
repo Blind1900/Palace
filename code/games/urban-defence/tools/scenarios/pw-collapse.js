@@ -52,7 +52,25 @@ const sunkIn = () => {
     if (frame >= 20 && inside / frame > worstSunk) { worstSunk = inside / frame; sunkNote = `${inside} of ${frame} frame cells`; }
   }
 };
-const run = (seconds) => { for (let k = 0; k < seconds * 60; k += 1) { pwApp.stepWorld(1); times.push(structure.stats.ms + fragments.stats.ms); maxPieces = Math.max(maxPieces, fragments.list.length); if (k % 10 === 0) sunkIn(); } };
+// (the most whole pieces of the fallen towers lying about as ruins at once - the builders clear the
+// rubble on a lot as they rebuild, ruins too, so those that came to rest on it go in time)
+let mostRuins = 0, mostRuinCells = 0;
+const ruinsNow = () => {
+  const rs = (world.ruins || []).filter((r) => r.from === A.id || r.from === B.id);
+  if (rs.length > mostRuins) { mostRuins = rs.length; mostRuinCells = rs.reduce((n, r) => n + r.cells, 0); }
+};
+// (how far each falling piece of a building turns, all told, from when it comes away until it
+// comes to rest - N49O: it tips, slides and settles; it never spins)
+const turned = new Map();
+const turning = () => {
+  for (const p of fragments.list) {
+    if (p.flora || p.mass < 36) continue;
+    const r = turned.get(p);
+    if (!r) turned.set(p, { last: p.angle, total: 0 });
+    else { r.total += Math.abs(p.angle - r.last); r.last = p.angle; }
+  }
+};
+const run = (seconds) => { for (let k = 0; k < seconds * 60; k += 1) { pwApp.stepWorld(1); turning(); times.push(structure.stats.ms + fragments.stats.ms); maxPieces = Math.max(maxPieces, fragments.list.length); if (k % 10 === 0) { sunkIn(); ruinsNow(); } } };
 run(1.2);
 await view('co-implode', (A.body.left + A.body.right) / 2, A.ground - heightOf(A) * 0.5, 3);
 await view('co-tip', (B.body.left + B.body.right) / 2, B.ground - heightOf(B) * 0.5, 3);
@@ -73,6 +91,10 @@ check(fragments.list.length === 0, `everything has come to rest after 30 s (${fr
 // their loosest cells, the parts that no longer hang together going their own ways)
 check(worstSunk < 0.1, `no falling piece sinks into the ground (at worst ${(worstSunk * 100).toFixed(0)}% of a piece's frame in it${sunkNote ? `: ${sunkNote}` : ''})`);
 check((fragments.stats.shed || 0) > 0 && (fragments.stats.parted || 0) > 0, `falling buildings come apart as they fall (${fragments.stats.shed || 0} cells shaken loose in the air, ${fragments.stats.parted || 0} parts gone their own ways)`);
+{
+  const totals = [...turned.values()].map((r) => r.total), most = Math.max(0, ...totals), half = totals.filter((a) => a > Math.PI).length;
+  check(most < 2 * Math.PI && half <= Math.max(1, totals.length * 0.03), `falling pieces tip, slide and settle, never spinning (${totals.length} pieces: the most any turned all told ${(most * 180 / Math.PI).toFixed(0)} deg, ${half} turned more than half a turn)`);
+}
 // Nothing floats: structure still standing is joined to the ground, and no back wall or fitting
 // hangs without what held it.
 const damaged = world.buildings.filter((b) => b.health !== undefined && b.health < 1);
@@ -86,7 +108,7 @@ const pileA = pile(A), pileB = pile(B);
 check(pileA > 4000 && pileB > 4000, `the fallen towers lie as rubble and ruins (${pileA} and ${pileB} cells)`);
 // Some of each comes to rest whole: pieces of the building, misplaced, as ruins.
 const ruins = (world.ruins || []).filter((r) => r.from === A.id || r.from === B.id);
-check(ruins.length >= 2, `whole pieces of the fallen towers lie about as ruins (${ruins.length} ruins, ${ruins.reduce((n, r) => n + r.cells, 0)} cells)`);
+check(mostRuins >= 2, `whole pieces of the fallen towers lie about as ruins (at most ${mostRuins} at once, ${mostRuinCells} cells; ${ruins.length} left after 30 s, the rest cleared by the builders)`);
 // The tipped tower's rubble spreads out to the side it fell.
 const spread = (b, dir) => {
   let far = 0;
