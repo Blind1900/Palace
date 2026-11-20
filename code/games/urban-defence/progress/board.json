@@ -1,5 +1,21 @@
 [
  {
+  "title": "Fable: the military wing grown whole - taller, welded to its neighbours, nothing floating (75a1559, N65-N68)",
+  "author": "Fable",
+  "time": "2026-11-20 (the four wing refinements, routed through the day)",
+  "note": "Your four rulings on the merged military building, landed as one validated batch. N65 - the annex is a full WING now: five to seven floors by the tower's level, the tower's own floor grid continuing into it through doorways in the shared wall, a control panel on its top floor, turrets on its roof (an interceptor from level 3), slit lights and dark muzzle ports on the glacis, a vertical hangar bay rising the wing's height to a grated hatch in the roof (N64's drain rule reads it, so the roof drains through the bay), a sally door at the glacis foot, and the merged tower's rooms gone military inside - the civilian beds, sofas and bookshelves struck for the garrison's consoles, racks, lockers and crates, floor by floor, the stairs keeping their rails. The wing lays its runway at the grade and mends it as the growing city's own re-seats churn the ground (the mend judges by MATERIAL - the road flag survives a regrow, and a flag test slept through a ruined strip). N66 - no slot of air between the wing and the building it reaches toward: a settle pass welds the gap the N58 way, the wing's floors carried across as gallery slabs, the roof rows carried over - the host tower's own terrace design when the host is a sloped variant - and a doorway cut into the neighbour at every floor with a room behind the wall. The weld belongs to the wing and goes with it if the wing is dismantled. N67 - add-ons stand on the left, the right, or BOTH sides: a military seed dropped ON an already-militarised tower grows its second wing, each wing joining the building it sits beside. N68 - nothing hangs in the air: armour belts now must TOUCH the facade they belt (on sloped towers the belt band ran past recessed storeys and left dashes in the sky - your screenshots), the chamfer cap follows each column's own silhouette, the sally door takes the slit lights with it, the bay's hazard threshold sits flush on the grade, and the lab now steps the flora, so a tree stranded by earthworks falls like it always did in the live world instead of floating. Canvas floater scan: zero across all five tower variants. Lab probe 17/17 on seeds 7 and 11; matrix 18/18 on 7, 3 and 11.",
+  "shots": [
+   {
+    "src": "shots/n65-wing-merged.png",
+    "caption": "the wing at the join: the tower's floors running through the shared wall into military rooms, crates and consoles behind the glacis, the plated strip tying the bases at the grade"
+   },
+   {
+    "src": "shots/n67-both-wings.png",
+    "caption": "add-ons BOTH sides: a second military drop on the tower grew the second wing, each flank joining its neighbour"
+   }
+  ]
+ },
+ {
   "title": "Fable: seed cities thread onto the supply bundle - the network grows with the city (c4b35f5, N2/N3 slice 2)",
   "author": "Fable",
   "time": "2026-11-20 (after slice 1)",
@@ -1838,6 +1854,34 @@
         "owner": "F",
         "step": "H, E",
         "text": "Tunnel fixes (user, 2026-11-19, from shots/incline.png): pipes are part of the background walls, not drawn over the tunnels; the roof above stairs is higher; every tunnel is walkable for a ground trooper, so the whole network can be explored on foot."
+       },
+       {
+        "id": "N65",
+        "owner": "F",
+        "step": "C, K, F2",
+        "text": "Military buildings bigger and more noticeable, high enough to merge with next-door buildings (user, 2026-11-20, refines N55/N57/N63): 5-7 floors by level; population floors continue into the military structure; the connected structure gets a control panel, defences, a vertical hangar and a runway (runways can merge with farm and population bases); the merged building's interior decor changes too. Reference shots/n63-flank-annex.jpg. DONE 75a1559 (the wing: continued floors, panel, turrets+ports, full-height bay with grated hatch, runway laid and mended, garrison interiors).",
+        "done": true
+       },
+       {
+        "id": "N66",
+        "owner": "F",
+        "step": "C, K, F2",
+        "text": "Building connections in the capital growth lab (user, 2026-11-20, screenshot): buildings connect with no gaps; sloped buildings extend their design toward the military structures and connect their floors and roofs so the merged mass reads as one building. DONE 75a1559 (the weld pass: floor galleries and roof carried across the slot the N58 way, host terrace design on sloped towers, doorways cut where rooms align; welds owned by the wing, taken up on dismantle).",
+        "done": true
+       },
+       {
+        "id": "N67",
+        "owner": "F",
+        "step": "C, K, F2",
+        "text": "Military add-ons on the left, the right, or both sides of a building, at the shorter heights of the building base, connecting with no gap; each add-on joins the building it sits beside (user, 2026-11-20, adds to N66). DONE 75a1559 (a military drop ON a militarised tower grows its second wing; welds run both flanks).",
+        "done": true
+       },
+       {
+        "id": "N68",
+        "owner": "F",
+        "step": "C, K, A2",
+        "text": "Floating bits at the sides of the outer walls of armoured sloped buildings (user, 2026-11-20, two lab screenshots): find the cause and remove it; terrain and structure changes must leave nothing unsupported, trees included. DONE 75a1559 (armour belts must touch the facade - the body-edge band ran past recessed storeys; the cap follows each column's silhouette; the sally door takes the slit lights with it; the bay threshold sits flush; the lab steps the flora so stranded trees fall). Canvas floater scan zero across all five variants.",
+        "done": true
        },
        {
         "id": "N64",
