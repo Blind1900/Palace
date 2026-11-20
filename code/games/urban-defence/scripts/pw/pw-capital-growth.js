@@ -143,7 +143,7 @@
       // N55/N63: a militarised tower is rebuilt bulkier - armour skin, steel floors, gunmetal,
       // and the grey annex merged on its outward flank (the user's sketch).
       if (lot.mil && lot.type === 'population' && PW.militarise) {
-        cv = PW.militarise(cv, city.style, lot.side === 'left' ? -1 : 1);
+        cv = PW.militarise(cv, city.style, lot.milBoth ? 0 : (lot.side === 'left' ? -1 : 1));
       }
       return cv;
     }
@@ -195,6 +195,9 @@
       if (!p) return;
       // Let go of the bundle first: spans and threaded cores off, the pipe itself stays.
       if (lot.faction && world.pipes && world.pipes.releaseBuilding) world.pipes.releaseBuilding(lot.faction, lot.owner);
+      // A wing's welds go with it (they live OUTSIDE the lot's own box).
+      if (lot.weldL) clearWeld(lot, 'weldL');
+      if (lot.weldR) clearWeld(lot, 'weldR');
       const x0 = p.worksL - 8, x1 = p.worksR + 8;
       const y0 = Math.max(2, p.y0 - 4), y1 = Math.min(world.height - 30, p.y1 + 150);
       for (let y = y0; y <= y1; y += 1) for (let x = x0; x <= x1; x += 1) {
@@ -812,21 +815,46 @@
           lots.splice(i, 0, lot);
           lots.forEach((l, k) => { l.ring = k; });
           layPodiums(city, side);
+          layWingRunway(city, lot);
           note(city, 'a hangar tower squeezes in between the buildings');
           return { ok: true, city };
         }
+      }
+      // N67: a drop aimed AT an already-militarised tower grows its SECOND wing - add-ons
+      // stand on the left, the right, or both sides, each joining the building beside it.
+      const secondWing = (l) => {
+        if (nearBlast(l.placed.worksL, l.placed.worksR)) return { ok: false, note: 'under fire - wait for the dust' };
+        l.milBoth = true; l.canvas = null;
+        clearWeld(l, 'weldL'); clearWeld(l, 'weldR');
+        seatChain(city, l.side, l.ring);
+        if (!l.placed) { l.milBoth = false; l.canvas = null; seatChain(city, l.side, Math.min(l.ring, city.rings[l.side].length)); return { ok: false, note: 'the works would not fit' }; }
+        layPodiums(city, l.side);
+        note(city, 'the second wing goes up: add-ons both sides');
+        return { ok: true, city };
+      };
+      for (const side of ['left', 'right']) for (const l of city.rings[side]) {
+        if (l.mil && !l.milBoth && l.placed && x >= l.placed.worksL - 12 && x <= l.placed.worksR + 12) return secondWing(l);
       }
       let best = null;
       for (const side of ['left', 'right']) for (const l of city.rings[side]) {
         if (l.type !== 'population' || l.mil || !l.placed) continue;
         if (!best || Math.abs(l.x - x) < Math.abs(best.x - x)) best = l;
       }
-      if (!best) return { ok: false, note: 'no tower to militarise' };
+      // (with every tower already militarised, the drop falls to the nearest single wing)
+      if (!best) {
+        for (const side of ['left', 'right']) for (const l of city.rings[side]) {
+          if (l.type !== 'population' || !l.mil || l.milBoth || !l.placed) continue;
+          if (!best || Math.abs(l.x - x) < Math.abs(best.x - x)) best = l;
+        }
+        if (!best) return { ok: false, note: 'no tower to militarise' };
+        return secondWing(best);
+      }
       if (nearBlast(best.placed.worksL, best.placed.worksR)) return { ok: false, note: 'under fire - wait for the dust' };
       best.mil = true; best.canvas = null;
       seatChain(city, best.side, best.ring);
       if (!best.placed) { best.mil = false; best.canvas = null; seatChain(city, best.side, Math.min(best.ring, city.rings[best.side].length)); return { ok: false, note: 'the works would not fit' }; }
       layPodiums(city, best.side);
+      layWingRunway(city, best);
       note(city, 'a tower is militarised: armour over its bones');
       return { ok: true, city };
     }
@@ -876,6 +904,168 @@
       if (dir > 0) city.edge.right = Math.max(city.edge.right, end + 4);
       else city.edge.left = Math.min(city.edge.left, end - 4);
       note(city, 'the runway is laid');
+    }
+    // N65: a militarised tower's wing lays its own runway - a strip out from the wing's foot
+    // at the grade, paved the settlements' way. The PAD stops short of the next building, but
+    // the PAVING runs on into its apron (the user's rule: runways merge with the base of farm
+    // and population buildings) - it rides the podium plates, cutting nothing.
+    function layWingRunway(city, lot) {
+      if (!ST.paveRunway || !ST.terracePad || !lot.placed) return;
+      const dir = lot.side === 'left' ? -1 : 1;
+      const from = dir > 0 ? lot.placed.worksR + 2 : lot.placed.worksL - 2;
+      const lots = city.rings[lot.side];
+      const next = lots[lot.ring + 1];
+      const open = next && next.placed ? Math.abs((dir > 0 ? next.placed.worksL : next.placed.worksR) - from) - 4 : 150;
+      let padLen = Math.max(24, Math.min(170, open));
+      let paveLen = Math.min(200, padLen + (next && next.placed ? 26 : 0));
+      let end = from + dir * paveLen;
+      if (Math.min(from, end) < 60 || Math.max(from, end) > world.width - 60) { city.runwayNote = 'edge'; return; }
+      // a pond or a flank in the way shortens the strip - the runway stops at the shore.
+      // Even a short strip is laid: between towers it is the apron joining the two bases.
+      const bar = barrierIn(Math.min(from, end), Math.max(from, end));
+      if (bar) {
+        const stop = dir > 0 ? bar.x0 - 6 : bar.x1 + 6;
+        paveLen = Math.max(0, Math.abs(stop - from) - 2);
+        padLen = Math.min(padLen, paveLen);
+        if (paveLen < 18) { city.runwayNote = `shore at ${bar.x0}..${bar.x1}`; return; }
+        end = from + dir * paveLen;
+      }
+      city.runwayNote = `laid ${paveLen}`;
+      const g = world.groundTop[from];
+      const padEnd = from + dir * padLen;
+      ST.terracePad(world, Math.min(from, padEnd), Math.max(from, padEnd), g);
+      ST.paveRunway(world, from, dir, paveLen, g, city.style);
+      for (let x = Math.min(from, end) - 2; x <= Math.max(from, end) + 2; x += 1) PW.refreshGroundTop(world, x);
+      clearSimAround(Math.min(from, end), g - 6, Math.max(from, end), g + 8);
+      note(city, 'the wing lays its runway');
+    }
+    // N65: a re-seat beside a wing regrows the ground over its strip - so, like the base
+    // runways (laid again after each level-up), the wings' strips are mended as the city
+    // settles: one a step at most, under the heavy-work budget.
+    function mendWingRunways(city) {
+      for (const side of ['left', 'right']) {
+        for (const l of city.rings[side]) {
+          if (!l.placed || !(l.mil || (l.type === 'military' && l.variant === 'tower'))) continue;
+          const dir = side === 'left' ? -1 : 1;
+          const x = (dir > 0 ? l.placed.worksR : l.placed.worksL) + dir * 12;
+          if (x < 2 || x >= world.width - 2) continue;
+          // judge by the MATERIAL, not the flag: a re-seat's regrow turns the asphalt back
+          // to grass but the ROAD flag survives it, and a flag test slept through the ruin
+          const id = PW.get(world, x, world.groundTop[x]) & 63;
+          if (id === M.ASPHALT || id === M.ROADBED) continue;
+          layWingRunway(city, l);
+          return true;
+        }
+      }
+      return false;
+    }
+    // N66/N67: the merged mass reads as ONE building - no slot of air between a wing and
+    // the building it reaches toward. A settle pass welds the gap world-side, the N58 way:
+    // the wing's floor rows carried across as gallery slabs, the roof rows carried over
+    // (the host's terrace design on a sloped tower), the band between back-filled, and a
+    // doorway cut into the neighbour at every floor with a room behind the wall. The weld
+    // belongs to the wing's owner; a dismantled wing takes it up (eraseLot wipes weldSpan),
+    // and a re-seated neighbour gets it laid afresh (the signature goes stale).
+    const S = PW.buildingKit.S;   // (KIT is declared further down; the kit global is loaded first)
+    function clearWeld(l, key) {
+      const w = l[key];
+      if (!w || !w.span) return;
+      const [wx0, wx1, wy0, wy1] = w.span;
+      for (let y = Math.max(2, wy0); y <= Math.min(world.height - 2, wy1); y += 1) {
+        for (let x = wx0; x <= wx1; x += 1) {
+          if (PW.getOwner(world, x, y) !== l.owner) continue;
+          PW.set(world, x, y, M.AIR, Q);
+          PW.setLayer(world, 'paint', x, y, 0);
+          PW.setLayer(world, 'back', x, y, 0);
+          PW.setOwner(world, x, y, 0);
+        }
+      }
+      l[key] = null;
+    }
+    function weldWingAt(city, l, n, dir) {
+      const key = dir > 0 ? 'weldR' : 'weldL';
+      const a = dir > 0 ? l.placed.worksR + 1 : n.placed.worksR + 1;
+      const b = dir > 0 ? n.placed.worksL - 1 : l.placed.worksL - 1;
+      const gapW = b - a + 1;
+      if (gapW < 1 || gapW > 46) return false;
+      const sig = n.placed.x0 * 100000 + a;
+      if (l[key] && l[key].sig === sig) return false;
+      const rec = world.buildings[l.owner - 1];
+      const wing = (rec.floors || []).filter((f) => f.wing).sort((p, q) => p.y - q.y);
+      if (!wing.length) return false;
+      clearWeld(l, key);
+      const sloped = ['setback', 'tapered', 'crown', 'spire', 'needle'].includes(l.variant || '');
+      const wingTopY = wing[0].y - S.FLOOR + S.SLAB;   // the wing's roof band sits here
+      const backTone = (x, y) => (((x + y) % 9) ? [34, 38, 46] : [40, 45, 54]);
+      for (let x = a; x <= b; x += 1) {
+        // the roof rows carried across
+        for (const yy of [wingTopY - 1, wingTopY]) {
+          if (!PW.getOwner(world, x, yy) && PW.mat.open[PW.get(world, x, yy) & 63]) {
+            PW.set(world, x, yy, sloped ? M.CONCRETE : M.STEEL, Q);
+            PW.setLayer(world, 'paint', x, yy, PW.abgr(...(sloped ? [104, 106, 110, 255] : (((x >> 1) & 1) ? [196, 164, 58, 255] : [64, 68, 74, 255]))));
+            PW.setOwner(world, x, yy, l.owner);
+          }
+        }
+        // the floors carried across as gallery slabs, the band between back-filled
+        for (const f of wing) {
+          for (let r = 0; r < S.SLAB; r += 1) {
+            const yy = f.y + r;
+            if (!PW.getOwner(world, x, yy) && PW.mat.open[PW.get(world, x, yy) & 63]) {
+              PW.set(world, x, yy, M.STEEL, Q);
+              PW.setLayer(world, 'paint', x, yy, PW.abgr(...(r === 0 ? [88, 92, 100, 255] : [56, 60, 68, 255])));
+              PW.setOwner(world, x, yy, l.owner);
+            }
+          }
+          for (let yy = f.y - S.CLEAR + 6; yy < f.y; yy += 1) {
+            if ((PW.get(world, x, yy) & 63) === M.AIR && !PW.getLayer(world, 'back', x, yy)) {
+              PW.setLayer(world, 'back', x, yy, PW.abgr(...backTone(x, yy), 255));
+            }
+          }
+        }
+      }
+      // a doorway into the neighbour at every floor with a room behind its wall
+      const wallX0 = dir > 0 ? n.placed.worksL : n.placed.worksR - 7;
+      for (const f of wing) {
+        const probeX = dir > 0 ? n.placed.worksL + 9 : n.placed.worksR - 9;
+        let roomRows = 0;
+        for (let yy = f.y - S.DOOR_H; yy < f.y; yy += 1) {
+          if ((PW.get(world, probeX, yy) & 63) === M.AIR && PW.getLayer(world, 'back', probeX, yy)) roomRows += 1;
+        }
+        if (roomRows < S.DOOR_H * 0.6) continue;
+        for (let yy = f.y - S.DOOR_H; yy < f.y; yy += 1) {
+          for (let d = 0; d < 8; d += 1) {
+            const x = wallX0 + d;
+            if (PW.getOwner(world, x, yy) !== n.owner) continue;
+            const id = PW.get(world, x, yy) & 63;
+            if (!PW.mat.structural[id] && id !== M.GLASS) continue;
+            PW.set(world, x, yy, M.AIR, Q);
+            PW.setLayer(world, 'paint', x, yy, 0);
+            if (!PW.getLayer(world, 'back', x, yy)) PW.setLayer(world, 'back', x, yy, PW.abgr(40, 44, 52, 255));
+          }
+        }
+      }
+      const bottomY = world.groundTop[Math.max(0, Math.min(world.width - 1, Math.round((a + b) / 2)))];
+      l[key] = { sig, span: [a, b, wingTopY - 2, bottomY] };
+      clearSimAround(a - 2, wingTopY - 4, b + 2, bottomY + 4);
+      note(city, 'the wing is welded to its neighbour: one building');
+      return true;
+    }
+    function weldWings(city) {
+      for (const side of ['left', 'right']) {
+        const lots = city.rings[side];
+        const dir = side === 'left' ? -1 : 1;
+        for (const l of lots) {
+          if (!l.mil || !l.placed) continue;
+          const out = lots[l.ring + 1];
+          if (out && out.placed && weldWingAt(city, l, out, dir)) return true;
+          // N67: a both-sided tower also joins the building on its inner flank
+          if (l.milBoth) {
+            const inn = l.ring > 0 ? lots[l.ring - 1] : null;
+            if (inn && inn.placed && weldWingAt(city, l, inn, -dir)) return true;
+          }
+        }
+      }
+      return false;
     }
     // N57: the bases of population and farm buildings adapt to the military's terrain changes
     // as it grows - a neighbour whose facing lots sit on reshaped ground re-seats there.
@@ -1296,6 +1486,8 @@
         }
         if (city.clock > GROW_EVERY * 4) city.clock = GROW_EVERY * 4;
         if (city.kind === 'capital' && heavy < heavyMax && ageLots(city)) heavy += 1;
+        if (city.kind === 'capital' && heavy < heavyMax && mendWingRunways(city)) heavy += 1;
+        if (city.kind === 'capital' && heavy < heavyMax && weldWings(city)) heavy += 1;
       }
       for (let i = flashes.length - 1; i >= 0; i -= 1) { flashes[i].age += 1 / 60; if (flashes[i].age > 0.9) flashes.splice(i, 1); }
     }

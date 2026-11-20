@@ -638,13 +638,22 @@
   // an armour skin plates the outer walls (the body widens), every floor gains a steel
   // under-layer, the roof takes the chamfer-and-parapet cap, and the walls go gunmetal.
   // N63 (the user's sketch): the military building merges ON THE TOWER'S SIDE - a plated
-  // annex widening the base, the two bases combined up to 3-4 floors into one building, a
-  // thin armour line carried over the tower's top with a small dish mast. annexSide picks
-  // the flank (the growth passes the side facing away from the city's centre).
+  // annex widening the base, a thin armour line carried over the tower's top with a small
+  // dish mast. annexSide picks the flank (the side facing away from the city's centre).
+  // N65 (refining N55/N57/N63): the annex is a full military WING - five to seven floors
+  // by level, the tower's own floor grid continuing into it through doorways in the shared
+  // wall, a control panel on its top floor, defence ports and roof turrets, and a vertical
+  // hangar bay behind the glacis with a grated hatch in the roof. The merged tower's rooms
+  // go military inside too: the civilian furniture is struck and the garrison moves in.
   function militarise(src, style, annexSide = -1) {
-    const ANNEX_W = 48;
+    const level = (src.meta && src.meta.level) || 1;
+    const towerStoreys = (src.meta && src.meta.storeys) || 3;
+    const annexFloors = Math.max(3, Math.min(towerStoreys + 1, 5 + Math.min(2, Math.floor((level - 1) / 2))));
+    const ROOMS_W = 34 + (annexFloors - 5 > 0 ? (annexFloors - 5) * 4 : 0);
+    const BAY_W = 26, GLACIS = 6;
+    const ANNEX_W = ROOMS_W + BAY_W + GLACIS + 2;
     const pad = 7;
-    const padL = annexSide < 0 ? ANNEX_W + 6 : pad, padR = annexSide < 0 ? pad : ANNEX_W + 6;
+    const padL = annexSide <= 0 ? ANNEX_W + 6 : pad, padR = annexSide >= 0 ? ANNEX_W + 6 : pad;
     const c = K.createCanvas(src.width + padL + padR, src.height, src.ground);
     for (let y = 0; y < src.height; y += 1) for (let x = 0; x < src.width; x += 1) {
       const i = y * src.width + x, j = y * c.width + (x + padL);
@@ -692,14 +701,24 @@
       }
     }
     // Armour belts: plate stubs protruding at every floor line, on the facades only (never
-    // across the rooms, never over the ground storey's doors).
+    // across the rooms, never over the ground storey's doors). N68: a stub must TOUCH the
+    // facade it belts - on a sloped tower the body-edge band runs past recessed storeys,
+    // and unanchored stubs hung in the open air beside the walls (the user's screenshots).
+    const touchesFacade = (x, y, inward) => {
+      for (let k = 1; k <= 4; k += 1) {
+        const j = y * c.width + x + inward * k;
+        if (c.mat[j] && (c.role[j] === ROLE.WALL || c.role[j] === ROLE.GLASS)) return true;
+      }
+      return false;
+    };
     for (const f of c.floors) {
       if (f.y >= c.ground - 2) continue;
-      for (const [bx0, bx1] of [[c.body.left - pad + 2, c.body.left + 3], [c.body.right - 3, c.body.right + pad - 2]]) {
+      for (const [bx0, bx1, inward] of [[c.body.left - pad + 2, c.body.left + 3, 1], [c.body.right - 3, c.body.right + pad - 2, -1]]) {
         for (let x = Math.max(2, bx0); x <= Math.min(c.width - 3, bx1); x += 1) {
           for (let r = 0; r < 2; r += 1) {
             const i = (f.y - r) * c.width + x;
-            if (c.role[i] === ROLE.GLASS || !c.mat[i]) {
+            const empty = !c.mat[i];
+            if (c.role[i] === ROLE.GLASS || (empty && touchesFacade(x, f.y - r, inward))) {
               c.mat[i] = M.STEEL; c.role[i] = ROLE.WALL;
               c.paint[i] = K.pack(tone(tint, r === 1 ? 1.14 : 0.82));
             }
@@ -723,84 +742,219 @@
     // The chamfer-and-parapet cap on the roof line.
     let roofY = c.ground;
     for (let y = 0; y < c.ground; y += 1) { if (c.mat[y * c.width + Math.round((c.body.left + c.body.right) / 2)]) { roofY = y; break; } }
-    for (let s = 0; s < 6; s += 1) for (let d = 0; d <= s; d += 1) {
-      const col = tone(tint, d === s ? 1.2 : 0.95);
-      K.solidIfEmpty(c, c.body.left + s, roofY - 1 - d, M.STEEL, col, ROLE.ORNAMENT);
-      K.solidIfEmpty(c, c.body.right - s, roofY - 1 - d, M.STEEL, col, ROLE.ORNAMENT);
+    // N68: each cap column stands on ITS OWN silhouette - keyed off the centre column's
+    // roof, the wedges floated beside a sloped tower's recessed top storeys.
+    for (let s = 0; s < 6; s += 1) {
+      for (const x of [c.body.left + s, c.body.right - s]) {
+        let top = 0;
+        while (top < c.ground && !c.mat[top * c.width + x]) top += 1;
+        if (top <= 2 || top >= c.ground) continue;
+        for (let d = 0; d <= s; d += 1) K.solidIfEmpty(c, x, top - 1 - d, M.STEEL, tone(tint, d === s ? 1.2 : 0.95), ROLE.ORNAMENT);
+      }
     }
-    // N63: THE ANNEX - the grey military building merged on the tower's flank, widening the
-    // base. Three and a half floors of plate armour against the wall, its outer face tapering
-    // in as it rises (a glacis), slit lights per storey, a flat armoured roof with a hazard
-    // lip, a sally door at its foot, and inside, a garrison room cut into the shared wall.
-    {
-      const aH = 3 * S.FLOOR + 20;
+    // N65: THE WING - the grey military building merged on the tower's flank, five to seven
+    // floors of it. The tower's floor grid runs on into the rooms band through doorways in
+    // the shared wall; behind the rooms a vertical hangar bay rises the wing's full height
+    // to a grated hatch in the roof; the outer face is the glacis, slit-lit per storey and
+    // cut with defence ports; the top floor carries the wing's control panel; the roof its
+    // turrets. A sally door opens at the glacis foot into the bay.
+    // N67: the add-on stands on the LEFT, the RIGHT, or BOTH flanks (annexSide 0 means
+    // both), at the shorter heights of the building's base; each wing joins the building
+    // it sits beside (the growth's weld pass seals the far edge to the neighbour). The
+    // armour crown, the dish mast and the plinth are laid once, after the wings.
+    const wingSides = annexSide === 0 ? [-1, 1] : [annexSide];
+    for (const dirOut of wingSides) {
+      const aH = Math.min(c.ground - 10, annexFloors * S.FLOOR + 10);
       const aTop = c.ground - aH;
-      const inner = annexSide < 0 ? c.body.left : c.body.right;           // against the tower wall
-      const dirOut = annexSide;
+      const inner = dirOut < 0 ? c.body.left : c.body.right;              // against the tower wall
+      const ax = (k) => inner + dirOut * k;                               // wing column k, 1-based
+      const CHAMFER = 18;                                                 // the top leans in
+      const outAt = (y) => ANNEX_W - Math.max(0, Math.round((CHAMFER - (y - aTop)) * 0.55));
+      const bayL = ROOMS_W + 1, bayR = ROOMS_W + BAY_W;                   // the shaft's columns
+      const bayTop = aTop + CHAMFER + 2;
+      const roomBack = (x, y) => K.pack(tone([34, 38, 46], ((x + y) % 9) ? 1 : 1.18));
+      // The wing's floors: the TOWER'S own rows, carried into the rooms band.
+      const wingFloors = c.floors.filter((f) => !f.wing && f.y > aTop + CHAMFER && f.y < c.ground - 2)
+        .sort((a, b) => a.y - b.y);
       for (let y = aTop; y < c.ground; y += 1) {
         const rise = c.ground - 1 - y;
-        const taper = Math.floor((y - aTop) / 26);                        // leans IN as it rises
-        const wEff = ANNEX_W - (Math.floor(aH / 26) - taper) * 2;
-        for (let k = 0; k < wEff; k += 1) {
-          const x = inner + dirOut * (1 + k);
+        const wEff = outAt(y);
+        for (let k = 1; k <= wEff; k += 1) {
+          const x = ax(k);
           const i = y * c.width + x;
           if (c.mat[i]) continue;
-          // the sketch's annex is MASS: solid plate armour, hatched grey - a garrison room
-          // is carved at its foot, the rest is armour through and through
-          const room = rise >= 4 && rise < 32 && k >= 5 && k < wEff - 5;
-          if (room) {
-            if (!c.back[i]) c.back[i] = K.pack(tone([36, 40, 48], ((x + y) % 9) ? 1 : 1.3));
+          const inBay = k >= bayL && k <= bayR && y >= bayTop;
+          const inRooms = k <= ROOMS_W && y > aTop + CHAMFER;
+          if (inBay || inRooms) {
+            if (!c.back[i]) c.back[i] = inBay ? K.pack(tone([26, 29, 36], ((x ^ y) % 7) ? 1 : 1.25)) : roomBack(x, y);
             continue;
           }
           K.solid(c, x, y, M.STEEL, milPlate(style, (k * 7 + rise) % 4, 4, rise, x, y), ROLE.WALL);
         }
-        // slit lights at each storey's band on the outer face
+        // slit lights at each storey's band on the glacis face
         if (rise % S.FLOOR === 18) {
-          for (let k = Math.max(5, wEff - 8); k < wEff - 2; k += 1) {
-            const x = inner + dirOut * (1 + k);
-            K.solid(c, x, y, M.GLASS, mix([26, 30, 36], (KIT_P(style).lamp || [255, 220, 140]), 0.4), ROLE.GLASS);
+          for (let k = Math.max(2, wEff - 5); k <= wEff - 1; k += 1) {
+            K.solid(c, ax(k), y, M.GLASS, mix([26, 30, 36], (KIT_P(style).lamp || [255, 220, 140]), 0.4), ROLE.GLASS);
+          }
+        }
+        // defence ports: a dark muzzle slot through the glacis at each storey's chest height
+        if (rise % S.FLOOR === 30 || rise % S.FLOOR === 31) {
+          for (let k = wEff - GLACIS + 1; k <= wEff; k += 1) {
+            const i = y * c.width + ax(k);
+            if (c.mat[i]) { c.paint[i] = K.pack(k === wEff ? [14, 15, 18] : tone(tint, 0.5)); }
           }
         }
       }
-      // the flat armoured roof with its hazard lip
-      for (let k = 0; k < ANNEX_W - (Math.floor(aH / 26)) * 2 + 2; k += 1) {
-        const x = inner + dirOut * (1 + k);
-        K.solidIfEmpty(c, x, aTop - 1, M.STEEL, ((k >> 1) & 1) ? [196, 164, 58] : tone(tint, 0.85), ROLE.ROOF);
-        K.solidIfEmpty(c, x, aTop, M.STEEL, tone(tint, 1.1), ROLE.ROOF);
+      // The continued floors: steel slabs across the rooms band at the tower's own rows,
+      // a doorway through the shared wall at every one - the floors genuinely run on.
+      for (const f of wingFloors) {
+        for (let r = 0; r < S.SLAB; r += 1) {
+          for (let k = 1; k <= ROOMS_W; k += 1) {
+            const i = (f.y + r) * c.width + ax(k);
+            if (!c.mat[i] && f.y + r < c.ground) { c.mat[i] = M.STEEL; c.role[i] = ROLE.SLAB; c.paint[i] = K.pack(tone(tint, r === 0 ? 1.05 : 0.8)); }
+          }
+        }
+        for (let y = f.y - S.DOOR_H; y < f.y; y += 1) {
+          for (let d = 0; d < 4; d += 1) {
+            const x = inner - dirOut * d + dirOut;                        // through the shared wall
+            const i = y * c.width + x;
+            if (c.mat[i] && (c.role[i] === ROLE.WALL || c.role[i] === ROLE.GLASS)) {
+              c.mat[i] = 0; c.role[i] = 0; c.paint[i] = 0; c.back[i] = c.back[i] || K.pack([40, 44, 52]);
+            }
+          }
+        }
+        c.floors.push({ storey: f.storey, y: f.y, left: Math.min(ax(2), ax(ROOMS_W - 1)), right: Math.max(ax(2), ax(ROOMS_W - 1)), wing: true });
       }
-      // the sally door at the annex's foot, and the opening into the tower
+      // The wing's rooms live like the military's own: one piece of kit a floor and a lamp.
+      const kitWalk = ['console', 'rack', 'locker', 'crate'];
+      wingFloors.forEach((f, n) => {
+        const name = kitWalk[(n + level) % kitWalk.length];
+        const w = { console: 30, rack: 26, locker: 18, crate: 24 }[name];
+        const x0 = Math.min(ax(3), ax(3 + w)) ;
+        if (w <= ROOMS_W - 5) K.FURNITURE[name](c, x0, f.y, KIT_P(style));
+        K.ceilingLamp(c, style, ax(ROOMS_W >> 1), f.y - S.CLEAR + 6);
+      });
+      // The control panel on the wing's top floor.
+      if (wingFloors.length) {
+        const top = wingFloors[0];
+        c.panels.push({ x: ax(ROOMS_W - 8), y: top.y, storey: top.storey });
+      }
+      // The bay: a FLUSH hazard threshold on the grade (N68: a strip a cell up hung in the
+      // air over the bay floor), a cradle stub either side standing on it, the mech's spawn.
+      for (let k = bayL; k <= bayR; k += 1) {
+        const i = (c.ground - 1) * c.width + ax(k);
+        if (!c.mat[i]) { c.mat[i] = M.STEEL; c.role[i] = ROLE.ORNAMENT; c.paint[i] = K.pack(((k >> 1) & 1) ? [196, 164, 58] : [40, 40, 44]); }
+      }
+      for (const k of [bayL, bayR]) for (let r = 2; r <= 7; r += 1) {
+        const i = (c.ground - r) * c.width + ax(k);
+        if (!c.mat[i]) { c.mat[i] = M.STEEL; c.role[i] = ROLE.ORNAMENT; c.paint[i] = K.pack(tone(tint, 0.9)); }
+      }
+      c.hangar = c.hangar || { left: Math.min(ax(bayL), ax(bayR)), right: Math.max(ax(bayL), ax(bayR)),
+        top: bayTop, bottom: c.ground - 1, door: { x: ax(outAt(c.ground - 1)), top: c.ground - S.DOOR_H, bottom: c.ground - 1 },
+        spawn: { x: ax((bayL + bayR) >> 1), y: c.ground } };
+      // the flat armoured roof - and the grated hatch over the bay (the mechs' way out, and
+      // the roof's drain: N64's water rule reads the platform cells). N66: on a SLOPED host
+      // (setback, tapered, crown...) the roof takes the tower's own terrace design instead
+      // of the hazard lip - the stepped silhouette extends over the wing, one building.
+      const hostVariant = (src.meta && src.meta.variant) || 'slab';
+      const sloped = hostVariant === 'setback' || hostVariant === 'tapered' || hostVariant === 'crown'
+        || hostVariant === 'spire' || hostVariant === 'needle';
+      for (let k = 1; k <= outAt(aTop) + 1; k += 1) {
+        const x = ax(k);
+        const overBay = k >= bayL && k <= bayR;
+        if (overBay) {
+          for (const yy of [aTop - 1, aTop]) {
+            const i = yy * c.width + x;
+            if (!c.mat[i]) { c.mat[i] = M.PLATFORM; c.role[i] = ROLE.ROOF; c.paint[i] = K.pack(tone(tint, ((k - bayL) % 4 < 2) ? 0.55 : 0.95)); }
+          }
+        } else if (sloped) {
+          K.solidIfEmpty(c, x, aTop - 1, M.CONCRETE, K.slabColor(style, 0, x, aTop - 1), ROLE.ROOF);
+          K.solidIfEmpty(c, x, aTop, M.CONCRETE, K.slabColor(style, 1, x, aTop), ROLE.ROOF);
+        } else {
+          K.solidIfEmpty(c, x, aTop - 1, M.STEEL, ((k >> 1) & 1) ? [196, 164, 58] : tone(tint, 0.85), ROLE.ROOF);
+          K.solidIfEmpty(c, x, aTop, M.STEEL, tone(tint, 1.1), ROLE.ROOF);
+        }
+      }
+      // (the terrace parapet at the glacis edge, the tower's trim carried out)
+      if (sloped) {
+        for (const k of [outAt(aTop), outAt(aTop) + 1]) {
+          K.solidIfEmpty(c, ax(k), aTop - 2, M.CONCRETE, tone(KIT_P(style).ornament || [120, 120, 126], 0.9), ROLE.ORNAMENT);
+        }
+      }
+      // the wing's own guns: turrets on the armoured roof (and an interceptor from level 3)
+      if (PW.buildingOrnaments && PW.buildingOrnaments.devices) {
+        const roofRect = [{ left: Math.min(ax(1), ax(bayL - 2)), right: Math.max(ax(1), ax(bayL - 2)), y: aTop - 1, top: true }];
+        PW.buildingOrnaments.devices(c, style, roofRect, level >= 3 ? ['turret', 'interceptor'] : ['turret'], dirOut,
+          PW.createRandom(((src.meta && src.meta.seed) || 1) * 31 + annexFloors));
+      }
+      // the sally door at the glacis foot, opening into the bay (the cut takes the slit
+      // lights with it - glass left in the opening hung in the air: N68)
       for (let y = c.ground - S.DOOR_H; y < c.ground; y += 1) {
-        for (let d = 0; d < 3; d += 1) {
-          const x = inner + dirOut * (ANNEX_W - Math.floor(aH / 26) * 2 - d);
+        for (let d = 0; d < GLACIS + 1; d += 1) {
+          const x = ax(outAt(y) - d);
           const i = y * c.width + x;
-          if (c.mat[i]) { c.mat[i] = 0; c.role[i] = 0; c.paint[i] = 0; }
+          if (c.mat[i] && (c.role[i] === ROLE.WALL || c.role[i] === ROLE.GLASS)) { c.mat[i] = 0; c.role[i] = 0; c.paint[i] = 0; }
           if (!c.back[i]) c.back[i] = K.pack(tone([40, 44, 52], 0.9));
         }
-        for (let d = 0; d < 4; d += 1) {
-          const x = inner - dirOut * d + dirOut;                          // through the shared wall
-          const i = y * c.width + x;
-          if (c.mat[i] && c.role[i] === ROLE.WALL) { c.mat[i] = 0; c.role[i] = 0; c.paint[i] = 0; c.back[i] = c.back[i] || K.pack([40, 44, 52]); }
-        }
       }
-      c.doors.push({ x: inner + dirOut * (ANNEX_W - Math.floor(aH / 26) * 2 - 1), side: dirOut, top: c.ground - S.DOOR_H, bottom: c.ground - 1 });
-      // the thin armour line carried over the tower's top, and the little dish on its stick
+      c.doors.push({ x: ax(outAt(c.ground - 1) - 1), side: dirOut, top: c.ground - S.DOOR_H, bottom: c.ground - 1 });
+    }
+    // the thin armour line carried over the tower's top, and the little dish on its stick
+    {
       const crownX0 = Math.min(c.body.left, c.body.right), crownX1 = Math.max(c.body.left, c.body.right);
       for (let x = crownX0; x <= crownX1; x += 1) {
         let y = 0;
         while (y < c.ground && !c.mat[y * c.width + x]) y += 1;
         if (y > 2 && y < c.ground) K.solidIfEmpty(c, x, y - 1, M.STEEL, tone(tint, ((x >> 2) & 1) ? 1.05 : 0.9), ROLE.ORNAMENT);
       }
-      const mastX = annexSide < 0 ? c.body.left + 10 : c.body.right - 10;
+      const mastSide = wingSides[0];
+      const mastX = mastSide < 0 ? c.body.left + 10 : c.body.right - 10;
       for (let k = 1; k <= 10; k += 1) K.solidIfEmpty(c, mastX, roofY - 1 - k, M.STEEL, (k % 4) ? [76, 80, 88] : [100, 104, 112], ROLE.ORNAMENT);
-      for (const [dx, dy] of [[-2, 9], [-1, 10], [0, 11], [1, 10], [2, 9]]) K.deco(c, mastX + (annexSide < 0 ? dx : -dx), roofY - 1 - dy, [168, 174, 182]);
+      for (const [dx, dy] of [[-2, 9], [-1, 10], [0, 11], [1, 10], [2, 9]]) K.deco(c, mastX + (mastSide < 0 ? dx : -dx), roofY - 1 - dy, [168, 174, 182]);
       // the plinth: one flush plated course tying the combined footprint at the grade
-      for (let x = Math.min(c.body.left, inner + dirOut * ANNEX_W) - 3; x <= Math.max(c.body.right, inner + dirOut * ANNEX_W) + 3; x += 1) {
+      const extL = c.body.left - (annexSide <= 0 ? ANNEX_W : 0), extR = c.body.right + (annexSide >= 0 ? ANNEX_W : 0);
+      for (let x = extL - 3; x <= extR + 3; x += 1) {
         const i = (c.ground - 1) * c.width + x;
         if (!c.mat[i]) K.solid(c, x, c.ground - 1, M.FOUNDATION, ((x >> 2) & 1) ? [74, 78, 84] : [64, 67, 73], ROLE.ORNAMENT);
       }
     }
-    c.body.left -= annexSide < 0 ? ANNEX_W + 4 : pad - 1;
-    c.body.right += annexSide < 0 ? pad - 1 : ANNEX_W + 4;
+    // N65: the merged building's interiors go military too - the civilian furnishings are
+    // struck from the rooms (the back layer carries them, nothing structural) and the
+    // garrison's kit moves in: consoles, racks, lockers and crates, floor by floor. The
+    // stair band keeps its rails; walls, glazing, lamps and doorways are untouched.
+    {
+      const roomBackTone = (x, y) => K.pack(tone([34, 38, 46], ((x + y) % 9) ? 1 : 1.18));
+      const sBand = c.stairs.length ? [Math.min(...c.stairs.map((s) => Math.min(s.from, s.to))) - S.LANDING - 2,
+        Math.max(...c.stairs.map((s) => Math.max(s.from, s.to))) + S.LANDING + 2] : null;
+      const items = ['console', 'rack', 'locker', 'crate', 'rack'];
+      const widths = { console: 30, rack: 26, locker: 18, crate: 24 };
+      for (const f of c.floors) {
+        if (f.wing) continue;
+        const spans = [];
+        if (sBand && sBand[0] > f.left + 6 && sBand[1] < f.right - 6) {
+          spans.push([f.left + 2, sBand[0] - 2], [sBand[1] + 2, f.right - 2]);
+        } else spans.push([f.left + 2, f.right - 2]);
+        for (const [a, b] of spans) {
+          if (b - a < 14) continue;
+          for (let y = f.y - S.CLEAR + 6; y < f.y; y += 1) {
+            for (let x = a; x <= b; x += 1) {
+              const i = y * c.width + x;
+              if (!c.mat[i] && c.back[i]) c.back[i] = roomBackTone(x, y);
+            }
+          }
+          let x = a + 3, n = 0;
+          while (n < items.length && x < b - 16) {
+            const name = items[(n + f.storey) % items.length], w = widths[name];
+            if (x + w > b - 2) break;
+            K.FURNITURE[name](c, x, f.y, KIT_P(style));
+            x += w + 8 + ((f.storey * 7 + n * 13) % 9);
+            n += 1;
+          }
+        }
+      }
+    }
+    c.body.left -= annexSide <= 0 ? ANNEX_W + 4 : pad - 1;
+    c.body.right += annexSide >= 0 ? ANNEX_W + 4 : pad - 1;
     return c;
   }
   const KIT_P = (style) => STYLES[style] || STYLES.modern;

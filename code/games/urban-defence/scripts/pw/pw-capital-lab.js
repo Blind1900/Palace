@@ -202,6 +202,10 @@
       if (air) air.step();
       if (PW.stepSmokeBursts) PW.stepSmokeBursts(world, DT);
       if (PW.stepSmoulders) PW.stepSmoulders(world, DT);
+      // N68: the lab steps the flora too - without this, a tree stranded by the growth's
+      // earthworks (a regrade, a runway pad) never noticed its footing was gone and hung
+      // in the air; the live world always stepped it.
+      if (PW.flora && PW.flora.step) PW.flora.step(world, particles);
       growth.step(DT * speed);
     }
   }
