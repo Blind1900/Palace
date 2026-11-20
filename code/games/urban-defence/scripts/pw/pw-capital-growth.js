@@ -171,6 +171,18 @@
       lot.groundSig = apronSig(lot.placed);
       world.buildings[lot.owner - 1] = PW.buildingRecord(world, res.stamp,
         { id: lot.owner, side: 'left', type: lot.type, style: city.style, level: lot.level, kind: city.kind });
+      // The newcomer threads its vault cores onto its faction's bundle (the worldgen rule,
+      // step E): the line grows out to it or the stretch is taken up and re-laid through
+      // its connectors - which also heals any cut the foundation work just made. A re-seat
+      // released the old threading in eraseLot, so the pair never doubles up.
+      lot.faction = city.faction;
+      if (world.pipes && world.pipes.connectCore && city.faction) {
+        const rec = world.buildings[lot.owner - 1];
+        for (const core of rec.cores || []) {
+          if (core.orb || core.standing || !core.vault) continue;
+          world.pipes.connectCore(core.x, core.y, city.faction, world.pipes.TAPS[lot.type], lot.owner);
+        }
+      }
       clearSimAround(lot.placed.x0 - 8, lot.placed.y0 - 8, lot.placed.x1 + 8, lot.placed.y1 + 60);
       flashes.push({ box: { ...lot.placed }, age: 0 });
       return true;
@@ -181,6 +193,8 @@
     function eraseLot(lot) {
       const p = lot.placed;
       if (!p) return;
+      // Let go of the bundle first: spans and threaded cores off, the pipe itself stays.
+      if (lot.faction && world.pipes && world.pipes.releaseBuilding) world.pipes.releaseBuilding(lot.faction, lot.owner);
       const x0 = p.worksL - 8, x1 = p.worksR + 8;
       const y0 = Math.max(2, p.y0 - 4), y1 = Math.min(world.height - 30, p.y1 + 150);
       for (let y = y0; y <= y1; y += 1) for (let x = x0; x <= x1; x += 1) {
@@ -286,7 +300,9 @@
       return null;
     }
 
-    function drop(xIn, kind, style) {
+    // `faction` names the side ('left'/'right') whose supply bundle the city threads onto as
+    // it grows (the live world passes it; the lab has no lines and passes none).
+    function drop(xIn, kind, style, faction) {
       const x = Math.round(xIn);
       if (x < 120 || x > world.width - 120) return { ok: false, note: 'off the map' };
       const b = barrierIn(x - 40, x + 40);
@@ -311,7 +327,7 @@
         if (!farmish) for (const o of cities) if (o.kind === 'farm' && Math.abs(o.x - x) < 700) farmish = true;
         setting = nearMtn && nearMtn.kind === 'mountain' ? 'mountain' : farmish ? 'farm' : 'urban';
       }
-      const city = { id: cities.length + 1, kind, style, x, setting, level: 1, clock: 0, actions: 0,
+      const city = { id: cities.length + 1, kind, style, x, setting, faction: faction || null, level: 1, clock: 0, actions: 0,
         appendClock: { left: APPEND_EVERY, right: APPEND_EVERY },   // the first rings come at once
         infillClock: 0,
         rings: { left: [], right: [] }, edge: { left: x, right: x }, capEdge: { left: x, right: x },

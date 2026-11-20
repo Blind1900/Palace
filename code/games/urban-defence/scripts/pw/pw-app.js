@@ -257,19 +257,15 @@
     for (const o of [...(world.outposts || []), ...(world.bunkers || [])]) {
       for (const f of o.footprints || []) if (p.x > f[0] - 90 && p.x < f[1] + 90) { lastDig = 'seed: claimed by the military'; return; }
     }
-    // The buried bundle: a new lot's foundation work would saw through it (worldgen lays
-    // buildings FIRST, then threads the line through their spans). Until the growth system
-    // threads its lots onto the line the same way (the pipes' connect/release protocol,
-    // next slice), a seed city keeps clear of the lines' spans.
-    for (const l of (world.pipes && world.pipes.lines) || []) {
-      if (p.x > l.x0 - 120 && p.x < l.x1 + 120) { lastDig = 'seed: the supply line runs under this ground - open country only, for now'; return; }
-    }
     let near = null;
     for (const s of world.settlements || []) {
       const d = Math.abs((s.streetLeft + s.streetRight) / 2 - p.x);
       if (!near || d < near.d) near = { s, d };
     }
-    const r = capital.drop(Math.round(p.x), kind, near ? near.s.style : 'modern');
+    // The nearest town lends the seed its style AND its faction side: the growing city
+    // threads its cores onto that side's bundle lot by lot (connect on place, release on
+    // re-seat), which also heals any cut the foundation work makes landing over the line.
+    const r = capital.drop(Math.round(p.x), kind, near ? near.s.style : 'modern', near ? near.s.side : null);
     lastDig = r.ok ? `seed: ${kind} ${r.city ? r.city.id : ''} planted` : `seed: ${r.note}`;
   }
   canvas.addEventListener('contextmenu', (event) => event.preventDefault());

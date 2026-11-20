@@ -75,6 +75,33 @@
         if (list) list.push(s); else spanMap.set(x, [s]);
       }
     };
+    // A grown building taken out of the world (a lot re-seated for a level-up, the centre
+    // tightening, a dismantling) lets go of the line: its spans' licences die and its cores
+    // come off the threading, so the next re-read of the stretch runs the bundle straight
+    // again. The laid pipe itself stays - it is the line's, not the building's - and cargo
+    // already bound for a removed core simply delivers to the side's stock at the old port.
+    const removeSpans = (building) => {
+      for (let i = spans.length - 1; i >= 0; i -= 1) {
+        if (spans[i].building !== building) continue;
+        const s = spans[i];
+        spans.splice(i, 1);
+        for (let x = s.x0; x <= s.x1; x += 1) {
+          const list = spanMap.get(x);
+          if (!list) continue;
+          const at = list.indexOf(s);
+          if (at >= 0) list.splice(at, 1);
+          if (!list.length) spanMap.delete(x);
+        }
+      }
+    };
+    function releaseBuilding(side, building) {
+      const line = lines.find((l) => l.side === side) || null;
+      removeSpans(building);
+      if (!line) return;
+      const before = line.cores.length;
+      line.cores = line.cores.filter((c) => c.building !== building);
+      stats.cores -= before - line.cores.length;
+    }
     const spanAt = (x, y) => {
       const list = spanMap.get(x);
       if (!list) return false;
@@ -1267,7 +1294,7 @@
       }
     }
 
-    const api = { build, step, draw, attach, carry, connectCore, notifyDamage, openEnds, lines, stats, flowing, lineFor, contour, BORE, BED, LANES, TAPS };
+    const api = { build, step, draw, attach, carry, connectCore, releaseBuilding, notifyDamage, openEnds, lines, stats, flowing, lineFor, contour, BORE, BED, LANES, TAPS };
     return api;
   }
 
