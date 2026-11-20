@@ -417,6 +417,8 @@
       const ring = city.rings[side].length;
       // The spread outruns its upkeep: no more rings than the city's level affords (N44 size).
       if (ring >= city.level + 3) { if (!city.blocked[side]) city.blocked[side] = 'upkeep'; return false; }
+      // N60: the edge does not build into a fresh crater's reach
+      if (nearBlast(Math.min(city.edge[side], city.edge[side] + dir * 320) - 120, Math.max(city.edge[side], city.edge[side] + dir * 320) + 120)) return false;
       const lot = { type: 'population', level: 1, age: 0, ring, side, bornLevel: city.level,
         variant: POP_LOT_VARIANTS[rand.int(0, POP_LOT_VARIANTS.length - 1)], seedN: seedN += 17, owner: 0 };
       const canvas = canvasFor(city, lot);
@@ -645,6 +647,7 @@
       for (const lot of [...city.rings.left, ...city.rings.right].sort((a, b) => a.ring - b.ring)) {
         if (lot.type !== 'population' && !(lot.type === 'military' && lot.variant === 'tower')) continue;
         if (city.blocked[lot.side] === 'edge') continue;   // pinned at the map's edge: no room to grow
+        if (lot.placed && nearBlast(lot.placed.worksL, lot.placed.worksR)) continue;   // N60: never into a live collapse
         const target = Math.min(MAX_LEVEL, city.level, 1 + Math.floor(lot.age / AGE_PER_LEVEL));
         if (target <= lot.level) continue;
         lot.level += 1;
@@ -800,6 +803,7 @@
         if (!best || Math.abs(l.x - x) < Math.abs(best.x - x)) best = l;
       }
       if (!best) return { ok: false, note: 'no tower to militarise' };
+      if (nearBlast(best.placed.worksL, best.placed.worksR)) return { ok: false, note: 'under fire - wait for the dust' };
       best.mil = true; best.canvas = null;
       seatChain(city, best.side, best.ring);
       if (!best.placed) { best.mil = false; best.canvas = null; seatChain(city, best.side, Math.min(best.ring, city.rings[best.side].length)); return { ok: false, note: 'the works would not fit' }; }
@@ -891,7 +895,7 @@
     // ---- Military ----------------------------------------------------------------------------
     const MIL_MAIN = ['compound', 'fortress', 'command', 'bastion'];
     function militaryAct(city) {
-      if (city.actions % 3 === 2 && city.level < 6) {
+      if (city.actions % 3 === 2 && city.level < 6 && !nearBlast(city.capEdge.left, city.capEdge.right)) {
         city.level += 1;
         eraseLot(city.main);
         city.main.level = city.level;
@@ -1170,7 +1174,8 @@
       city.actions += 1;
       if (city.kind === 'capital') {
         const lots = city.rings.left.length + city.rings.right.length;
-        if (lots >= city.level * 2 && city.level < MAX_LEVEL) return levelUp(city);
+        if (lots >= city.level * 2 && city.level < MAX_LEVEL
+          && !nearBlast(city.edge.left, city.edge.right)) return levelUp(city);   // N60: no compaction under fire
         // The edge creeps out on its own slow clock; the towers level by age, not here (N48).
         const sides = city.rings.left.length <= city.rings.right.length ? ['left', 'right'] : ['right', 'left'];
         for (const s of sides) {
@@ -1207,11 +1212,41 @@
       return militaryAct(city);
     }
 
+    // N60: the lab must run smoothly through mass development and blast storms at once. The
+    // crews take cover: while the air is thick (particles) or pieces are still falling
+    // (fragments), growth does NO heavy work - no appends, no re-seats, no joints - and even
+    // in calmer moments only one heavy op runs per tick while any dust hangs. A fresh crater
+    // keeps restamps away locally besides (never rebuild into a live collapse).
+    // A storm is falling pieces, a very recent blast, or an extreme particle load - NOT the
+    // smoke that hangs for minutes after (the long smoulders kept the crews in cover forever).
+    const stormy = () => {
+      if (world.fragments && typeof world.fragments.list === 'function') {
+        const fl = world.fragments.list();
+        if (fl && fl.length > 0) return true;
+      }
+      if (world.particles && world.particles.count > 6000) return true;
+      if (world.labBlasts && world.labBlasts.length) {
+        const last = world.labBlasts[world.labBlasts.length - 1];
+        if ((world.tick || 0) - last.t < 240) return true;
+      }
+      return false;
+    };
+    const nearBlast = (x0, x1) => {
+      if (!world.labBlasts) return false;
+      const now = world.tick || 0;
+      for (const bl of world.labBlasts) {
+        if (now - bl.t > 180) continue;
+        if (bl.x >= x0 - 400 && bl.x <= x1 + 400) return true;
+      }
+      return false;
+    };
     let stepTick = 0;
     function step(dt) {
-      let heavy = 0;
       stepTick += 1;
       if (stepTick % 30 === 0) for (const city of cities) stepBridges(city);   // N56
+      const storm = stormy();
+      const heavyMax = storm ? 0 : (world.particles && world.particles.count > 1500 ? 1 : 3);
+      let heavy = 0;
       for (const city of cities) {
         if (city.kind === 'farm') {
           for (const field of city.fields) {
@@ -1229,15 +1264,15 @@
         city.jointClock += dt;
         if (city.jointClock >= JOINT_EVERY) {   // N58: close neighbours join through a merge point
           city.jointClock = 0;
-          if (heavy < 3 && tryJoint(city)) heavy += 1;
+          if (heavy < heavyMax && tryJoint(city)) heavy += 1;
         }
         city.clock += dt;
-        while (city.clock >= GROW_EVERY && heavy < 3) {
+        while (city.clock >= GROW_EVERY && heavy < heavyMax) {
           city.clock -= GROW_EVERY;
           if (act(city)) heavy += 1;
         }
         if (city.clock > GROW_EVERY * 4) city.clock = GROW_EVERY * 4;
-        if (city.kind === 'capital' && heavy < 3 && ageLots(city)) heavy += 1;
+        if (city.kind === 'capital' && heavy < heavyMax && ageLots(city)) heavy += 1;
       }
       for (let i = flashes.length - 1; i >= 0; i -= 1) { flashes[i].age += 1 / 60; if (flashes[i].age > 0.9) flashes.splice(i, 1); }
     }

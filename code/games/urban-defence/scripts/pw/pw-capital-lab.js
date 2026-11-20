@@ -117,6 +117,9 @@
   function explode(x, y, radius, power = 1) {
     const r = PW.explode(world, particles, { x, y, radius, power });
     if (cores && cores.supportLost) cores.supportLost(x - radius - 14, y - radius - 14, x + radius + 14, y + radius + 14);
+    // N60: the growth system keeps clear of fresh craters - no restamp over a live collapse
+    (world.labBlasts = world.labBlasts || []).push({ x, y, t: world.tick || 0 });
+    if (world.labBlasts.length > 24) world.labBlasts.shift();
     return r;
   }
   const blasts = { blastS: { radius: 22, power: 0.9 }, blastM: { radius: 48, power: 1.1 } };
