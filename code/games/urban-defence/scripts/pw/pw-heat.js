@@ -22,7 +22,6 @@
   // water goes dark at once, in a hiss of steam. (QUENCH: the share of their difference traded
   // each heat tick.)
   const QUENCH = 0.4;
-  const HOLLOW = FLAG.HOLLOW || 0;
   // How much heat a cell holds for each degree, against rock's (its volumetric heat capacity -
   // the heat equation's, as the physics references have it): air and the gases little (kept a
   // little more than real, so a fire's heat still carries), water a great deal, metal more than
@@ -65,13 +64,6 @@
 
     const decoAt = (x, y) => PW.getLayer(world, 'deco', x, y);
     const isOpenCell = (i) => open[mat[i] & ID_MASK] === 1;
-    // (is the pipe cell at (x, y) - local cell li of chunk c, or c < 0 to look it up - the hollow
-    // inside of a bore?)
-    const hollowAt = (c, li, x, y) => {
-      if (!HOLLOW) return false;
-      const f = c >= 0 ? world.flags[c] : null;
-      return ((f ? f[li] : PW.getFlags(world, x, y)) & HOLLOW) !== 0;
-    };
     function hasAir(i, x, y) {
       return (x > 0 && isOpenCell(i - 1)) || (x < W - 1 && isOpenCell(i + 1)) || (y > 0 && isOpenCell(i - W)) || (y < H - 1 && isOpenCell(i + W));
     }
@@ -368,13 +360,12 @@
             }
             let excess = t - AMBIENT;
             if (excess > COLD || excess < -COLD) {
-              // Losses to the surroundings; hot air rises and drifts downwind. (The hollow inside
-              // of a pipe's bore is air too, shut in: hot gas in it climbs its wells.)
-              const bore = id === M.PIPE && hollowAt(c, li, x, y);
-              if (open[id] || bore) {
-                t -= excess * (!bore && y < world.groundTop[x] ? LOSS_OPEN : LOSS_OPEN_UNDER);
+              // Losses to the surroundings; hot air rises and drifts downwind. (A pipe's bore is
+              // open air too, shut in by its casing: hot gas in it climbs its wells.)
+              if (open[id]) {
+                t -= excess * (y < world.groundTop[x] ? LOSS_OPEN : LOSS_OPEN_UNDER);
                 excess = t - AMBIENT;
-                if (excess > 5 && y > 0 && (bore ? (mat[i - W] & ID_MASK) === M.PIPE && hollowAt(ly > 0 ? c : -1, li - CHUNK, x, y - 1) : open[mat[i - W] & ID_MASK])) {
+                if (excess > 5 && y > 0 && open[mat[i - W] & ID_MASK]) {
                   const up = excess * RISE;
                   t -= up;
                   if (ly > 0) T[li - CHUNK] += up; else PW.addHeat(world, x, y - 1, up);

@@ -64,6 +64,7 @@
                              // is looked at as it is
   const SAG_CELLS = 30000;   // cells moved per tick, at most, by all the sags under way
   const HOLLOW_MAX = 30000;  // cells: a hollow bigger than this is looked at as it is
+  const BORE = PW.FLAG.HOLLOW || 0;   // (the open inside of a supply line's bore: see findHollow)
   // Broken rock takes up about a third more room than it did whole, so a hollow under a cover
   // more than CHOKE times its own height fills with its own broken roof before anything shows at
   // the surface: it chokes (the fill goes in a share a tick).
@@ -405,7 +406,7 @@
       let started = false;
       for (const i of kept) {
         const x = i % W, y = (i / W) | 0, j = i + W;
-        if (y + 2 >= H || box.mark[(y + 1 - box.y0) * box.w + x - box.x0] || !open[mat[j] & ID_MASK] || y + 1 <= world.groundTop[x] || tunnelAt(x, y + 1)) continue;
+        if (y + 2 >= H || box.mark[(y + 1 - box.y0) * box.w + x - box.x0] || !open[mat[j] & ID_MASK] || y + 1 <= world.groundTop[x] || tunnelAt(x, y + 1) || (PW.getFlags(world, x, y + 1) & BORE)) continue;
         const hollow = findHollow(x, y + 1, box);
         if (!hollow.open && startSag(hollow)) started = true;
       }
@@ -413,7 +414,8 @@
       return kept;
     }
     // The hollow open cell (x, y) is part of: the open cells joined to it under the ground line -
-    // not a tunnel (its timbering holds its roof up) nor a building's rooms. `open` when it opens
+    // not a tunnel (its timbering holds its roof up), a building's rooms, nor the bore of a supply
+    // line (open inside its steel casing). `open` when it opens
     // to the sky (an overhang, a crater: that is the ordinary breaking's) or reaches too far.
     function findHollow(sx, sy, box) {
       const { mark, w, x0: ox, y0: oy, x1: ex, y1: ey } = box;
@@ -427,7 +429,9 @@
         mark[k] = 1;
         if (!open[mat[ny * W + nx] & ID_MASK]) return;
         const o = PW.getOwner(world, nx, ny);
-        if (tunnelAt(nx, ny) || (o > 0 && o < 50000)) return;
+        // (a building's rooms, a tunnel, a supply line's bore - open inside its casing - are no
+        // hollow in the ground)
+        if (tunnelAt(nx, ny) || (o > 0 && o < 50000) || (PW.getFlags(world, nx, ny) & BORE) !== 0) return;
         if (n >= HOLLOW_MAX) { isOpen = true; return; }
         queue[n++] = ny * W + nx;
       };

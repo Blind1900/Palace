@@ -16,14 +16,12 @@
   const PW = window.PW;
   const { M, FLAG, ID_MASK } = PW;
   const { structural, terrain } = PW.mat;
-  // N38 part 4: the bore as REAL space. Off, the inside of the bore is solid M.PIPE painted as
-  // the lanes, and the physics track reads FLAG.HOLLOW to pass gas through the solid. On, each
-  // lane row is carved to real air with the lane's colour on the back wall behind it - smoke
-  // drifts, water drops and debris rains through the actual tube under the ordinary physics -
-  // while the casing and the lane dividers stay solid steel. Default off until the physics
-  // track's half of the flip lands (pw-heat's hollowAt, pw-particles' gasOpen PIPE case and
-  // intoMouths go in the same change); the two halves flip together, tested together.
-  if (PW.PIPE_CAVITY === undefined) PW.PIPE_CAVITY = false;
+  // N38 part 4: the bore as REAL space. Each lane row is carved to real air with the lane's colour
+  // on the back wall behind it - smoke drifts, water drops and debris rains through the actual
+  // tube under the ordinary physics - while the casing and the lane dividers stay solid steel.
+  // (Off - flags=PIPE_CAVITY:0 - the inside of the bore is solid M.PIPE painted as the lanes, and
+  // nothing passes through it: the physics no longer reads FLAG.HOLLOW.)
+  if (PW.PIPE_CAVITY === undefined) PW.PIPE_CAVITY = true;
 
   const ORE_BITS = [[240, 210, 255], [192, 107, 252], [155, 86, 203], [127, 71, 167]];
   // The three lanes, top to bottom inside the casing. `row` is the lane's row within the bore.
@@ -231,8 +229,9 @@
     // machines - carved open it would drain the pump's own lake into the line for real.
     function layCell(line, x, y, color, row, solid) {
       if (x < 1 || y < 1 || x >= W - 1 || y >= H - 1) return false;
-      // The bore is hollow (N17F): its inside rows are marked so smoke and fire travel the
-      // pipe among the cargo (the physics track reads the flag; everything else sees solid).
+      // The bore is hollow (N17F): its inside rows are marked - bookkeeping for the line's own
+      // take-up and repair; what the physics sees is the carve itself, its lanes open air (see
+      // PW.PIPE_CAVITY above).
       const inside = row !== undefined && row > 0 && row < BORE - 1;
       if (inside) PW.setFlag(world, x, y, FLAG.HOLLOW);
       const id = mat[y * W + x] & ID_MASK;

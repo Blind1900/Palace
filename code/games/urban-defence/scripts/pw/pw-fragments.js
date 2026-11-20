@@ -228,6 +228,16 @@
           cx = sx / mass; cy = sy / mass;
         }
       }
+      // (a plant's piece is one body of wood too: wood with a gap in it - a bough lifted across a
+      // fork, a twig cut short - goes as a piece for each part of it, its leaves with them)
+      if (spec.flora && !spec.pivot && !spec.flex && !spec.joined) {
+        const parts = partsOf(grid, gw, gh, SOL);
+        if (parts) {
+          for (const ks of parts) spawn({ ...spec, cells: null, data: pick(data, ks), joined: true });
+          stats.parted = (stats.parted || 0) + parts.length;
+          return null;
+        }
+      }
       // What it strikes with is its frame - pillars, floors, outer walls (a tree's wood). A
       // building is mostly air: its rooms are open, the back wall only a panel behind them, so
       // what it falls on can come into its rooms (and a piece hollow enough breaks up the easier).
@@ -349,7 +359,38 @@
     // one. Its frame and its back wall hold it together, cell to cell, corners too; a fitting or a
     // lick of paint holds nothing, and goes with the part it is on)
     const PART_LABEL = { buf: new Int32Array(0), queue: new Int32Array(0) };
+    // (is it all one? Its frame's runs along each row - unbroken stretches of it - each joined to
+    // the runs it touches in the row above, corners too: most often it hangs together, and that
+    // is all there is to know - a cell read each, not a search round every cell)
+    const RUNS = { x0: new Int32Array(0), x1: new Int32Array(0), root: new Int32Array(0) };
+    function onePart(grid, gw, gh, solid) {
+      const most = ((gw + 1) >> 1) * gh + 1;
+      if (RUNS.x0.length < most) { RUNS.x0 = new Int32Array(most); RUNS.x1 = new Int32Array(most); RUNS.root = new Int32Array(most); }
+      const { x0, x1, root } = RUNS;
+      const find = (r) => { while (root[r] !== r) { root[r] = root[root[r]]; r = root[r]; } return r; };
+      let n = 0, parts = 0, prev = 0, prevEnd = 0;
+      for (let v = 0, g = 0; v < gh; v += 1) {
+        const start = n;
+        let p = prev;
+        for (let u = 0; u < gw; u += 1, g += 1) {
+          if (!grid[g] || !solid[grid[g] - 1]) continue;
+          const a = u;
+          while (u + 1 < gw && grid[g + 1] && solid[grid[g + 1] - 1]) { u += 1; g += 1; }
+          x0[n] = a; x1[n] = u; root[n] = n; parts += 1;
+          // (the runs above it that reach from a - 1 to u + 1)
+          while (p < prevEnd && x1[p] < a - 1) p += 1;
+          for (let q = p; q < prevEnd && x0[q] <= u + 1; q += 1) {
+            const ra = find(q), rb = find(n);
+            if (ra !== rb) { root[rb] = ra; parts -= 1; }
+          }
+          n += 1;
+        }
+        prev = start; prevEnd = n;
+      }
+      return parts <= 1;
+    }
     function partsOf(grid, gw, gh, solid) {
+      if (onePart(grid, gw, gh, solid)) return null;
       const N = gw * gh;
       if (PART_LABEL.buf.length < N) { PART_LABEL.buf = new Int32Array(N); PART_LABEL.queue = new Int32Array(N); }
       const lab = PART_LABEL.buf, queue = PART_LABEL.queue;
