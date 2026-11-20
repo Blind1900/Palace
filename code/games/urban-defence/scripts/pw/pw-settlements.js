@@ -1551,5 +1551,5 @@
 
   PW.generateSettlements = generateSettlements;
   PW.capturePumpPrints = capturePumpPrints;
-  PW.settlementTools = { terracePad, paveStreet, carveBox, ladder, tunnelLamps, sowField, drawCrop, recountField, fieldY, TUNNEL, PAVING, PAD_DEPTH };
+  PW.settlementTools = { terracePad, paveStreet, paveRunway, carveBox, ladder, tunnelLamps, sowField, drawCrop, recountField, fieldY, TUNNEL, PAVING, PAD_DEPTH };
 })();

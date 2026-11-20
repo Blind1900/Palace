@@ -11,6 +11,11 @@
 
   // Hangar sized for the fleet at real scale: jets ~180 cells long, mechs ~85 tall, tanks ~120 long.
   const HANGAR = Object.freeze({ width: 260, clear: 108, door: 100, wall: 8, vaultRise: 30, vaultThick: 7 });
+  // N57: the growth system's bases went vertical - the hangar NARROWER (a jet still just fits)
+  // and the blocks a storey taller; the fleet's room is the runway outside, not floor. Passed
+  // as options.vertical by the lab: the fixed worldgen keeps its proportions (changing them
+  // under the towns reflowed the ruins and broke the core-rise and collapse checks on seed 3).
+  const HANGAR_VERTICAL_WIDTH = 210;
 
   // N52: the military skin - geometric plate armour in gunmetal, read from the sci-fi base
   // references but drawn in the game's own sprite voice. Large flat panels with recessed seams,
@@ -41,9 +46,11 @@
     // An outpost is the block alone, with no hangar: a fortified blockhouse with a watchtower, the
     // kind that holds a mountain top or a pass.
     const hangar = variant !== 'outpost';
-    const rearStoreys = { compound: 2, fortress: 3, command: 4, bastion: 1, outpost: 2 }[variant] + (level >= 5 ? 1 : 0);
+    const vertical = !!options.vertical;   // N57: the growth system's taller, narrower proportions
+    const rearStoreys = { compound: 2, fortress: 3, command: 4, bastion: 1, outpost: 2 }[variant] + (level >= 5 ? 1 : 0) + (vertical ? 1 : 0);
     const rearWidth = 140;
-    const bodyWidth = hangar ? rearWidth + HANGAR.width - HANGAR.wall : rearWidth;
+    const hw = vertical ? HANGAR_VERTICAL_WIDTH : HANGAR.width;
+    const bodyWidth = hangar ? rearWidth + hw - HANGAR.wall : rearWidth;
     const margin = 44, coreDepth = K.VAULT_DEPTH + 3;
     const top = hangar ? Math.max(rearStoreys * S.FLOOR + 120, HANGAR.clear + HANGAR.vaultRise + 90) : rearStoreys * S.FLOOR + 130;
     const width = bodyWidth + margin * 2, height = top + coreDepth + 20;

@@ -132,6 +132,8 @@
         lot.type === 'farm' ? Math.max(1, Math.min(6, lot.level)) : Math.max(1, Math.min(7, lot.level));
       const opts = { style: city.style, level, variant: lot.variant, seed: lot.seedN, facing: lot.side === 'left' ? 1 : -1 };
       if (lot.type === 'population' && lot.ring >= 0) opts.storeys = skylineStoreys(level);
+      if (lot.type === 'military') opts.vertical = true;   // N57: taller bases, narrower hangars
+
       let cv = T[lot.type](opts);
       // N55: a militarised tower is rebuilt bulkier - armour skin, steel floors, gunmetal.
       if (lot.mil && lot.type === 'population' && PW.militarise) cv = PW.militarise(cv, city.style);
@@ -139,6 +141,12 @@
     }
     const bodyWidth = (canvas) => canvas.body.right - canvas.body.left + 1;
 
+    const apronSig = (p) => {
+      let sig = 0;
+      for (let x = Math.max(2, p.worksL - 18); x <= p.worksL - 2; x += 1) sig += world.groundTop[x];
+      for (let x = p.worksR + 2; x <= Math.min(world.width - 3, p.worksR + 18); x += 1) sig += world.groundTop[x];
+      return sig;
+    };
     function placeLot(city, lot, centerX) {
       const canvas = lot.canvas || (lot.canvas = canvasFor(city, lot));
       const w = bodyWidth(canvas);
@@ -149,6 +157,10 @@
       lot.placed = { x0: res.stamp.x, y0: res.stamp.y, x1: res.stamp.x + res.stamp.width - 1,
         y1: res.stamp.y + res.stamp.height - 1, worksL: res.works[0], worksR: res.works[1] };
       for (let x = lot.placed.worksL - 4; x <= lot.placed.worksR + 4; x += 1) PW.refreshGroundTop(world, x);
+      // N57: remember the lie of the ground BESIDE the works (the approach strips - over the
+      // works themselves groundTop reads the building's own roof). A neighbour's later
+      // earthmoving is noticed by this signature changing, and the lot re-seats.
+      lot.groundSig = apronSig(lot.placed);
       world.buildings[lot.owner - 1] = PW.buildingRecord(world, res.stamp,
         { id: lot.owner, side: 'left', type: lot.type, style: city.style, level: lot.level, kind: city.kind });
       clearSimAround(lot.placed.x0 - 8, lot.placed.y0 - 8, lot.placed.x1 + 8, lot.placed.y1 + 60);
@@ -296,6 +308,7 @@
       city.edge = { left: city.capEdge.left, right: city.capEdge.right };
       city.fieldEdge = { left: main.placed.worksL - 4, right: main.placed.worksR + 4 };
       cities.push(city);
+      if (kind === 'military') layRunway(city);   // N57: the base's runway from the first day
       note(city, `${kind} seed takes root`);
       return { ok: true, city };
     }
@@ -758,6 +771,43 @@
       }
     }
 
+    // N57: a military base gets its runway for the planes and mechs - graded level with the
+    // hangar floor out from the door, paved the settlements' way. Laid at the drop and again
+    // after each level-up (the door moves as the base grows).
+    function layRunway(city) {
+      const rec = world.buildings[city.main.owner - 1];
+      if (!rec || !rec.runway || !ST.paveRunway) return;
+      const len = Math.min(rec.runway.length || 380, 380);
+      const from = rec.runway.from, dir = rec.runway.direction, end = from + dir * len;
+      if (Math.min(from, end) < 60 || Math.max(from, end) > world.width - 60) return;
+      if (barrierIn(Math.min(from, end), Math.max(from, end))) return;   // never over water or a flank
+      ST.terracePad(world, Math.min(from, end), Math.max(from, end), rec.ground);
+      ST.paveRunway(world, from, dir, len, rec.ground, city.style);
+      for (let x = Math.min(from, end) - 2; x <= Math.max(from, end) + 2; x += 1) PW.refreshGroundTop(world, x);
+      clearSimAround(Math.min(from, end), rec.ground - 6, Math.max(from, end), rec.ground + 8);
+      city.runway = { from, to: end, y: rec.ground };
+      if (dir > 0) city.edge.right = Math.max(city.edge.right, end + 4);
+      else city.edge.left = Math.min(city.edge.left, end - 4);
+      note(city, 'the runway is laid');
+    }
+    // N57: the bases of population and farm buildings adapt to the military's terrain changes
+    // as it grows - a neighbour whose facing lots sit on reshaped ground re-seats there.
+    function adaptNeighbours(milCity) {
+      for (const other of cities) {
+        if (other === milCity || other.kind === 'military') continue;
+        const side = other.x < milCity.x ? 'right' : 'left';
+        const lots = other.rings[side];
+        for (let i = Math.max(0, lots.length - 2); i < lots.length; i += 1) {
+          const lot = lots[i];
+          if (!lot.placed || lot.groundSig === undefined) continue;
+          if (apronSig(lot.placed) === lot.groundSig) continue;
+          seatChain(other, side, lot.ring);
+          note(other, 'the town re-seats around the military works');
+          break;
+        }
+      }
+    }
+
     // ---- Military ----------------------------------------------------------------------------
     const MIL_MAIN = ['compound', 'fortress', 'command', 'bastion'];
     function militaryAct(city) {
@@ -770,6 +820,8 @@
         if (!placeLot(city, city.main, city.main.x)) { city.main.level -= 1; city.main.canvas = null; placeLot(city, city.main, city.main.x); }
         city.capEdge = { left: city.main.placed.worksL - 2, right: city.main.placed.worksR + 2 };
         city.edge = { left: Math.min(city.edge.left, city.capEdge.left), right: Math.max(city.edge.right, city.capEdge.right) };
+        layRunway(city);          // N57: the door moved with the bigger base - the strip follows
+        adaptNeighbours(city);    // N57: the neighbours' bases adapt to the reshaped ground
         note(city, `dug in deeper: level ${city.level}`);
         return true;
       }
@@ -1015,7 +1067,8 @@
       }).join(' | ');
     }
 
-    return { cities, barriers, drop, step, draw, describe, dbg, regrades: () => regradeCount };
+    return { cities, barriers, drop, step, draw, describe, dbg, regrades: () => regradeCount,
+      _adapt: adaptNeighbours };   // (test hook: the N57 neighbour re-seat, called by the harness)
   }
 
   PW.createCapitalGrowth = createCapitalGrowth;
