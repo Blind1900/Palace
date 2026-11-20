@@ -12,6 +12,26 @@
   // Hangar sized for the fleet at real scale: jets ~180 cells long, mechs ~85 tall, tanks ~120 long.
   const HANGAR = Object.freeze({ width: 260, clear: 108, door: 100, wall: 8, vaultRise: 30, vaultThick: 7 });
 
+  // N52: the military skin - geometric plate armour in gunmetal, read from the sci-fi base
+  // references but drawn in the game's own sprite voice. Large flat panels with recessed seams,
+  // joints staggered course by course, a rivet at the odd crossing; each style tints the metal
+  // its own way. Colours only: the walls keep their materials and their exact widths.
+  const MIL_TINT = { modern: [96, 102, 110], gothic: [84, 86, 94], asian: [100, 102, 92] };
+  const MIL_SEAM = { modern: [54, 58, 64], gothic: [46, 48, 54], asian: [56, 58, 50] };
+  function milPlate(style, d, total, rise, x, y) {
+    const base = MIL_TINT[style] || MIL_TINT.modern;
+    const seam = MIL_SEAM[style] || MIL_SEAM.modern;
+    const course = Math.floor(rise / 12);
+    const stagger = (course & 1) * 9;
+    const seamRow = rise % 12 === 0;
+    const seamCol = ((x + stagger) % 18) === 0;
+    if (seamRow || seamCol) return seam;
+    if (rise % 12 === 6 && ((x + stagger) % 18) === 9) return tone(seam, 1.35);           // rivet
+    const edge = d === 0 ? 1.18 : d === total - 1 ? 0.72 : 1;                             // lit face, shadowed core
+    return tone(base, edge * (1 - (course % 3) * 0.045) * ((PW.hash2(x, y) & 7) === 0 ? 0.93 : 1));
+  }
+  const MIL_AMBER = [235, 182, 52], MIL_CYAN = [118, 214, 232];
+
   function militaryBase(options) {
     const style = options.style, level = options.level || 3, variant = options.variant || 'compound';
     const facing = options.facing || 1;   // +1: hangar door faces right (towards the enemy)
@@ -56,17 +76,26 @@
         const side = lx === left ? -1 : 1;
         for (let d = 0; d < S.WALL; d += 1) {
           const wx = X(lx - side * d);
-          for (let y = floorRow(k + 1); y < fRow; y += 1) K.solid(c, wx, y, P.wallMat, K.wallColor(style, d, S.WALL, fRow - 1 - y, wx, y), ROLE.WALL);
+          for (let y = floorRow(k + 1); y < fRow; y += 1) K.solid(c, wx, y, P.wallMat, milPlate(style, d, S.WALL, fRow - 1 - y, wx, y), ROLE.WALL);
         }
       }
-      // Command cab: the top storey is glazed all round.
+      // N52: the glazing is embrasure slits - two long horizontal cuts per storey, dark glass
+      // with the lamp behind it, instead of the town's tall window band. The command cab alone
+      // keeps its full glazing, a lit bridge over the base.
       const cab = variant === 'command' && k === rearStoreys - 1;
       for (const lx of [left, right]) {
         const side = lx === left ? -1 : 1;
-        const winTop = cab ? fRow - 32 : fRow - 29, winBottom = fRow - 12;
         if (k === 0 && lx === right && hangar) continue;
-        for (let d = 0; d < S.WALL; d += 1) for (let y = winTop; y <= winBottom; y += 1) {
-          K.solid(c, X(lx - side * d), y, M.GLASS, cab ? mix(K.GLASS_SIDE, P.lamp, 0.55) : mix(K.GLASS_SIDE, P.lamp, 0.3), ROLE.GLASS);
+        if (cab) {
+          for (let d = 0; d < S.WALL; d += 1) for (let y = fRow - 32; y <= fRow - 12; y += 1) {
+            K.solid(c, X(lx - side * d), y, M.GLASS, mix(K.GLASS_SIDE, P.lamp, 0.55), ROLE.GLASS);
+          }
+          continue;
+        }
+        for (const [sTop, sBot] of [[fRow - 16, fRow - 13], [fRow - 27, fRow - 24]]) {
+          for (let d = 0; d < S.WALL; d += 1) for (let y = sTop; y <= sBot; y += 1) {
+            K.solid(c, X(lx - side * d), y, M.GLASS, mix([26, 30, 36], P.lamp, y === sTop + 1 ? 0.5 : 0.22), ROLE.GLASS);
+          }
         }
       }
       // Furniture: consoles, racks, lockers and crates.
@@ -135,16 +164,16 @@
         const wx = X(hangarRight - d);
         for (let y = wallTop; y < ground; y += 1) {
           if (y >= ground - HANGAR.door) continue;
-          K.solid(c, wx, y, M.STEEL, K.wallColor(style, d, HANGAR.wall, ground - 1 - y, wx, y), ROLE.WALL);
+          K.solid(c, wx, y, M.STEEL, milPlate(style, d, HANGAR.wall, ground - 1 - y, wx, y), ROLE.WALL);
         }
-        // Door frame.
-        K.solid(c, wx, ground - HANGAR.door - 1, M.STEEL, P.ornament, ROLE.FRAME);
+        // Door frame, with a warning light either side of the lintel (N52).
+        K.solid(c, wx, ground - HANGAR.door - 1, M.STEEL, d === 1 || d === HANGAR.wall - 2 ? MIL_AMBER : P.ornament, ROLE.FRAME);
       }
       // Upper rear wall of the hangar where it rises above the rear block's ground storey.
       for (let d = 0; d < HANGAR.wall; d += 1) {
         const wx = X(hangarLeft + d);
         for (let y = wallTop; y < ground - S.FLOOR; y += 1) {
-          if (!K.isSolid(c, wx, y)) K.solid(c, wx, y, P.wallMat, K.wallColor(style, d, HANGAR.wall, ground - 1 - y, wx, y), ROLE.WALL);
+          if (!K.isSolid(c, wx, y)) K.solid(c, wx, y, P.wallMat, milPlate(style, d, HANGAR.wall, ground - 1 - y, wx, y), ROLE.WALL);
         }
       }
       // Inner door between rear block and hangar.
@@ -186,6 +215,41 @@
     const roofTop = floorRow(rearStoreys);
     const rearRoof = { left: Math.min(X(rearFloors[rearStoreys - 1].left), X(rearFloors[rearStoreys - 1].right)),
       right: Math.max(X(rearFloors[rearStoreys - 1].left), X(rearFloors[rearStoreys - 1].right)), y: roofTop, top: true };
+    // N52: the geometric silhouette. Chamfer wedges armour the roof's corners (45-degree steps
+    // rising inward), a parapet lip runs between them, and a recessed light strip underlines
+    // each storey's slab - amber at the ground, cool cyan above, the hyper-military read.
+    {
+      const w0 = rearRoof.left, w1 = rearRoof.right;
+      for (let s = 0; s < 7; s += 1) {
+        for (let d = 0; d <= s; d += 1) {
+          const col = tone(MIL_TINT[style] || MIL_TINT.modern, d === s ? 1.2 : 0.95);
+          K.solidIfEmpty(c, w0 + s, roofTop - 1 - d, M.STEEL, col, ROLE.ORNAMENT);
+          K.solidIfEmpty(c, w1 - s, roofTop - 1 - d, M.STEEL, col, ROLE.ORNAMENT);
+        }
+      }
+      for (let x = w0 + 8; x <= w1 - 8; x += 1) {
+        K.solidIfEmpty(c, x, roofTop - 2, M.STEEL, tone(MIL_SEAM[style] || MIL_SEAM.modern, (x & 7) === 0 ? 1.5 : 1.1), ROLE.ORNAMENT);
+      }
+      for (let k = 0; k < rearStoreys; k += 1) {
+        const f = rearFloors[k];
+        const lx0 = Math.min(X(f.left), X(f.right)), lx1 = Math.max(X(f.left), X(f.right));
+        const row = floorRow(k + 1) + S.SLAB;
+        for (let x = lx0 + 3; x <= lx1 - 3; x += 1) {
+          if ((x - lx0) % 6 >= 3) continue;
+          K.deco(c, x, row, k === 0 ? MIL_AMBER : tone(MIL_CYAN, 0.8));
+        }
+      }
+      if (variant === 'command') {
+        // The sensor mast: a slim lattice with a blinker, off-centre on the roof, its foot
+        // standing on the roof slab (a mast anchored above it floated - the seed-3 catch).
+        const mx = Math.round(w0 + (w1 - w0) * 0.3);
+        for (let dy = 0; dy <= 25; dy += 1) {
+          K.solidIfEmpty(c, mx, roofTop - 1 - dy, M.STEEL, (dy % 5) === 0 ? tone(MIL_SEAM.modern, 1.4) : [72, 76, 84], ROLE.ORNAMENT);
+          if (dy % 6 === 3) { K.deco(c, mx - 1, roofTop - 1 - dy, [96, 100, 108]); K.deco(c, mx + 1, roofTop - 1 - dy, [96, 100, 108]); }
+        }
+        K.deco(c, mx, roofTop - 28, [255, 92, 72]);
+      }
+    }
     if (variant === 'fortress' || variant === 'outpost') {
       // Corner turret tower on the rear block (an outpost's watchtower).
       const tx = rearFloors[rearStoreys - 1].left + 2;
