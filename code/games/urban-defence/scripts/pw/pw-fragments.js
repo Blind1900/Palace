@@ -8,6 +8,8 @@
 // comes down, part by part. Struck structures are chipped (which can bring them down too), dust is
 // driven out along the ground the way it was going, and big blows leave the rubble smouldering.
 // What comes to rest big enough stays as ruin, part of the ground; small bits heap as rubble.
+// A plant's piece is its wood and leaves: its limbs bend where they strike something and spring
+// back, its branches snap off as pieces of their own, and the air tears its leaves off.
 // Pieces are drawn by re-sampling onto the cell grid: cells are never rotated as pixels.
 (function () {
   const PW = window.PW;
@@ -463,8 +465,9 @@
     }
     // The branch of a plant at outline point k snaps off: its wood out from there no thicker than
     // it there, and its leaves (those near it, not nearer other wood), go on as a piece of their
-    // own, moving as they were; the plant goes on without them. (False if there was nothing to
-    // break off.)
+    // own, moving as they were; the plant goes on without them - and, if that leaves it in parts,
+    // each part goes on as a piece of its own (see remake). (False if there was nothing to break
+    // off.)
     function snapBranch(p, k) {
       const { grid, gw, gh, data } = p, girth = data.girth;
       if (p.snapTick !== world.tick) { p.snapTick = world.tick; p.snaps = 0; }
@@ -511,11 +514,12 @@
         }
         ring = next;
       }
-      // (crushed under the plant, it lies where it broke: see PW.flora.land; splinters fly from
-      // the break)
+      // (it goes on by itself from where it broke, moving as it was there - its own weight, its own
+      // outline: what it strikes it strikes, apart from the plant; a twig comes apart - see spawn.
+      // Splinters fly from the break)
       const ks = cells.map((gi) => grid[gi] - 1);
       const [c, s] = cosSin(p);
-      if (PW.flora) PW.flora.land(world, particles, place(p, pick(data, ks), c, s), null);
+      if (spawn({ data: pick(data, ks), parent: p, inherit: true, flora: true, generation: p.generation + 1 })) stats.brokeOff = (stats.brokeOff || 0) + 1;
       const [bx, by] = toWorld(p, c, s, p.points[k], p.points[k + 1]), [vx] = velocityAt(p, bx, by);
       for (let q = Math.min(6, 1 + (wood >> 3)); q > 0; q -= 1) {
         const j = ks[Math.floor(random() * Math.min(wood, ks.length))];
@@ -528,17 +532,337 @@
       stats.snapped = (stats.snapped || 0) + 1;
       return true;
     }
-    // A plant that lost branches is made over from what is left at the end of the tick - its
-    // weight, its middle, its outline - going on just as it was (still swinging on its foot, if it
-    // was).
+    // A plant that lost branches is made over at the end of the tick, where it is: what no longer
+    // hangs together, wood to wood, comes apart - its greatest part goes on as it is, the others
+    // each a piece of its own, with the leaves nearest them, moving as that part of it was (leaves
+    // left with no wood at all flutter down) - and what is left has its weight, its middle and its
+    // outline made again, going on just as it was, its limbs still bent and springing as they were.
+    // (True when nothing of it is left.)
     function remake(p) {
-      const ks = [];
-      for (let k = 0; k < p.data.x.length; k += 1) if (p.data.solid[k] || p.data.color[k]) ks.push(k);
-      if (!ks.length) return true;
-      const q = spawn({ data: pick(p.data, ks), parent: p, inherit: true, flora: true, generation: p.generation, dir: p.dir, base: p.base,
-        pivot: p.mode === 'hinge' ? { x: p.hx, y: p.hy } : null });
-      if (q) Object.assign(q, { age: p.age, touched: p.touched, still: p.still, snapTick: p.snapTick, snaps: p.snaps, rigidGirth: p.rigidGirth });
+      p.reshape = false;
+      const { data, grid, gw, gh } = p;
+      const kind = new Uint8Array(gw * gh), shown = new Uint8Array(data.x.length);
+      for (let g = 0; g < kind.length; g += 1) { const k = grid[g] - 1; if (k >= 0 && (data.solid[k] || data.color[k])) { kind[g] = data.solid[k] ? 1 : 2; shown[k] = 1; } }
+      const [c, s] = cosSin(p);
+      const drop = (k) => {
+        const [x, y] = toWorld(p, c, s, data.x[k] - p.ox0 + 0.5, data.y[k] - p.oy0 + 0.5);
+        PW.flora.shed(particles, x, y, data.color[k], p.vx, p.vy, false, null);
+        const g = cellOf(p, data.x[k], data.y[k]);
+        if (g >= 0 && grid[g] === k + 1) grid[g] = 0;
+        data.solid[k] = 0; data.color[k] = 0;
+      };
+      // (a cell of a limb bent in over the plant's other cells - see bendLimb - is shaken off it)
+      for (let k = 0; k < data.x.length; k += 1) if (!shown[k] && (data.solid[k] || data.color[k])) drop(k);
+      const { parts, loose } = PW.flora.splitPiece(kind, gw, gh, false);
+      for (const g of loose) drop(grid[g] - 1);
+      if (!parts.length) return true;
+      let main = 0, most = -1;
+      parts.forEach((part, q) => { let w = 0; for (const g of part) if (kind[g] === 1) w += 1; if (w > most) { most = w; main = q; } });
+      for (let q = 0; q < parts.length; q += 1) {
+        if (q === main) continue;
+        const ks = parts[q].map((g) => grid[g] - 1);
+        const kid = spawn({ data: pick(data, ks), parent: p, inherit: true, flora: true, generation: p.generation, dir: p.dir, base: p.base });
+        if (kid) Object.assign(kid, { age: p.age, touched: p.touched, still: p.still, rigidGirth: Math.min(kid.rigidGirth, p.rigidGirth) });
+        for (const g of parts[q]) { const k = grid[g] - 1; grid[g] = 0; data.solid[k] = 0; data.color[k] = 0; }
+      }
+      if (parts.length > 1) stats.parted = (stats.parted || 0) + parts.length - 1;
+      reweigh(p);
+      return false;
+    }
+    // (a plant that lost cells: its weight, its middle and how it turns, moving on as it was - and
+    // its outline, made again where it is, its limbs' share of it with them)
+    function reweigh(p) {
+      const { data } = p, n = data.x.length, wt = girthWeights(data.solid, data.girth || data.solid);
+      let mass = 0, sx = 0, sy = 0;
+      for (let k = 0; k < n; k += 1) { const w = wt[k]; if (!w) continue; mass += w; sx += (data.x[k] - p.ox0 + 0.5) * w; sy += (data.y[k] - p.oy0 + 0.5) * w; }
+      if (!mass) return;
+      const gx = sx / mass, gy = sy / mass;
+      const [c, s] = cosSin(p), [wx, wy] = toWorld(p, c, s, gx, gy), [vx, vy] = velocityAt(p, wx, wy);
+      let inertia = 0;
+      for (let k = 0; k < n; k += 1) { const w = wt[k]; if (w) inertia += w * ((data.x[k] - p.ox0 + 0.5 - gx) ** 2 + (data.y[k] - p.oy0 + 0.5 - gy) ** 2); }
+      Object.assign(p, { mass, gx, gy, vx, vy, inertia: Math.max(1, inertia), shapeMass: mass });
+      const rigid = p.rigidGirth;
+      reoutline(p);
+      plantOf(p);
+      p.rigidGirth = rigid;
+      for (const l of p.limbs || []) limbOutline(p, l);
+    }
+    // ---- A plant's limbs bend --------------------------------------------------------------------
+    // Wood gives before it breaks. A limb of a falling plant - a branch or twig thinner than its
+    // trunk and stoutest boughs (see RIGID) - that strikes something bends back about where it
+    // grows from stouter wood (its joint), rather than the plant striking there: what it struck
+    // holds its end, and the plant comes on, pressing it over, held back by the spring of it. It
+    // bends along its length as a branch held at its root bends under a load at its end - hardly at
+    // all near the joint, most at its tip - as stiff as its girth lets it (the ring of a standing
+    // plant's limb swinging: see PW.flora's bend), and springs back, ringing down, once what pressed
+    // it is gone. Bent as far as it goes (the less the stouter it is), it bears on the plant like the
+    // rest of its wood - or, struck harder than its wood takes, it snaps (see snapBranch). Its cells
+    // are moved in the piece's own grid to where it bends to (see bendLimb), so it is drawn and
+    // strikes where it is, a cell at a time.
+    const LIMB_MIN = 8;           // wood cells: a limb smaller than this is too slight to bend apart from its branch,
+    const LIMB_CELLS = 400;       // ...and one bigger than this (a crown's twigs crossing into one another) too tangled
+    const LIMBS_MAX = 24;         // limbs of a piece that bend, at most
+    const LIMB_LEAVES = 6;        // a limb's leaves: those this near its wood
+    const LIMB_BEND = 0.35, LIMB_BEND_THIN = 0.6;  // radians its tip bends at most: LIMB_BEND + LIMB_BEND_THIN / girth
+    const LIMB_DAMP = 0.22;       // share of critical damping (a standing limb's: see PW.flora's bend)
+    const LIMB_FREE = 0.1;        // s: bent all the way and pressed no longer for this long, it springs back
+    const LIMB_DRAWS = 16;        // limbs moved to where they bend to in a tick, at most (the rest the tick after)
+    let contacts = 0, nBent = 0, nLimbPts = 0, limbDraws = 0;
+    const bent = [], limbPt = new Float32Array(OUTLINE_MAX * 3);
+    // (world cell (X, Y), as the piece was formed, in its grid; -1 outside it)
+    const cellOf = (p, X, Y) => {
+      const gu = X - p.ox0 - p.u0, gv = Y - p.oy0 - p.v0;
+      return gu < 0 || gv < 0 || gu >= p.gw || gv >= p.gh ? -1 : gv * p.gw + gu;
+    };
+    // (the share of its tip's bend a cell s out from the joint of a limb L long is turned by: a
+    // branch held at its root, loaded at its end, is bent over its length as s^2 (3L - s))
+    const bendShare = (s, L) => { const t = Math.min(1, s / L); return t * (3 - t) / 2; };
+    // The limb of a plant whose wood is at its outline point j, made the first time it strikes
+    // something: its wood joined to the wood there no stouter than it, out from the stouter wood it
+    // grows from, with its leaves. (Null: there is none - too slight, or wood that does not bend.)
+    function limbAt(p, j) {
+      const { grid, gw, gh, data } = p, girth = data.girth;
+      const c0 = grid[p.ptCell[j]] - 1;
+      if (c0 < 0 || !girth || data.solid[c0] !== 1) return null;
+      const of = p.limbOf || (p.limbOf = new Int16Array(data.x.length));
+      if (of[c0]) return of[c0] > 0 ? p.limbs[of[c0] - 1] : null;
+      const limbs = p.limbs || (p.limbs = []);
+      if (limbs.length >= LIMBS_MAX) return null;
+      const g0 = Math.max(1, girth[c0]);
+      const each = (g, visit) => {
+        const gu = g % gw, gv = (g / gw) | 0;
+        for (let dv = -1; dv <= 1; dv += 1) for (let du = -1; du <= 1; du += 1) {
+          const nu = gu + du, nv = gv + dv;
+          if ((du || dv) && nu >= 0 && nv >= 0 && nu < gw && nv < gh) visit(nv * gw + nu);
+        }
+      };
+      // (the wood joined to g no stouter than it, in no other limb, out from g a cell at a time -
+      // each with the one it was reached from - and whether there was more of it than a limb's)
+      const wood = (g) => {
+        const cells = [g], from = [-1], seen = new Set(cells);
+        for (let q = 0; q < cells.length && cells.length <= LIMB_CELLS; q += 1) {
+          each(cells[q], (ni) => {
+            const k = grid[ni] - 1;
+            if (seen.has(ni) || k < 0 || data.solid[k] !== 1 || girth[k] > g0 || of[k]) return;
+            seen.add(ni); cells.push(ni); from.push(q);
+          });
+        }
+        return { cells, from, more: cells.length > LIMB_CELLS };
+      };
+      // (its joint: going along its wood from where it struck, the first cell by stouter wood - or,
+      // none, the one nearest the plant's middle)
+      const start = p.ptCell[j], near = wood(start);
+      const mu = p.gx - p.u0, mv = p.gy - p.v0;
+      let joint = -1, best = Infinity;
+      for (let q = 0; q < near.cells.length && joint < 0; q += 1) {
+        each(near.cells[q], (ni) => { const k = grid[ni] - 1; if (k >= 0 && data.solid[k] === 1 && girth[k] > g0) joint = near.cells[q]; });
+      }
+      if (joint < 0) for (const g of near.cells) { const d = (g % gw + 0.5 - mu) ** 2 + (((g / gw) | 0) + 0.5 - mv) ** 2; if (d < best) { best = d; joint = g; } }
+      // (all that grows out from there: a limb bends whole - or, a crown's twigs crossing one
+      // another into too much of it, none of it bends apart)
+      const out = near.more ? near : wood(joint);
+      if (out.more || out.cells.length < LIMB_MIN) { for (const g of near.cells) of[grid[g] - 1] = -1; return null; }
+      const { cells, from } = out, nWood = cells.length;
+      // (its leaves: out from its wood, a cell at a time, through leaves not touching other wood)
+      const mine = new Set(cells);
+      let ring = cells.slice();
+      for (let d = 0; d < LIMB_LEAVES && ring.length; d += 1) {
+        const next = [];
+        for (const g of ring) {
+          each(g, (ni) => {
+            const k = grid[ni] - 1;
+            if (mine.has(ni) || k < 0 || data.solid[k] || !data.color[k] || of[k]) return;
+            let other = false;
+            each(ni, (mi) => { const e = grid[mi] - 1; if (e >= 0 && data.solid[e] === 1 && !mine.has(mi)) other = true; });
+            if (other) return;
+            mine.add(ni); next.push(ni); cells.push(ni);
+          });
+        }
+        ring = next;
+      }
+      const id = limbs.length + 1, n = cells.length, kj = grid[joint] - 1, jx = data.x[kj], jy = data.y[kj];
+      const ks = new Int32Array(n), up = new Int32Array(n).fill(-1), rx = new Float32Array(n), ry = new Float32Array(n), f = new Float32Array(n), qOf = new Map();
+      let L = 2, I = 0;
+      for (let q = 0; q < n; q += 1) {
+        const k = grid[cells[q]] - 1;
+        ks[q] = k; rx[q] = data.x[k] - jx; ry[q] = data.y[k] - jy; of[k] = id; qOf.set(k, q);
+        if (q < nWood) { up[q] = from[q]; const r2 = rx[q] * rx[q] + ry[q] * ry[q]; I += r2; L = Math.max(L, Math.sqrt(r2)); }
+      }
+      for (let q = 0; q < n; q += 1) f[q] = bendShare(Math.hypot(rx[q], ry[q]), L);
+      const l = { id, ks, up, qOf, rx, ry, f, jx, jy, L, g0, I: Math.max(1, I), ring: Math.max(5, Math.min(16, 3 + 2.5 * g0)), max: LIMB_BEND + LIMB_BEND_THIN / g0,
+        theta: 0, omega: 0, drawn: 0, stiff: false, pressedAt: 0, hitAt: -1, n: 0, sx: 0, sy: 0, fx: 0, fy: 0, k: 0 };
+      limbOutline(p, l);
+      limbs.push(l);
+      stats.limbs = (stats.limbs || 0) + 1;
+      return l;
+    }
+    // (a limb's points of the plant's outline, and which way each faces unbent)
+    function limbOutline(p, l) {
+      const pts = [], ptQ = [], fu = [], fv = [];
+      for (let j = 0; j < p.ptCell.length; j += 1) {
+        const k = p.grid[p.ptCell[j]] - 1;
+        if (k < 0 || p.limbOf[k] !== l.id) continue;
+        const q = l.qOf.get(k), a = -l.drawn * l.f[q], c = Math.cos(a), s = Math.sin(a);
+        pts.push(j); ptQ.push(q); fu.push(p.faces[j * 2] * c - p.faces[j * 2 + 1] * s); fv.push(p.faces[j * 2] * s + p.faces[j * 2 + 1] * c);
+      }
+      Object.assign(l, { pts: Int32Array.from(pts), ptQ: Int32Array.from(ptQ), fu: Float32Array.from(fu), fv: Float32Array.from(fv) });
+    }
+    // (outline point k of a plant, in a cell it struck at (x, y): on a limb that bends, noted for
+    // flexOn - true; on wood that does not, or a limb bent as far as it goes, it strikes as the
+    // plant's wood)
+    function limbHit(p, k, wx, wy, x, y) {
+      const l = limbAt(p, k >> 1);
+      if (!l) return false;
+      if (l.stiff) { l.pressedAt = time; return false; }
+      if (l.hitAt !== contacts) { l.hitAt = contacts; l.n = 0; l.sx = 0; l.sy = 0; l.fx = 0; l.fy = 0; bent[nBent++] = l; }
+      // (which way the surface it struck faces there: out through its open sides - see touch)
+      let gx = 0, gy = 0;
+      for (let dy = -1; dy <= 1; dy += 1) for (let dx = -1; dx <= 1; dx += 1) if ((dx || dy) && !blocking(x + dx, y + dy)) { gx += dx; gy += dy; }
+      const gl = Math.hypot(gx, gy);
+      if (gl > 0) { l.fx += gx / gl; l.fy += gy / gl; }
+      l.n += 1; l.sx += wx; l.sy += wy; l.k = k;
+      if (nLimbPts < OUTLINE_MAX) { const q = nLimbPts * 3; limbPt[q] = wx; limbPt[q + 1] = wy; limbPt[q + 2] = l.id; nLimbPts += 1; }
       return true;
+    }
+    // A limb that struck something this sub-step: what it struck stops its end going on into it -
+    // the limb bends instead, and bends back out of it as far as it lies in it - and the limb,
+    // bent, pushes the plant back there, as hard as the spring of it (it is light: what pushes on
+    // it, it passes on). Too hard a blow snaps it.
+    function flexOn(p, l, c, s, h) {
+      const n = l.n, mx = l.sx / n, my = l.sy / n;
+      const [jx, jy] = toWorld(p, c, s, l.jx - p.ox0 + 0.5, l.jy - p.oy0 + 0.5);
+      const rx = mx - jx, ry = my - jy, share = bendShare(Math.hypot(rx, ry), l.L);
+      const [bvx, bvy] = velocityAt(p, mx, my);
+      const vx = bvx - l.omega * share * ry, vy = bvy + l.omega * share * rx;
+      const fl = Math.hypot(l.fx, l.fy);
+      const [nx, ny] = fl > 0.3 * n ? [l.fx / fl, l.fy / fl] : normalAt(Math.floor(mx), Math.floor(my), vx, vy);
+      p.touched = p.age;
+      // (how far a radian more of bend takes it out of what it struck; struck by its joint, it
+      // cannot bend away - it bears there as the plant's wood)
+      const lever = share * (rx * ny - ry * nx);
+      if (Math.abs(lever) < 1) { l.stiff = true; l.pressedAt = time; return; }
+      const into = -(vx * nx + vy * ny);
+      if (into > 0) {
+        // (the blow: its weight at its end times the speed stopped there)
+        if (into * l.I / (lever * lever) > WOOD_BLOW * l.g0 ** 3 && snapBranch(p, l.k)) return;
+        l.omega += into / lever;
+      }
+      let deep = 0;
+      for (let q = 0; q < nLimbPts; q += 1) if (limbPt[q * 3 + 2] === l.id) deep = Math.max(deep, depthAt(limbPt[q * 3], limbPt[q * 3 + 1], nx, ny));
+      if (deep > REST_DEPTH) l.theta += Math.min(1, deep - REST_DEPTH) / lever;
+      if (Math.abs(l.theta) >= l.max) { l.theta = Math.sign(l.theta) * l.max; l.omega = 0; l.stiff = true; l.pressedAt = time; }
+      const push = l.I * l.ring * l.ring * l.theta / lever * h;
+      if (push <= 0) return;
+      const [cx, cy] = centre(p), ax = mx - cx, ay = my - cy;
+      p.vx += push * nx / p.mass; p.vy += push * ny / p.mass;
+      p.omega += (ax * ny - ay * nx) * push / Math.max(1, p.inertia);
+      p.omega = Math.max(-FLORA_SPIN, Math.min(FLORA_SPIN, p.omega));
+    }
+    // (each limb's spring brings it back, ringing down - one bent all the way stays so while it is
+    // pressed there)
+    function springLimbs(p, h) {
+      for (const l of p.limbs) {
+        if (l.stiff) { if (time - l.pressedAt > LIMB_FREE) l.stiff = false; else continue; }
+        if (!l.theta && !l.omega) continue;
+        l.omega += (-l.ring * l.ring * l.theta - 2 * LIMB_DAMP * l.ring * l.omega) * h;
+        l.theta += l.omega * h;
+        if (Math.abs(l.theta) > l.max) { l.theta = Math.sign(l.theta) * l.max; l.omega = 0; }
+        if (Math.abs(l.theta) < 1e-3 && Math.abs(l.omega) < 1e-2) { l.theta = 0; l.omega = 0; }
+      }
+    }
+    // A limb's cells moved in the piece's grid to where it is bent to (its tip moved half a cell or
+    // more since): out of where they were, into where they go - never over the plant's other cells
+    // (its wood over its own leaves); a cell with nowhere to go is not drawn until it has. Its wood
+    // stays joined, cell to cell, out from its joint: each cell of it goes next to the one it
+    // grows from, where it is nearest to where it bends to - room there first. Its outline points
+    // go with its wood, turned as it is turned there. (The grid is made bigger when a limb bends
+    // out of it.)
+    function bendLimb(p, l) {
+      const { data } = p, { ks, up, rx, ry, f } = l, n = ks.length;
+      for (let q = 0; q < n; q += 1) {
+        const k = ks[q], g = cellOf(p, data.x[k], data.y[k]);
+        if (g >= 0 && p.grid[g] === k + 1) p.grid[g] = 0;
+      }
+      // (room for cell k at (X, Y): nothing there, or - for wood - its own limb's leaf)
+      const room = (k, X, Y) => {
+        const g = cellOf(p, X, Y), there = g < 0 ? -1 : p.grid[g] - 1;
+        return there < 0 || (data.solid[k] && !data.solid[there] && p.limbOf[there] === l.id);
+      };
+      for (let q = 0; q < n; q += 1) {
+        const k = ks[q];
+        if (!data.solid[k] && !data.color[k]) continue;
+        const a = l.theta * f[q], c = Math.cos(a), s = Math.sin(a);
+        const ex = rx[q] * c - ry[q] * s, ey = rx[q] * s + ry[q] * c;
+        let X = l.jx + Math.round(ex), Y = l.jy + Math.round(ey);
+        const kp = up[q] >= 0 ? ks[up[q]] : -1;
+        if (kp >= 0 && data.solid[kp] && (Math.abs(X - data.x[kp]) > 1 || Math.abs(Y - data.y[kp]) > 1 || !room(k, X, Y))) {
+          let best = Infinity;
+          for (let dy = -1; dy <= 1; dy += 1) for (let dx = -1; dx <= 1; dx += 1) {
+            if (!dx && !dy) continue;
+            const cx = data.x[kp] + dx, cy = data.y[kp] + dy;
+            const d = (cx - l.jx - ex) ** 2 + (cy - l.jy - ey) ** 2 + (room(k, cx, cy) ? 0 : 100);
+            if (d < best) { best = d; X = cx; Y = cy; }
+          }
+        }
+        data.x[k] = X; data.y[k] = Y;
+        let g = cellOf(p, X, Y);
+        if (g < 0) { growGrid(p, X, Y); g = cellOf(p, X, Y); }
+        if (room(k, X, Y)) p.grid[g] = k + 1;
+      }
+      const { points, faces, ptCell } = p;
+      for (let q = 0; q < l.pts.length; q += 1) {
+        const j = l.pts[q], k = ks[l.ptQ[q]], a = l.theta * f[l.ptQ[q]], c = Math.cos(a), s = Math.sin(a);
+        points[j * 2] = data.x[k] - p.ox0 + 0.5; points[j * 2 + 1] = data.y[k] - p.oy0 + 0.5;
+        ptCell[j] = cellOf(p, data.x[k], data.y[k]);
+        faces[j * 2] = l.fu[q] * c - l.fv[q] * s; faces[j * 2 + 1] = l.fu[q] * s + l.fv[q] * c;
+      }
+      l.drawn = l.theta;
+      stats.limbBends = (stats.limbBends || 0) + 1;
+    }
+    function growGrid(p, X, Y) {
+      const m = 8, u = X - p.ox0, v = Y - p.oy0;
+      const u0 = Math.min(p.u0, u - m), v0 = Math.min(p.v0, v - m);
+      const gw = Math.max(p.u0 + p.gw, u + m + 1) - u0, gh = Math.max(p.v0 + p.gh, v + m + 1) - v0;
+      const grid = new Int32Array(gw * gh), du = p.u0 - u0, dv = p.v0 - v0;
+      for (let g = 0; g < p.grid.length; g += 1) if (p.grid[g]) grid[(((g / p.gw) | 0) + dv) * gw + (g % p.gw) + du] = p.grid[g];
+      for (let j = 0; j < p.ptCell.length; j += 1) { const g = p.ptCell[j]; p.ptCell[j] = (((g / p.gw) | 0) + dv) * gw + (g % p.gw) + du; }
+      Object.assign(p, { grid, gw, gh, u0, v0 });
+    }
+    // (each limb of a plant that has bent on since it was last moved: see bendLimb)
+    function drawLimbs(p) {
+      for (const l of p.limbs) {
+        if (limbDraws >= LIMB_DRAWS) return;
+        if (Math.abs(l.theta - l.drawn) * l.L < 0.5) continue;
+        bendLimb(p, l);
+        limbDraws += 1;
+      }
+    }
+    // The air tears leaves off a plant going through it fast - its drag on a leaf goes with the
+    // square of the speed - from the edge of its crown in (a leaf with open air beside it): a tree
+    // flung by a blast loses many on the way, one toppling over hardly any.
+    const LEAF_TEAR = 0.25;       // per second, a leaf at the crown's edge going 100 cells/s through still air
+    const LEAF_TEAR_SPEED = 70;   // cells/s: slower than this through the air, it loses none
+    function stripLeaves(p, dt) {
+      const { grid, gw, gh, data } = p;
+      const [c, s] = cosSin(p), [cx, cy] = centre(p);
+      const wind = world.air && world.air.wind ? world.air.wind(Math.floor(cx), Math.floor(cy)) : NO_WIND;
+      let n = 0;
+      for (let g = 0; g < grid.length; g += 1) {
+        const k = grid[g] - 1;
+        if (k < 0 || data.solid[k] || !data.color[k]) continue;
+        const gu = g % gw, gv = (g / gw) | 0;
+        if (gu > 0 && gv > 0 && gu < gw - 1 && gv < gh - 1 && grid[g - 1] && grid[g + 1] && grid[g - gw] && grid[g + gw]) continue;
+        const [x, y] = toWorld(p, c, s, gu + p.u0 + 0.5, gv + p.v0 + 0.5);
+        const vx = p.vx - p.omega * (y - cy), vy = p.vy + p.omega * (x - cx);
+        const rx = vx - wind[0], ry = vy - wind[1];
+        if (random() >= LEAF_TEAR * (rx * rx + ry * ry) / 1e4 * dt) continue;
+        PW.flora.shed(particles, x, y, data.color[k], vx * 0.8, vy * 0.8, false, null);
+        grid[g] = 0; data.color[k] = 0;
+        n += 1;
+      }
+      if (!n) return;
+      p.area = Math.max(1, p.area - n);
+      stats.stripped = (stats.stripped || 0) + n;
     }
     // The air on a falling plant drags on all of it against the way it goes through the air (the
     // wind's way, less its own): a leafy twig flutters down slowly and is carried off on the wind, a
@@ -698,12 +1022,24 @@
     };
     // (swinging about a pin: a hinging top, a bent limb)
     function pinned(p) { return p.mode === 'hinge' || p.mode === 'flex'; }
+    // (a bent limb swung on into something solid this sub-step: an outline point of it now in what
+    // it was not in before)
+    const SWING_BOUNCE = 0.3;     // share of its swing it springs back off what it swung into with
+    function swingsInto(p, c, s) {
+      const pts = p.points, c0 = Math.cos(was.angle), s0 = Math.sin(was.angle);
+      for (let k = 0; k < pts.length; k += 2) {
+        if (!blocking(Math.floor(p.px + pts[k] * c - pts[k + 1] * s), Math.floor(p.py + pts[k] * s + pts[k + 1] * c))) continue;
+        if (!blocking(Math.floor(was.px + pts[k] * c0 - pts[k + 1] * s0), Math.floor(was.py + pts[k] * s0 + pts[k + 1] * c0))) return true;
+      }
+      return false;
+    }
     const was = { px: 0, py: 0, angle: 0 };
     function step(dt) {
       const t0 = performance.now();
       time += dt;
       // (a great piece is made over at most one a tick: the rest wait their turn - see reshape)
       let bigRemakes = 0;
+      limbDraws = 0;
       for (let k = list.length - 1; k >= 0; k -= 1) {
         const p = list[k];
         p.age += dt;
@@ -720,15 +1056,18 @@
           was.px = p.px; was.py = p.py; was.angle = p.angle;
           // (a bent limb's damping is the air's on its leaves already: see its spring)
           if (p.flora && p.mode !== 'flex') airDrag(p, h);
+          if (p.limbs) springLimbs(p, h);
           if (p.mode === 'flex') {
             // A limb of a standing plant, bent: pinned where it grows from the stouter wood, its
             // own spring brings it back, ringing down (its stiffness and damping: see PW.flora's
-            // bend). It passes through what it swings by.
+            // bend). It passes through the leaves it swings by; swinging into the ground, a wall,
+            // a heap, it stops against it and springs back off it.
             p.omega += (-p.spring * p.angle - p.damp * p.omega) * h;
             p.angle += p.omega * h;
             const c = Math.cos(p.angle), sn = Math.sin(p.angle);
             p.px = p.hx + p.rx * c - p.ry * sn;
             p.py = p.hy + p.rx * sn + p.ry * c;
+            if (swingsInto(p, c, sn)) { p.angle = was.angle; p.px = was.px; p.py = was.py; p.omega *= -SWING_BOUNCE; }
             continue;
           }
           if (p.mode === 'hinge') {
@@ -773,6 +1112,10 @@
         // (a building's piece in the air crumbles at its edges - see shed; once it has come down
         // on something, what breaks off it is what the blow breaks - see strike)
         if (!done && !p.flora && (p.mode === 'fly' || p.mode === 'drop') && ((world.tick || 0) + k) % SHED_EVERY === 0 && p.age - p.touched > 0.25 && motion(p) > REST_SPEED) shed(p, dt * SHED_EVERY);
+        // (a plant's: its limbs are drawn where they have bent to, and the air tears leaves off it -
+        // see bendLimb, stripLeaves)
+        if (!done && p.limbs) drawLimbs(p);
+        if (!done && p.flora && p.mode === 'fly' && ((world.tick || 0) + k) % SHED_EVERY === 0 && motion(p) > LEAF_TEAR_SPEED) stripLeaves(p, dt * SHED_EVERY);
         // A plant that lost branches is made over at once. A building's piece that has lost cells -
         // shaken loose, ground or crushed off, folded up - has its outline made again from what is
         // left (see reoutline), and is looked at for hanging in parts now: if it does, it is made
@@ -1017,7 +1360,7 @@
     // which way what they struck faces, how hard it is, and their spread - see touch)
     let tN = 0, tSX = 0, tSY = 0, tFX = 0, tFY = 0, tHS = 0, tBX0 = 0, tBY0 = 0, tBX1 = 0, tBY1 = 0;
     function touch(p, k, wx, wy, x, y, ox, oy, c, s) {
-      if (tN < OUTLINE_MAX) { went[tN * 2] = wx - ox; went[tN * 2 + 1] = wy - oy; }
+      if (tN < OUTLINE_MAX) { went[tN * 2] = wx - ox; went[tN * 2 + 1] = wy - oy; at[tN * 2] = wx; at[tN * 2 + 1] = wy; }
       tN += 1; tSX += wx; tSY += wy; tHS += hardness[mat[y * W + x] & ID_MASK];
       if (PW.debugHitboxes && nTouched < OUTLINE_MAX) touched[nTouched++] = k >> 1;
       // (a plant: the thinnest wood it struck with - see snapBranch)
@@ -1043,6 +1386,7 @@
       embedded = false;
       const [mid] = toWorld(p, c, s, p.gx, p.gy);   // (what it crushes is squeezed out away from this)
       weakest = -1; nTouched = 0;
+      contacts += 1; nBent = 0; nLimbPts = 0;
       for (let k = 0; k < pts.length; k += 2) {
         // (the storeys of it already crushed under its hinge are gone; a plant's branches snapped
         // off it; a cell of it crushed, ground off or shaken loose - no longer there to strike with
@@ -1102,8 +1446,11 @@
           if (nb < OUTLINE_MAX) { bites[nb] = k; const q = nb * 4; biteAt[q] = wx; biteAt[q + 1] = wy; biteAt[q + 2] = ox; biteAt[q + 3] = oy; nb += 1; }
           continue;
         }
+        // (a plant's limb that struck it bends - see flexOn - rather than the plant striking it there)
+        if (p.flora && p.ptGirth[k >> 1] < p.rigidGirth && limbHit(p, k, wx, wy, x, y)) continue;
         touch(p, k, wx, wy, x, y, ox, oy, c, s);
       }
+      for (let q = 0; q < nBent; q += 1) flexOn(p, bent[q], c, s, h);
       // (its outline has many points over cells no longer there: it is made over from what is left)
       if (ghosts >= Math.max(3, (pts.length >> 1) * GHOSTS) && !p.flora) p.reshape = true;
       if (crushed && p.mode === 'hinge') p.omega *= Math.max(0.9, 1 - crushed * 0.001);   // crushing the stump slows the swing
@@ -1247,8 +1594,8 @@
       for (let k = before; k < list.length; k += 1) Object.assign(list[k], { remadeAt: time, age: p.age, touched: p.touched, still: p.still, m0: p.m0, worn: p.worn, crumpled: p.crumpled });
       return true;
     }
-    // (how far each point that struck something moved this sub-step)
-    const went = new Float32Array(OUTLINE_MAX * 2);
+    // (how far each point that struck something moved this sub-step, and where it is)
+    const went = new Float32Array(OUTLINE_MAX * 2), at = new Float32Array(OUTLINE_MAX * 2);
     let wentN = 0, stepH = 1 / 60;
     // (a plant: its outline point with the thinnest wood that struck something this sub-step)
     let weakest = -1;
@@ -1398,6 +1745,15 @@
       // (a lump too small to grind lying in what it struck - see contact - is worked back out of it,
       // a cell a tick; a greater piece grinds where it bites, and rests where it lies)
       if (embedded && p.mass < GRIND_FLOOR && p.embedTick !== world.tick) { p.embedTick = world.tick; p.px += nx; p.py += ny; }
+      // (a plant pressed into what it struck - slid or turned in over it - is put back out of it the
+      // way that faces, as deep as its wood that touches lies in it on the whole, a cell a sub-step
+      // at most: it lies on the ground, never sinks on into it)
+      if (p.flora) {
+        let deep = 0;
+        for (let q = 0; q < wentN; q += 1) deep += depthAt(at[q * 2], at[q * 2 + 1], nx, ny);
+        deep /= wentN;
+        if (deep > REST_DEPTH) { const d = Math.min(1, deep - REST_DEPTH); p.px += nx * d; p.py += ny * d; }
+      }
       if (hit <= 0) return false;            // (touching it, but already moving off it)
       // (it does not sink into what it struck: it is put back out, the way that faces, as far as
       // it went in this sub-step - going on turning and sliding as it was)
@@ -1512,6 +1868,15 @@
       if (len > 0.5) return [gx / len, gy / len];
       const v = Math.hypot(vx, vy) || 1;
       return [-vx / v, -vy / v];
+    }
+    // How deep (wx, wy) lies in what it is in, out the way (nx, ny): half a cell at a time, DEEP_MAX
+    // at most.
+    const DEEP_MAX = 4;
+    const REST_DEPTH = 0.75;      // cells: a plant lying no deeper than this in what it touches, on the whole, rests on it
+    function depthAt(wx, wy, nx, ny) {
+      let d = 0;
+      while (d < DEEP_MAX && blocking(Math.floor(wx + nx * d), Math.floor(wy + ny * d))) d += 0.5;
+      return d;
     }
     // What a piece strikes at (hx, hy) feels the blow (`energy`: the push times the speed it
     // stopped): the ground is dented and shaken, and looked at for what lost its footing; a struck

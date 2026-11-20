@@ -1,6 +1,7 @@
 // Ground physics (run with --page=pixel-world.html --params=seed=N): rock shields a blast far more
-// than soil does, a mountain blown open comes down in a rockslide, and a collapsed piece of a
-// building rains down into a wide heap instead of standing in the air.
+// than soil does, a mountain blown open comes down in a rockslide, a collapsed piece of a building
+// rains down into a wide heap instead of standing in the air, water pushes on what is in its way,
+// and felled trees come down onto the ground, bending their limbs, never sinking into it.
 const { world, layout, stability } = pwApp;
 const { M } = PW;
 const checks = [];
@@ -168,6 +169,70 @@ check(stability.stats.broken === before, `ground nobody disturbed stands (${stab
     const broke = (sim.stats.waterBroke || 0) - broke0;
     check(broke > 30 && pwApp.countWater() === water1, `water stood against a tower's wall breaks into it, and none of it is lost (${broke} structure cells broken by water; water ${water1} -> ${pwApp.countWater()}, ${water1 - water0} let go)`);
   }
+}
+
+// 5. Trees felled by small blasts at their feet come down a branch at a time and lie on the ground -
+// on slopes too - never sinking into it (none of their wood two cells or more under its surface),
+// each falling piece one body of wood; their limbs bend where they strike the ground, and the
+// branches they snap off fall on as pieces of their own (N41O).
+{
+  const { fragments } = pwApp;
+  // (the ground itself: rubble and debris come down on what lies there after it)
+  const solid = (x, y) => { const k = id(x, y); return PW.mat.terrain[k] && PW.mat.phase[k] === PW.PHASE.SOLID; };
+  // (how many cells under the ground's surface a cell lies: 0 in the open, 1 in its top layer, 2 a
+  // cell under that ... out to 4)
+  const depth = (x, y) => {
+    if (!solid(x, y)) return 0;
+    for (let r = 1; r <= 3; r += 1) for (let dy = -r; dy <= r; dy += 1) for (let dx = -r; dx <= r; dx += 1) if (Math.max(Math.abs(dx), Math.abs(dy)) === r && !solid(x + dx, y + dy)) return r;
+    return 4;
+  };
+  const partsOf = (p) => {
+    const { grid, gw, gh, data } = p, seen = new Uint8Array(gw * gh);
+    let n = 0;
+    for (let g0 = 0; g0 < grid.length; g0 += 1) {
+      if (!grid[g0] || data.solid[grid[g0] - 1] !== 1 || seen[g0]) continue;
+      n += 1; seen[g0] = 1;
+      for (const queue = [g0]; queue.length;) {
+        const g = queue.pop(), u = g % gw, v = (g / gw) | 0;
+        for (let dv = -1; dv <= 1; dv += 1) for (let du = -1; du <= 1; du += 1) {
+          const nu = u + du, nv = v + dv, j = nv * gw + nu;
+          if (nu >= 0 && nv >= 0 && nu < gw && nv < gh && grid[j] && data.solid[grid[j] - 1] === 1 && !seen[j]) { seen[j] = 1; queue.push(j); }
+        }
+      }
+    }
+    return n;
+  };
+  const trees = [];
+  for (const r of (world.flora || []).filter((t) => t.kind === 'tree' && !t.fallen && t.size > 90 && t.type !== 'deadTree')) {
+    if (trees.every((q) => Math.abs(q.anchorX - r.anchorX) > 400)) trees.push(r);
+    if (trees.length >= 8) break;
+  }
+  const stats0 = { ...fragments.stats };
+  for (const r of trees) pwApp.explode(r.anchorX + 6, r.row - 2, 9, 1.0);
+  let worst = 0, worstNote = '', deepest = 0, worstParts = 0;
+  for (let t = 0; t < 60 * 10; t += 1) {
+    pwApp.stepWorld(1);
+    if (t % 3) continue;
+    for (const p of fragments.list) {
+      if (!p.flora || p.mode === 'flex') continue;
+      const c = Math.cos(p.angle), s = Math.sin(p.angle);
+      let wood = 0, under = 0;
+      for (let k = 0; k < p.data.x.length; k += 1) {
+        if (p.data.solid[k] !== 1) continue;
+        const u = p.data.x[k] - p.ox0 + 0.5, v = p.data.y[k] - p.oy0 + 0.5;
+        const d = depth(Math.floor(p.px + u * c - v * s), Math.floor(p.py + u * s + v * c));
+        wood += 1;
+        if (d >= 2) under += 1;
+        deepest = Math.max(deepest, d);
+      }
+      if (wood >= 10 && under / wood > worst) { worst = under / wood; worstNote = `${under} of ${wood}`; }
+      worstParts = Math.max(worstParts, partsOf(p));
+    }
+  }
+  const more = (key) => (fragments.stats[key] || 0) - (stats0[key] || 0);
+  check(trees.length >= 4 && deepest <= 2 && worst < 0.25, `falling trees never sink into the ground (${trees.length} trees felled; their wood at most ${deepest} cells under the surface; at worst ${(worst * 100).toFixed(0)}% of a piece's wood a cell or more under its top layer${worstNote ? `: ${worstNote}` : ''})`);
+  check(worstParts === 1, `each falling piece of a tree is one body of wood (at most ${worstParts} separate parts of wood in one; ${more('parted')} parts gone their own ways)`);
+  check(more('limbs') > 0 && more('limbBends') > 0 && more('brokeOff') > 0, `falling trees' limbs bend where they strike the ground, and the branches they snap off fall as pieces of their own (${more('limbs')} limbs bent ${more('limbBends')} times; ${more('brokeOff')} of ${more('snapped')} snapped branches fell on by themselves; ${more('stripped')} leaves torn off by the air)`);
 }
 pwApp.setPaused(false);
 return { checks, shots: shots.length, holes, stability: stability.stats };
