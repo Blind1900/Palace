@@ -1,5 +1,21 @@
 [
  {
+  "title": "Fable: farms climb easing the land, growth pays its way, joined bases share a spine (cf47817, N69+N4+N70)",
+  "author": "Fable",
+  "time": "2026-11-20 (late)",
+  "note": "Three landings in one validated wave. N69 - farms reach level 7 (the level-up block AND the canvas cap both held them at 6), and a growing farm now SMOOTHS the terrain under and around it while keeping the slope's relative height: the surface eases toward its own windowed mean - shape held, bumps taken out, never flattened to a line - with moves clamped to the budget and anything untouchable (water, roads, standing fields, rock) frozen where it lies. Proof on the lab's hills: over the sown strips the shape-scale roughness fell 48 to 18 while the end-to-end fall stayed exactly 31 cells. N4 (first slice) - a faction city's growth is PAID now, from what the bundle actually delivers to its side's stock: 24 HM for a lot, 50 for a level-up, 40 for a militarisation, with a 60-HM war chest the growth never spends into, and the towers age at quarter pace while the city is unwatered or unfed. The lab's sandbox cities carry no faction and grow free, as a design lab should; the live-world probe funds the purse and proves the spend. N70 - where two bases meet they CONNECT: the joint roots its core in the centre of the gap and a central pillar climbs to the shorter tower's roofline, tying the two through their floors - slab arms at every storey, doorways cut wherever a room stands behind the wall - and their roofs. The deep truth your screenshot taught: a mature compacted city has NO gaps left in the old joint window (34-110) - every slot tightens to 8-32, which is exactly the divided-wall case - so joints now take the tight slots (minimum 10), and a joint its towers OUTGROW rebuilds taller in the same pass, so the stubby early joints become full spines as the pair ages. The joint's primal core threads the faction's bundle like every other core. Also in the wave: the render GC fix the physics chat measured (845fd63) - a blast's flicker reuses each chunk's stored darkness buffer instead of allocating 18 MB of fresh ones. Probes 7/7, 7/7, 17/17, 12/12; matrix 18/18 on seeds 7, 3 and 11.",
+  "shots": [
+   {
+    "src": "shots/n70-joint-spine.png",
+    "caption": "the spine: towers tied through a central pillar at every storey, the slot no longer a dividing wall (modern pair, lab seed 7)"
+   },
+   {
+    "src": "shots/n69-farm-eased.png",
+    "caption": "the farm over the eased hills: the land keeps its roll, the bumps gone, the farmstead at the new level-7 height"
+   }
+  ]
+ },
+ {
   "title": "Fable: the military wing grown whole - taller, welded to its neighbours, nothing floating (75a1559, N65-N68)",
   "author": "Fable",
   "time": "2026-11-20 (the four wing refinements, routed through the day)",
@@ -1854,6 +1870,20 @@
         "owner": "F",
         "step": "H, E",
         "text": "Tunnel fixes (user, 2026-11-19, from shots/incline.png): pipes are part of the background walls, not drawn over the tunnels; the roof above stairs is higher; every tunnel is walkable for a ground trooper, so the whole network can be explored on foot."
+       },
+       {
+        "id": "N69",
+        "owner": "F",
+        "step": "J, H",
+        "text": "Farm height and terrain (user, 2026-11-20, lab screenshot; refines N46/N54): farms can reach higher than the current limit; while they grow, a farm smooths the terrain under and around it and keeps the relative height of the slope - the terrain keeps its shape, just smoother. DONE cf47817 (level cap 6 -> 7 in the farm's level-up block and the canvas; smoothGrade eases the surface toward its windowed mean, shape and slope kept; hills proof 48 -> 18 roughness at identical end-to-end fall).",
+        "done": true
+       },
+       {
+        "id": "N70",
+        "owner": "F",
+        "step": "H, F2",
+        "text": "Connected bases (user, 2026-11-20, lab screenshot): where two bases meet they connect, not divided by a wall - a core in the centre of the gap, a pillar in the centre, the pillar connecting the two bases through their floors and roofs. DONE cf47817 (the joint spine: central pillar to the shorter roofline, slab arms every storey with doorways where rooms align, roof cap; joints take tight slots now - min 10 - and rebuild taller when their towers outgrow them; the joint core threads the bundle).",
+        "done": true
        },
        {
         "id": "N65",
