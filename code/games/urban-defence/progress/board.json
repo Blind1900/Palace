@@ -1,5 +1,21 @@
 [
  {
+  "title": "Fable: the pipe bore is real space, built behind a flag for the joint flip with PS (7feb6b6, N38 part 4)",
+  "author": "Fable",
+  "time": "2026-11-20 (priority item 3)",
+  "note": "The fourth N38 note - pipes as truly hollowed terrain - is built, behind PW.PIPE_CAVITY (off by default, so today's worlds are unchanged). With the flag on, each of the three lane rows inside the bundle is carved to REAL open space with the lane's ribbed colour as its back wall; the casing and the two lane dividers stay solid steel. So the tube is terrain, not deco: smoke drifts down the real channels, flood water drops in through a real breach and runs along the real bore (PS's N61O water as it is), debris rains into a cut mouth and the arriving stream still blasts it free. Break detection, the spill, the regrowth and the take-up all work on the real tube - a flooded lane that is dug up ejects its water as drops, never burying it (the N42O water rule). Two deliberate exceptions: risers stay solid (carved open, a pump's riser would drain its own lake into the line for real), and sleeves through buildings stay painted (nothing load-bearing is cut). Validation both ways: with the flag OFF, suites 17/17 on seeds 3 and 11; seed 7 is 16/17, where pw-collapse's p95 perf budget fails IDENTICALLY at the clean tip over four A/B runs - today's machine load pushed a marginal world over the 3 ms line, nothing from this change (PS has it in their P2 perf pass). With the flag ON, a new pw-pipe-cavity scenario passes 10 checks on seed 7: carve structure cell by cell over 200+ columns, whole as laid, cargo to stock, cut, spill, regrow, take-up clean, water conserved. The flip is agreed with PS: right after their P2 lands they delete their gas-through-solid machinery (pw-heat hollowAt, pw-particles gasOpen and intoMouths), extend the stability walk and the conservation counters, and the flag goes on for good - two halves, one joint matrix.",
+  "shots": [
+   {
+    "src": "shots/n38-cavity-break.png",
+    "caption": "flag on: a blast cuts the real tube by the pump's lake - cargo streams to the wound while debris chokes it"
+   },
+   {
+    "src": "shots/n38-cavity-repaired.png",
+    "caption": "flag on: the ends regrow and the real tube closes; the level steps carry their wells, water flowing again"
+   }
+  ]
+ },
+ {
   "title": "Opus: water pours, falls and levels like water - continuous falls, basins that fill level, nothing lost (b5de1ca, N61O)",
   "author": "Opus",
   "time": "2026-11-20",
@@ -1787,7 +1803,7 @@
         "id": "N38",
         "owner": "F",
         "step": "E, D, C",
-        "text": "Pipes, cores and peek holes become terrain, not deco blocks (user, 2026-11-19). Pipes: two parallel lines hollowed out of the terrain itself, running together and turning only where needed; resource pixels travel inside the tube. If a tube end is destroyed before it reconnects, its resource pixels push out and destroy the debris at that end. Cores: the same change, the core is part of the terrain, not a deco block. The white energy is a light equation that gives an atom-like motion of vibrations. Military peek holes: they stop at the structure or terrain, and do not jut outward at the top end or corner."
+        "text": "Pipes, cores and peek holes become terrain, not deco blocks (user, 2026-11-19). Pipes: two parallel lines hollowed out of the terrain itself, running together and turning only where needed; resource pixels travel inside the tube. If a tube end is destroyed before it reconnects, its resource pixels push out and destroy the debris at that end. Cores: the same change, the core is part of the terrain, not a deco block. The white energy is a light equation that gives an atom-like motion of vibrations. Military peek holes: they stop at the structure or terrain, and do not jut outward at the top end or corner. STATUS: all four notes built - the hollowed-tube half lives behind PW.PIPE_CAVITY (7feb6b6, suites green both ways); it flips on for good with PS's half right after their P2 perf pass, in one joint commit with a joint matrix."
        },
        {
         "id": "N43",
