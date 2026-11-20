@@ -208,6 +208,7 @@
       const rows = strong ? 4 : 2, pierEvery = strong ? 18 : 12;
       const plank = [[126, 96, 58], [110, 84, 50], [96, 72, 44]];
       const steel = [[96, 100, 106], [84, 88, 94], [70, 74, 80]];
+      const piers = [], legGap = strong ? 5 : 4;
       for (let x = b.x0 - 2; x <= b.x1 + 2; x += 1) {
         for (let r = 0; r < rows; r += 1) {
           const y = deckTop + r;
@@ -220,20 +221,36 @@
           PW.setLayer(world, 'paint', x, y, PW.abgr ? PW.abgr(c[0], c[1], c[2], 255) : 0);
           PW.setFlag(world, x, y, FLAG.BRIDGE);
         }
-        if (((x - b.x0) % pierEvery) === 2 && x > b.x0 + 1 && x < b.x1 - 2) {
-          for (const px of [x, x + 1]) {
+        // N56: each pier is an open truss the river passes THROUGH - two slim legs with brace
+        // dashes between them. Real support for the deck, no dam in the water: the flow runs
+        // round the legs and through the windows between the braces.
+        if (((x - b.x0) % pierEvery) === 2 && x > b.x0 + 1 && x < b.x1 - 2 - legGap) {
+          let bottom = deckTop + rows;
+          for (const px of [x, x + legGap]) {
             for (let y = deckTop + rows; y < world.height - 30; y += 1) {
               const id = PW.get(world, px, y) & 63;
               if (id !== M.AIR && id !== M.WATER) break;
               PW.set(world, px, y, (strong ? M.PILLAR : M.WOOD) | ((PW.hash2(px, y) & 3) << 6), Q);
               PW.setLayer(world, 'paint', px, y, PW.abgr ? PW.abgr(...(strong ? [84, 88, 94, 255] : [92, 70, 44, 255])) : 0);
+              PW.setFlag(world, px, y, FLAG.BRIDGE);
+              bottom = Math.max(bottom, y);
             }
           }
+          for (let y = deckTop + rows + 2; y < bottom - 1; y += 4) {
+            for (let bx = x + 1; bx < x + legGap; bx += 1) {
+              const id = PW.get(world, bx, y) & 63;
+              if (id !== M.AIR && id !== M.WATER) break;
+              PW.set(world, bx, y, (strong ? M.PILLAR : M.WOOD) | ((PW.hash2(bx, y) & 3) << 6), Q);
+              PW.setLayer(world, 'paint', bx, y, PW.abgr ? PW.abgr(...(strong ? [70, 74, 80, 255] : [78, 60, 38, 255])) : 0);
+              PW.setFlag(world, bx, y, FLAG.BRIDGE);
+            }
+          }
+          piers.push(x);
         }
       }
       for (let x = b.x0 - 3; x <= b.x1 + 3; x += 1) PW.refreshGroundTop(world, x);
       clearSimAround(b.x0 - 4, deckTop - 4, b.x1 + 4, deckTop + 60);
-      city.bridges.push({ x0: b.x0, x1: b.x1, y: deckTop, strong });
+      city.bridges.push({ x0: b.x0 - 2, x1: b.x1 + 2, y: deckTop, rows, strong, piers, legGap, sag: 0 });
       note(city, strong ? 'main bridge raised' : 'lesser bridge laid');
     }
 
@@ -774,6 +791,106 @@
       return true;
     }
 
+    // ---- N56: bridge support -------------------------------------------------------------------
+    // A bridge with too little support bends at its point of least resistance, snaps and
+    // breaks apart (the earthquake references). Every half second each bridge checks its
+    // piers: one holds while either leg runs unbroken from the deck to the bed. The longest
+    // unheld run sags the deck a little further each check; past the limit the deck snaps at
+    // the sag's centre and the freed span falls as rigid pieces for the fragments to break.
+    const SAG_SPAN = { strong: 120, plank: 70 };
+    const SNAP_SAG = 5;
+    function legHolds(br, px) {
+      for (let y = br.y + br.rows; y < world.height - 28; y += 1) {
+        const id = PW.get(world, px, y) & 63;
+        if (id === M.PILLAR || id === M.WOOD || id === M.BRIDGE) continue;   // leg, plank or the sagged deck itself
+        if (id === M.AIR || id === M.WATER || PW.mat.phase[id] === PW.PHASE.GAS) return false;
+        // rubble heaped against a cut leg is no footing - only solid ground holds a bridge
+        if (id === M.DEBRIS || id === M.RUBBLE || id === M.SAND || id === M.ASH || id === M.LOOSE_SOIL || id === M.LOOSE_STONE) return false;
+        return true;
+      }
+      return false;
+    }
+    const pierHolds = (br, px) => legHolds(br, px) || legHolds(br, px + br.legGap);
+    function stepBridges(city) {
+      for (const br of city.bridges) {
+        if (br.dead) continue;
+        const holds = [br.x0, ...(br.piers || []).filter((px) => pierHolds(br, px)).map((px) => px + (br.legGap >> 1)), br.x1];
+        let worst = null;
+        for (let i = 0; i + 1 < holds.length; i += 1) {
+          const run = holds[i + 1] - holds[i];
+          if (!worst || run > worst.run) worst = { run, a: holds[i], b: holds[i + 1] };
+        }
+        const limit = br.strong ? SAG_SPAN.strong : SAG_SPAN.plank;
+        if (!worst || worst.run <= limit) { br.sag = 0; continue; }
+        br.sag += 1;
+        br.sagAt = Math.round((worst.a + worst.b) / 2);
+        bendDeck(br, worst);
+        if (br.sag >= SNAP_SAG) snapBridge(city, br, worst);
+      }
+    }
+    function bendDeck(br, span) {
+      br.off = br.off || new Int16Array(br.x1 - br.x0 + 1);
+      const mid = (span.a + span.b) / 2, half = Math.max(1, (span.b - span.a) / 2);
+      for (let x = Math.max(br.x0, span.a + 1); x <= Math.min(br.x1, span.b - 1); x += 1) {
+        const t = 1 - Math.abs(x - mid) / half;
+        const want = Math.round(br.sag * t * t * 1.4);
+        const k = x - br.x0;
+        while (br.off[k] < want) {
+          const yTop = br.y + br.off[k], yBot = yTop + br.rows - 1;
+          const below = PW.get(world, x, yBot + 1) & 63;
+          if (below !== M.AIR && below !== M.WATER && PW.mat.phase[below] !== PW.PHASE.GAS) break;
+          for (let y = yBot; y >= yTop; y -= 1) {
+            PW.set(world, x, y + 1, PW.get(world, x, y), Q);
+            PW.setLayer(world, 'paint', x, y + 1, PW.getLayer(world, 'paint', x, y));
+            PW.setFlag(world, x, y + 1, FLAG.BRIDGE);
+          }
+          PW.set(world, x, yTop, below === M.WATER ? M.WATER : M.AIR, Q);
+          PW.setLayer(world, 'paint', x, yTop, 0);
+          PW.setFlag(world, x, yTop, FLAG.BRIDGE, false);
+          br.off[k] += 1;
+        }
+      }
+      clearSimAround(span.a - 2, br.y - 2, span.b + 2, br.y + br.rows + SNAP_SAG + 6);
+    }
+    function snapBridge(city, br, span) {
+      const cut = Math.min(Math.max(br.sagAt, span.a + 4), span.b - 4);
+      const deckCells = (xa, xb) => {
+        const cells = [];
+        for (let x = Math.max(br.x0, xa); x <= Math.min(br.x1, xb); x += 1) {
+          const k = x - br.x0, y0 = br.y + (br.off ? br.off[k] : 0);
+          for (let y = y0; y < y0 + br.rows; y += 1) {
+            if (PW.getFlags(world, x, y) & FLAG.BRIDGE) {
+              cells.push(y * world.width + x);
+              PW.setFlag(world, x, y, FLAG.BRIDGE, false);
+            }
+          }
+        }
+        return cells;
+      };
+      for (let x = cut - 1; x <= cut + 1; x += 1) {
+        const k = x - br.x0, y0 = br.y + (br.off ? br.off[k] : 0);
+        for (let y = y0; y < y0 + br.rows; y += 1) {
+          if (!(PW.getFlags(world, x, y) & FLAG.BRIDGE)) continue;
+          PW.set(world, x, y, M.AIR, Q);
+          PW.setLayer(world, 'paint', x, y, 0);
+          PW.setFlag(world, x, y, FLAG.BRIDGE, false);
+        }
+      }
+      const bed = br.y + br.rows + 60;
+      const launch = (cells, dir) => {
+        if (!cells.length) return;
+        if (world.fragments && world.fragments.spawn) {
+          world.fragments.spawn({ cells, drop: true, floor: bed, base: bed, omega: dir * 0.04 });
+        } else {
+          for (const i of cells) PW.set(world, i % world.width, (i / world.width) | 0, M.DEBRIS | 2 << 6, {});
+        }
+      };
+      launch(deckCells(span.a + 1, cut - 2), -1);
+      launch(deckCells(cut + 2, span.b - 1), 1);
+      br.dead = true;
+      note(city, 'the bridge gives: it bends, snaps, and falls');
+    }
+
     // ---- The clock ---------------------------------------------------------------------------
     function act(city) {
       city.actions += 1;
@@ -816,8 +933,11 @@
       return militaryAct(city);
     }
 
+    let stepTick = 0;
     function step(dt) {
       let heavy = 0;
+      stepTick += 1;
+      if (stepTick % 30 === 0) for (const city of cities) stepBridges(city);   // N56
       for (const city of cities) {
         if (city.kind === 'farm') {
           for (const field of city.fields) {
