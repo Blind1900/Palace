@@ -2,8 +2,9 @@
 // Cell automaton for water, powders (sand, loose soil and stone, building debris, ash) and gases,
 // run only on active chunks inside their changed rectangles. How each moves comes from the element
 // table (PW.mat): its weight (heavier sinks through lighter), how readily it slides and spreads,
-// what it settles into, how a gas rises and thins. Water is moved by swaps only, so it is
-// conserved. A grain with a long way to fall is handed to the particles, which fly it with
+// what it settles into, how a gas rises and thins. Water is moved by swaps only - or, with a long
+// way to fall, handed to the particles as a drop in flight that goes back into the water where it
+// lands - so it is conserved. A grain with a long way to fall is handed to the particles, which fly it with
 // gravity, drag and the wind and put it back into the grid where it lands. Debris that comes to
 // rest on the ground compacts into rubble after about 10 seconds; debris on roofs stays loose.
 (function () {
@@ -310,6 +311,12 @@
       if (y + 1 >= H) return false;
       // Free fall through air, several cells per tick; the cell lands with sideways momentum.
       if (isAir(mat[i + W])) {
+        // (a long way down: it goes as a drop in flight - see flyWater)
+        if (world.particles && openBelow(i, y) >= FLY_WATER) {
+          const m = mat[i];
+          flyWater(i, x, y, m & MOVING ? ((m & RIGHT) ? 1 : -1) * RUN_SPEED : isAir(mat[i + 1]) && !isAir(mat[i - 1]) ? LIP_SPEED : isAir(mat[i - 1]) && !isAir(mat[i + 1]) ? -LIP_SPEED : 0);
+          return true;
+        }
         let j = i + W, ny = y + 1;
         while (ny + 1 < H && ny - y < WATER_FALL && isAir(mat[j + W])) { j += W; ny += 1; }
         const m = mat[i];
@@ -349,8 +356,12 @@
             let go = 1;
             while (go < DISPERSE && x + d * (go + 1) > 0 && x + d * (go + 1) < W - 1 && isAir(mat[i + d * (go + 1)])) go += 1;
             mat[i] = M.WATER | MOVING | (d > 0 ? RIGHT : 0);
-            sweep(x, y, d, go, Math.sqrt(280 * Math.max(1, lastHead)));
+            const jet = Math.sqrt(2 * WATER_G * Math.max(1, lastHead));
+            sweep(x, y, d, go, jet);
             move(i, x, y, i + d * go, x + d * go, y, 'squirt');
+            // (out over a drop, it shoots on as a jet - see flyWater)
+            const j = i + d * go;
+            if (world.particles && isAir(mat[j + W]) && openBelow(j, y) >= FLY_WATER) flyWater(j, x + d * go, y, d * Math.min(JET_MAX, jet));
             if (lastHead > 0) refill(i, x, y);
           }
           return true;
@@ -395,7 +406,98 @@
           return true;
         }
       }
-      return false;
+      return level(i, x, y, dir);
+    }
+
+    // ---- Falling and levelling --------------------------------------------------------------------
+    // Water with a long way to fall goes as a drop in flight (see pw-particles): it keeps the speed it
+    // left with - a jet out of a breach at sqrt(2 g h), a sliding sheet at its run, a trickle over a
+    // lip at a little - and gravity takes it from there, so a fall comes off its lip as an arc,
+    // whole at the top and thinning as it speeds up, and goes back into the water where it lands.
+    // (Drops in flight are counted as the world's water: see particles.airWater.)
+    const FLY_WATER = 12;          // open cells under it, at least, for a fall to fly
+    const LIP_SPEED = 20;          // cells/s water trickling over a lip leaves it at
+    const JET_MAX = 260;           // cells/s
+    const openBelow = (i, y) => { let n = 0; for (let j = i + W; n < FLY_WATER && y + n + 1 < H - 1 && isAir(mat[j]); j += W) n += 1; return n; };
+    const FLY_COLUMN = 24;         // a column of water this tall at most, with nothing under it, falls whole
+    function flyWater(i, x, y, vx) {
+      const F = PW.PARTICLE;
+      // (the water standing on it: a short column open above - a sheet gone over a lip, a lump
+      // thrown up - has nothing holding it, and all of it falls together)
+      let top = y;
+      while (top > 0 && y - top < FLY_COLUMN && isWater(mat[(top - 1) * W + x])) top -= 1;
+      if (y - top < FLY_COLUMN && top > 0 && isAir(mat[(top - 1) * W + x])) {
+        for (let cy = top; cy <= y; cy += 1) {
+          PW.set(world, x, cy, M.AIR, { quiet: true });
+          world.particles.spawn(x + 0.5, cy + 0.5, vx, 0, M.WATER, 0, F.WATER, 8);
+        }
+        stats.waterFlown = (stats.waterFlown || 0) + y - top + 1;
+        PW.wakeArea(world, x - 2, top - 2, x + 2, y + 2);
+        return;
+      }
+      // A lake pours out through a hole under it as fast as its depth drives it (sqrt(2 g h), as
+      // out of a breach in its side - see outflow), the lake following it down: the drops leave
+      // from the open air under the hole, at that speed.
+      const keep = [lastHead, lastTopX, lastTopY];
+      const v = Math.sqrt(2 * WATER_G * (headAt(x, y) + 1)), n = Math.max(1, Math.min(OUTFLOW_MAX, Math.round(v / 60)));
+      [lastHead, lastTopX, lastTopY] = keep;
+      for (let b = 0; b < n && isWater(mat[i]); b += 1) {
+        PW.set(world, x, y, M.AIR, { quiet: true });
+        world.particles.spawn(x + 0.5, y + 1.5 + b * v / 60 / n, vx, v, M.WATER, 0, F.WATER, 8);
+        shiftColumn(x, y, 1);
+        stats.waterFlown = (stats.waterFlown || 0) + 1;
+      }
+      PW.wakeArea(world, x - 2, y - 2, x + 2, y + 2);
+    }
+    // Water finds its level. A cell at the surface looks along the surface either way, through the
+    // water it stands in, LEVEL_REACH columns at most - stopping at a wall, or where the water
+    // stands higher than here - for where the surface stands lowest, or where it runs out over an
+    // edge; at least two cells lower than here, it goes there (one cell: the surface is level). So a
+    // basin fills level from wherever the water comes into it, and water left on a ledge runs off.
+    // (In the body of the water, the pressure that levels it moves it all a little; here the top
+    // cell goes the whole way - the same water, the same level.)
+    const LEVEL_REACH = 128, LEVEL_DROP = 8, LEVEL_BUDGET = 120000;   // columns looked along a tick, at most
+    let levelBudget = 0;
+    function level(i, x, y, dir) {
+      if (y < 1 || !isAir(mat[i - W])) return false;
+      if (levelBudget <= 0) { PW.wakeCell(world, x, y); return false; }
+      let best = y + 1, bx = -1, edge = false;
+      for (let k = 0; k < 2 && !edge; k += 1) {
+        const s = k ? -dir : dir;
+        // (cy: the row it goes along - the top of the water, or the open cell on a dry floor;
+        // surf: how low the surface stands there, a dry floor as if it were water's)
+        let cy = y, surf = y;
+        for (let n = 1; n <= LEVEL_REACH; n += 1) {
+          const cx = x + s * n;
+          if (cx < 1 || cx >= W - 1) break;
+          levelBudget -= 1;
+          let j = cy * W + cx;
+          if (isWater(mat[j])) {
+            while (cy > 0 && isWater(mat[j - W])) { cy -= 1; j -= W; }
+            if (cy < y) break;                       // (standing higher than here)
+            surf = cy;
+          } else if (isAir(mat[j])) {
+            let d = 0;
+            while (d < LEVEL_DROP && cy < H - 2 && isAir(mat[j + W])) { cy += 1; j += W; d += 1; }
+            if (d >= LEVEL_DROP) {
+              // (an edge it pours over: out beside the bottom of the water at the lip)
+              let ly = cy - d, lj = ly * W + cx - s;
+              while (ly < H - 2 && isWater(mat[lj + W])) { ly += 1; lj += W; }
+              if (isAir(mat[ly * W + cx])) { bx = cx; best = ly; edge = true; }
+              break;
+            }
+            if (isWater(mat[j + W])) { cy += 1; surf = cy; } else surf = cy + 1;   // (a lower surface, or a dry floor)
+          } else break;                              // (a wall)
+          if (surf > best) { best = surf; bx = cx; }
+        }
+      }
+      if (bx < 0) return false;
+      // (where it goes: the open cell on the low surface - or, at an edge, out at its own height)
+      const ty = edge ? best : best - 1, j = ty * W + bx;
+      if (!edge && ty < y + 1) return false;
+      if (!isAir(mat[j])) return false;
+      move(i, x, y, j, bx, ty, 'level');
+      return true;
     }
 
     // (a blast's wind at (x, y) strong enough to push a grain of `id` off where it lies: the
@@ -723,6 +825,7 @@
       stats.kinds = {};
       stamp = (stamp % 255) + 1;
       bubbleBudget = 60;
+      levelBudget = LEVEL_BUDGET;
       // Wind: a slow swing of up to 14 cells/s (1 m/s) either way, with gusts on top.
       const t = world.tick / 60;
       world.wind = 14 * windNoise(t / 45) + 6 * gustNoise(t / 4);

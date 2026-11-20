@@ -247,5 +247,45 @@ check(stability.stats.broken === before, `ground nobody disturbed stands (${stab
   check(worstParts === 1, `each falling piece of a tree is one body of wood (at most ${worstParts} separate parts of wood in one; ${more('parted')} parts gone their own ways)`);
   check(more('limbs') > 0 && more('limbBends') > 0 && more('brokeOff') > 0, `falling trees' limbs bend where they strike the ground, and the branches they snap off fall as pieces of their own (${more('limbs')} limbs bent ${more('limbBends')} times; ${more('brokeOff')} of ${more('snapped')} snapped branches fell on by themselves; ${more('stripped')} leaves torn off by the air)`);
 }
+
+// 6. Water flows (N61O): a tank of water (70 x 60) on a stone pillar 220 cells up, its side knocked
+// out - the water pours out and falls as a sheet of drops in flight, not a dotted line of cells; the
+// tank empties; it lands in a walled basin below and spreads level across it; none of it is lost.
+{
+  const firm = (x) => { const k = id(x, world.groundTop[x]); return PW.mat.terrain[k] && PW.mat.phase[k] === PW.PHASE.SOLID; };
+  let x0 = -1;
+  for (const zone of layout.wilds) for (let x = zone.x0 + 100; x < zone.x1 - 600 && x0 < 0; x += 13) {
+    let flat = true;
+    for (let d = 0; d <= 420 && flat; d += 3) flat = firm(x + d) && Math.abs(world.groundTop[x + d] - world.groundTop[x]) <= 3;
+    if (flat) x0 = x;
+  }
+  if (x0 > 0) {
+    const g = Math.min(...Array.from({ length: 421 }, (_, d) => world.groundTop[x0 + d]));
+    const fill = (a, b, c, d, m) => { for (let y = b; y <= d; y += 1) for (let x = a; x <= c; x += 1) { PW.set(world, x, y, m, { quiet: true }); if (m === M.AIR) PW.setLayer(world, 'deco', x, y, 0); } };
+    fill(x0, g - 300, x0 + 420, g - 1, M.AIR);
+    for (let x = x0; x <= x0 + 420; x += 1) for (let y = g; y <= world.groundTop[x]; y += 1) if (id(x, y) === M.AIR) PW.set(world, x, y, M.STONE, { quiet: true });
+    const tx0 = x0 + 10, tx1 = x0 + 79, ty0 = g - 280, ty1 = g - 221;
+    fill(tx0 - 3, ty0 - 3, tx0 - 1, ty1 + 4, M.STONE); fill(tx1 + 1, ty0 - 3, tx1 + 3, ty1 + 4, M.STONE); fill(tx0 - 3, ty1 + 1, tx1 + 3, ty1 + 4, M.STONE);
+    fill(tx0 + 10, ty1 + 5, tx0 + 40, g - 1, M.STONE);
+    fill(x0 + 417, g - 50, x0 + 420, g - 1, M.STONE);
+    const P = pwApp.particles, water = () => pwApp.countWater() + P.airWater();
+    fill(tx0, ty0, tx1, ty1, M.WATER);
+    const water0 = water();
+    fill(tx1 + 1, ty0 - 3, tx1 + 3, ty1, M.AIR);
+    PW.wakeArea(world, x0, g - 300, x0 + 420, g);
+    const inBox = (a, b, c, d) => { let n = 0; for (let y = b; y <= d; y += 1) for (let x = a; x <= c; x += 1) if (id(x, y) === M.WATER) n += 1; return n; };
+    let flying = 0, emptied = -1;
+    for (let t = 1; t <= 60 * 14; t += 1) {
+      pwApp.stepWorld(1);
+      flying = Math.max(flying, P.airWater());
+      if (emptied < 0 && inBox(tx0, ty0, tx1, ty1) <= 5) emptied = t;
+    }
+    let lo = Infinity, hi = -Infinity;
+    for (let x = tx1 + 6; x <= x0 + 414; x += 1) { let y = g - 50; while (y < g && id(x, y) !== M.WATER) y += 1; lo = Math.min(lo, y); hi = Math.max(hi, y); }
+    check(flying > 500 && emptied > 0 && emptied < 60 * 8, `water pours out of a breach and falls as a sheet of drops, and the tank empties (${flying} drops in the air at once; emptied in ${emptied > 0 ? (emptied / 60).toFixed(1) + ' s' : 'never'})`);
+    check(hi - lo <= 3, `water spreads level across a basin (its surface ${g - hi}..${g - lo} cells deep across 330 cells after 14 s)`);
+    check(water() === water0, `the falling water is all kept (${water0} -> ${water()})`);
+  }
+}
 pwApp.setPaused(false);
 return { checks, shots: shots.length, holes, stability: stability.stats };

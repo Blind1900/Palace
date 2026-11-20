@@ -539,6 +539,10 @@
     // and it is left over the gap, to stand on what still holds it, or come down whole and break
     // (see the structure system, the props, the cores). The cells moved; -1 when it cannot sink
     // (nothing of the hollow left to take it, or something solid right over it).
+    // (steam in the hollow the ground fills condenses there: its water goes on as a drop)
+    const condense = (i) => {
+      if ((mat[i] & ID_MASK) === M.STEAM && particles) particles.spawn(i % W + 0.5, ((i / W) | 0) + 0.5, 0, -20, M.WATER, 0, PW.PARTICLE.WATER, 6);
+    };
     const sinksWith = (x, y, id) => {
       if (RIGID[id]) return false;
       const o = PW.getOwner(world, x, y);
@@ -569,8 +573,11 @@
         while (s.filled < s.fill.length && into < 0) { const i = s.fill[s.filled++]; if (s.hollow.has(i) && open[mat[i] & ID_MASK]) into = i; }
         if (into < 0) return -1;
         s.hollow.delete(into);
-        PW.set(world, into % W, (into / W) | 0, s.rubble);
-      } else s.hollow.delete(bottom * W + x);
+        condense(into);
+        // (what is pressed out goes in: ground as rubble; water lying there as the water it is)
+        const pressed = mat[bottom * W + x];
+        PW.set(world, into % W, (into / W) | 0, phase[pressed & ID_MASK] === PW.PHASE.LIQUID ? pressed : s.rubble);
+      } else { s.hollow.delete(bottom * W + x); condense(bottom * W + x); }
       PW.sinkColumn(world, x, top, bottom);
       return bottom - top + 1;
     }
