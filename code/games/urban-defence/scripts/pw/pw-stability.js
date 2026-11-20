@@ -73,6 +73,14 @@
   const STIR_FELT = 0.12;    // a shake felt this hard (times how loose the stuff is) stirs a heap
   const SLIDE_SPEED = 40;    // cells a second ground breaking loose comes down at, for its shock
   const SHOCK_EVERY = 6;     // ticks between gathering up the strikes of flying debris
+  // A shock's vibration runs on through the ground as a wave, far beyond where it stirs the heaps
+  // (see shake): where it passes, the loose top of the ground shivers - its grains hop a cell or
+  // two and settle back - the more the nearer the shock and the looser the stuff.
+  const WAVE_SPEED = 1400;   // cells/s the shiver runs out at (about 100 m/s, as in loose ground)
+  const WAVE_REACH = 12;     // times a shock's size (the cube root of its energy) the wave carries
+  const WAVE_MIN = 24;       // a shock smaller than this sends out no wave to see
+  const WAVE_HOPS = 120;     // grains a tick, at most, all the waves together set hopping
+  const WAVE_MAX = 24;       // waves running at once, at most
   const FAR = 0xffff;
 
   function createStability(world, particles) {
@@ -646,7 +654,55 @@
       if (!(energy > SHOCK_MIN)) return;
       const size = Math.cbrt(energy);
       shake(x, y, size * 1.65, Math.min(1.6, size / 48));
+      if (size >= WAVE_MIN) wave(x, size);
       stats.shocks = (stats.shocks || 0) + 1;
+    }
+    // (the wave a shock at x of `size` sends out along the ground: it starts where its shake ends.
+    // Shocks coming together - a collapse's blows, a slide's - run out as one, the strongest)
+    const waves = [];
+    function wave(x, size) {
+      for (const w of waves) if (Math.abs(w.x - x) < 120 && w.r < w.start + 60) { if (size > w.size) { w.size = size; w.reach = size * WAVE_REACH; } return; }
+      if (waves.length >= WAVE_MAX) return;
+      const start = size * 1.65;
+      waves.push({ x: Math.round(x), size, start, r: start, reach: size * WAVE_REACH, n: 0 });
+    }
+    // Each tick the waves run on WAVE_SPEED / 60 cells each way; in each column they pass where the
+    // top of the ground is loose stuff lying open, a grain may hop - the likelier the nearer and
+    // the looser - and it comes down again as such grains do (rolling where it lands, by its heap's
+    // slope: see pw-particles).
+    function stepWaves() {
+      if (!waves.length) return;
+      let hops = particles && particles.count < particles.capacity * 0.6 ? WAVE_HOPS : 0;
+      const shakeOf = PW.mat.shake, POWDER = PW.PHASE.POWDER;
+      for (let k = waves.length - 1; k >= 0; k -= 1) {
+        const w = waves[k], r0 = w.r;
+        w.r = Math.min(w.reach, w.r + WAVE_SPEED / 60);
+        const amp = Math.min(1.5, w.size / 48);
+        for (let d = Math.floor(r0) + 1; d <= w.r && hops > 0; d += 1) {
+          const felt = amp * (1 - d / w.reach) * (1 - d / w.reach);
+          for (const x of [w.x - d, w.x + d]) {
+            if (x < 2 || x >= W - 2) continue;
+            // (the top of what lies loose on the ground there - a heap of building rubble does not
+            // count as the ground's line: see PW.mat.skyline)
+            let g = world.groundTop[x];
+            for (let up = 0; up < 60 && g > 2 && phase[mat[(g - 1) * W + x] & ID_MASK] === POWDER; up += 1) g -= 1;
+            if (g < 2 || g >= H - 2) continue;
+            const m = mat[g * W + x], id = m & ID_MASK;
+            if (phase[id] !== POWDER || !PW.mat.open[mat[(g - 1) * W + x] & ID_MASK]) continue;
+            w.n += 1;
+            const h = PW.hash3(x, g, w.n);
+            if ((h & 1023) / 1023 > Math.min(0.8, felt * shakeOf[id] * 1.2)) continue;
+            // (a hop of a cell or two - the harder it is shaken, the higher)
+            const v = 18 + felt * 24 * ((h >>> 10 & 255) / 255);
+            const paint = PW.getLayer(world, 'paint', x, g);
+            PW.set(world, x, g, M.AIR, { quiet: true });
+            particles.spawn(x + 0.5, g + 0.5, (((h >>> 18) & 31) / 31 - 0.5) * 12, -v, m, paint, F.LAND | F.LOOSE, 3);
+            stats.shivered = (stats.shivered || 0) + 1;
+            if ((hops -= 1) <= 0) break;
+          }
+        }
+        if (w.r >= w.reach) waves.splice(k, 1);
+      }
     }
     // Vibration from a shock at (cx, cy): it dies away over `reach`.
     // Each kind of ground feels it as much as the element table's `shake` says: the surface of
@@ -849,6 +905,7 @@
         if (!ruinLeft(r)) ruins.splice(ruinAt, 1);
       }
       if (sags.length) { const t0 = performance.now(); stepSags(1 / 60); stats.sagMs = performance.now() - t0; }
+      stepWaves();
       if (toppling.length) goOver();
       // The strikes of flying debris, gathered tile by tile, each felt as one shock.
       if (tick % SHOCK_EVERY === 0 && particles && particles.drainImpacts) particles.drainImpacts(shock);

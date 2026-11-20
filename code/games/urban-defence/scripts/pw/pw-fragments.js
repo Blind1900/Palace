@@ -262,7 +262,7 @@
         mode: spec.flex ? 'flex' : spec.pivot ? 'hinge' : spec.drop ? 'drop' : 'fly', dir: spec.dir || 1, age: 0, flora: !!spec.flora,
         spring: spec.flex ? spec.flex.spring : 0, damp: spec.flex ? spec.flex.damp : 0,
         yf: spec.pivot ? spec.pivot.y : spec.floor || 0, crushedRows: 0, base: spec.base ?? H, h0: spec.h0 || gh, still: 0, touched: -1, sunk: spec.sunk || 0,
-        hollow: heavy + thin ? thin / (heavy + thin) : 0, shapeMass: mass, partsDue: partsLater,
+        hollow: heavy + thin ? thin / (heavy + thin) : 0, shapeMass: mass, partsDue: partsLater, frame: frameOf(data),
         // (a great piece of a building just lifted out of the world starts to move on the tick
         // after: the lifting is the work of a tick in itself)
         waits, outlineDue: waits };
@@ -303,6 +303,8 @@
     const OUT = { frame: new Uint8Array(0), outside: new Uint8Array(0), fill: new Int32Array(0), outer: new Int32Array(0), inner: new Int32Array(0) };
     // (an outline still to be made: see spawn)
     const NO_OUTLINE = { points: new Float32Array(0), faces: new Float32Array(0), ptCell: new Int32Array(0) };
+    // (how many cells of frame a piece's data holds - what it strikes with, and holds together by)
+    const frameOf = (data) => { let n = 0; const S = data.solid; for (let k = 0; k < S.length; k += 1) if (S[k] === 1) n += 1; return n; };
     function outlineOf(grid, gw, gh, u0, v0, data, ax, ay) {
       const N = gw * gh, n = data.x.length, X = data.x, Y = data.y, SOL = data.solid;
       if (OUT.frame.length < N) { OUT.frame = new Uint8Array(N); OUT.outside = new Uint8Array(N); OUT.fill = new Int32Array(N); }
@@ -358,6 +360,7 @@
     function reoutline(p) {
       const o = outlineOf(p.grid, p.gw, p.gh, p.u0, p.v0, p.data, p.ox0, p.oy0);
       p.points = o.points; p.faces = o.faces; p.ptCell = o.ptCell; p.hitV = null;
+      p.frame = frameOf(p.data);
       p.outlinedAt = time;
       stats.reoutlined = (stats.reoutlined || 0) + 1;
     }
@@ -481,6 +484,7 @@
       }
       if (!n) return;
       p.mass = Math.max(1, p.mass - lost);
+      p.frame = Math.max(0, (p.frame ?? n) - n);
       stats.shed = (stats.shed || 0) + n;
     }
     // A falling plant's wood holds only as much as its girth lets it. Where it strikes something,
@@ -1212,10 +1216,11 @@
             p.reshape = false;
             reoutline(p);
           }
-          // (its frame all shaken off - only panels of back wall left, which strike nothing: it
-          // can hold together no longer, and comes apart where it is, as a scrap does - see spawn.
-          // Kept whole, nothing would ever stop it)
-          if (!done && !p.outlineDue && !p.points.length) {
+          // (its frame shaken off but for a few cells - all but panels of back wall, which strike
+          // nothing: it can hold together no longer, and comes apart where it is, as a scrap made
+          // so does - see spawn. Kept whole, its last few cells of frame are all that could ever
+          // stop it, and a few cells slip through the ground)
+          if (!done && !p.outlineDue && (!p.points.length || p.frame < CHUNK_MIN / 2)) {
             const [c, s] = cosSin(p);
             settle(place(p, p.data, c, s), p.vx, p.vy);
             stats.frameless = (stats.frameless || 0) + 1;

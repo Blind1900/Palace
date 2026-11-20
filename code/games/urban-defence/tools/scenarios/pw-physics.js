@@ -391,5 +391,36 @@ check(stability.stats.broken === before, `ground nobody disturbed stands (${stab
     check(water() === water0, `the water going down the stairwell is all kept (${water0} -> ${water()})`);
   } else check(false, 'a standing tower with stairs to pour water down');
 }
+
+// 8. Loose ground shivers from a distant shock (N9): its wave runs on through the ground far past
+// where it stirs the heaps, and the grains on top of loose ground it passes hop and settle back.
+// Two strips of sand on a stone floor, one within the wave's reach (but past the shake's), one
+// past it: the near one's grains shiver, none of them lost; the far one does not stir.
+{
+  const firm = (x) => { const k = id(x, world.groundTop[x]); return PW.mat.terrain[k] && PW.mat.phase[k] === PW.PHASE.SOLID; };
+  let x0 = -1;
+  for (const zone of layout.wilds) for (let x = zone.x0 + 100; x < zone.x1 - 900 && x0 < 0; x += 13) {
+    let flat = true;
+    for (let d = 0; d <= 820 && flat; d += 3) flat = firm(x + d) && Math.abs(world.groundTop[x + d] - world.groundTop[x]) <= 30;
+    if (flat) x0 = x;
+  }
+  if (x0 > 0) {
+    const g = Math.min(...Array.from({ length: 821 }, (_, d) => world.groundTop[x0 + d]));
+    const fill = (a, b, c, d, m) => { for (let y = b; y <= d; y += 1) for (let x = a; x <= c; x += 1) { PW.set(world, x, y, m, { quiet: true }); if (m === M.AIR) PW.setLayer(world, 'deco', x, y, 0); } };
+    fill(x0, g - 80, x0 + 820, g - 1, M.AIR);
+    for (let x = x0; x <= x0 + 820; x += 1) for (let y = g; y <= world.groundTop[x]; y += 1) if (id(x, y) === M.AIR) PW.set(world, x, y, M.STONE, { quiet: true });
+    fill(x0 + 250, g - 3, x0 + 400, g - 1, M.SAND);
+    fill(x0 + 600, g - 3, x0 + 750, g - 1, M.SAND);
+    pwApp.stepWorld(60 * 2);
+    const sandIn = (a, b) => { let n = 0; for (let y = g - 40; y < g; y += 1) for (let x = a; x <= b; x += 1) if (id(x, y) === M.SAND) n += 1; return n; };
+    const layout0 = (a, b) => { const s = []; for (let y = g - 40; y < g; y += 1) for (let x = a; x <= b; x += 1) if (id(x, y) === M.SAND) s.push(y * W + x); return s.join(','); };
+    const near0 = sandIn(x0 + 200, x0 + 450), far0 = layout0(x0 + 560, x0 + 790), hops0 = stability.stats.shivered || 0;
+    // (a shock of size 40: it stirs heaps within 66 cells, its wave carries 480)
+    stability.shock(x0 + 50, g - 1, 40 ** 3);
+    pwApp.stepWorld(60 * 3);
+    const hops = (stability.stats.shivered || 0) - hops0, near = sandIn(x0 + 200, x0 + 450), farStill = layout0(x0 + 560, x0 + 790) === far0;
+    check(hops > 12 && near === near0 && farStill, `loose ground shivers from a distant shock, and settles back (${hops} grains hopped in sand 200-350 cells off, past the 66 the shake stirs; ${near0} -> ${near} sand cells there; the strip 550-700 cells off, past the wave's 480: ${farStill ? 'still' : 'stirred'})`);
+  }
+}
 pwApp.setPaused(false);
 return { checks, shots: shots.length, holes, stability: stability.stats };
