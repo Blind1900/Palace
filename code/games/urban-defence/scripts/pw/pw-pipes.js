@@ -16,6 +16,14 @@
   const PW = window.PW;
   const { M, FLAG, ID_MASK } = PW;
   const { structural, terrain } = PW.mat;
+  // N38 part 4: the bore as REAL space. Off, the inside of the bore is solid M.PIPE painted as
+  // the lanes, and the physics track reads FLAG.HOLLOW to pass gas through the solid. On, each
+  // lane row is carved to real air with the lane's colour on the back wall behind it - smoke
+  // drifts, water drops and debris rains through the actual tube under the ordinary physics -
+  // while the casing and the lane dividers stay solid steel. Default off until the physics
+  // track's half of the flip lands (pw-heat's hollowAt, pw-particles' gasOpen PIPE case and
+  // intoMouths go in the same change); the two halves flip together, tested together.
+  if (PW.PIPE_CAVITY === undefined) PW.PIPE_CAVITY = false;
 
   const ORE_BITS = [[240, 210, 255], [192, 107, 252], [155, 86, 203], [127, 71, 167]];
   // The three lanes, top to bottom inside the casing. `row` is the lane's row within the bore.
@@ -217,11 +225,16 @@
     const collarAt = (along) => !tendrilAt(along) && ((along % 36) + 36) % 36 < 2;
     // Lay one bundle cell: in the ground a PIPE cell; across open space underground it is fixed to
     // the wall face; through a core's span it breaches plate and foundation into the bed's socket.
-    function layCell(line, x, y, color, hollow) {
+    // `row` is the cell's row within the bore (its column, stood on end) - casing 0 and BORE-1,
+    // lanes 1/3/5, dividers 2/4; omitted for fittings laid solid whatever the mode. `solid`
+    // keeps the lanes solid even with the cavity on: a riser pierces the surface and the
+    // machines - carved open it would drain the pump's own lake into the line for real.
+    function layCell(line, x, y, color, row, solid) {
       if (x < 1 || y < 1 || x >= W - 1 || y >= H - 1) return false;
       // The bore is hollow (N17F): its inside rows are marked so smoke and fire travel the
       // pipe among the cargo (the physics track reads the flag; everything else sees solid).
-      if (hollow) PW.setFlag(world, x, y, FLAG.HOLLOW);
+      const inside = row !== undefined && row > 0 && row < BORE - 1;
+      if (inside) PW.setFlag(world, x, y, FLAG.HOLLOW);
       const id = mat[y * W + x] & ID_MASK;
       const cover = id === M.COVER_ROCK || id === M.COVER_WOOD || id === M.COVER_METAL || id === M.COVER_SAND;
       if (PW.mat.open[id] || id === M.WATER || cover) {
@@ -256,6 +269,15 @@
       }
       if (!terrain[id] && id !== M.PIPE && id !== M.ASPHALT && id !== M.ROADBED) return false;
       if (id === M.ORE) return false;
+      // N38 part 4: with the cavity on, a lane row in the ground is REAL space - the tube is
+      // terrain, not deco. The lane's ribbed colour becomes the back wall behind the channel.
+      if (PW.PIPE_CAVITY && !solid && inside && (row & 1)) {
+        PW.set(world, x, y, M.AIR, { quiet: true });
+        PW.setLayer(world, 'back', x, y, rgb(color));
+        PW.setLayer(world, 'paint', x, y, 0);
+        PW.setOwner(world, x, y, line.owner);
+        return true;
+      }
       PW.set(world, x, y, M.PIPE, { quiet: true });
       PW.setLayer(world, 'paint', x, y, rgb(color));
       PW.setOwner(world, x, y, line.owner);
@@ -268,6 +290,34 @@
       if (!terrain[id] || id === M.ORE || id === M.BEDROCK || PW.getOwner(world, x, y) || isTunnel(x, y)) return;
       PW.set(world, x, y, M.FILL, { quiet: true });
       PW.setLayer(world, 'paint', x, y, rgb(color));
+    }
+    // Is (x, y) the line's own work? Its casing and dividers are its M.PIPE cells; with the bore
+    // carved (PW.PIPE_CAVITY) its open lane cells are its too, marked HOLLOW under its owner.
+    // (the material is read first: the repair sweeps ask this for every cell of a wide band,
+    // and the chunked owner lookup is only worth paying on the few cells that could be the
+    // line's - the sweeps' old cost, kept)
+    function boreCell(line, x, y) {
+      const id = mat[y * W + x] & ID_MASK;
+      if (id === M.PIPE) return PW.getOwner(world, x, y) === line.owner;
+      if (!PW.PIPE_CAVITY) return false;
+      return (PW.getFlags(world, x, y) & FLAG.HOLLOW) !== 0 && PW.getOwner(world, x, y) === line.owner;
+    }
+    // Dig up one cell of the line's own work: back to bed fill, every mark cleared. Water
+    // standing in a carved lane is ejected as a drop first, never buried (the N42O rule:
+    // the world's water is only ever moved, not minted away).
+    function takeUp(line, x, y) {
+      if (!boreCell(line, x, y)) return false;
+      if (PW.PIPE_CAVITY) {
+        if ((mat[y * W + x] & ID_MASK) === M.WATER && world.particles) {
+          world.particles.spawn(x + 0.5, y + 0.5, 0, -30, M.WATER, 0, PW.PARTICLE.WATER, 6);
+        }
+        PW.setLayer(world, 'back', x, y, 0);
+      }
+      PW.set(world, x, y, M.FILL, { quiet: true });
+      PW.setFlag(world, x, y, FLAG.HOLLOW, false);
+      PW.setLayer(world, 'paint', x, y, rgb(tone(SAND, (PW.hash2(x, y) & 3) === 0 ? 0.88 : 1)));
+      PW.setOwner(world, x, y, 0);
+      return true;
     }
     // A column of a core's own bed is not laid: the bundle enters one connector and leaves by the
     // other, carried through inside.
@@ -286,7 +336,7 @@
         bedCell(x, y - b, b === 1 && collar ? tone(CASING, 1.2) : sand(-b));
         bedCell(x, y + BORE - 1 + b, b === 1 && collar ? tone(CASING, 0.78) : sand(b));
       }
-      for (let r = 0; r < BORE; r += 1) layCell(line, x, y + r, pipeColor(r, x), r > 0 && r < BORE - 1);
+      for (let r = 0; r < BORE; r += 1) layCell(line, x, y + r, pipeColor(r, x), r);
     }
     // A riser between the line and an anchor at (x, y): for the few taps that are not cores (the
     // lake pump, a mining hopper, the main core's pedestal). It is the SAME pipe, turned (the
@@ -298,7 +348,7 @@
       const yA = Math.min(anchor.y, lineY), yB = Math.max(anchor.y, lineY + BORE - 1);
       for (let r = 0; r < BORE; r += 1) {
         const x = anchor.x - 3 + r;
-        for (let y = yA; y <= yB; y += 1) layCell(line, x, y, pipeColor(r, y), r > 0 && r < BORE - 1);
+        for (let y = yA; y <= yB; y += 1) layCell(line, x, y, pipeColor(r, y), r, true);
       }
       layFlange(line, anchor.x, yA - 1);
       if (yB > lineY + BORE - 1) layFlange(line, anchor.x, yB + 1);
@@ -371,18 +421,12 @@
           const cross = BORE - Math.hypot(x - cx, y - cy);
           if (cross < -1) {
             // beyond the sweep: the squared outer corner goes back to the bed
-            if ((mat[y * W + x] & ID_MASK) === M.PIPE && PW.getOwner(world, x, y) === line.owner) {
-              PW.set(world, x, y, M.FILL, { quiet: true });
-              PW.setFlag(world, x, y, FLAG.HOLLOW, false);
-              PW.setLayer(world, 'paint', x, y, rgb(tone(SAND, (PW.hash2(x, y) & 3) === 0 ? 0.88 : 1)));
-              PW.setOwner(world, x, y, 0);
-              PW.setLayer(world, 'pipe', x, y, 0);
-            }
+            if (takeUp(line, x, y)) PW.setLayer(world, 'pipe', x, y, 0);
             continue;
           }
           if (cross < 0) continue;   // (the soft ring between arc and bed keeps what it has)
           const r = Math.max(0, Math.min(BORE - 1, Math.round(cross)));
-          layCell(line, x, y, pipeColor(r, x + y), r > 0 && r < BORE - 1);
+          layCell(line, x, y, pipeColor(r, x + y), r);
         }
       }
     }
@@ -402,7 +446,7 @@
         if (near) {
           const y0 = Math.min(near.y0 + 1, yTop), y1 = Math.max(near.y1 - 1, yBot);
           for (let r = 0; r < BORE; r += 1) {
-            for (let y = y0; y <= y1; y += 1) layCell(line, near.x - 3 + r, y, pipeColor(r, y), r > 0 && r < BORE - 1);
+            for (let y = y0; y <= y1; y += 1) layCell(line, near.x - 3 + r, y, pipeColor(r, y), r);
           }
           layFlange(line, near.x, y0 - 1);
           layFlange(line, near.x, y1 + 1);
@@ -415,14 +459,14 @@
           for (const x of [xc - 1, xc]) {
             for (let y = yTop; y <= yBot; y += 1) {
               const r = Math.max(0, Math.min(BORE - 1, y - (x === xc ? b : a)));
-              layCell(line, x, y, pipeColor(r, x), r > 0 && r < BORE - 1);
+              layCell(line, x, y, pipeColor(r, x), r);
             }
           }
           continue;
         }
         for (let r = 0; r < BORE; r += 1) {
           const x = xc - 3 + r;
-          for (let y = yTop; y <= yBot; y += 1) layCell(line, x, y, pipeColor(r, y), r > 0 && r < BORE - 1);
+          for (let y = yTop; y <= yBot; y += 1) layCell(line, x, y, pipeColor(r, y), r);
         }
         // N34: the pipe compensates through the bend - each corner of the well is a swept
         // elbow (the user's elbow-fitting references), one continuous pipe, never two bores
@@ -445,12 +489,7 @@
           for (let y = Math.max(1, w.y0); y <= Math.min(H - 2, w.y1); y += 1) {
             if (kk >= 0 && kk < line.ys.length && y >= line.ys[kk] - 1 && y <= line.ys[kk] + BORE) continue;
             if (line.wells.some((q) => Math.abs(x - q.x) <= 3 && y >= q.y0 && y <= q.y1)) continue;
-            if ((mat[y * W + x] & ID_MASK) === M.PIPE && PW.getOwner(world, x, y) === line.owner) {
-              PW.set(world, x, y, M.FILL, { quiet: true });
-              PW.setFlag(world, x, y, FLAG.HOLLOW, false);
-              PW.setLayer(world, 'paint', x, y, rgb(tone(SAND, (PW.hash2(x, y) & 3) === 0 ? 0.88 : 1)));
-              PW.setOwner(world, x, y, 0);
-            }
+            takeUp(line, x, y);
             PW.setLayer(world, 'pipe', x, y, 0);
           }
         }
@@ -706,12 +745,7 @@
         for (let y = Math.max(1, lo), x = line.x0 + k; y <= Math.min(H - 2, hi); y += 1) {
           if (y >= ny - 1 && y <= ny + BORE) continue;   // the new bore and its lip stay
           if (rr && Math.abs(x - rr.x) <= 3 && y >= rY0 - 1 && y <= rY1 + 1) continue;
-          if ((mat[y * W + x] & ID_MASK) === M.PIPE && PW.getOwner(world, x, y) === line.owner) {
-            PW.set(world, x, y, M.FILL, { quiet: true });
-            PW.setFlag(world, x, y, FLAG.HOLLOW, false);
-            PW.setLayer(world, 'paint', x, y, rgb(tone(SAND, (PW.hash2(x, y) & 3) === 0 ? 0.88 : 1)));
-            PW.setOwner(world, x, y, 0);
-          }
+          takeUp(line, x, y);
           PW.setLayer(world, 'pipe', x, y, 0);
         }
       }
@@ -729,7 +763,7 @@
       // clean pipe and nothing else. Same design as every pipe; no overlay.
       const tipX = line.x0 + k + dir * 4;
       for (let r = 0; r < BORE; r += 1) {
-        for (let y = ny - 8; y < ny + BORE + 8; y += 1) layCell(line, tipX - 3 + r, y, pipeColor(r, y), r > 0 && r < BORE - 1);
+        for (let y = ny - 8; y < ny + BORE + 8; y += 1) layCell(line, tipX - 3 + r, y, pipeColor(r, y), r);
       }
       // A searching feeler now and then: a few cells of ink reaching off the fresh work into
       // the ground, grown over as the end moves on (painted; it cuts nothing).
@@ -752,12 +786,7 @@
           if ((line.wells || []).some((w) => Math.abs(x - w.x) <= 3 && y >= w.y0 && y <= w.y1)) continue;
           if (line.risers.some((q) => (Math.abs(x - q.x) <= 3 && y >= q.y0 - 1 && y <= q.y1 + 1)
             || (Math.abs(x - q.x) <= 8 && y >= (q.tTop ?? q.y0) && y <= (q.tBot ?? q.y1)))) continue;   // (shaft, and the T-valve's band out to +-8)
-          if ((mat[y * W + x] & ID_MASK) === M.PIPE && PW.getOwner(world, x, y) === line.owner) {
-            PW.set(world, x, y, M.FILL, { quiet: true });
-            PW.setFlag(world, x, y, FLAG.HOLLOW, false);
-            PW.setLayer(world, 'paint', x, y, rgb(tone(SAND, (PW.hash2(x, y) & 3) === 0 ? 0.88 : 1)));
-            PW.setOwner(world, x, y, 0);
-          }
+          takeUp(line, x, y);
           PW.setLayer(world, 'pipe', x, y, 0);
         }
         stats.repaired += 1;
@@ -780,13 +809,7 @@
           // but outside it is wreckage like any other - a pump must not shelter a snarl)
           if (line.risers.some((q) => (Math.abs(x - q.x) <= 3 && y >= q.y0 - 1 && y <= q.y1 + 1)
             || (Math.abs(x - q.x) <= 8 && y >= (q.tTop ?? q.y0) && y <= (q.tBot ?? q.y1)))) continue;   // (shaft, and the T-valve's band out to +-8)
-          if ((mat[y * W + x] & ID_MASK) === M.PIPE && PW.getOwner(world, x, y) === line.owner) {
-            PW.set(world, x, y, M.FILL, { quiet: true });
-            PW.setFlag(world, x, y, FLAG.HOLLOW, false);
-            PW.setLayer(world, 'paint', x, y, rgb(tone(SAND, (PW.hash2(x, y) & 3) === 0 ? 0.88 : 1)));
-            PW.setOwner(world, x, y, 0);
-            PW.setLayer(world, 'pipe', x, y, 0);
-          }
+          if (takeUp(line, x, y)) PW.setLayer(world, 'pipe', x, y, 0);
         }
       }
     }
@@ -853,12 +876,7 @@
         // (take up the old pipe in this column, then lay it on the new row)
         for (let r = -1; r <= BORE; r += 1) {
           const yy = old + r, xx = line.x0 + k;
-          if ((mat[yy * W + xx] & ID_MASK) === M.PIPE && PW.getOwner(world, xx, yy) === line.owner) {
-            PW.set(world, xx, yy, M.FILL, { quiet: true });
-            PW.setFlag(world, xx, yy, FLAG.HOLLOW, false);
-            PW.setLayer(world, 'paint', xx, yy, rgb(tone(SAND, (PW.hash2(xx, yy) & 3) === 0 ? 0.88 : 1)));
-            PW.setOwner(world, xx, yy, 0);
-          }
+          takeUp(line, xx, yy);
           if (r >= 0 && r < BORE) PW.setLayer(world, 'pipe', xx, yy, 0);
         }
         line.ys[k] = ny;
@@ -1136,8 +1154,10 @@
       const cell = (x, y, c) => {
         if (x < vx0 || x > vx1 || y < vy0 || y > vy1) return;
         const id = mat[y * W + x] & ID_MASK;
+        // (a carved lane (PW.PIPE_CAVITY) is real open space: the cargo pixel shows in it)
         if (id === M.PIPE || ((id === M.REINFORCED || id === M.LINING) && (PW.getFlags(world, x, y) & FLAG.FIXTURE))
-          || (PW.mat.open[id] && PW.pipeShows(world, x, y))) put(x, y, c);
+          || (PW.mat.open[id] && (PW.pipeShows(world, x, y)
+            || (PW.PIPE_CAVITY && (PW.getFlags(world, x, y) & FLAG.HOLLOW))))) put(x, y, c);
       };
       for (const line of lines) {
         if (line.x1 < vx0 || line.x0 > vx1) continue;

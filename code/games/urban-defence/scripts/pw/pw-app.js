@@ -8,6 +8,13 @@
   const status = document.getElementById('world-status');
   const toolbar = document.getElementById('world-tools');
   const seed = Number(params.get('seed')) || (Math.random() * 1e9) >>> 0;
+  // Engine switches from the URL, for the labs and the suite runner: flags=PIPE_CAVITY turns
+  // PW.PIPE_CAVITY on (flags=REBUILD_RUINS:0 turns one off) before anything is generated.
+  for (const f of (params.get('flags') || '').split(',')) {
+    if (!f) continue;
+    const [name, v] = f.split(':');
+    PW[name] = v === undefined ? true : v !== '0';
+  }
 
   const timings = {};
   let t = performance.now();
