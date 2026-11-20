@@ -24,6 +24,10 @@
   const APPEND_EVERY = 110;      // growth-seconds before a side's edge creeps out another ring
   const INFILL_EVERY = 160;      // growth-seconds between looks for a gap worth filling in (N51)
   const AGE_PER_LEVEL = 140;     // N48: a building levels up as it stands - one level per this much age
+  // N54: growth shapes the ground. A spreading town or farm regrades the span ahead into one
+  // straight slope - built along the original shape - but only while the work is modest.
+  const GRADE = { maxSlope: 0.5, maxMove: 26 };         // a town's earthworks (streets take a 1-in-2)
+  const FARM_GRADE = { maxSlope: 0.4, maxMove: 20 };    // a farm's lighter ones
   const CLAIM = 46;              // land a city claims beyond its built edge (where merges happen)
   const RIPEN = 1 / 260;         // crop growth per growth-second: a field ripens in ~4 lab minutes
 
@@ -278,6 +282,70 @@
     const gapFor = (city, lot) => Math.max(GAP_MIN,
       (lot.gapWant ?? (GAP0 + lot.ring * GAP_RING)) - TIGHTEN * (city.level - lot.bornLevel));
 
+    // N54: the earthwork. [xa, xb] is regraded into one straight slope from the ground at one
+    // end to the ground at the other (cut above the line, fill below it) - growth built along
+    // the original shape. Refused when the line would run steeper than maxSlope, any column
+    // would move more than maxMove, a cut would bite into rock, or anything built, paved,
+    // sown or wet stands in the way. The graded line becomes the land's new natural shape
+    // (surface0), so spacing, erasing and re-seating all read it as the ground thereafter.
+    let regradeCount = 0;
+    function regrade(xa, xb, maxSlope, maxMove) {
+      const x0 = Math.max(8, Math.round(Math.min(xa, xb))), x1 = Math.min(world.width - 9, Math.round(Math.max(xa, xb)));
+      if (x1 - x0 < 8) return false;
+      const g0 = world.groundTop[x0], g1 = world.groundTop[x1];
+      const refuse = (why) => { dbg.push(`grade-${why}@${x0}`); if (dbg.length > 40) dbg.shift(); return false; };
+      if (Math.abs(g1 - g0) / (x1 - x0) > maxSlope) return refuse('slope');
+      const line = (x) => Math.round(g0 + (g1 - g0) * (x - x0) / (x1 - x0));
+      const soilish = (id) => id === M.GRASS || id === M.TOPSOIL || id === M.SOIL || id === M.LOOSE_SOIL || id === M.SAND;
+      let needed = false, lo = 1e9, hi = -1e9;
+      for (let x = x0; x <= x1; x += 1) {
+        const g = world.groundTop[x], t = line(x);
+        if (Math.abs(g - t) > maxMove) return refuse('move');
+        if ((PW.get(world, x, g) & 63) === M.WATER) return refuse('wet');
+        if (PW.getFlags(world, x, g) & (FLAG.ROAD | FLAG.FIELD)) return refuse('paved');
+        if (PW.getOwner(world, x, g) || PW.getOwner(world, x, g - 1)) return refuse('built');
+        for (let y = Math.min(g, t); y < Math.max(g, t); y += 1) {
+          if (y >= g && !soilish(PW.get(world, x, y) & 63)) return refuse('rock');
+          if (PW.getOwner(world, x, y)) return refuse('built');
+        }
+        if (Math.abs(g - t) > 2) needed = true;
+        lo = Math.min(lo, Math.min(g, t)); hi = Math.max(hi, Math.max(g, t));
+      }
+      if (!needed) return true;
+      for (let x = x0; x <= x1; x += 1) {
+        const g = world.groundTop[x], t = line(x);
+        if (g < t) {
+          for (let y = g; y < t; y += 1) PW.set(world, x, y, M.AIR, Q);           // cut the bump
+          PW.setLayer(world, 'deco', x, g - 1, 0);
+        } else {
+          for (let y = t; y < g; y += 1) {                                        // fill the dip
+            const d = y - t;
+            PW.set(world, x, y, (d < 3 ? M.GRASS : d < 16 ? M.TOPSOIL : M.SOIL) | (PW.hash2(x >> 3, y >> 3) & 3) << 6, Q);
+          }
+        }
+        for (let y = t; y < t + 3; y += 1) {
+          if ((PW.get(world, x, y) & 63) !== M.AIR) PW.set(world, x, y, M.GRASS | (PW.hash2(x, y) & 3) << 6, Q);
+        }
+        for (let y = t - 30; y < t; y += 1) PW.setLayer(world, 'deco', x, y, 0);  // plants over the works are cleared
+        world.surface0[x] = t;
+        PW.refreshGroundTop(world, x);
+      }
+      clearSimAround(x0, lo - 4, x1, hi + 6);
+      regradeCount += 1;
+      return true;
+    }
+    // A long span grades in strides: a polyline of straight slopes along the original shape,
+    // each stride cut and filled on its own (a refused stride stays as it was).
+    function regradeRun(xa, xb, grade) {
+      let x0 = Math.round(Math.min(xa, xb));
+      const x1 = Math.round(Math.max(xa, xb));
+      // the street's flare at the span's head is stepped past, not a reason to refuse
+      while (x0 < x1 && (PW.getFlags(world, x0, world.groundTop[x0]) & FLAG.ROAD)) x0 += 1;
+      let any = false;
+      for (let a = x0; a < x1; a += 96) any = regrade(a, Math.min(x1, a + 96), grade.maxSlope, grade.maxMove) || any;
+      return any;
+    }
+
     function tryAppend(city, side) {
       if (city.blocked[side] === 'merged' || city.blocked[side] === 'edge') return false;
       const dir = side === 'left' ? -1 : 1;
@@ -288,6 +356,10 @@
         variant: POP_LOT_VARIANTS[rand.int(0, POP_LOT_VARIANTS.length - 1)], seedN: seedN += 17, owner: 0 };
       const canvas = canvasFor(city, lot);
       const w = bodyWidth(canvas);
+      // N54: the ground ahead is graded in strides into straight slopes while the work is
+      // modest. The spread then reads the smoothed ground: a graded stretch packs close, and
+      // ground the earthworks refuse still spreads the N51 way or blocks as a barrier.
+      regradeRun(city.edge[side], city.edge[side] + dir * (GAP_MIN + 21 + w + 36), GRADE);
       // N51: the town spreads out - gaps start loose and varied, with the odd plaza-sized hole
       // left open (one lot in six), and the infill fills them in as it grows (the tightening
       // on level-up pulls the centre in besides).
@@ -523,6 +595,9 @@
         city.blocked[side] = null;
         return true;
       }
+      // N54: the farm flattens its land first - lighter earthworks than a town's; what they
+      // refuse, the old slope gate still judges.
+      regrade(from, to, FARM_GRADE.maxSlope, FARM_GRADE.maxMove);
       for (let x = Math.min(from, to) + 16; x <= Math.max(from, to); x += 1) {
         if (Math.abs(surf(x) - surf(x - 16)) > 9) { city.blocked[side] = 'farm-mountain'; return false; }
       }
@@ -544,13 +619,20 @@
     }
     const FARM_OUT = ['barn', 'greenhouse', 'silos'];
     function farmOutbuilding(city, side) {
+      // Outbuildings are the exception among the fields, never a march of their own: a blocked
+      // side stays blocked, the map's edge stops them, and they stay few against the fields
+      // (unchecked, a line of 46 barns once crawled thirteen thousand cells off the map).
+      if (city.blocked[side]) return false;
+      if (city.rings[side].length >= 2 + Math.floor(city.fields.length / 4)) return false;
       const dir = side === 'left' ? -1 : 1;
       const lot = { type: 'farm', level: 1 + rand.int(0, 1), ring: city.rings[side].length, side, bornLevel: city.level,
         variant: FARM_OUT[rand.int(0, FARM_OUT.length - 1)], seedN: seedN += 17, owner: 0 };
       const canvas = canvasFor(city, lot);
       const w = bodyWidth(canvas);
       const cursor = city.fieldEdge[side] + dir * 10;
-      if (barrierIn(cursor, cursor + dir * (w + 8)) || claimed(cursor, cursor + dir * (w + 8), city)) return false;
+      const far = cursor + dir * (w + 8);
+      if (Math.min(cursor, far) < 80 || Math.max(cursor, far) > world.width - 80) { city.blocked[side] = 'edge'; return false; }
+      if (barrierIn(cursor, far) || claimed(cursor, far, city)) return false;
       lot.canvas = canvas;
       lot.owner = allotOwner();
       if (!placeLot(city, lot, cursor + dir * (w / 2 + 2))) { world.buildings.pop(); return false; }
@@ -625,7 +707,8 @@
             note(city, `the farm grows: level ${city.level}`);
             return true;
           }
-          return farmOutbuilding(city, city.actions % 2 ? 'left' : 'right');
+          const s1 = city.actions % 2 ? 'left' : 'right';
+          return farmOutbuilding(city, s1) || farmOutbuilding(city, s1 === 'left' ? 'right' : 'left');
         }
         const sides = city.actions % 2 ? ['left', 'right'] : ['right', 'left'];
         for (const s of sides) if (extendFields(city, s)) return true;
@@ -713,7 +796,7 @@
       }).join(' | ');
     }
 
-    return { cities, barriers, drop, step, draw, describe, dbg };
+    return { cities, barriers, drop, step, draw, describe, dbg, regrades: () => regradeCount };
   }
 
   PW.createCapitalGrowth = createCapitalGrowth;
