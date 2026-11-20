@@ -99,9 +99,11 @@
     const EMPTY_CANVAS = { width: 1, height: 1, ground: 0, body: { left: 0, right: 0, top: 0, bottom: 0 },
       mat: new Uint16Array(1), back: new Uint32Array(1), deco: new Uint32Array(1), paint: new Uint32Array(1), role: new Uint8Array(1),
       floors: [], stairs: [], doors: [], slots: [], panels: [], cores: [], devices: [], windows: [], storage: [], lamps: [] };
-    const emptyRecord = (id) => ({ id, canvas: EMPTY_CANVAS, ox: -9999, oy: 0, ground: 0,
+    // (at the world's origin with one cell, NOT off-world: N42O's structure sweep clamps a
+    // record's scan box to the world and an off-world box went negative - a crashing array)
+    const emptyRecord = (id) => ({ id, canvas: EMPTY_CANVAS, ox: 0, oy: 0, ground: 0,
       cores: [], floors: [], stairs: [], doors: [], slots: [], panels: [], devices: [], windows: [], storage: [],
-      health: 0, body: { left: -9999, right: -9998, top: 0, bottom: 0 }, works: [-9999, -9998] });
+      health: 0, body: { left: 0, right: 0, top: 0, bottom: 0 }, works: [0, 0] });
     function allotOwner() { const id = world.buildings.length + 1; world.buildings.push(emptyRecord(id)); return id; }
 
     function clearSimAround(x0, y0, x1, y1) {
@@ -295,7 +297,7 @@
         infillClock: 0,
         rings: { left: [], right: [] }, edge: { left: x, right: x }, capEdge: { left: x, right: x },
         blocked: { left: null, right: null }, fields: [], fieldEdge: { left: x, right: x },
-        bridges: [], merged: new Set(), notes: [] };
+        bridges: [], joints: [], jointClock: 0, merged: new Set(), notes: [] };
       const main = { type: kind === 'capital' ? 'population' : kind, level: 2, ring: -1, side: 'right',
         bornLevel: 1, variant: kind === 'capital' ? 'offset' : kind === 'farm' ? 'homestead' : 'compound',
         seedN: seedN += 17, owner: allotOwner(), x };
@@ -551,6 +553,7 @@
     function seatChain(city, side, fromRing) {
       const dir = side === 'left' ? -1 : 1;
       const lots = city.rings[side];
+      clearJoints(city, side, fromRing);   // N58: a joint comes down before its neighbours move
       const chain = lots.slice(fromRing);
       for (const l of chain) eraseLot(l);
       let edge = fromRing === 0 ? city.capEdge[side] :
@@ -843,6 +846,148 @@
       return true;
     }
 
+    // ---- N58: merge points ---------------------------------------------------------------------
+    // Where two buildings stand close, they join through a merge point: a three-floor base
+    // spanning the gap, continuing the floor design, with a monument, statue, fountain or
+    // park in its ground hall - whichever suits the pair - and at its middle a NEW PRIMAL
+    // CORE in its own vault. When either neighbour re-seats, the joint is taken down first
+    // and the pair may merge again once they stand still.
+    const JOINT_EVERY = 200, JOINT_MIN = 34, JOINT_MAX = 110;
+    const KIT = PW.buildingKit;
+    const tone = KIT.tone;
+    function jointDecorKind(a, b) {
+      const kinds = [a, b].sort().join('+');
+      if (kinds.includes('military')) return kinds.includes('population') ? 'statue' : 'monument';
+      if (kinds.includes('farm')) return 'park';
+      return (PW.hash2(seedN, 7) & 1) ? 'fountain' : 'park';
+    }
+    function jointDecor(c, kind, cx, ground, P) {
+      const d = KIT.deco, s = (x, y, m, col) => KIT.solid(c, x, y, m, col, 6);
+      if (kind === 'fountain') {
+        for (let dx = -13; dx <= 13; dx += 1) {
+          const edge = Math.abs(dx) >= 12;
+          s(cx + dx, ground - 1, M.MASONRY, edge ? tone(P.ornament, 1.1) : [96, 152, 192]);
+          s(cx + dx, ground - 2, M.MASONRY, edge ? tone(P.ornament, 0.9) : [134, 192, 226]);
+        }
+        s(cx - 1, ground - 3, M.MASONRY, tone(P.ornament, 1.05)); s(cx + 1, ground - 3, M.MASONRY, tone(P.ornament, 1.05));
+        s(cx, ground - 4, M.MASONRY, tone(P.ornament, 1.15));
+        for (let dy = 5; dy <= 14; dy += 1) d(c, cx, ground - dy, dy > 12 ? [214, 238, 252] : [152, 206, 240]);
+        for (const [dx, dy] of [[-2, 12], [2, 12], [-4, 9], [4, 9], [-1, 14], [1, 14], [-3, 6], [3, 6]]) d(c, cx + dx, ground - dy, [192, 226, 246]);
+      } else if (kind === 'statue') {
+        for (let dx = -5; dx <= 5; dx += 1) for (let dy = 1; dy <= 3; dy += 1) {
+          s(cx + dx, ground - dy, M.MASONRY, tone(P.ornament, dy === 3 ? 1.2 : 1));
+        }
+        const bronze = [104, 84, 56], dark = [74, 60, 40];
+        for (let dy = 4; dy <= 10; dy += 1) { s(cx - 1, ground - dy, M.COVER_METAL, dy & 1 ? bronze : dark); s(cx + 1, ground - dy, M.COVER_METAL, dy & 1 ? dark : bronze); }
+        for (let dy = 11; dy <= 14; dy += 1) s(cx, ground - dy, M.COVER_METAL, bronze);
+        s(cx, ground - 15, M.COVER_METAL, [128, 104, 70]);                        // the head
+        s(cx - 2, ground - 12, M.COVER_METAL, dark); s(cx - 3, ground - 13, M.COVER_METAL, bronze);   // the raised arm
+      } else if (kind === 'monument') {
+        for (let dx = -6; dx <= 6; dx += 1) for (let dy = 1; dy <= 3; dy += 1) s(cx + dx, ground - dy, M.MASONRY, tone(P.ornament, dy === 3 ? 1.15 : 0.95));
+        for (let dy = 4; dy <= 30; dy += 1) {
+          const half = Math.max(1, Math.round(3 * (1 - (dy - 4) / 30)));
+          for (let dx = -half; dx <= half; dx += 1) s(cx + dx, ground - dy, M.MASONRY, dx < 0 ? [168, 164, 156] : dx > 0 ? [112, 110, 104] : [142, 139, 132]);
+        }
+        d(c, cx, ground - 31, [226, 190, 60]);                                    // the gold cap
+      } else {   // the park
+        for (let dx = -16; dx <= 16; dx += 1) s(cx + dx, ground - 1, M.GRASS, [86, 126, 56]);
+        for (const tx of [cx - 10, cx + 9]) {
+          for (let dy = 2; dy <= 7; dy += 1) s(tx, ground - dy, M.WOOD, [104, 76, 48]);
+          for (let dy = 6; dy <= 12; dy += 1) for (let dx = -3; dx <= 3; dx += 1) {
+            if (Math.abs(dx) + Math.abs(dy - 9) <= 4) d(c, tx + dx, ground - dy, (PW.hash2(tx + dx, dy) & 3) ? [84, 136, 60] : [108, 162, 74]);
+          }
+        }
+        for (let dx = -2; dx <= 2; dx += 1) d(c, cx + dx, ground - 3, [140, 104, 66]);   // the bench
+        d(c, cx - 2, ground - 2, [96, 70, 46]); d(c, cx + 2, ground - 2, [96, 70, 46]);
+      }
+    }
+    // The joint's canvas: three floors on the kit's own pitch, slabs and back walls in the
+    // pair's style, frame columns at the seams, the decor in the ground hall, the primal
+    // core's vault under the middle.
+    function buildJoint(style, w, decorKind) {
+      const S2 = KIT.S, P = KIT.STYLES[style], R = KIT;
+      const ground = 3 * S2.FLOOR + 10;
+      const c = R.createCanvas(w, ground + R.VAULT_DEPTH + 5, ground);
+      c.meta = { type: 'joint', style, decor: decorKind };
+      const floorRow = (k) => ground - k * S2.FLOOR;
+      for (let k = 0; k < 3; k += 1) {
+        const fRow = floorRow(k);
+        R.rect(c, 2, fRow - S2.CLEAR, w - 3, fRow - 1, (x, y) => R.back(c, x, y, R.backWallColor(style, x, y, fRow - 1 - y, 2, w - 3)));
+        for (let wx = 10; wx < w - 16; wx += 30) if (k > 0) R.backWindow(c, style, wx, fRow, (PW.hash2(wx, k) & 3) !== 0);
+        R.ceilingLamp(c, style, w >> 1, fRow - S2.CLEAR + 2);
+        for (let x = 2; x < w - 2; x += 1) for (let r = 0; r < S2.SLAB; r += 1) {
+          R.solid(c, x, floorRow(k + 1) + r, M.CONCRETE, R.slabColor(style, r, x, floorRow(k + 1) + r), k === 2 ? 4 : 2);
+        }
+      }
+      for (let x = 2; x < w - 2; x += 1) for (let r = 0; r < S2.SLAB; r += 1) {
+        R.solid(c, x, ground - 1 - r, M.CONCRETE, R.slabColor(style, r, x, ground - 1 - r), 2);
+      }
+      for (const lx of [0, 1, w - 2, w - 1]) {
+        for (let y = floorRow(3) - S2.SLAB; y < ground; y += 1) R.solid(c, lx, y, M.STEEL, tone(P.frame, lx < 2 ? 1.05 : 0.8), 1);
+      }
+      jointDecor(c, decorKind, w >> 1, ground, P);
+      R.core(c, w >> 1, ground);
+      R.corePillars(c, style);
+      R.bakeLights(c, style);
+      c.body = { left: 0, right: w - 1, top: 0, bottom: ground - 1 };
+      return c;
+    }
+    function eraseJoint(city, J) {
+      eraseLot({ owner: J.owner, placed: J.placed });
+      const un = (ow) => {
+        for (const side of ['left', 'right']) for (const l of city.rings[side]) if (l.owner === ow) l.jointWith = null;
+      };
+      un(J.a); un(J.b);
+    }
+    function clearJoints(city, side, fromRing) {
+      // joints find their neighbours by OWNER at call time - ring indices go stale the moment
+      // an infill splices or a lot is dismantled (a stale index left one joint standing alone
+      // in the open after its towers re-seated away)
+      const lots = city.rings[side];
+      const ringOf = (ow) => { const l = lots.find((q) => q.owner === ow); return l ? l.ring : Infinity; };
+      for (let j = city.joints.length - 1; j >= 0; j -= 1) {
+        const J = city.joints[j];
+        if (J.side !== side) continue;
+        if (ringOf(J.a) >= fromRing || ringOf(J.b) >= fromRing) { eraseJoint(city, J); city.joints.splice(j, 1); }
+      }
+    }
+    function tryJoint(city) {
+      for (const side of ['left', 'right']) {
+        const dir = side === 'left' ? -1 : 1, lots = city.rings[side];
+        for (let i = 0; i + 1 < lots.length; i += 1) {
+          const A = lots[i], B = lots[i + 1];
+          if (!A.placed || !B.placed || A.jointWith || B.jointWith) continue;
+          if (A.level < 2 || B.level < 2) continue;
+          const [L2, R2] = A.placed.worksR < B.placed.worksR ? [A, B] : [B, A];
+          const gap = R2.placed.worksL - L2.placed.worksR - 1;
+          if (gap < JOINT_MIN || gap > JOINT_MAX) continue;
+          if (barrierIn(L2.placed.worksR, R2.placed.worksL)) continue;
+          // the joint welds wall to wall: it reaches 3 cells into each neighbour's apron (the
+          // works' edge is wider than the visible wall - a flush joint, no slit of air)
+          const x0 = L2.placed.worksR - 2, w = gap + 6;
+          const decorKind = jointDecorKind(A.type, B.type);
+          const canvas = buildJoint(city.style, w, decorKind);
+          const owner = allotOwner();
+          const res = PW.foundations.place(world, canvas, x0, { style: city.style, owner });
+          if (!res) { world.buildings.pop(); continue; }
+          const rec = PW.buildingRecord(world, res.stamp, { id: owner, side: 'left', type: 'joint', style: city.style, level: 1, kind: city.kind });
+          for (const k of rec.cores) k.kind = 'main';
+          rec.primal = true;
+          world.buildings[owner - 1] = rec;
+          const placed = { x0: res.stamp.x, y0: res.stamp.y, x1: res.stamp.x + res.stamp.width - 1,
+            y1: res.stamp.y + res.stamp.height - 1, worksL: res.works[0], worksR: res.works[1] };
+          for (let x = placed.worksL - 2; x <= placed.worksR + 2; x += 1) PW.refreshGroundTop(world, x);
+          clearSimAround(placed.x0 - 6, placed.y0 - 6, placed.x1 + 6, placed.y1 + 40);
+          flashes.push({ box: placed, age: 0 });
+          city.joints.push({ owner, side, a: A.owner, b: B.owner, ringA: A.ring, ringB: B.ring, placed, decor: decorKind });
+          A.jointWith = B.owner; B.jointWith = A.owner;
+          note(city, `a ${decorKind} joins the two: the merged base roots a new primal core`);
+          return true;
+        }
+      }
+      return false;
+    }
+
     // ---- N56: bridge support -------------------------------------------------------------------
     // A bridge with too little support bends at its point of least resistance, snaps and
     // breaks apart (the earthquake references). Every half second each bridge checks its
@@ -1003,6 +1148,11 @@
           city.appendClock.left += dt; city.appendClock.right += dt;
           city.infillClock += dt;
           for (const side of ['left', 'right']) for (const l of city.rings[side]) l.age += dt;
+        }
+        city.jointClock += dt;
+        if (city.jointClock >= JOINT_EVERY) {   // N58: close neighbours join through a merge point
+          city.jointClock = 0;
+          if (heavy < 3 && tryJoint(city)) heavy += 1;
         }
         city.clock += dt;
         while (city.clock >= GROW_EVERY && heavy < 3) {
