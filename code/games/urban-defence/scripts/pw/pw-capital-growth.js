@@ -1245,6 +1245,10 @@
     };
     let stepTick = 0;
     function step(dt) {
+      // Idle engine, idle cost: with no city grown (the live world before any seed lands)
+      // nothing is scanned - the storm check alone walked the falling-pieces list every
+      // tick and that garbage showed in pw-collapse's at-the-line budget.
+      if (!cities.length && !flashes.length) return;
       stepTick += 1;
       if (stepTick % 30 === 0) for (const city of cities) stepBridges(city);   // N56
       const storm = stormy();

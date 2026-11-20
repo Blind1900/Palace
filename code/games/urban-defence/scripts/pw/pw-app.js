@@ -86,6 +86,12 @@
   const cores = PW.createCores ? PW.createCores(world, particles) : null;
   // The city grows by itself: seeds carried past the street's end, towers grown by repair (step H).
   const growth = PW.createGrowth && !gallery ? PW.createGrowth(world) : null;
+  // N2/N3: the capital-growth engine in the live world - the whole lab system (rings, levels,
+  // spacing, earthworks, farms, military spread, merge joints) runs any city dropped with the
+  // SEED tools. Idle until a seed lands: with no cities its step is a no-op, so nothing in the
+  // world changes until the player plants one.
+  const capital = PW.createCapitalGrowth && !gallery ? PW.createCapitalGrowth(world, { seed }) : null;
+  if (capital) world.capitalGrowth = capital;
   // Ground that loses its footing breaks loose: cave-ins, landslides and avalanches.
   const stability = world.stability = PW.createStability ? PW.createStability(world, particles) : null;
   // Air pressure and wind, worked only where a blast has stirred it.
@@ -125,6 +131,9 @@
   }
   function explode(x, y, radius, power = 1) {
     const r = PW.explode(world, particles, { x, y, radius, power });
+    // (the growth engine's storm cover reads recent blasts from this ring - as the lab feeds it)
+    (world.labBlasts = world.labBlasts || []).push({ x, y, t: world.tick || 0 });
+    if (world.labBlasts.length > 24) world.labBlasts.shift();
     // (the lines look at the struck columns next tick instead of waiting for the watch window)
     if (pipes && pipes.notifyDamage) pipes.notifyDamage(x - radius - 14, x + radius + 14);
     // (and any core or seed near the blast looks at its support - N18O, event-driven)
@@ -235,6 +244,34 @@
     else if (tool === 'life') life.seed(p.x, p.y, Math.max(3, brush));
     else if (typeof spec === 'function') paint(p.x, p.y, brush, spec);
   }
+  // N2: a seed dropped by hand - the capital-growth engine grows a capital, farm or military
+  // base from it by the growth rules (the lab's whole system, live in the world). The style
+  // follows the nearest town's; the engine answers with why a spot refuses a seed.
+  function dropSeed(which, p) {
+    if (!capital) return;
+    const kind = which === 'seedF' ? 'farm' : which === 'seedM' ? 'military' : 'capital';
+    // (the engine knows its own cities' claims; the standing worldgen towns are guarded here)
+    for (const s of world.settlements || []) {
+      if (p.x > s.streetLeft - 220 && p.x < s.streetRight + 220) { lastDig = 'seed: claimed by a standing town'; return; }
+    }
+    for (const o of [...(world.outposts || []), ...(world.bunkers || [])]) {
+      for (const f of o.footprints || []) if (p.x > f[0] - 90 && p.x < f[1] + 90) { lastDig = 'seed: claimed by the military'; return; }
+    }
+    // The buried bundle: a new lot's foundation work would saw through it (worldgen lays
+    // buildings FIRST, then threads the line through their spans). Until the growth system
+    // threads its lots onto the line the same way (the pipes' connect/release protocol,
+    // next slice), a seed city keeps clear of the lines' spans.
+    for (const l of (world.pipes && world.pipes.lines) || []) {
+      if (p.x > l.x0 - 120 && p.x < l.x1 + 120) { lastDig = 'seed: the supply line runs under this ground - open country only, for now'; return; }
+    }
+    let near = null;
+    for (const s of world.settlements || []) {
+      const d = Math.abs((s.streetLeft + s.streetRight) / 2 - p.x);
+      if (!near || d < near.d) near = { s, d };
+    }
+    const r = capital.drop(Math.round(p.x), kind, near ? near.s.style : 'modern');
+    lastDig = r.ok ? `seed: ${kind} ${r.city ? r.city.id : ''} planted` : `seed: ${r.note}`;
+  }
   canvas.addEventListener('contextmenu', (event) => event.preventDefault());
   canvas.addEventListener('pointerdown', (event) => {
     drag.active = true; drag.x = event.clientX; drag.y = event.clientY;
@@ -244,6 +281,7 @@
       const spec = tools[tool];
       const p = toWorld(event);
       if (tool === 'digL' || tool === 'digR') dig(tool === 'digL' ? 'left' : 'right', Math.round(p.x - 30), Math.round(p.y - 18), Math.round(p.x + 30), Math.round(p.y + 18));
+      else if (tool === 'seedC' || tool === 'seedF' || tool === 'seedM') dropSeed(tool, p);
       else if (spec && typeof spec === 'object') explode(p.x, p.y, spec.radius, spec.power);
       else useTool(event);
     }
@@ -289,6 +327,8 @@
       if (pipes) pipes.step();
       if (repair) repair.step(DT);
       if (growth) growth.step(DT);
+      // (seed cities grow at the dev speed, like the lab's controllable speeds)
+      if (capital) capital.step(DT * devSpeed);
       life.step();
       simTimes.push(performance.now() - s);
       if (simTimes.length > 240) simTimes.shift();
@@ -321,6 +361,7 @@
     particles.draw(renderer);
     if (life.draw) life.draw(renderer);
     if (cores && cores.draw) cores.draw(renderer, now);
+    if (capital && capital.draw) capital.draw(renderer, now / 1000);
     if (PW.debugHitboxes && fragments && fragments.drawHitboxes) fragments.drawHitboxes(renderer);
     PW.drawEffects(world, renderer, (now - (frame.prev || now)) / 1000);
     frame.prev = now;
