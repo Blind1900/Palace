@@ -110,6 +110,12 @@
       return -1;
     }
     function outflow(x, y) {
+      headAt(x, y);
+      return Math.max(1, Math.min(OUTFLOW_MAX, Math.round(Math.sqrt(280 * lastHead) / 60)));
+    }
+    // (the head of water over (x, y): followed up through the water over it, and on along the
+    // ceiling of a flooded passage to its way up - see opening; where its top is, in lastTopX/Y)
+    function headAt(x, y) {
       let h = 0, cx = x, cy = y - 1, hops = 0;
       while (h < HEAD_SCAN && cy >= 1) {
         const m = mat[cy * W + cx];
@@ -120,7 +126,7 @@
         cx = nx; hops += 1;
       }
       lastHead = h; lastTopX = cx; lastTopY = cy + 1;
-      return Math.max(1, Math.min(OUTFLOW_MAX, Math.round(Math.sqrt(280 * h) / 60)));
+      return h;
     }
     // Water is incompressible: water leaving at the bottom lowers the surface where it stands
     // highest. From the top of the column at (x, top), follow the connected surface sideways and
@@ -176,24 +182,51 @@
     // a building's fittings, street furniture, plants - is knocked out of its way: a plant is struck
     // (its wood snaps if the push is enough for it, its leaves and the grass are stripped and float
     // off), a fitting or a prop is knocked loose and carried off (a prop then topples whole, see
-    // PW.streetProps). A structure it drives against - a building's walls, floors, glass, timber -
-    // gives way where the push is more than its stuff can take, as under a flying lump (pw-particles'
-    // chip): the cell breaks and is thrown on with the water, its building is told (it may come
-    // down), and the water runs on into the gap. The ground does not wash away, nor do the pipes
-    // (terrain: N38F) or the god's metal. The push is the water's speed: v = sqrt(2 g h) for water
-    // forced out under a head of h cells; a front running free, about 4 m/s.
+    // PW.streetProps). A structure it presses or drives against - a building's walls, floors,
+    // glass, timber - gives way where the water's push is more than the wall there can hold: the
+    // cell breaks and is thrown on with the water, its building is told, and the water runs on into
+    // the gap. The ground does not wash away, nor do the pipes (terrain: N38F) or the god's metal.
+    // The push is the water's pressure, as a head of water: the depth of water standing over it
+    // (followed on up through a flooded room's ceiling to where the water stands open - see headAt),
+    // and, running at it, its speed's v^2 / 2g more; less the water on the wall's far side. A wall
+    // holds a head of WALL_HOLD x its stuff's hardness x its thickness squared (a panel between
+    // floors bending under the pressure): a brick wall 20 cm thick about a metre and a quarter of
+    // water, glass hardly any - so a deep flood breaks in, a puddle does not. (And the building as a whole
+    // takes the push of all the water against it: see pw-structure's swept.)
     const RUN_SPEED = 60;            // cells/s: a sliding front, a surge
-    const GIVES = 0.15;              // chance a tick that a push enough for it breaks a structure cell
+    const WATER_G = 140;             // cells/s^2: the water's gravity (see outflow)
+    const SURGE_HEAD = RUN_SPEED * RUN_SPEED / (2 * WATER_G);
+    const GIVES = 0.15;              // chance a tick that a push enough for it breaks a structure cell (more, the more it is over)
+    const WALL_HOLD = 5;             // head (cells) a wall a cell thick holds, per unit of its stuff's hardness
+    const WALL_MAX = 6;              // cells of a wall's thickness that count
+    const WATER_LOOK = 30;           // ticks between telling a building water presses on it...
+    const WATER_NOTICE = 12;         // ...this deep at least (no building is swept by less)
+    const WATER_FRESH = 600;         // ticks without water against a building before water is new to it again
     const WOOD_PUSH = 120;           // cells/s: a flow slower than this does not strike a plant's wood
     const { hardness: HARDNESS, breaksTo: BREAKS_TO, terrain: TERRAIN } = PW.mat;
     const FLORA = PW.FLAG.FLORA, WOOD_FLAG = PW.FLAG.WOOD, CHARRED = PW.FLAG.CHARRED;
     const breakable = (id) => structural[id] && !TERRAIN[id] && id !== M.PIPE && id !== M.CORE && phase[id] === PHASE.SOLID;
-    function pushOn(j, x, y, d, v) {
+    // (the world's: the head of water at a water cell, itself counted - for pw-structure's swept)
+    world.waterHead = (x, y) => headAt(x, y) + 1;
+    // (water at (x - d, y) pushing on the structure cell j at (x, y), with a head of `head` cells)
+    function pushOn(j, x, y, d, head) {
       const id = mat[j] & ID_MASK;
-      if (!breakable(id) || rnd(x, y) >= GIVES) return false;
-      // (as a flying lump's blow, against the stuff's hardness)
-      if (v / 400 < HARDNESS[id] * (0.6 + (PW.hash2(x, y) & 255) / 640) || PW.growing(world, x, y)) return false;
-      const owner = PW.getOwner(world, x, y), paint = PW.getLayer(world, 'paint', x, y);
+      if (!breakable(id)) return false;
+      const owner = PW.getOwner(world, x, y);
+      // (its building looks at what all the water against it does to it - see pw-structure's swept)
+      if (head >= WATER_NOTICE && owner > 0 && owner < 50000 && world.structure) {
+        const b = (world.buildings || [])[owner - 1];
+        const since = (world.tick || 0) - (b ? b.waterAt ?? -1e9 : 0);
+        // (at once when the water first comes against it - see pw-structure's notify)
+        if (b && since >= WATER_LOOK) { b.waterAt = world.tick || 0; world.structure.notify(owner, since > WATER_FRESH); }
+      }
+      // (the wall: as thick as the run of structure from here on, and the water on its far side)
+      let t = 1;
+      while (t < WALL_MAX && x + d * t > 0 && x + d * t < W - 1 && breakable(mat[j + d * t] & ID_MASK)) t += 1;
+      const far = j + d * t, back = isWater(mat[far]) ? headAt(x + d * t, y) + 1 : 0;
+      const over = (head - back) / (WALL_HOLD * HARDNESS[id] * t * t * (0.8 + (PW.hash2(x, y) & 255) / 640));
+      if (over < 1 || rnd(x, y) >= GIVES * Math.min(4, over) || PW.growing(world, x, y)) return false;
+      const v = Math.sqrt(2 * WATER_G * Math.max(1, head)), paint = PW.getLayer(world, 'paint', x, y);
       PW.set(world, x, y, M.AIR);
       const particles = world.particles;
       if (particles) particles.spawn(x + 0.5, y + 0.5, d * v * 0.5, -10 - (PW.hash3(x, y, world.tick) & 15), BREAKS_TO[id] || M.DEBRIS, paint, PW.PARTICLE.LAND, 6, owner);
@@ -235,12 +268,6 @@
       if (owner > 0 && owner < 50000 && world.onDamage) world.onDamage(owner, 0, x, y);
       stats.waterSwept = (stats.waterSwept || 0) + 1;
     }
-    // (the head of water standing over a cell, up to 128)
-    function headOver(i, y) {
-      let h = 0, j = i - W;
-      while (h < 128 && y - h > 0 && isWater(mat[j])) { h += 1; j -= W; }
-      return h;
-    }
 
     // Water momentum lives in the cell's two variant bits: bit 7 = sliding, bit 6 = direction (+x).
     // Falling water lands sliding; it keeps going until something blocks it, then stops for good.
@@ -259,7 +286,7 @@
       }
       if (go === 0) {
         // (running into a structure: it pushes on it - see pushOn - and runs into the gap next)
-        if (x + d > 0 && x + d < W - 1 && !isWater(mat[i + d]) && pushOn(i + d, x + d, y, d, RUN_SPEED)) return true;
+        if (x + d > 0 && x + d < W - 1 && !isWater(mat[i + d]) && pushOn(i + d, x + d, y, d, SURGE_HEAD)) return true;
         // Running into standing water, the push carries through it (like a surge): the cell
         // passes to the far end of the water along its row, if that end is open and within
         // reach, and the front advances there. A wall or a long run spends the momentum.
@@ -307,8 +334,9 @@
           const d = k ? -dir : dir;
           if (x + d < 1 || x + d >= W - 1) continue;
           if (!isAir(mat[i + d])) {
-            // (a structure beside it: the water standing over it presses on it - see pushOn)
-            if (pressed && breakable(mat[i + d] & ID_MASK) && rnd(x + d, y) < GIVES && pushOn(i + d, x + d, y, d, Math.sqrt(280 * headOver(i, y)))) return true;
+            // (a structure beside it: the water standing over it - or, in a flooded room, the water
+            // it is joined to - presses on it, and more, running at it - see pushOn)
+            if (breakable(mat[i + d] & ID_MASK) && rnd(x + d, y) < GIVES * 4 && pushOn(i + d, x + d, y, d, headAt(x, y) + 1 + ((mat[i] & MOVING) ? SURGE_HEAD : 0))) return true;
             continue;
           }
           if (ceiling && !isWater(mat[i - d])) continue;

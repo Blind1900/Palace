@@ -9,15 +9,18 @@
 //   - each row above the floor compares the load it carries per supporting column with what it
 //     carried as built (so every style is equally sturdy): a row that has lost too much of its
 //     support gives way, and so does one whose load now overhangs its remaining supports;
+//   - water standing or running against it pushes on it as a whole: a storey whose frame cannot
+//     take the push of all the water against the building above its floor shears through (swept);
 //   - everything above the failing row becomes ONE rigid piece that hinges down towards the side
 //     that failed (crushing the stump as it goes) or, when it lost its supports evenly, drops into
-//     its own footprint floor by floor; a jagged band crumbles at the break;
+//     its own footprint floor by floor - or, swept, is shoved off the way the water pushes; a
+//     jagged band crumbles at the break;
 //   - fittings (lamps, signs, railings) left hanging without what held them come down.
 // A building that has lost three quarters of its frame is ruined.
 (function () {
   const PW = window.PW;
   const { M, ID_MASK, CHUNK_SHIFT, CHUNK_MASK } = PW;
-  const { phase, structural, breaksTo } = PW.mat;
+  const { phase, structural, breaksTo, hardness } = PW.mat;
   const groundMat = PW.mat.ground;
 
   const FAIL_RATIO = 1.8;     // a row gives way when each support carries 1.8 times its built load
@@ -32,6 +35,26 @@
   // takes it away); its works hold its loose parts up while it was worked within SITE_IDLE ticks;
   // it is a building like any other again once SITE_DONE of it stands and the work has stopped.
   const GROW_LOSS = 60, SITE_IDLE = 1800, SITE_DONE = 0.9;
+  // Water against a building pushes on it with its pressure: in a row of its outer face, as a head
+  // of water, the depth of the water standing outside it there (and, running at it, its speed's
+  // v^2 / 2g more), less the water against its other face. The push on all of it above a row is
+  // what the row's frame must take, sideways (it is a storey's shear): each frame cell across it
+  // takes SHEAR x its stuff's hardness (a back wall stands for brick facades and party walls - in
+  // this side view about a twentieth of the building's depth of brick, which shears at about
+  // 0.3 MPa: some 22 cells of water head a cell). So a tower 13 m long gives way under a flood
+  // some 6 m deep against one side, a cottage under 2-3 m, a concrete bunker hardly at all; and
+  // what gives way is shoved off the way the water pushes, as fast as the push over what it
+  // holds, over its weight, gives it while the water falls on it.
+  const SHEAR = 55;             // head (cells) a frame cell across a storey takes, per unit of hardness
+  const BACK_HARD = 0.4;        // a back wall's hardness (brick)
+  const SURGE_HEAD = 13;        // cells: water running at it at a surge's speed (60 cells/s: see pw-sim)
+  const WATER_HEAD_MAX = 400;
+  const FACE_REACH = 40;        // cells out from its face the water's depth is looked for (past its eaves, a canopy)
+  const WET_FOR = 300;          // ticks after water last pressed on a building that it is looked for
+  const WATER_QUICK = 48, WATER_REPEAT = 6;   // ticks, from when water first comes against it, it is looked at this often
+  const FRAME_WEIGHT = 0.35;    // a frame cell weighs about a third of a cell of water (for the same depth)
+  const SWEEP_TIME = 0.5;       // s: about how long the push lasts on what gives way
+  const SWEEP_MAX = 120;        // cells/s
 
   function createStructure(world, fragments) {
     const { mat, width: W, height: H } = world;
@@ -39,6 +62,42 @@
     const stats = { analysed: 0, collapses: 0, detached: 0, crumbled: 0, orphans: 0, ms: 0, maxMs: 0, last: null };
     let tick = 0;
     const isStructure = (id) => phase[id] === PW.PHASE.SOLID && (structural[id] || groundMat[id]);
+    // The water's push on a row of a building (rightward, as a head of water x cells). A building is
+    // a box: its walls, doors and windows keep the water out - or, broken in, the water running
+    // through its rooms spends its head on all that is in them, its partitions, stairs and far wall
+    // - so the push on it is the water against its outer face upstream less that against its face
+    // downstream: the head of water standing there (as deep as it stands out from the face - under
+    // its eaves or a canopy only to their underside - or followed up under them to where it stands
+    // open: see pw-sim's waterHead), and, running at it, its surge. Water as deep on both sides of
+    // it pushes it no way at all. An open frame - a hall on pillars, a gate - the water runs
+    // through, pushing only on the share of the row its frame fills; and water poured in at an open
+    // ground floor runs on into it, so a short-lived flood pushes such a building less. A row
+    // pushed against the ground - a vault in its pit, a wall dug into a slope - the ground holds.
+    function waterOn(S, state, y, xl, xr, frame) {
+      const push = headOf(xl - 1, y, 1) - headOf(xr + 1, y, -1);
+      if (!push || groundAt(push > 0 ? xr + 1 : xl - 1, y)) return 0;
+      return push * frame / (xr - xl + 1);
+    }
+    const groundAt = (x, y) => x < 1 || x >= W - 1 || (PW.mat.terrain[mat[y * W + x] & ID_MASK] === 1 && phase[mat[y * W + x] & ID_MASK] === PW.PHASE.SOLID);
+    // (the head of water at (x, y) pushing the way `dir`, 0 out of the water: the deepest it stands
+    // in that row out from there, as far as FACE_REACH)
+    // (the rows are looked at going down: how high each column's water reaches, kept from the row
+    // above, so a column is climbed once an analysis)
+    const colRow = new Map(), colTop = new Map();
+    function headOf(x, y, dir) {
+      if (x < 1 || x >= W - 1) return 0;
+      const m = mat[y * W + x];
+      if ((m & ID_MASK) !== M.WATER) return 0;
+      let h = world.waterHead ? world.waterHead(x, y) : 1;
+      for (let s = 0, cx = x; s < FACE_REACH && cx >= 1 && cx < W - 1 && (mat[y * W + cx] & ID_MASK) === M.WATER; s += 1, cx -= dir) {
+        let top;
+        if (colRow.get(cx) === y - 1) top = colTop.get(cx);
+        else { top = y; for (let j = (y - 1) * W + cx; y - top < WATER_HEAD_MAX && top > 1 && (mat[j] & ID_MASK) === M.WATER; j -= W) top -= 1; }
+        colRow.set(cx, y); colTop.set(cx, top);
+        if (y - top + 1 > h) h = y - top + 1;
+      }
+      return (m & 0x80) && ((m & 0x40) ? 1 : -1) === dir ? h + SURGE_HEAD : h;
+    }
     // (by material: frame, and what holds frame up - ground, or structure it does not own)
     const frameOf = new Uint8Array(ID_MASK + 1), holds = new Uint8Array(ID_MASK + 1);
     for (let id = 0; id <= ID_MASK; id += 1) {
@@ -130,11 +189,15 @@
     }
 
     // ---- Analysis ---------------------------------------------------------------------------------
-    // (a building is analysed at most once every REPEAT ticks however often it is hit)
+    // (a building is analysed at most once every REPEAT ticks however often it is hit - but when
+    // water first comes against it, `soon`, at once and every WATER_REPEAT ticks for a while: a
+    // flood's push is greatest as it strikes, and falls off as the water spreads)
     const last = new Map();
-    function notify(id) {
-      if (!building(id) || due.has(id)) return;
-      due.set(id, Math.max(tick + 2, (last.get(id) ?? -1e9) + REPEAT));
+    function notify(id, soon = false) {
+      const b = building(id);
+      if (!b || (due.has(id) && !soon)) return;
+      if (soon) b.floodAt = tick;
+      due.set(id, soon ? Math.min(due.get(id) ?? Infinity, tick + 2) : Math.max(tick + 2, (last.get(id) ?? -1e9) + REPEAT));
     }
     let sweepAt = 0, blueprintAt = 0;
     function step(budgetMs = 1.5) {
@@ -305,12 +368,17 @@
       const ref = site ? b.asBuilt : bp;
       const rows = bp.load.length, rowLoad = new Float32Array(rows), rowSup = new Int32Array(rows);
       const cx0 = Math.max(S.fx0, b.body.left - 2), cx1 = Math.min(S.fx1, b.body.right + 2);
-      let load = 0, loadX = 0, fail = null;
+      let load = 0, loadX = 0, fail = null, pushed = 0;
+      // (only a building water has pressed on lately - see pw-sim's pushOn)
+      const wet = (world.tick || 0) - (b.waterAt ?? -1e9) < WET_FOR;
+      colRow.clear(); colTop.clear();
       for (let y = S.fy0; y <= Math.min(S.fy1, b.ground - 1); y += 1) {
         const r = y - b.oy;
-        let rowN = 0, rowX = 0, carried = 0, carriedX = 0, left = Infinity, right = -Infinity, last = -1, gap = 0, gapAt = 0;
+        let rowN = 0, rowX = 0, carried = 0, carriedX = 0, left = Infinity, right = -Infinity, last = -1, gap = 0, gapAt = 0, xl = -1, xr = -1;
         for (let x = cx0, k = at(cx0, y); x <= cx1; x += 1, k += 1) {
           if (!state[k]) continue;
+          if (xl < 0) xl = x;
+          xr = x;
           rowN += 1; rowX += x + 0.5;
           if (state[k - gw]) {
             carried += 1; carriedX += x + 0.5; if (x < left) left = x; if (x > right) right = x;
@@ -344,11 +412,25 @@
           }
           // (keep going down: the lowest failing row brings the most down)
         }
+        // Swept: the water against it above here pushes more than this row of its frame takes.
+        if (wet && xl >= 0) {
+          pushed += waterOn(S, state, y, xl, xr, rowN);
+          if (pushed) {
+            let holds = 0;
+            for (let x = xl, k = at(xl, y), i = y * W + xl; x <= xr; x += 1, k += 1, i += 1) {
+              if (state[k]) holds += SHEAR * (cls[k] & SOLID ? hardness[mat[i] & ID_MASK] : BACK_HARD);
+            }
+            if (Math.abs(pushed) > holds) fail = { y, dir: Math.sign(pushed), reason: 'swept', load, support: carried, push: Math.abs(pushed), holds };
+            // (the row nearest giving way, for the tests)
+            if (!report.water || Math.abs(pushed) / holds > report.water.share) report.water = { y, push: Math.round(pushed), holds: Math.round(holds), share: Math.abs(pushed) / holds };
+          }
+        }
         load += rowN; loadX += rowX;
       }
       if (fail) {
         report.failed = fail;
-        (b.failed || (b.failed = [])).push({ reason: fail.reason, y: fail.y, support: fail.support, built: fail.builtSupport, shift: fail.shift && +fail.shift.toFixed(3), row: fail.row });
+        (b.failed || (b.failed = [])).push({ reason: fail.reason, y: fail.y, support: fail.support, built: fail.builtSupport, shift: fail.shift && +fail.shift.toFixed(3), row: fail.row,
+          push: fail.push && Math.round(fail.push), holds: fail.holds && Math.round(fail.holds) });
         collapse(b, fail, S, state);
       }
       report.orphans = clearFittings(b, S, state);
@@ -370,6 +452,8 @@
       // (all but whole, and no longer being worked: a building like any other again)
       if ((site || b.siteWanted) && b.health >= SITE_DONE && !PW.isGrowing(world, b)) { b.site = false; b.siteWanted = false; b.asBuilt = null; b.grownAnchored = undefined; b.grownFrame = undefined; }
       if (b.health < 1) loosePanels(b);
+      // (the water has just come against it: looked at again soon - see notify)
+      if (!fail && tick - (b.floodAt ?? -1e9) < WATER_QUICK) due.set(b.id, tick + WATER_REPEAT);
       stats.last = report;
       return report;
     }
@@ -472,7 +556,12 @@
       crumble(band);
       for (const i of band) if ((PW.hash2(i, 3) & 7) === 0) fragments.puff(i % W, ((i / W) | 0) - 1, 2, 4, 2);
       if (fail.reason === 'pancake') fragments.spawn({ cells: piece, owner: b.id, drop: true, floor: yf, base: b.ground, dir: fail.dir });
-      else fragments.spawn({ cells: piece, owner: b.id, floor: yf, base: b.ground, dir: fail.dir });
+      else if (fail.reason === 'swept') {
+        // (shoved off the way the water pushes: the push over what the row held, over its weight)
+        const vx = fail.dir * Math.min(SWEEP_MAX, PW.GRAVITY * (fail.push - fail.holds) / (piece.length * FRAME_WEIGHT) * SWEEP_TIME);
+        fragments.spawn({ cells: piece, owner: b.id, floor: yf, base: b.ground, dir: fail.dir, vx });
+        stats.swept = (stats.swept || 0) + 1;
+      } else fragments.spawn({ cells: piece, owner: b.id, floor: yf, base: b.ground, dir: fail.dir });
       fail.cells = piece.length + band.length;
       b.collapses = (b.collapses || 0) + 1;
       (b.failures || (b.failures = [])).push(fail.reason);
@@ -480,12 +569,15 @@
       // The stump is checked again, and so are neighbours that leaned on it.
       due.set(b.id, tick + REPEAT);
       for (const other of world.buildings || []) {
-        if (other === b || other.body.right < b.body.left - 60 || other.body.left > b.body.right + 60) continue;
+        // (a lot cleared for building - see the capital lab - is a record with no body yet)
+        if (other === b || !other || !other.body || other.body.right < b.body.left - 60 || other.body.left > b.body.right + 60) continue;
         notify(other.id);
       }
     }
 
-    return { notify, step, analyse, stats, blueprintOf };
+    // (the world's: water pressing on a building tells it - see pw-sim's pushOn)
+    world.structure = { notify, step, analyse, stats, blueprintOf };
+    return world.structure;
   }
 
   PW.createStructure = createStructure;

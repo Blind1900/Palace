@@ -144,8 +144,11 @@ pwApp.stepWorld(60 * 5);
 check(stability.stats.broken === before, `ground nobody disturbed stands (${stability.stats.broken - before} cells broke loose by themselves)`);
 
 // 4. Water pushes on what is in its way: a block of water let go beside a street lamp runs down the
-// street and knocks it over; a column of water stood against a tower's wall breaks into it, and
-// none of the water is lost.
+// street and knocks it over. A column of water 140 cells deep (some 10 m) stood against the tallest
+// tower's wall breaks into it and sweeps it over - its ground storey cannot take the push of so
+// much water (N42O); one 60 cells deep (4 m) against another tower breaks into its walls but leaves
+// it standing. None of the water is lost (counted with what is in the air as spray, once all has
+// come to rest).
 {
   const sim = pwApp.sim, broke0 = sim.stats.waterBroke || 0;
   let tried = 0, fell = 0;
@@ -160,14 +163,24 @@ check(stability.stats.broken === before, `ground nobody disturbed stands (${stab
     if (rec.broken) fell += 1;
   }
   check(tried >= 3 && fell >= tried / 2, `a flood running down a street knocks over the lamps in its way (${fell} of ${tried} knocked over, ${sim.stats.waterSwept || 0} fittings, props and plants swept)`);
-  const T = world.buildings.filter((b) => b.type === 'population').sort((a, b) => (b.ground - b.body.top) - (a.ground - a.body.top))[0];
-  if (T) {
-    const water0 = pwApp.countWater();
-    for (let x = T.body.left - 70; x <= T.body.left - 2; x += 1) for (let y = T.ground - 140, top = world.groundTop[x]; y < top; y += 1) if (id(x, y) === M.AIR) PW.set(world, x, y, M.WATER);
-    const water1 = pwApp.countWater();
+  const towers = world.buildings.filter((b) => b.type === 'population').sort((a, b) => (b.ground - b.body.top) - (a.ground - a.body.top));
+  const T = towers[0], T2 = towers.find((b) => Math.abs(b.body.left - T.body.left) > 800);
+  if (T && T2) {
+    const P = pwApp.particles;
+    const spray = () => { let n = 0; for (let i = 0; i < P.count; i += 1) if (P.flags[i] & P.F.WATER) n += 1; return n; };
+    const water = () => pwApp.countWater() + spray();
+    const flood = (b, h) => { for (let x = b.body.left - 70; x <= b.body.left - 2; x += 1) for (let y = b.ground - h, top = world.groundTop[x]; y < top; y += 1) if (id(x, y) === M.AIR) PW.set(world, x, y, M.WATER); };
+    const water0 = water();
+    flood(T, 140);
+    flood(T2, 60);
+    const water1 = water();
     pwApp.stepWorld(60 * 6);
     const broke = (sim.stats.waterBroke || 0) - broke0;
-    check(broke > 30 && pwApp.countWater() === water1, `water stood against a tower's wall breaks into it, and none of it is lost (${broke} structure cells broken by water; water ${water1} -> ${pwApp.countWater()}, ${water1 - water0} let go)`);
+    const swept = (b) => (b.failures || []).includes('swept');
+    const push = (b) => (b.failed || []).filter((f) => f.reason === 'swept').map((f) => `pushed ${f.push} against ${f.holds}`).join(', ');
+    check(broke > 30 && swept(T) && !swept(T2), `deep water stood against a tower sweeps it over, shallow water breaks into another and leaves it standing (${broke} structure cells broken by water; the tower in 140 cells of water ${swept(T) ? `swept (${push(T)})` : 'standing'}, health ${(T.health ?? 1).toFixed(2)}; the one in 60 cells ${swept(T2) ? 'swept' : 'standing'}, health ${(T2.health ?? 1).toFixed(2)})`);
+    for (let s = 0; s < 20 && (pwApp.fragments.list.length || spray()); s += 1) pwApp.stepWorld(60);
+    check(water() === water1, `none of the water is lost (${water1 - water0} cells let go; ${water1} -> ${water()})`);
   }
 }
 
