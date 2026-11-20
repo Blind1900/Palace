@@ -1,5 +1,702 @@
 [
  {
+  "title": "Opus: water pours, falls and levels like water - continuous falls, basins that fill level, nothing lost (b5de1ca, N61O)",
+  "author": "Opus",
+  "time": "2026-11-20",
+  "note": "Measured first, in stone on level ground (seed 7): a tank 300 cells up with its side knocked out, a walled basin under it, and a slope. The fall was a dotted line: each column of the lip let go one cell a tick and the cells fell 6 rows a tick, so 46 of every 60 rows of the fall held no water. The tank took 8 s to empty and never drained its last layer. The basin never levelled: its surface still sloped 13 cells after 20 s, because only single surface cells crept downhill where the surface stepped down by 2. Now, in pw-sim: (1) Water with a long way to fall goes as drops in flight, with the speed it left at: out of a breach at sqrt(2 g h), as a sliding sheet at its run, over a lip at a trickle. Gravity takes it from there. So a fall comes off its lip as an arc, whole at the top and thinning as it speeds up, and the drops go back into the water where they land. A sheet or lump with nothing under it falls whole. (2) A lake draining through a hole pours as fast as its depth drives it (the same rule as a breach in its side). (3) Water finds its level: a surface cell looks along the surface, through the water, up to 128 cells either way, for where it stands lowest or where it runs over an edge, and goes there. So a basin fills level from wherever the water comes in, and water left on a ledge runs off. Result on the same test: the tank empties in about 4 s, down to 1 cell (it was 8 s, with 190 left). The fall is a continuous sheet of drops. The basin levels to within 2 cells (a 0.5% slope, level to the eye) by 8 s, where before it still sloped 13 cells after 20 s. Water down the slope moves about twice as fast. A tunnel under a breached lake floods 73-76% in 5 s (it was 55%). The fall now takes as long as a real fall: it starts at rest at the lip and gravity speeds it up. Before, it moved at full speed from the first moment. Water is kept to the cell everywhere: drops in flight count as the world's water. A ground sag that pressed water out sideways into a hollow used to turn that water into rubble; now it goes as water (pw-stability). Cost: the water sim is no dearer (a lake breached by two large blasts: p95 3.2 ms, as before). Frames are unchanged in real time (median 13.3 ms, p95 13.5 ms), with up to 7,600 drops in flight. Suites 17/17 on seeds 7, 3 and 11, with new pw-physics checks (all fail on the old code): water pours out of a breach and falls as a sheet of drops, the tank empties, the basin levels, and the falling water is all kept.",
+  "shots": [
+   {
+    "src": "shots/n61-before.png",
+    "caption": "before: the fall a dotted line down the pillar, the basin filling from one end"
+   },
+   {
+    "src": "shots/n61-after-15.png",
+    "caption": "now, 1.5 s: the water arcs out of the breach as one sheet"
+   },
+   {
+    "src": "shots/n61-after-3.png",
+    "caption": "now, 3 s: the fall comes down whole into the basin, which fills level"
+   }
+  ]
+ },
+ {
+  "title": "Fable: the military merges on the tower's flank, as drawn (b0b19f9, N63)",
+  "author": "Fable",
+  "time": "2026-11-19 (after N62)",
+  "note": "Built straight from your sketch this time (the image reached me on disk): the grey military building merges ON the blue tower's side - a solid plated annex three and a half floors tall widening the base, armour through and through with the outer face leaning in as it rises, slit lights per storey, a hazard-lipped roof, a sally door at its foot, and a garrison room carved into the shared wall with the opening cut through so the two bases are ONE building. The thin grey armour line runs over the tower's whole top with the little dish on its stick, and a flush plated plinth ties the combined footprint at the grade. The annex takes the flank facing away from the city's centre. One honest cut on the way: the first version built it as a hollow room and only a thin grey sliver showed - your hatched block is MASS, so now it is.",
+  "shots": [
+   {
+    "src": "shots/n63-flank-annex.jpg",
+    "label": "The militarised tower with the solid grey annex merged on its flank, on the shared plinth (N63)"
+   }
+  ]
+ },
+ {
+  "title": "Fable: one pump per body of water (5acfaa5, N62)",
+  "author": "Fable",
+  "time": "2026-11-19 (after N60)",
+  "note": "As ruled from the pump-core screenshot: the first farm to reach a lake builds THE pump, and every later farm shares the water through the bundle - no second chamber under the same basin. Seed 3 now has four lakes, four pumps, one each (the x=250 lake used to carry two). The subtle half: the strip a second pump would have taken stays RESERVED even though nothing is dug there, because the wild growth consumes one serial random stream - releasing a single footprint reshuffled every tree on the map, and one such reshuffle left the N42O flood eroding a bank forever on seed 7 (pw-physics went 31s to a 236s timeout before the fix; with the span reserved, the world is byte-identical except the missing chamber). That latent soil-water settling pathology is noted for PS - my change only ever exposed it. Matrix 17/17 x 7/3/11.",
+  "shots": []
+ },
+ {
+  "title": "Opus: falling pieces of buildings tip, slide and settle - no more spinning in the rubble (c3655bf, N49O)",
+  "author": "Opus",
+  "time": "2026-11-20",
+  "note": "Measured on your seed (370934178) with BLAST L on its tallest towers, before changing anything. The big pieces turned calmly (2 rad/s at most). The spinning was in the medium chunks of 36 to 300 cells: up to 40 rad/s (six turns a second) while touching the rubble, some turning nearly two full turns and still going 10 s after the blast. Four causes, each fixed in pw-fragments with physics rather than a cap: (1) Each contact was reduced to one point, so friction there kept turning a chunk over and it rolled along like a wheel. Now a piece lies on a face: the push spreads across the face that touches, and turns the piece only once the turning is more than the push can hold across that face. What lands flat stays flat and slides to a stop, what lands on a corner tips over it, and what has its weight past the edge tips over that edge. Loose rubble or earth gives under a piece and closes round it, so a piece that comes down in a heap stops turning. (2) Ploughing through rubble was free: the rubble was thrown aside but never pushed back. Now every cell of rubble a piece throws aside takes its momentum out of the piece at that point, so pieces slow and stop in a heap. (3) A piece that shattered on a hard blow passed the whole blow's turn to its chunks, as if it had pivoted on its corner. Now the blow goes into the breaking, and the chunks keep a quarter of that turn. (4) A blast's push set a piece's far edge moving as fast as the whole push. The wave meets a piece near its middle, so it now turns a building's piece by a quarter of that (trees still go end over end). Also: a piece shaken down to too little frame now comes apart as rubble instead of flying on empty, and a piece that sheds cells now turns about where its weight really is. Result in pw-collapse (seeds 7, 3, 11): the most any falling piece turns, all told, is 98 deg, 76 deg and 106 deg, where before it was 944 deg and 542 deg on seeds 7 and 3. No piece turns more than half a turn. On your seed, the only things that still tumble are small chunks about 1 m across thrown by the blast, at most about two-thirds of a turn while they fly. Ruins: pieces now come to rest in the heap on their own lot (24 to 35 ruins at once, where before about 9 got thrown clear), and the builders clear them as they rebuild. So the pw-collapse ruin check now counts the most ruins lying at once, not what is left after 30 s. Suites 17/17 on seeds 7, 3 and 11, with a new pw-collapse check that falling pieces never spin.",
+  "shots": [
+   {
+    "src": "shots/n49-user.jpg",
+    "caption": "your screenshot: a tower top come to rest at a tilt on the rubble"
+   },
+   {
+    "src": "shots/n49-before.png",
+    "caption": "before (your seed, BLAST L at mid-height, 3 s): pieces tumbling over one another"
+   },
+   {
+    "src": "shots/n49-after.png",
+    "caption": "now, same moment: the top comes down onto its stump and settles into the heap"
+   },
+   {
+    "src": "shots/n49-after-5s.png",
+    "caption": "now, 5 s: the heap, its pieces lying still"
+   }
+  ]
+ },
+ {
+  "title": "Fable: the lab takes cover during blast storms (3638ed9, N60 - growth half)",
+  "author": "Fable",
+  "time": "2026-11-19 (after N59)",
+  "note": "The reported crash was overload: 24 blasts over two developing cities at x64 put 31,766 particles in the air, single ticks hit 154 ms and the tab froze at user scale. Growth now takes cover: while pieces fall or within four seconds of a blast there are no appends, re-seats, joints or compactions (first cut gated on particle count and the long smoulder smoke kept the crews in cover forever - the signal is falling pieces / recent blasts now); under heavy dust at most one heavy op per tick; and no restamp ever goes near a fresh crater - aging skips lots in its reach, the edge will not build into it, and militarising a tower under fire answers \"wait for the dust\". Same barrage after: growth costs 1.4 ms worst / 0.007 ms average per tick, worst whole-ticks 33-49 ms (physics share), zero errors on seeds 7 and 11, and growth RESUMES as the dust settles (lots 18->24, 20->25). The remaining tick cost is the particle/structure load during the barrage itself - handed to PS with numbers and a repro under N49O.",
+  "shots": []
+ },
+ {
+  "title": "Fable: the military never blocks the town, and dresses for its ground (d3ae019, N59)",
+  "author": "Fable",
+  "time": "2026-11-19 (after N58)",
+  "note": "A base no longer stops anyone: a capital's spread passes its claim and grows alongside, a farm's fields pass it and carry on, re-seats hold short of the claim or go beyond it, the infill never fills into it (one once planted a tower mid-claim - the span across the base read as a single huge gap), and when the base GROWS, the neighbours make room: holds move out with the new edge and any lot the works now reach under re-seats clear. Proof run: a capital grown hard against a level-6 base ends with zero lots over the base and the two merged alongside. And the base dresses for where it stands, read from the ground at the drop: gunmetal in the city, olive-khaki with hay bales by the hangar door and a camo net over the roof among the farms, stone-grey with a rock revetment at the walls' feet in the mountains (verified: farm base among the fields reads \"farm\", the shoulder base reads \"mountain\"). Shots next time the lab tabs cooperate - all of this is in your lab right now: drop a farm, a base beside it, and a capital beyond, and watch nobody stop anybody.",
+  "shots": []
+ },
+ {
+  "title": "Fable: merge points - a fountain between towers, a primal core beneath it (9a6fd07, N58)",
+  "author": "Fable",
+  "time": "2026-11-19 (after N57)",
+  "note": "Where two buildings stand close enough, they now join through a merge point: a three-floor base welded flush wall to wall, continuing the floor design in the pair's style - slabs on the kit's pitch, back walls, windows, lamps, frame columns at the seams. The ground hall holds the decor that suits the pair (fountain or park for population, park at a farm, statue where military meets town, monument between military works), and at the middle a NEW PRIMAL CORE roots in its own vault - the fountain plays right over the grating of the buried machine. Joints come down before their neighbours re-seat and the pair can merge again when still; they track neighbours by owner (ring indices go stale - a stale one left a joint standing alone in the open, fixed). Bonus catch: PS's new structure sweep crashed on my off-world empty records within seconds of their N42O landing - empty slots now live harmlessly at the origin. Your screenshot stayed in the chat attachments again - built from the written idea; the decor set is easy to extend against the image.",
+  "shots": [
+   {
+    "src": "shots/n58-merge-point.jpg",
+    "label": "The merge point welded between two towers: 3 floors, the fountain in the hall, the primal core vaulted beneath (N58)"
+   },
+   {
+    "src": "shots/n58-city-block.jpg",
+    "label": "In the block: the joint standing in its slot among the towers, its vault joined into the core row (N58)"
+   }
+  ]
+ },
+ {
+  "title": "Fable: taller bases, runways, and neighbours that adapt (cac8766, N57)",
+  "author": "Fable",
+  "time": "2026-11-19 (after N56)",
+  "note": "As corrected: the growth system's military bases now stand a storey TALLER with a narrower hangar (210 vs 260 - a jet still just fits; the fleet's room is the runway, not floor). Every base lays its RUNWAY - graded level with the hangar floor out from the door, laid at the drop and re-laid each level-up as the door moves, never over water or a flank; the base claims the strip. And neighbours adapt: every building remembers the lie of the ground beside its works, and when the military's earthmoving reshapes a town's approach, the facing lots re-seat - foundations cut and filled afresh (\"the town re-seats around the military works\"). One honest retreat: I first made the taller/narrower proportions worldgen-wide and the matrix caught the ruins reflowing under the towns (core-rise and collapse checks broke on seed 3) - the N43 lesson again, so the design is the growth path's (options.vertical) and worldgen keeps its geometry; final matrix 17/17 x 7/3/11 over PS's N42O tip.",
+  "shots": [
+   {
+    "src": "shots/n57-tall-base-runway.jpg",
+    "label": "A level-6 base: the command tower a storey taller over the narrower hangar, outposts, and the graded runway strip left of the door (N57)"
+   }
+  ]
+ },
+ {
+  "title": "Opus: a deep flood brings a tower down - water pushes with its real pressure, and none of it is lost (ae40a09, N42O)",
+  "author": "Opus",
+  "time": "2026-11-20",
+  "note": "Your flood test, re-run first on the current branch: the column of water 140 cells (about 10 m) deep broke 167 of the tower's 13,398 wall cells and stopped, and the tower stood at full health with 95 cells of water still against it after 30 s. Two reasons. (1) A wall's breaking was judged by the water's speed, which grows only with the square root of the depth, so deep water was far too weak (the depth was also only read up to 128 cells, and walls inside flooded rooms were never pushed). (2) Nothing judged the water's push on the building as a whole: a tower stands on its back walls, which the water runs past, so no flood could ever bring one down. Now: (1) A wall gives way where the water's pressure is more than it holds. The pressure is the depth of water standing over it (traced up through a flooded room's ceiling to where the water stands open), plus v²/2g where the water runs at it, minus any water on its far side. What a wall holds goes with its material's hardness and its thickness squared, the way a wall panel bends between floors: a 20 cm brick wall holds about 1.25 m of water, and glass almost none. (2) Each storey must take the push of all the water against the building above it: the depth standing against its upstream side minus that against its downstream side. Water as deep on both sides pushes nothing, an open frame (a hall on pillars) only by the share its frame fills, and a side dug into the ground is held by the ground. Each frame cell across the storey takes a set amount by its hardness (back wall counted as brick: in this side view about a twentieth of the building's depth is brick facade, which shears at about 0.3 MPa). If a storey can't take the push, everything above it gives way and is shoved off downstream, as fast as the extra push over its weight gives it. Result on your test: the tower's ground storey takes 4,004 and the water pushed 7,198, so it tips over away from the water within a second and comes down in a heap. From each building's frame, the depth of still water against one side that would sweep it: the towers 70 to 95 cells (5 to 7 m), depending on how long they are; the open hall next to it about 60; the military bases about 130 (9 m). Checked on seed 7 with the same 140-cell flood: five towers of similar strength all come down; the same tower stands under 90 cells (6 m); the concrete military base stands under 140. Water: in the test, a core settling back into its flooded vault overwrote 41 water cells. WGM fixed that in pw-cores (2b013de). With it every water cell is kept, counted with the spray in the air, on all seeds. Cost: the water sim is unchanged (p95 0.3 ms when nothing falls). The structure check adds about 0.15 ms a tick while a flood is new; the first look at a big tower is about 9 ms. A swept tower costs no more than a blasted one. Suites 17/17 on seeds 7, 3 and 11. pw-physics now checks that 140 cells of water sweep the tallest tower, that 60 cells leave another standing, and that no water is lost.",
+  "shots": [
+   {
+    "src": "shots/n42-before-15s.png",
+    "caption": "before: 15 s after the 140-cell column hit it, the tower stands with water against it"
+   },
+   {
+    "src": "shots/n42-after-1s.png",
+    "caption": "now, 1 s: its ground storey sheared, the tower tips away from the water"
+   },
+   {
+    "src": "shots/n42-after-3s.png",
+    "caption": "3 s: coming down; the water floods its footing"
+   },
+   {
+    "src": "shots/n42-after-15s.png",
+    "caption": "15 s: the tower lies in a heap, the water spread round it (the open hall beside it went too)"
+   }
+  ]
+ },
+ {
+  "title": "Fable: bridges let the river through, and fail like the footage (1b51b9c, N56)",
+  "author": "Fable",
+  "time": "2026-11-19 (after N55)",
+  "note": "Bridge piers are now open trusses: two slim legs with brace dashes, so the deck stands on real support while the river runs round the legs and through the windows - on the lake crossing, 63% of the truss-window cells hold flowing water. And bridges fail the way your earthquake clips do: each one checks its piers every half second (a pier holds only while a leg runs unbroken from deck to bed - rubble heaped on a cut leg is no footing, and the sagged deck never counts as its own support, two real bugs the test run caught), the longest unheld run bends the deck at its point of least resistance a little more per check, and past the limit it SNAPS at the sag centre - the freed spans fall as rigid pieces that break apart on the water, while the approach spans stand on at their shores. The proof run: eight piers blasted from under the lake bridge, sag climbing 1-3-4-5 with the deck dipping seven cells, snap, and the deck lying broken along the lake bed. The gif links stayed in the chat - built from the described behaviour; happy to tune sag pace/limits against the clips if they land in Live ref.",
+  "shots": [
+   {
+    "src": "shots/n56-bridge-fallen.jpg",
+    "label": "After the snap: centre spans down on the lake bed, approach spans standing on their trusses (N56)"
+   }
+  ]
+ },
+ {
+  "title": "Fable: vertical hangars and militarised towers (ddfe1d1, N55) + a water fix for PS (2b013de)",
+  "author": "Fable",
+  "time": "2026-11-19 (after N54)",
+  "note": "Drop a MILITARY seed inside a city now: if a plaza-sized gap takes it, a vertical hangar squeezes in - a narrow armoured shaft of stacked bays (mechs below, jets racked above), lift at the rear, tall lift-door at the street, chamfer-and-mast cap. With no gap it merges into the nearest tower and militarises it: the body widens under an armour skin, floors gain steel under-layers and facade belts, the glazing darkens and the rooms black out to military lighting - a militarised district reads at a glance against the lit civilian half. Militarised towers keep aging, the armour spreads to the next tower every other level, and armoured neighbours' bases merge under a flush plated apron with a hazard seam. Also: a live crash the user hit (blasting near a dismantled lot) is fixed - empty building slots now look like harmless buildings to the physics sweeps; and PS's catch of my cores bug is landed (a settling core stamped over flood water - 17 cells vanished; it now leaves as a water particle). Isolated matrix 17/17 x 7/3/11. The sci-fi hangar reference still has not reached Live ref - the tower is built from the named language; I'll refine it against the image when it lands.",
+  "shots": [
+   {
+    "src": "shots/n55-militarised-district.jpg",
+    "label": "The militarised district: blackout towers, wider armoured masses, the plated apron tying their bases (N55)"
+   },
+   {
+    "src": "shots/n55-hangar-tower.jpg",
+    "label": "A vertical hangar squeezed in at the city edge: narrow, dark, machine-floor glow on top (N55)"
+   }
+  ]
+ },
+ {
+  "title": "Fable: growth shapes the ground (c722819, N54)",
+  "author": "Fable",
+  "time": "2026-11-19 (after N52/N53)",
+  "note": "Towns and farms now regrade the land as they spread: the span ahead is cut and filled into straight slopes along the original shape (a polyline of 96-column strides, each running from the ground at one end to the other), tops re-grassed, and the graded line becomes the land's new natural shape. Limits per your rule - not too steep (a town street takes up to 1-in-2, a farm 0.4) and not too high (26 / 20 cells of cut or fill); a stride that would bite rock, touch water or cross anything built, paved or sown is refused and the old spreading/blocking rules take over there. Seen on the gothic hills city: 31 earthworks, the centre's ground running in clean straight segments, graded gaps packed to 12-28 while refused stretches stay spread at 76+ - and one young infill tower standing down in a dip the earthworks refused. Farms flatten their field strips the same way. Also fixed: farm outbuildings respected no bounds and once marched 13,000 cells off the map; they now stay few, bounded and behind the blocked flags.",
+  "shots": [
+   {
+    "src": "shots/n54-earthworks.jpg",
+    "label": "The hills under the city graded into straight slopes; a young tower in the one refused dip (N54)"
+   }
+  ]
+ },
+ {
+  "title": "Fable: hyper-military skin + the civic tunnel bore (9aa77ab + 6647efd, N52/N53)",
+  "author": "Fable",
+  "time": "2026-11-19 (after N51)",
+  "note": "N52: the military buildings wear gunmetal plate armour with recessed staggered seams, embrasure slits instead of window bands (the command cab keeps its lit glazing), 45-degree chamfer wedges on the roof corners, amber/cyan light strips per storey, warning lights on the hangar lintel, and a sensor mast with a blinker on command bases. Colours and ornament only - no width or material changed, so nothing reflows. One real catch on the way: the mast anchored above the roof floated (pw-slopes seed 3, 26 unsupported cells) - its foot now stands on the slab. N53: tunnels carry a use - military networks keep their faction dressings, and the new POPULATION bore is wide and high-crowned (76x48 vs 60x36, PROFILES exported) in smooth pale ring-jointed concrete with a tiled wainscot, handrail, a continuous crown light strip, green exit signs and sector numbers. Two galleries dug side by side on seed 7 show the contrast at every zoom. NOTE: the routed sci-fi/tunnel reference images did not reach the Live ref folder - both passes are built from the named subjects; drop the images in and I will refine against them. Suites 17/17 x seeds 7/3/11 (with PS N41O falling trees in the same tree).",
+  "shots": [
+   {
+    "src": "shots/n52-military-skyline.jpg",
+    "label": "Modern command base: gunmetal masses, lit cab, sensor mast, light strips (N52)"
+   },
+   {
+    "src": "shots/n52-plating-close.jpg",
+    "label": "Up close: plate seams, amber strip, slits, the standing core in the hangar (N52)"
+   },
+   {
+    "src": "shots/n53-both-bores.jpg",
+    "label": "Army bore above, population bore below - width, crown and lining apart (N53)"
+   },
+   {
+    "src": "shots/n53-civic-close.jpg",
+    "label": "The civic bore: ring-jointed concrete, tiled wainscot, exit signs, sector numbers (N53)"
+   }
+  ]
+ },
+ {
+  "title": "Opus: falling trees never sink into the ground, their limbs bend where they strike, snapped branches fall on their own (666e8f4, N41O)",
+  "author": "Opus",
+  "time": "2026-11-20",
+  "note": "Checked trees for the same problems as buildings first, measuring 10 trees felled on three seeds. (1) Clipping: yes. Small branch pieces sliding down slopes sank steadily into the turf, up to 71% of a twig's wood buried 2+ cells deep and as deep as 5 cells. A plant piece was only pushed back as far as it had moved in that step; it never took the \"lying in it, work it back out\" path that buildings got in N40O. Now a plant piece that lies in the ground is put back out by how deep it lies. Its wood never goes more than a cell under the surface (deepest 2 cells, the turf's top layer, on all three seeds; before, 3 to 5). (2) Rigid image: yes. A falling tree was one stiff picture until it landed. Now its thin limbs (branches and twigs thinner than its trunk and stoutest boughs) bend where they strike the ground. Each one bends about its joint, where it grows from stouter wood, the way a branch held at its root bends under a load at its end: hardly at all near the joint, most at the tip. Stiffness follows its girth (the same spring as a standing tree's swinging limb), and it springs back when released. Bent as far as it goes, it bears the tree's weight like the rest of the wood, or snaps if the blow or the load is more than its wood takes. The cells really move, so the limb is drawn and collides where it is, pixel by pixel. Fast-flying trees also lose leaves from the edge of the crown to the air. (3) Separated branches: partly. A branch snapped off in flight used to be stamped into the world where it broke. Now it falls on as a piece of its own with its own collision. A tree left in separate bits after a snap comes apart: its biggest part goes on as it was (limbs still bent and springing), and each other part becomes its own piece. Also, a standing tree's limb swinging after a blow now stops against the ground or a wall instead of passing through it. Cost: the falling-piece step averages 0.25 ms a tick with 10 trees coming down (0.22 before). The worst tick is about 4 ms, when a branch snaps and the tree is remade in the same tick. Suites 17/17 on seeds 7, 3 and 11, with new checks in pw-physics (all three fail on the old code): falling trees never sink into the ground, each falling piece is one body of wood, and limbs bend where they strike while snapped branches fall as pieces of their own.",
+  "shots": [
+   {
+    "src": "shots/n41-old-bough-021.png",
+    "caption": "before: a bough with twigs dropped on flat ground - the twigs stay straight and rigid, and snap"
+   },
+   {
+    "src": "shots/n41-new-bough-021.png",
+    "caption": "now, same moment: the twigs bend along their length as they meet the ground"
+   },
+   {
+    "src": "shots/n41-new-bough-120.png",
+    "caption": "come to rest: the bough on the grass, its twigs lying along the ground"
+   },
+   {
+    "src": "shots/n41-new-tree-025.png",
+    "caption": "a real tree felled by a small blast at its foot, coming down"
+   },
+   {
+    "src": "shots/n41-new-tree-200.png",
+    "caption": "the same tree lying on the ground, its crown spread over it"
+   }
+  ]
+ },
+ {
+  "title": "Fable: organic spacing in the capital lab (987616b, N51)",
+  "author": "Fable",
+  "time": "2026-11-19 (after N50)",
+  "note": "No more uniform rows: every lot rolls its own gap when placed - jitter on level land, the odd plaza-sized hole left open, and mostly the lie of the ground (buildings stand further apart where the terrain rises or falls across the span). The infill then fills the holes in as the town grows: a young slab squeezed between its elders, kept low by the age rule until it has stood a while. Gaps are honoured as the eye sees them (a building whose retaining walls swallowed the spacing is re-seated out by what was lost). Hardened two chain scrambles this surfaced: map-edge pushes now stop and hold, and a lot whose shore has filled is dismantled rather than stamped over its neighbour. Verified ordered, zero-overlap growth over plain + hills with a merge, a shore and a map edge in one run.",
+  "shots": [
+   {
+    "src": "shots/n51-organic-spacing.jpg",
+    "label": "Two towns, two rhythms: tight pairs, wide breaks and plazas on the plain; broad terrain-driven spacing on the hills (N51)"
+   }
+  ]
+ },
+ {
+  "title": "Fable: silo cores and self-regenerating pumps (429a9cd, N50)",
+  "author": "Fable",
+  "time": "2026-11-19 (after N48)",
+  "note": "The farm core now sits directly under the silo bank - the grain column stands on the core translator, with hopper tapers and an auger run to the grating, so the stored SM reads as going down through the core into the pipeline (barn: under the hay loft; homestead: under the house). And every lake pump carries its own small core: a half-size heart in a hazard-rimmed pocket in the chamber floor, cabled to the bedplate. It is a real regenerator, not a prop: the pump cells are captured as a repair PRINT at the end of generation, and the repair system rebuilds them through the same translators as a building - blasting a chamber open on seed 3 tore 262 cells out, and 150 s later the pump stood whole again (22 HM). Found and fixed on the way: a print captured before the pipes lay their bundle fights their rework - that burned the town HM dry and starved the seed-3 pipe-regrowth suite; prints are now captured once the world finally stands. Suites 17/17 on 7/3/11.",
+  "shots": [
+   {
+    "src": "shots/n50-silo-core.jpg",
+    "label": "The silo farm: the grain column standing directly on the core vault under it (N50)"
+   },
+   {
+    "src": "shots/n50-pump-core.jpg",
+    "label": "Pump chambers under the lake bed: the small core in its hazard-rimmed pocket, suction up, bundle below"
+   }
+  ]
+ },
+ {
+  "title": "Fable: levels rise with age in the capital lab (8cfd465, N48)",
+  "author": "Fable",
+  "time": "2026-11-19 (after N44)",
+  "note": "The skyline is now an age gradient, as asked: a tower starts at level 1 when the edge reaches it and levels up for every stretch of time it has stood (never above its city). Measured on one city: t=300 reads 3-2-1, t=900 a full 7-6-5-5-4-3-2-1 staircase, and by t=1500 the old core sits uniformly at 7 while the young district across the lake is still climbing - the rise rolls outward. The edge now creeps out on its own slow clock too, so watching at x4/x16 the order is: a ring appears small at the loose edge, stands, and comes of age (\"ring N comes of age\" notes above the capital). Ring caps are gone - the falloff IS age now.",
+  "shots": [
+   {
+    "src": "shots/n48-age-districts.jpg",
+    "label": "Old core all come of age (uniform 7s), the bridge, and the young far-shore district still climbing (N48)"
+   }
+  ]
+ },
+ {
+  "title": "Fable: the capital growth lab is live (e9d979a, N44) - open /game/capital-lab.html",
+  "author": "Fable",
+  "time": "2026-11-19 23:55",
+  "note": "A separate lab page: a sandbox world with a plain, rolling hills, a lake, a pond, a plateau behind cliff steps, a mountain with a buildable shoulder and a high plain. Pick CAPITAL / FARM / MILITARY and a style, click the land, and watch it grow at x1-x64. Everything is the real building kit seated on real foundations. What the rules do: capitals grow rings of towers - newest ring loosest, the centre tightening on each level-up (N43), the skyline falling from high-rise centre to low-rise edge (N45, new storeys curve); they stop at water and mountains until level 5, then raise a main steel bridge on piers (the whole lake) and climb the flanks by road; spread is held by upkeep and by merging with a neighbour (the modern capital merged with the asian farm across the lake). Farms spread ripening maize fields across the flatland, lay a lesser plank bridge over the pond from level 3, and never cross mountains (N46). Military seats on the mountain shoulder on rock terraces and digs in deeper per level. Blasts work (structure/fragments live). Suites 17/17 on seeds 7/3/11. Not yet: construction-by-repair growth (towers appear seated, not built brick-by-brick), tunnels through mountains, cores/pipes threading - those come with the real growth build.",
+  "shots": [
+   {
+    "src": "shots/n44-skyline.jpg",
+    "label": "A modern capital at level 7: the skyline falls from the centre (N45), the centre packed tight (N43)"
+   },
+   {
+    "src": "shots/n44-waterfront-bridge.jpg",
+    "label": "Waterfront: towers held at the shore, the main bridge on piers crossing the lake at level 5 (N44)"
+   },
+   {
+    "src": "shots/n44-farm-pond.jpg",
+    "label": "A farm: silos, ripe maize across the flat, and the lesser plank bridge over the pond (N46)"
+   },
+   {
+    "src": "shots/n44-asian-military.jpg",
+    "label": "An asian capital on the high plain, blocked markers at the mountain; the military base dug into the shoulder"
+   },
+   {
+    "src": "shots/n44-tower-base.jpg",
+    "label": "Up close: furnished storeys, stairs, and the core vaults rooted under the floor"
+   }
+  ]
+ },
+ {
+  "title": "Opus: falling buildings never sink through the ground, crumble as they fall, and fly apart as separate pieces (7b0d8c4, N40O)",
+  "author": "Opus",
+  "time": "2026-11-19 20:40",
+  "note": "Measured the three reports on your own seeds before changing anything. (1) Pieces falling through the ground: a piece already inside something was never pushed back out, and small pieces (under 400 cells) are not allowed to grind, so they just sank - one 40-cell lump went from 3% to 100% into the ground. Now whatever a piece is in pushes it back out. (2) Pieces that fly apart staying one hitbox: up to 27 separate parts were flying as one body. Now a piece is only what actually hangs together: parts that come apart (cut by a crack, a crush or crumbling) break away as pieces of their own, and a piece's hitbox is remade as it loses cells. (3) Rigid until it lands: a falling building now crumbles in the air - its loosest edge cells (antennas and masts first, glass, thin walls) shake loose as rubble from the moment it breaks free, faster when it spins or is struck - and parts that come loose fly off on their own. Kept what you liked: whole wreck pieces still lie about as ruins, and the collapsed heaps now smoke much longer (1700-2000 smoke cells after 30 s, was 400-900). Frame cost held: the collapse simulation is 1.6-1.9 ms per tick (p95). Suites 17/17 on seeds 7, 3 and 11, with new checks: no falling piece sinks into the ground, buildings come apart as they fall, a lump pressed into the ground is worked back out.",
+  "shots": [
+   {
+    "src": "shots/n40-user.jpg",
+    "caption": "your screenshot: a tower top falling as one rigid image"
+   },
+   {
+    "src": "shots/n40-before.png",
+    "caption": "before (your seed): the falling top as one block, masts and all"
+   },
+   {
+    "src": "shots/n40-after.png",
+    "caption": "now, same moment: masts shaken off, edges crumbling, the base coming apart"
+   }
+  ]
+ },
+ {
+  "title": "Opus: water pushes on what is in its way - it sweeps fittings, props and plants aside and breaks into buildings (bd34ede, N39O)",
+  "author": "Opus",
+  "time": "2026-11-19 17:40",
+  "note": "Moving water now pushes on everything it runs into, as a flood does. Street lamps, benches, statues, railings and a building's fittings in its path are knocked loose and carried off with the water (wooden bits float); a street prop that loses its footing topples whole. Grass and leaves are stripped off and float away; a strong flow snaps branches and saplings. Where water drives against a building - a burst tank, a breached lake - the wall gives way where the push is more than its material can take: glass bursts at once, timber gives to a strong flow, brick and concrete only to a deep surge (the push is the water speed from the depth of water behind it). The broken bits are thrown on with the flow, the building is told (it may come down), and the water runs into the gap. The ground does not wash away, nor do the pipes or the cores. WGM made repair lift water out of a wound before rebuilding it, so no water is ever lost or copied (e935558, d204133). Tested: a block of water let go beside street lamps knocks over 3-4 of 4; a column stood against a tower breaks 150-290 of its wall cells with every water cell kept. Suites 17/17 on seeds 7, 3 and 11, with both as new checks.",
+  "shots": [
+   {
+    "src": "shots/n39-street-before.png",
+    "caption": "a block of water in a barn beside a street lamp, a cypress and a statue"
+   },
+   {
+    "src": "shots/n39-street-after.png",
+    "caption": "1.5 s later: the flood has swept them away"
+   },
+   {
+    "src": "shots/n39-tower-before.png",
+    "caption": "a column of water stood against a tower"
+   },
+   {
+    "src": "shots/n39-tower-5s.png",
+    "caption": "5 s later: it has broken into the wall (repair fights back)"
+   }
+  ]
+ },
+ {
+  "title": "Fable: the ball's light is an equation, streams blast their mouths free, no opening juts (cc9d6d7, N38)",
+  "author": "Fable",
+  "time": "2026-11-20 06:40",
+  "note": "Three of the four N38 structural notes landed (and the stable point 37d850e before them - the corridor-first fix that cured the seed-3/11 farm fields):\n- The ball's white energy is a LIGHT EQUATION now, not scripted sprites: a standing-wave field - radial vibration times precessing angular lobes, brighter towards the poles - whose interference breathes and orbits like an atom's shells. The old electrons fall out of the equation as racing knots; the pole spikes are its overdriven moments (shot).\n- A broken tube end PUSHES OUT: every resource pixel arriving at the mouth blasts a few cells of the debris choking it before it clogs as regrowth fuel or drains away - a buried end eats itself free.\n- A garrison opening stops at the hill it is cut in: nothing is painted into the open air beyond a sloped face, so no dark slab juts from the mountainside at a mouth's top end or corner.\n- The fourth note - pipes as truly hollowed terrain, two parallel lines - retires PS's bore-gas machinery, so the design went to PS for agreement first; built behind a flag next, validated together before landing. (Cores are already true terrain material, not deco - that half of the note holds today.)\nFull matrix 17/17 on real seeds 7, 3 and 11.",
+  "shots": [
+   {
+    "src": "shots/ball-eq-1.png",
+    "caption": "the main core's ball: the standing-wave light breathing around the centre, denser to the poles"
+   }
+  ]
+ },
+ {
+  "title": "Fable: conduits belong to the tunnel wall, stairs get headroom, every shaft a ladder (0186f3c, N37)",
+  "author": "Fable",
+  "time": "2026-11-20 04:30",
+  "note": "The three tunnel fixes from the incline screenshot:\n- A pipe crossing a carved tunnel is part of the BACK WALL now: the wall-mounted conduit blends into the back and dims, reading behind the room instead of overlapping it. And a dig that crosses a solid bore no longer cuts it: the casing becomes the wall's own conduit as the cell opens - the break watch reads it as intact, the cargo rides the same rows, nothing spills, and the trooper walks under it.\n- The roof above the stairs stands higher: inclined galleries carry 20 cells of clearance over their treads, against a drift's 14.\n- Every shaft is climbable on foot: the cave-highway hop shafts were dug without ladders - fixed. A full-map foot audit (walk, climb ladders, two-cell steps) now covers the worked networks from the surface mouths; the audit's movement model is still cruder than a real trooper - no jumps, and entries through building interiors (headframes, bunker doors) are not modelled - so the complete every-tunnel guarantee is tied to N5's unit movement, when real pathing can walk the map itself. Honest number from the crude audit: ~40% of all TUNNEL-flagged cells from bare surface mouths alone; the unreached mass sits in town service structures and interior-entered works the model cannot enter, not in sealed mine pockets.\nFull matrix green on real seed 7 (one sandbox non-det flake, clean on rerun); tunnels/mining/settlements/pipes/views green on 3 and 11.",
+  "shots": [
+   {
+    "src": "shots/incline-fixed.png",
+    "caption": "the same stair gallery: the crossing riser now blends into the back wall, and the roof over the treads stands taller"
+   }
+  ]
+ },
+ {
+  "title": "Fable: levels connect by inclined stair galleries - the cross-sections read as structure (a60b897, N31/N36)",
+  "author": "Fable",
+  "time": "2026-11-20 03:20",
+  "note": "Per the user's clarification, the references are structural guides now, not just looks. Studied the coal-mine plate and the Homestake section as layouts: stacked levels, each served by more than one way down, ore bins high and pockets deep - and levels joined by DECLINES, inclined galleries with stairs, not only vertical ladderways.\nFirst structural application: digIncline cuts a stepped gallery - two rows down per three columns, about 34 degrees, inside the user's flat-to-66 range - as overlapping boxes so the development wave flows down it, timber treads on every step, climbable end to end. The growing deep level under each mine face now arrives by incline: the stairs step down from the face drift, the new level's drift runs from their foot. Dug raw when the clock reaches its plan, lined by the wave - the shot shows one grown live: three lined levels and the stepped gallery between them, miners at its head.\nStructural programs recorded for the next builds - N33 capitals (capitol: winged base, monumental steps, setback tower with the core's vault at its base; cathedral: twin towers flanking the nave, the core at the crossing) and N32 military levels (each level hollows more chambers, multiple ways down, the hangar at the mountain foot at max level).\nFull matrix 17/17 on real seed 7; tunnels/mining/settlements/grounding green on 3 and 11.",
+  "shots": [
+   {
+    "src": "shots/incline.png",
+    "caption": "a grown deep level reached by the inclined stair gallery - dug by its plan, lined by the wave, like the plates"
+   }
+  ]
+ },
+ {
+  "title": "Fable: the three close-zoom worries, run down and mended (6e2c8b5, N37)",
+  "author": "Fable",
+  "time": "2026-11-20 02:20",
+  "note": "The live-world checks, each confirmed at close zoom and fixed:\n- The 'broken pipe beside the pump boxes': real, and not a break - between neighbouring beds the route dived back toward street depth and climbed again, a V-jog beside every cabinet. The line now runs straight on between beds, a shelf from connector to connector, so the main reads as one level with the cabinets mounted on it (first shot: the same three cabinets that used to sit between V-jogs).\n- The 'cut junction near the pumps': the run's underground END beside the gallery - a two-column cap that read as the pipe chopped off mid-ground. It is a bolted blind flange with a domed outer face now: built shut.\n- The 'blocky horizontal banding' in the lower soil: the soil horizons' three-tone wave bands repeated to the bottom of the world. The banding now fades with depth - full layers near the surface, gone by about 280 cells down, lenses and tone patches carrying the deep ground (second shot).\nFull matrix 17/17 on real seed 7; pipes/made-ground/views/styles green on 3 and 11. (The T-valve junctions and swept elbows from N30/N34 are in these shots too - the pump gallery run is flat, socketed and elbowed up the slope.)",
+  "shots": [
+   {
+    "src": "shots/shelf-through-beds.png",
+    "caption": "the main shelving straight through a town's three beds - no more V-jogs beside the cabinets"
+   },
+   {
+    "src": "shots/soil-faded.png",
+    "caption": "soil horizons layered near the surface, fading to organic ground below"
+   }
+  ]
+ },
+ {
+  "title": "Fable: the workings grow - narrow drifts, specialised halls, chambers dug as the clock reaches them (fa1f679, N36)",
+  "author": "Fable",
+  "time": "2026-11-20 01:10",
+  "note": "The user's tunnel design, all three parts:\n- The default drift is simple and narrow: a uniform 28-cell clearance, just room for a trooper, where it used to swell at random. The specialised rooms stand taller over it, each with its own look - and two new kinds join storage, pipe control, armoury, trash and the god's room: a PROCESSING hall (a chute from the roof into angled screen decks, an ore bin under the lower end - the mine-banner reference) and a MOSSY hall (green growth hanging from the roof and creeping the walls, damp along the floor). Every room but the subliminal wears arch ribs up its walls and across its roof, after the Euston and underground-railroad references.\n- And the mine ACCRETES the way the cross-section references do: paths, faces and mining operations are dug at generation, but every chamber is only planned - from about half a minute in, the narrow drifts visibly dig out into their tall rooms one by one, raw and timbered, lined by the development wave from the walls they grew out of. In time a deeper working level opens under each face: a shaft with its ladder, a new drift along the level.\nVerified: 16 growth plans on seed 7 digging 300-1400 cells each (a prop-blocked site stands down rather than cut a formation), all executed and developed whole by +1100 s. Full matrix 17/17 on real seed 7; tunnels/mining/settlements/grounding green on 3 and 11. (No beauty shot of a mossy hall yet - my green-detector kept finding greenhouses and crates; watch any mine for a minute and the rooms appear.)",
+  "shots": []
+ },
+ {
+  "title": "Fable: the ladder shafts and junction stubs are built works, not black cuts (7b11f77, N35)",
+  "author": "Fable",
+  "time": "2026-11-19 23:40",
+  "note": "The screenshot's 'core pixels cut off from the generation' run down: no core matter is actually disconnected anywhere - on that very seed, every one of the 565 core clusters touches its building's owned cells. What the eye caught was the bunkers' and outposts' tunnel works: a bare 15-wide black shaft and a 33-wide black box hanging off a ladder, wearing nothing of the building that dug them.\nDesign order is cores first and the building hangs off them - so what the building digs now reads as its own. The shaft is reinforced through the rock, its back the tunnel-lab tone behind the ladder; the junction stub below is a carved, lamp-lit chamber in the same language as every mine room - lined, floored, waiting for step H's tunnels to find it. Both the mountain bunkers and the summit outposts.\nFull matrix 17/17 on real seed 7; settlements/tunnels/mining/grounding green on 3 and 11; verified on the user's own seed (828829254).",
+  "shots": [
+   {
+    "src": "shots/stub-built.png",
+    "caption": "the bunker's shaft and junction stub on the user's seed: lined, lamp-lit, part of the works (both were bare black boxes)"
+   }
+  ]
+ },
+ {
+  "title": "Fable: the pipe compensates through the bend - every well corner is a swept elbow (c4f84b0, N34)",
+  "author": "Fable",
+  "time": "2026-11-19 22:50",
+  "note": "The user's clarification, with the elbow-fitting references: a pipe turning 90 degrees (and up to 111) stays ONE continuous pipe through the bend - the design never splits in two at a corner.\n- Each corner of a well is re-tiled as a swept elbow: rings about the bend's tight inner corner - casing sweeping the outside, the lane bands carried round inside it, casing again at the inner radius. The squared outer corner beyond the sweep is given back to the bed, so the silhouette itself turns like the reference fitting.\n- At the elbow's edges the rings become exactly the straight cross-sections they meet - casing meets casing, lane meets lane - so the elbow grows out of both arms rather than being pasted between them. The corner flanges go: the elbow IS the joint, and the collar bands along the shaft keep the built rhythm.\n- Mitred bends (small steps, up to 111-degree flexibility) were already one continuous run by design; this closes the true right-angle turns at the wells.\npw-pipes, made-ground and mining green on real seeds 7/3/11; full matrix 17/17 on 7.",
+  "shots": [
+   {
+    "src": "shots/elbow-bend.png",
+    "caption": "the line coming down the mountain face and turning vertical: one continuous casing through the bend"
+   }
+  ]
+ },
+ {
+  "title": "Fable: a vertical tees into the main through a valve - N30's first piece (18e62e6)",
+  "author": "Fable",
+  "time": "2026-11-19 21:40",
+  "note": "Round 2, pipe layout (N30), the junction first - the user's underground-pipe reference: where a pump's or a mining hopper's vertical meets the run, it is now a proper T-piece, never a clogged corner. The junction's lip rows widen into a socket collar around the crossing, and a gate-valve body sits on the vertical arm just off the main: a dark bolted band across the bore, a short spindle, a small bright handwheel reaching away from the run. The same casing language as every pipe; the hardware is laid with the riser and re-laid whenever the riser re-joins a moved run, so N25's no-fork rule and the valve live together. pw-pipes green on real seeds 7/3/11; full matrix 17/17 on 7.\nStill ahead under N30: routing may cross through water when that is quickest. Then N31 (tunnel floors, stairs, slopes), N32 (military levels hollowing the mountain, real firing openings), N33 (capitals).",
+  "shots": [
+   {
+    "src": "shots/valve-junction.png",
+    "caption": "a mining shaft's vertical teeing into the surface bundle: socket collar at the crossing, the valve body and handwheel on the arm below"
+   }
+  ]
+ },
+ {
+  "title": "Opus + Fable: the blast moment holds its frame rate; no memory growth in a 9-minute repair session (52c0208, 448ddea, P2)",
+  "author": "Opus",
+  "time": "2026-11-19 15:10",
+  "note": "The browser crash during repair: I ran the game in real time with rendering for 9 minutes, with the camera on a tower being repaired and a new blast every 90 s. Nothing crashed or grew: the page holds at about 530-550 MB, which is mostly the world itself (340 MB of cell data for a 36,096 x 4,096 world), and WGM's queue fixes held under real play. The stutter after a big blast came from three things together: the smoke and dust drifting through the grid made every visible chunk redraw every frame; thousands of flying particles were drawn one rectangle at a time; and the game ran up to three catch-up ticks in a frame that was already slow, which snowballed. WGM made drifting gas redraw a chunk only every third frame and capped the catch-up (448ddea); I separated gas-only changes from real ones so that works, sped up the smoke steps, and now draw all particles as one image a frame (52c0208). A BLAST L at a tower: before, about 50 frames over 34 ms in the 8 s after it (2 s of stutter), worst 100 ms; now 2-4 such frames, all in the first 0.15 s, p95 16 ms, and the game keeps real time. The look is unchanged (same blast before and after below). Numbers on the Performance tab. Suites 17/17 on seeds 7, 3 and 11.",
+  "shots": [
+   {
+    "src": "shots/perf-blast-before.png",
+    "caption": "before: a BLAST L at a tower, 20 ticks in"
+   },
+   {
+    "src": "shots/perf-blast-after.png",
+    "caption": "after: the same moment, same look"
+   }
+  ]
+ },
+ {
+  "title": "Opus: tree debris floats - wood and leaves lie on the water and drift (1c53e45, N26O)",
+  "author": "Opus",
+  "time": "2026-11-19 12:20",
+  "note": "Your screenshot showed a tree lying on a lake bed. Everything a tree sheds used to sink: the element table gave every kind of debris one weight, so wood splinters sank like concrete; leaves had no weight at all against water; and falling trees went through water as if it were air. Now the element table weighs a cell by what it really is: wood is about 0.6 of water and floats, a leaf lighter still, while brick and concrete rubble still sink and ash still floats. Splinters bob up and lie on the surface, drifting with the wind until they reach the shore; leaves land on the water and ride it, then after 15-30 s get waterlogged and sink slowly; a tree falling in floats, held up by the water it pushes aside, rolls to lie along the surface and comes to rest there partly under water. WGM made the water under floating debris read as open surface rather than a dark roof (8b612c1). Tested by dropping a tree, 160 splinters and 300 leaves on a lake: before, all of it on the bed; now all of it on the surface. Suites 17/17 on seeds 7, 3 and 11, with a new check that wood and leaves float.",
+  "shots": [
+   {
+    "src": "shots/n26-user.jpg",
+    "caption": "your screenshot: a tree lying on the lake bed"
+   },
+   {
+    "src": "shots/n26-before-5s.png",
+    "caption": "before: dropped wood ends in a heap on the lake bed"
+   },
+   {
+    "src": "shots/n26-final-5s-tree.png",
+    "caption": "now: the felled tree floats, partly under water"
+   },
+   {
+    "src": "shots/n26-final-15s-left.png",
+    "caption": "now: splinters and leaves lie on the surface and drift"
+   }
+  ]
+ },
+ {
+  "title": "Opus: a pipe melts and mends; the Game of Life twice as quick; sags tell the cores (4ad3ae2, a42a88c)",
+  "author": "Opus",
+  "time": "2026-11-19 10:50",
+  "note": "A pipe's steel casing now melts at 1350 C like other steel, running off as hot metal slag, and the pipe mends itself through WGM's regrowth (a torch held to the main line for 3 s: 63 casing cells melted, the run whole again 90 s later). Cores never melt. A sinking hollow now tells the cores over it that their ground went, so a core left with nothing under it comes down whole (WGM's new hook). The Game of Life counts its neighbours in small byte blocks instead of a map: every generation comes out exactly as before, at about twice the speed (a 14,000-cell soup 1.9 ms a generation instead of 3.3-4.8 ms), so big LIFE-tool soups no longer stutter as much. Also checked WGM's leak fixes over a 30 game-minute session: memory levels off at 24-26 MB and the pipes and repair costs stay flat (see the Performance tab). Suites 17/17 on seeds 7, 3 and 11.",
+  "shots": [
+   {
+    "src": "shots/melt-0.png",
+    "caption": "the main line before"
+   },
+   {
+    "src": "shots/melt-hot.png",
+    "caption": "a torch held to it: white-hot, the casing melts"
+   },
+   {
+    "src": "shots/melt-mended.png",
+    "caption": "90 s later: the pipe has regrown through the gap"
+   }
+  ]
+ },
+ {
+  "title": "Fable: a core with nothing under it comes down whole (9c7710a, N18O)",
+  "author": "Fable",
+  "time": "2026-11-19 08:05",
+  "note": "PS's sag now sinks only true ground and leaves made solids rigid - so a core left over a void must come down whole, not shear or float (the bent tower, the 3-cell cores and the floating grating box of the user's screenshot).\n- The hook: world.cores.supportLost(x0, y0, x1, y1) - PS's sinkhole re-check calls it every half second, and every blast marks its own box. Strictly event-driven: a periodic look while free read the collapse's churning rubble as momentary voids and danced balls into pockets (the suites caught it).\n- A unit that is its building's gives its ball up only when neither its cradle nor its bed stands under it - a rigid deck spanning a hollow IS support, so an undermined tower keeps its cores while it stands.\n- The freed ball falls row by row, held together by its field, every body column over open air; the thin connector filaments tear and stay at the rim - the gift torn from its sockets; it lands whole on the first thing that bears, rubble included.\n- It never settles onto NOTHING: a new bedStands guard means a wreck-filled vault is still home (as always), but a void cannot be stamped with a floating unit again. A fallen ball climbs back the way it came, and the field snaps it home once the repair rebuilds the bed.\nStaged proof: cradle, bed, ledges and ground removed under a pristine tower's unit - the 81-cell ball drops 28 rows whole and stands at the void floor. Collapse green on real seeds 7/3/11; full matrix 17/17 on 7.",
+  "shots": [
+   {
+    "src": "shots/core-fall-mid.png",
+    "caption": "the freed ball mid-fall, whole, its filaments torn at the rim"
+   }
+  ]
+ },
+ {
+  "title": "Fable: nothing grows without bound, and a core only descends towards a ready vault (8c477e6, a38d254)",
+  "author": "Fable",
+  "time": "2026-11-19 06:40",
+  "note": "The slow browser death PS measured is cured, and the no-hinge seed-7 core stall with it.\n- The pipes' clog rule was written in the comments and never in the code. A packet arriving at a broken end now becomes the mend's own supply: HM clogs and fuels the regrowth, water and SM drain into the torn ground (no standing water appears - the pump only measured the lake, and the water-conservation check caught the first version minting 22 cells). Jams drain from the front instead of piling for ever; a per-line cargo cap backstops it.\n- Repair crews starved and still for half a minute stand down: the job's queue and seen set are let go - tens of thousands of entries per wounded tower - and the work wakes when HM reaches the side's stock or fresh damage calls. The tombstone compactor's floor drops 2048 to 128, so small jobs shrink too.\n- PS's 20-minute soak on the fixed tree: heap 21.5 to 23.2 MB oscillating with GC (was 22 to 35 and climbing), pipes.step settling at ~0.48 ms a tick (was 0.40 to 1.12 and climbing), repair.step oscillating with rescans instead of rising, three starved towers parked at zero entries.\n- The seed-7 stall was exactly PS's trace: no piece ever touches the ball - pw-cores itself traded the same three rows once a second, rising to the open, sinking blind at a blocked vault, losing its exposure and digging back out. A free near-home core now sinks only while its vault reads ready; standing exposed it holds its ground. With the old pivot collapse gone from the branch, the strict-check concern that reverted the earlier gate no longer binds.\nFull matrix 17/17 on real seed 7; collapse green on real 3 and 11; repair/fire/grounding spot-checked on both; validated in a worktree at true branch HEAD this time.",
+  "shots": []
+ },
+ {
+  "title": "Opus: heat is each pixel's own - it tints its pixel and passes pixel to pixel (440ee89, c409d3c, N21O)",
+  "author": "Opus",
+  "time": "2026-11-19 02:28",
+  "note": "Heat is no longer light added over the world. Each hot pixel takes on the heat's tint over its own colour - dull red, cherry, orange, yellow, then white-hot - and goes back to its own colour as it cools. Heat moves from pixel to pixel as energy: each material holds it by its own heat capacity, so hot air hardly warms the rock it touches, water takes long to heat, and metal holds heat longer than earth. Smoke still starts hot and cools to its own colour, sparks are still pure light, and fire stays its own pixel. The heat step got cheaper too: it now works only the pixels that changed in a newly warmed chunk, not all 128x128 of it, so a fire's heat tick went from 3.5 ms bursts to under 1 ms; and heat carried by moving pixels no longer sits frozen outside the area being worked. From here on the physics is checked against your reference sources (csm, awesome-physics, STP) - study only, our own code, nothing copied. Suites on seeds 7, 3 and 11 pass, except pw-collapse on seed 7, which fails the same way on HEAD (the core-ball stall WGM found; my next fix). Also checked: the seed-7 core that never comes home is not shredded by falling pieces (traced cell by cell: only the core code moves it). It loops between rising until it is in the open and sinking towards a vault that is not ready yet; that loop is in WGM's core code and is reported to them. As a safety net, no falling piece can ever carry a core off now (c409d3c).",
+  "shots": [
+   {
+    "src": "shots/n21-before-ramp.png",
+    "caption": "before: rock heated 450 to 1450 C, light added - it washes out to white"
+   },
+   {
+    "src": "shots/n21-after-ramp.png",
+    "caption": "after: each pixel tinted by its heat over its own colour"
+   },
+   {
+    "src": "shots/n21-after-ramp-15s.png",
+    "caption": "15 s later: the heat passed into the rock, a dull red left"
+   },
+   {
+    "src": "shots/n21-after-blast.png",
+    "caption": "a blast: the smoke and fire look unchanged"
+   }
+  ]
+ },
+ {
+  "title": "Fable: a pump never pins the pipe - the riser re-joins the run wherever it regrows (de981a5, N25F)",
+  "author": "Fable",
+  "time": "2026-11-19 05:20",
+  "note": "The user's forking, run down: near a pump (or any riser - a hopper's, a farm's) the regrowth laid the line's NEW level but was forbidden to take the OLD level up, because the riser's guard skipped those columns whole. Both runs stood, and the line forked at every riser the land had moved under - exactly the Y-shapes in the user's screenshot.\nNow the level moves wherever the fresh path goes; the old run is taken up beside the riser like anywhere else, and only the riser's own fresh vertical bore is spared. The riser then lays its vertical again down to the new level - it connects to the closest run below it and is never part of the regrowing run itself, exactly as asked. The closure and tidy sweeps spare the risers' verticals cell by cell instead of sheltering whole columns, so no snarl of old casing survives under a pump either (the old behaviour left one - second shot's clean line used to be a tangle).\nVerified beside the lake pump on seed 7: the land carved two cells down over the connection, the line re-levelled straight through the riser zone and mended as ONE continuous run, nothing doubled. 17/17 on seed 7; pipes/made-ground/repair/fire green on 3 and 11; the user's own world seed (558214718) generates clean at HEAD - the as-generated forks in the screenshot were from an older build, cured by the N13F dive work already.",
+  "shots": [
+   {
+    "src": "shots/pump-rejoin.png",
+    "caption": "after carving the land two cells down over the pump connection: the line re-levelled through the riser zone and mended as one run"
+   }
+  ]
+ },
+ {
+  "title": "Fable: a correction and two fixes - my seed claims were wrong, the fray speckle was the line's own bedding, and the cores mends are taken back (5026521, c914d2d)",
+  "author": "Fable",
+  "time": "2026-11-19 04:30",
+  "note": "The correction first: run-pw-suites takes --seed, and my --params=seed=N was silently ignored - so every 'seeds 7/3/11' matrix I reported tonight actually ran the default seed 7 three times. PS's real-seed runs caught it. Everything below is validated with --seed on the real worlds, and the memory note is updated so it cannot happen again.\n- Made-ground, real seed 3 (5026521): the 110 'lone frayed cells' at the gothic neutral town were the pipe bed's darker apron dotted along the foreign-town dive - the line's own bedding, which the speckle check's exclusion list did not know (it listed the bed's two flat paints but not the apron pair). The check now excludes all four bed tones, and repair backfill paints with the bed's own dither. Visually there was never speckle: the dive's bedding is a clean continuous jacket.\n- Cores (c914d2d): on the real seeds, every variant of the 0be9d43 mends flips a one-cell-strict collapse check somewhere - the sink gate let standing balls chew a fallen tower's whole ruin piece, the field-gather diverged a marginal crush, and even the spans binding alone abandoned a freed unit's connector cell. d01fd9b's logic passes the old collapse cell-for-cell on 7, 3 and 11, so it is restored. The no-hinge stall is real but belongs to the piece side: a landing piece must not displace the god's metal - it should break around the freed ball as around bedrock, and then there is no crumb cloud to stall in. Repros and probes are with PS.\nFull matrix at HEAD: 17/17 on real seeds 7, 3 and 11.",
+  "shots": []
+ },
+ {
+  "title": "Opus: HITBOX debug view (c60b3eb, N19O)",
+  "author": "Opus",
+  "time": "2026-11-19 01:49",
+  "note": "A HITBOX button on the toolbar shows the hitboxes the physics uses: each standing building's frame outline, each falling piece's contact outline, and each ruin's outline - green, turning yellow then red by how hard it was struck lately (fading over about a second). Before: every building green. During: the struck neighbour and the stump go red as the tower comes down. After: the ruins. Off it costs nothing; on, about 1 ms a frame.",
+  "shots": [
+   {
+    "src": "shots/hitbox-before.png",
+    "caption": "before the blast"
+   },
+   {
+    "src": "shots/hitbox-during.png",
+    "caption": "during: the struck neighbour and the stump in red"
+   },
+   {
+    "src": "shots/hitbox-after.png",
+    "caption": "after"
+   }
+  ]
+ },
+ {
+  "title": "Opus: solid things keep their shape (5e49389) - no hinge for buildings, sags shear nothing, only melting metal deforms",
+  "author": "Opus",
+  "time": "2026-11-19 01:39",
+  "note": "Buildings blown at mid-height now fall free - no hinge - and tip over the failed side from the impact itself; big fallen pieces come to rest cracked into several ruins. Sinkholes now sink only the ground: buildings, cores, pipes, linings, ruins and props keep their shape and either stand on what still holds them or come down whole. Before/after: a tower over a hollow used to bend and its cores squash to a sliver; now both keep their shape and the ground sinks out from under. Metal deforms only when it melts (1350 C: steel runs as glowing slag). Cores dropping whole when unsupported is with WGM (pw-cores). Also found the long-session growth (repair queues, pipe cargo) - see the Performance tab; with WGM.",
+  "shots": [
+   {
+    "src": "shots/sag-before.png",
+    "caption": "before: the sag bends the tower"
+   },
+   {
+    "src": "shots/sag-after.png",
+    "caption": "after: the tower keeps its shape, the ground sinks under it"
+   },
+   {
+    "src": "shots/nohinge-tip.png",
+    "caption": "a tower falling free over its broken side"
+   }
+  ]
+ },
+ {
+  "title": "Fable: the god's life in the plant - the machinery watches, pulses and attends its wounds (47795ed)",
+  "author": "Fable",
+  "time": "2026-11-19 03:25",
+  "note": "N27F: the pipes, pumps, wells and the repairing stream now read as living god-machinery over the industrial plant, all in the energy ball's own black-and-white language - a white point, a grey fleck, an ink streak, never more than a few pixels at a time, so the DMG's touch stays subtle.\n- One white signal glides each line every few seconds, its trail dimming to ink behind it - and it dies at any wound it meets.\n- Wellheads and pump mouths keep watch: a small still eye with one slow fleck orbiting it, the ball's atom in miniature.\n- A packet passing through a core's bed blinks the bed's connectors white as it goes.\n- While a line is cut, the god's attention rests on each open mouth: a white point with hair-fine flickering rays and an ink fleck beneath, until the ends meet again.\nAll drawn over the frame; nothing is written into the world's cells, so physics, suites and determinism are untouched (17/17 on seed 7; pipes/views/styles/repair re-checked on 3 and 11). Also landed earlier tonight: an unveiled plant cell never paints over what is already drawn (b02e0d5) - PS's bent limbs and my growing trees agree on the rule from both sides.",
+  "shots": [
+   {
+    "src": "shots/god-well.png",
+    "caption": "the wellhead's eye at the dive bend, beside the main core's ball - one language"
+   },
+   {
+    "src": "shots/god-pump.png",
+    "caption": "the lake pumps: a still white eye at each riser mouth under the gallery"
+   },
+   {
+    "src": "shots/god-mouth.png",
+    "caption": "a cut line: the god's attention on the open mouths while the ends regrow"
+   }
+  ]
+ },
+ {
+  "title": "Fable: the ball's field holds it together - the no-hinge collapse stall is fixed (0be9d43)",
+  "author": "Fable",
+  "time": "2026-11-19 02:55",
+  "note": "PS's no-hinge collapse (the falling top as a free piece, per the bulletin) could land on the opened vaults and shred a freed energy ball into a cloud of core crumbs over twenty rows - every cell survived, but the ball read itself buried, dragged the crumb towers with it, and the go-home branch kept sinking it back into a vault still full of wreckage: it bounced three rows up and three rows down for ever, neither exposed nor settled.\nThree mends, all in the ball's own terms: its spans bind only to the matter joined to the ball (stray crumbs are not the ball); its field now gathers scattered crumbs back into the nearest open seat about the centre, a few cells a tick, so whatever lands on it the ball reassembles itself; and a near-home ball sinks only once its vault is actually open.\npw-collapse passes seeds 7/3/11 both at HEAD and with PS's uncommitted no-hinge spawn applied (237/237 core cells surviving on the seed-3 repro); the full matrix is 17/17 on all three seeds at HEAD. PS can push the no-hinge commit on top.",
+  "shots": []
+ },
+ {
+  "title": "Fable: everything regrows like a root - side walls wait for their floors, trees climb out of the ground wood-first, cut pipes re-route under the new land (cee4eb6, 7ce0cfb)",
+  "author": "Fable",
+  "time": "2026-11-19 01:50",
+  "note": "N22F/N23F, the regeneration clarification - nothing rebuilds like a printer:\n- Side walls follow the floors (cee4eb6): a rebuild branches - pillars up from the translator, floors out from the pillars, back walls from both - and the side walls close the building only where a floor has already reached the end. A wall cell climbs its own wall, stands on a floor, a pillar or the bed, or starts beside the floor that just arrived; never off the back walls alone.\n- Trees grow like plants (7ce0cfb): a regrowing plant is no longer drawn whole. Its cells are queued in growing order - the wood from the base upward (trunk, boughs, branches), then the leaves filling the crown - and laid a few per tick, so pw-life's regrowth saplings and every 30 s growth step visibly climb out of the ground. Felled part-grown, it stops where it stands. Worldgen still stamps instantly.\n- Broken pipes already grow back from both clogged ends on a path re-read from the land every few seconds; verified the full N22F story on a fresh crater: carved the street over a line, both ends regrew once the ground settled, and the mended run dives 13 cells into the crater bowl, riding the new land, buried 3-50 cells deep across the whole span (the HM clog pays for it; a starved end draws a trickle from stock).\nAll 17 suites pass on seeds 7, 3 and 11 at 7ce0cfb (one pw-sandbox flake on seed 11, green on immediate rerun).",
+  "shots": [
+   {
+    "src": "shots/tree-grow-0.png",
+    "caption": "a tree half a second in: trunk, boughs and branches first, the first leaves at the lower crown"
+   },
+   {
+    "src": "shots/tree-grow-final.png",
+    "caption": "the same tree grown whole"
+   },
+   {
+    "src": "shots/rr2-mended.png",
+    "caption": "the cut line mended under a fresh crater: the run re-read the land and dives through the bowl"
+   },
+   {
+    "src": "shots/wall2-5.png",
+    "caption": "a blasted tower growing back storey by storey under the rubble being dug off"
+   }
+  ]
+ },
+ {
+  "title": "Opus: fire stays fire, heat is its own glow; water quenches; branches bend (608c0e2, c3a836b)",
+  "author": "Opus",
+  "time": "2026-11-19 00:26",
+  "note": "Per your refinement: fire pixels are their own particles again (coloured by their life, as before) and heat is a separate per-pixel property - anything hot glows and cools; smoke born from a flame starts red-hot. Water quenches: hot rock, metal or rubble that meets water goes dark at once in a burst of steam (a 1100 C lump in the lake: 792 C after 8 ticks vs 1032 C on dry ground). Branches bend: a blow too light to snap a limb swings it about its joint on a spring - stiffer the thicker - and it rings down and settles back as it grew. Buildings breaking apart with no hinge animation is built and passes the tip/rubble checks, held for a cores fix on the WGM side.",
+  "shots": [
+   {
+    "src": "shots/bend-1.png",
+    "caption": "a bough swinging after a blow (0.15 rad)"
+   }
+  ]
+ },
+ {
+  "title": "Fable: miners' halls, two miners a body, one unforked hollow pipe each, pipes that regrow themselves, cargo as pixels on a sine path (b7bdeae, 8d645ed, de74721)",
+  "author": "Fable",
+  "time": "2026-11-19 00:55",
+  "note": "- N11F: the starter mines dig hallway-rooms beside their shafts, always heading toward the ore - storage, pipe control, an armoury, a trash room of junk mounds, and one quiet room with a single white point on inked backing. Caves are used as highways, and no crate or cave formation ever stands over a fresh cut.\n- N12F: at most two miners work one ore body, one operation per node.\n- N13F: no pipe ever forks - a foreign town's bundle dives to depth across the whole street, so the lines never braid.\n- N14F: the repairing stream is the pipeline look everywhere, drawn narrower and more tubular while it works.\n- N15F: the browser-crashing repair freeze is gone - the repair queue is tombstoned with a capped scan window, and the pipes' head-on slip-past is indexed per tick (a supply jam went quadratic; a 20 s blast block fell 7.4 s -> 0.8 s flat).\n- N16F: the old stamping glitch is now the growth itself - a cut pipe extends as a trailing stamp curtain until it meets the nearest open pipe, then flow resumes; same design as every pipe, never an overlay.\n- N17F: every cell inside the casing carries a HOLLOW flag; smoke, fire and heat will travel the bore among the cargo (PS builds the gas side on this push).\n- N20F: each pixel of water, SM and HM travels along the path of a sine wave fixed in space, and every resource pixel stays visible as its own pixel - no continuous wave band.\n- Buildings rebuild like life spreading - frame up from the translator, floors branching off standing frame - 67 percent faster; the core's energy ball keeps its rays inside the plate recess so a collapse cannot crush it; the last 91 permanently-raw tunnel cells on seed 11 develop (a kept ore streak split a dig box in two and only one half was ever scheduled).\nAll 17 suites pass on seeds 7, 3 and 11 at de74721.",
+  "shots": [
+   {
+    "src": "shots/hall-rooms.png",
+    "caption": "hallway-rooms dug beside the shaft, heading for the ore"
+   },
+   {
+    "src": "shots/tip-early.png",
+    "caption": "a cut pipe growing itself back: the stamp curtain at the tip"
+   },
+   {
+    "src": "shots/pp-cargo.png",
+    "caption": "cargo pixels riding the sine path through the ribbed bore (seed 7)"
+   },
+   {
+    "src": "shots/pp-repaired.png",
+    "caption": "the repaired span, same pipeline look as everywhere"
+   },
+   {
+    "src": "shots/f2-order-35.png",
+    "caption": "a rebuild spreading like life: frame first, floors branching"
+   }
+  ]
+ },
+ {
+  "title": "Opus: heat is a modifier on every pixel; space pauses (ba79a51)",
+  "author": "Opus",
+  "time": "2026-11-18 23:29",
+  "note": "Every pixel carries its temperature and glows while hot, cooling back to its own colour. A fire pixel is now a smoke pixel burning hot - same colours, same timing, so the fireball looks as before - and after the flame it cools from red into its own smoke shade instead of switching abruptly. Sparks and shrapnel glow and cool as they fly; rubble thrown from the heart of a blast glows and lands hot, heating the heap; burning trees drop embers. Water does not glow: a drop as hot as boiling flashes to steam (a blast at the lake edge throws up a steam cloud). Grid smoke and dust in hot air glow too, and red-hot smoke climbs faster. Spacebar now toggles pause. Frame cost after a BLAST L unchanged within noise; 17/17 on seeds 7/3/11.",
+  "shots": [
+   {
+    "src": "shots/heat-fireball.png",
+    "caption": "BLAST L at the lake: fireball as before, hot rubble glowing in the crater, steam off the water"
+   },
+   {
+    "src": "shots/heat-smoke.png",
+    "caption": "1 s later: smoke cooling from red to soot"
+   }
+  ]
+ },
+ {
   "title": "Opus: heat makes pixels glow (3ac33b4)",
   "author": "Opus",
   "time": "2026-11-18 22:45",
@@ -847,10 +1544,111 @@
         "owner": "O"
        },
        {
-        "id": "N14",
+        "id": "N24",
         "owner": "O",
         "step": "3ac33b4",
         "text": "Heat makes pixels glow: temperature is a modifier on every cell's colour - dull red from about 480 °C, through cherry, orange and yellow to white-hot at 1400 °C - fading as it cools (crater walls, torched stone); smoke and fire unchanged"
+       },
+       {
+        "id": "N18",
+        "owner": "O",
+        "step": "5e49389",
+        "text": "Cores, objects and decor keep their shape when the ground under them is hollowed: they stand or fall whole and break; only metal deforms, by melting"
+       },
+       {
+        "id": "N19",
+        "owner": "O",
+        "step": "c60b3eb",
+        "text": "HITBOX debug view: building, falling-piece and ruin hitboxes drawn green to red by collision intensity"
+       },
+       {
+        "id": "N26",
+        "owner": "O",
+        "step": "1c53e45",
+        "text": "Tree debris floats in water: wood and leaves that fall into water stay on the surface (or drift in it), as the user's screenshot shows, instead of sinking"
+       },
+       {
+        "id": "N39",
+        "owner": "O",
+        "step": "bd34ede",
+        "text": "Water damages and goes through structures and deco: water pushes structure, fittings and deco out of its way, forcing them over from their current place, the way it would move any other cell. (user, 2026-11-19)"
+       },
+       {
+        "id": "N40",
+        "owner": "O",
+        "step": "7b0d8c4",
+        "text": "Falling buildings break apart pixel by pixel and fall under real physics (user, 2026-11-19). Today: falling pieces are drawn as a rigid image that only turns into pixels when it lands; chunks can fall through the terrain; pieces that fly apart keep one hitbox. Fix: each piece is pixels all the way down, the collision uses every pixel (not sampled outline points), and a separated part gets its own collision."
+       },
+       {
+        "id": "N41",
+        "owner": "O",
+        "step": "666e8f4",
+        "text": "Trees follow the same fix as buildings (N40): falling trees are pixels all the way down, with collision on every pixel, and a separated branch gets its own collision. Branches must bend when they hit terrain, the way a real branch flexes, instead of passing through it or staying rigid."
+       },
+       {
+        "id": "N42",
+        "owner": "O",
+        "step": "ae40a09",
+        "text": "Water breaks through buildings more easily (user, 2026-11-19, from the flood test with the tower over the tunnel): a tower with water pressing on it would already have collapsed, and other structures of its strength should give way the same way. Tune the breach so structure fails under a realistic water push (depth and speed), without making the water lose cells."
+       },
+       {
+        "id": "N49",
+        "owner": "O",
+        "step": "c3655bf",
+        "text": "Unnatural spinning in building collapses: buildings falling into rubble spin in ways that look wrong (user, 2026-11-19, two screenshots). Fix the rotation of falling building pieces so they tip, slide and settle the way real structure does, and stop the spin once a piece meets rubble."
+       },
+       {
+        "id": "N61",
+        "owner": "O",
+        "step": "b5de1ca",
+        "text": "Water flows more smoothly and faster (user, 2026-11-19; refs: waterfall, river and water-flow gifs in the checklist chat). Water currently moves slowly and stutters; make it flow like the references: fast smooth falls, steady flow down slopes, and water spreading level across a basin."
+       }
+      ]
+     },
+     {
+      "title": "",
+      "items": [
+       {
+        "id": "N11",
+        "owner": "F",
+        "step": "H",
+        "text": "Miners dig hallway-rooms beside the shafts, always heading toward the ore - storage, pipe control, armoury, trash mounds and the quiet room; caves serve as highways; no prop ever stands over a fresh cut (8d645ed)"
+       },
+       {
+        "id": "N12",
+        "owner": "F",
+        "step": "H",
+        "text": "At most two miners harvest any one ore body, one operation per node; the rest reach on to other ore or the caves (8d645ed)"
+       },
+       {
+        "id": "N13",
+        "owner": "F",
+        "step": "E",
+        "text": "Pipes never fork - one continuous run per line, foreign bundles diving to depth across the whole street (de74721) - and a pump joins only the closest run below it, staying out of the regrowing run (de981a5). One pipeline look throughout: the repairing stream is the pipe aesthetic, narrower and more tubular while it works; a cut pipe regrows as its own trailing stamp curtain, never an overlay; and every pixel of water, SM and HM rides a sine path fixed in space, one visible pixel per unit (de74721). [merged: N14, N16, N20, N25]"
+       },
+       {
+        "id": "N15",
+        "owner": "F",
+        "step": "L",
+        "text": "Repair performance: both browser-freezing quadratics gone (tombstoned repair queue, indexed head-on slip-past - a 20 s post-blast block fell 7.4 s to 0.8 s flat), and the long-war growth closed: the clog rule wired, a per-line cargo cap, starved crews stand down and release their queues; PS's 30-minute soak holds flat (de74721, 8c477e6)"
+       },
+       {
+        "id": "N17",
+        "owner": "F",
+        "step": "E",
+        "text": "Hollow pipes: every in-casing bore cell carries FLAG.HOLLOW - smoke and flame pixels travel the bore among the cargo, heat moves like shut-in air and climbs the wells, grid smoke is drawn in at the open mouths (de74721; PS 640fd75, a42a88c)"
+       },
+       {
+        "id": "N23",
+        "owner": "F",
+        "step": "F, G",
+        "text": "Regrowth is growth from a base, never printing: pipes regrow from both clogged ends on a path re-read from the land, verified re-routing under a fresh crater (de74721); buildings branch - pillars climb from the translator, floors reach out, back walls fill from both, side walls close only where a floor has reached the end (b7bdeae, cee4eb6); trees climb out of the ground wood-first, leaves filling the crown (7ce0cfb). The same order stands ready for first builds - the machinery runs for any under-construction building; the seed-to-building entry that will exercise it is N2. [merged: N22, N1]"
+       },
+       {
+        "id": "N27",
+        "owner": "F",
+        "step": "E, F",
+        "text": "DMG machinery feels mythical in the ball's own black-and-white language: a white pulse glides each line and dies at wounds, wellheads and pump mouths keep watch with the ball's atom in miniature, connectors blink as cargo passes a bed, and the god's attention rests on each open mouth while a line regrows (47795ed)"
        }
       ]
      }
@@ -864,31 +1662,43 @@
       "name": "In progress",
       "items": [
        {
-        "text": "F part 2, the resurrection: all machinery landed and gated - waiting on construction-site semantics in the structure system (Opus building it: a growing building judged by what stands, light blows shrugged off)",
+        "text": "F part 2, the resurrection: LIVE and suite-verified - construction-site semantics landed (b.growing handshake), PW.REBUILD_RUINS on, ruined towers rebuild through risen cores in every collapse run; cores settle only onto a standing bed (9c7710a). Left for the checklist chat to confirm done: the fine-work-from-below polish items, if any remain",
         "step": "F",
         "left": "the structure-side exemption, then flip PW.REBUILD_RUINS",
         "id": "P1",
-        "owner": "F"
+        "owner": "F",
+        "pct": 85
        },
        {
-        "text": "Performance pass: bundle routing 3x faster; collapse/physics time budgets still flicker when two suite runs share the machine. The regenerated baseline is its own job (P4B). Still to do: collapse spike (~53 ms max) under load; frame budgets per system",
-        "step": "L",
-        "left": "the blast-moment hitch: falling tower crush steps, the debris flush, the first analysis after a blast",
+        "text": "Performance pass: bundle routing 3x faster; no memory growth in a 9-minute real-time repair session; the blast-moment hitch fixed (gas-only redraws every third frame, particles as one image, a frame budget for catch-up ticks: 50 long frames after a BLAST L down to 2-4)",
+        "step": "52c0208",
+        "left": "the first 0.15 s of a big blast (2-4 frames over 34 ms: the fireball, the debris it spawns, the first structure look); a tick still costs 7.5-9.5 ms for the 5 s after a big blast",
         "id": "P2",
-        "owner": "O"
+        "owner": "O",
+        "pct": 60
        },
        {
         "text": "Lasting smoke after strikes",
         "step": "A2.23",
         "left": "smoulder plumes that linger",
         "id": "P3",
-        "owner": "O"
+        "owner": "O",
+        "pct": 40
        },
        {
-        "id": "P4B",
+        "id": "P4",
         "owner": "B",
         "step": "L",
-        "text": "Performance baseline regenerated at HEAD on seeds 7, 3, 11 in a clean worktree (wt-base), by a Sonnet chat (low); writes baseline.json; the checklist chat posts results to the Performance tab"
+        "text": "Performance baseline regenerated at HEAD on seeds 7, 3, 11 in a clean worktree (wt-base), by a Sonnet chat (low); writes baseline.json; the checklist chat posts results to the Performance tab",
+        "pct": 50
+       },
+       {
+        "id": "N21",
+        "owner": "O",
+        "step": "440ee89",
+        "text": "Heat as each pixel's own tint (done: tint over the pixel's own colour, heat passing pixel to pixel by heat capacity); all physics follows your reference sources (csm, awesome-physics, STP) as guides, study only, our own code",
+        "left": "the rest of the physics brought in line with the references: heat step inside its stability limit, springs on an energy-keeping step, heaps at their angle of repose",
+        "pct": 70
        }
       ]
      }
@@ -901,12 +1711,6 @@
      {
       "name": "Growth and economy",
       "items": [
-       {
-        "text": "How a building grows from its cores: translator pillars first, then floors, back walls, outer walls (needs the same construction-site semantics)",
-        "step": "F2",
-        "id": "N1",
-        "owner": "F"
-       },
        {
         "text": "Seeds: drop one in your vision, it grows a core and a level-1 building",
         "step": "G",
@@ -926,48 +1730,186 @@
         "owner": "F"
        },
        {
-        "id": "N11",
-        "owner": "F",
-        "step": "H",
-        "text": "Tunnel building by miners: hallways of varying height and look that serve as rooms (storage, pipe control, armouries, trash, subliminal), dug just beside the mines but always heading toward the ore, using caves as highways (as noted before)"
-       },
-       {
-        "id": "N12",
-        "owner": "F",
-        "step": "H",
-        "text": "At most 2 miners harvest any one ore body; the rest reach out to other ore or to caves"
-       },
-       {
-        "id": "N13",
+        "id": "N30",
         "owner": "F",
         "step": "E",
-        "text": "Pipes never fork: the resource pipe is one continuous pipe, not a split into branches (user screenshot 2026-11-18); with vertical and horizontal pipes as one design, 111-degree turns, pumps joining the nearest pipe below"
+        "text": "Pipe layout, round 2 (user, 2026-11-19): the water pipeline joins the main resource pipeline, not the city directly, so it never cuts another line off. Pipes may spawn over land or through water when that is the quickest route. One pipe design everywhere: a 90-degree turn looks the same as a straight run. A vertical pipe leads into the main line through a T-shaped connector (valve-style, as in the user's underground-pipe reference), not by clogging a turn."
        },
        {
-        "id": "N14",
+        "id": "N31",
         "owner": "F",
-        "step": "E, F",
-        "text": "Repair look = the pipeline aesthetic everywhere: the repair stream's look (user screenshot) becomes the pipeline's look throughout, even when not repairing; while repairing it is less wide and more tubular; resources in the pipe move in a sine wave"
+        "step": "H",
+        "text": "Tunnels, round 2 (user, 2026-11-19): tunnels branch out from each other and never overlap. Several floors are allowed but must be clearer to read. Floors connect by diagonal stairs, not only ladders. Slopes run from flat up to 66 degrees either way. Refs: coal mine cross-section with underground chambers; Homestake mine 4850 level."
        },
        {
-        "id": "N15",
+        "id": "N32",
         "owner": "F",
-        "step": "L",
-        "text": "Repair performance: the browser crashed during repair - repair must be optimised and refined (with PS: every other source of frame drops)"
+        "step": "C2, K",
+        "text": "Military bases level up by hollowing out more of the mountain, with more rooms and defences at each level. At max level, a deployment hangar sits at the base of the mountain. Garrison peeking holes become real openings (a window or tube, like the resource pipe) that troopers can shoot and move through, and they are much shorter so they are practical. Refs: underground defence facility and bunker cross-sections (the military photos the user sent)."
        },
        {
-        "id": "N16",
+        "id": "N33",
         "owner": "F",
-        "step": "E, F",
-        "text": "Repair pipe and ordinary pipe are not two visuals pasted over each other: the repair is the pipe itself extending and growing outward to reach and connect with the nearest open pipe, then resources start flowing through it"
+        "step": "F2, G",
+        "text": "Each population seed gets its own capital building. The bunker is replaced by the main core, which sits inside the capital. The first capital is larger, grander and more detailed than the later ones. Style refs from the user: modern (state capitol with dome and colonnades), gothic (cathedral facades, spires, tracery), Asian (pagoda roofs, temple halls, tiered towers). Use these refs for other buildings too, merging their look, detail and function.. The image links are guides for how capitals and other buildings generate and function, as well as how they look."
        },
        {
-        "id": "N17",
+        "id": "N34",
         "owner": "F",
         "step": "E",
-        "text": "Hollow pipes: smoke and fire can travel through the pipe bore alongside the water, SM and HM flowing in it (WGM builds the hollow pipe; PS makes gas and fire move through it)"
+        "text": "Pipe elbows (user, 2026-11-19): a pipe turning 90 degrees (up to 111) is one continuous pipe. The design compensates through the bend, so it never splits in two. Refs: stainless 90-degree pipe elbow; water distribution pipe bend diagram."
+       },
+       {
+        "id": "N35",
+        "owner": "F",
+        "step": "D, F2",
+        "text": "Cores come first, buildings grow from them: the pixels that make up the cores must not be cut off from the buildings and their generation (user screenshot, 2026-11-19). Design order is cores, then the buildings that hang off them, so a core is never left separated from its building."
+       },
+       {
+        "id": "N36",
+        "owner": "F",
+        "step": "H",
+        "text": "Tunnel design (user, 2026-11-19): a default tunnel is simple and narrow, and connects the specialised tunnels, which have a higher roof and a unique design: storage, processing, subliminal, pipe control, mossy, and more. Tunnel decor and detail follow the user's references (subway and underground tunnel photos, the Euston and Pedway tunnels, the underground railroad tunnels, a mine-tunnel banner). Tunnels generate over time as the mine cross-sections show (chambers, levels, working drifts), not all at once.. The user's image links are visual guides for how buildings and tunnels generate and function (not only how they look): each reference shows a layout to copy in structure, not just in colour."
+       },
+       {
+        "id": "N37",
+        "owner": "F",
+        "step": "E, H",
+        "text": "Visual check of the live world (2026-11-19, while the user looked at it): the pump boxes on the main pipe line sit on the line with the pipe broken beside them; pipe junctions near the pumps look cut; the soil strata show blocky horizontal banding in the lower dirt. To confirm at close zoom."
+       },
+       {
+        "id": "N37",
+        "owner": "F",
+        "step": "H, E",
+        "text": "Tunnel fixes (user, 2026-11-19, from shots/incline.png): pipes are part of the background walls, not drawn over the tunnels; the roof above stairs is higher; every tunnel is walkable for a ground trooper, so the whole network can be explored on foot."
+       },
+       {
+        "id": "N38",
+        "owner": "F",
+        "step": "E, D, C",
+        "text": "Pipes, cores and peek holes become terrain, not deco blocks (user, 2026-11-19). Pipes: two parallel lines hollowed out of the terrain itself, running together and turning only where needed; resource pixels travel inside the tube. If a tube end is destroyed before it reconnects, its resource pixels push out and destroy the debris at that end. Cores: the same change, the core is part of the terrain, not a deco block. The white energy is a light equation that gives an atom-like motion of vibrations. Military peek holes: they stop at the structure or terrain, and do not jut outward at the top end or corner."
+       },
+       {
+        "id": "N43",
+        "owner": "F",
+        "step": "H, F2",
+        "text": "Capital growth density (user, 2026-11-19): as a capital levels up, its buildings get more compact toward the centre; the outer and newest buildings are the most spread out."
+       },
+       {
+        "id": "N44",
+        "owner": "F",
+        "step": "H, F2, G",
+        "text": "Capital growth lab (a separate lab page, the current build keeps being worked on): simulate a capital growing at controllable speeds, on different locations at different heights and land masses, and show the three building types as they look. Think about size, how capitals and farms grow across the terrain, and eventually merging. Most cities and farms stay cut off from water, bodies of water and mountains until they reach a high enough level."
+       },
+       {
+        "id": "N45",
+        "owner": "F",
+        "step": "G, H",
+        "text": "Population buildings grow out into a skyline. Refs: city skyline photos (Hong Kong, modern towers, the unsplash and pexels skylines) and the Forbidden City aerial and gate photos, the Trevi and Rome Forum photos, and the wallpaper and travel-site views of old cities."
+       },
+       {
+        "id": "N46",
+        "owner": "F",
+        "step": "J",
+        "text": "Farms grow out their crop fields mostly, making dense vegetation of crops across flatland. Farms can still build lesser bridges, weaker than the main ones, but cannot build through mountains. Refs: wheat and corn field photos, and the steel agricultural building photos."
+       },
+       {
+        "id": "N47",
+        "owner": "F",
+        "step": "M5 (later)",
+        "text": "Keep in mind, not built yet: how units interact with buildings and terrain, and how they move through it."
+       },
+       {
+        "id": "N48",
+        "owner": "F",
+        "step": "H, F2",
+        "text": "Building levels follow age (user, 2026-11-19): new buildings start at level 1 as they spread outward, so the innermost buildings are the highest level because they have existed longest. Levels rise with time from the centre outward, and the capital growth lab (N44) shows this."
+       },
+       {
+        "id": "N50",
+        "owner": "F",
+        "step": "J, F2",
+        "text": "Farm and pump design (user, 2026-11-19): a farm has a core under its silo storage; the silo's stored SM is transferred down through the core into the pipeline below. Water pumps each have their own small core that regenerates them."
+       },
+       {
+        "id": "N51",
+        "owner": "F",
+        "step": "C, K, G",
+        "text": "Buildings spread out, filling the gaps as the town grows, not stamped in uniform rows at a constant spacing. Spacing varies mostly with the height difference of the terrain."
+       },
+       {
+        "id": "N52",
+        "owner": "F",
+        "step": "C, K",
+        "text": "Military buildings have a hyper-military look: geometric, sleek, built for defence and adapted to the terrain. The visual design language comes from the sci-fi references (the hangars, bases and bunkers in the images), applied to the buildings in the game's own sprite style, not to the vehicles or mechs in those images. DONE 9aa77ab (first pass; refine when the ref images land).",
+        "done": true
+       },
+       {
+        "id": "N53",
+        "owner": "F",
+        "step": "C, M8",
+        "text": "Military tunnels and population tunnels get their 2D look from the references: military tunnels (subterranean and army photos, a bunker) and population tunnels (the Colorado memorial tunnels, the Euronews tunnel, the tunnel photo set). Tunnel width, roof height, lining and wall detail are read from these as they would appear as 2D pixels. DONE 6647efd (civic bore built; military keeps faction dressings pending refs).",
+        "done": true
+       },
+       {
+        "id": "N54",
+        "owner": "F",
+        "step": "H, J, K",
+        "text": "Growth shapes the terrain instead of stopping at a height difference (user, 2026-11-19, screenshot in the checklist chat). A growing town or farm may alter the ground: it builds along the original terrain, respecting its shape, and smooths and flattens it into a straight slope. This holds only while the slope is not too steep and not too high."
+       },
+       {
+        "id": "N55",
+        "owner": "F",
+        "step": "C, K, F2",
+        "text": "Military buildings are the most versatile: hangars grow more vertical and squeeze in between existing buildings, adapting their design around them. A military building merges into a population building it militarises, making it bulkier, with harder, thicker walls and floors and an added armour layer. The bases of several population buildings merge and redesign themselves around the spread of expanding military buildings as they grow along. Uses the earlier sci-fi hangar reference."
+       },
+       {
+        "id": "N56",
+        "owner": "F",
+        "step": "E, A2.31",
+        "text": "Bridge pillars are decor blocks that water can pass through, but they still hold the bridge up. If a bridge has too little support underneath, it bends at its point of least resistance, snaps and breaks apart (refs: a bridge collapsing in an earthquake, and a bridge failure gif)."
+       },
+       {
+        "id": "N57",
+        "owner": "F",
+        "step": "C, K",
+        "text": "Military hangars are taller and less wide (the vertical change is about height, and the hangars narrow). Military bases get a runway for planes and mechs. Population buildings and farm buildings adapt their base to the military terrain changes as the military grows."
+       },
+       {
+        "id": "N58",
+        "owner": "F",
+        "step": "F2, K, H",
+        "text": "Merge points (user, 2026-11-19): where buildings meet, they can join through a merge point, such as a monument, statue, fountain or park (or another decor that fits the building type). The merged base reaches 3 floors and continues the floor design. The middle of the merged base becomes the new primal core."
+       },
+       {
+        "id": "N59",
+        "owner": "F",
+        "step": "C, I, J, K",
+        "text": "Military buildings never stop population or farm buildings from expanding: a military base grows alongside them, and does not block their spread. Military detail appears among urban detail or farm detail depending on where the building sits (in the city, among farms, or in the mountains)."
+       },
+       {
+        "id": "N60",
+        "owner": "F",
+        "step": "N44",
+        "text": "Capital growth lab (capital-lab.html) runs smoothly under heavy development and explosions: it crashes today when many buildings grow and blasts go off at once. Keep the lab steady at its controllable speeds (frame time and memory held in check, growth and blasts spread over ticks)."
+       },
+       {
+        "id": "N62",
+        "owner": "F",
+        "step": "E, F2",
+        "text": "Only one water pump per body of water (user, 2026-11-19, pump-core shot on the Screenshots tab). Each pond, lake or basin gets a single pump, with its own small core that regenerates it (see N50F)."
+       },
+       {
+        "id": "N63",
+        "owner": "F",
+        "step": "C, K, F2",
+        "text": "Merged population and military buildings (user, 2026-11-19; reference image in the checklist chat): a population building takes a merged military building on its side, widening its base. The two can combine their base up to 3-4 floors into one building. Blue is the population building; grey is the armour/military building attached to it."
        }
       ]
+     },
+     {
+      "name": "Physics",
+      "items": []
      },
      {
       "name": "Units and combat",
@@ -1003,18 +1945,6 @@
         "owner": "O",
         "step": "M5",
         "text": "Tanks in two sprites: the tracks are one sprite that always adjusts to the terrain under it, the turret with its long-range gun barrel is another that stays stabilised, aiming forward or at its target"
-       },
-       {
-        "id": "N18",
-        "owner": "O",
-        "step": "A2.21",
-        "text": "Cores, objects and decor keep their shape when the ground under them is hollowed out (no squashing or stretching in the sag): they fall or slide over depending on whether terrain still supports them, and break rather than distort; only metal distorts, and only when hot enough to melt"
-       },
-       {
-        "id": "N19",
-        "owner": "O",
-        "step": "A2",
-        "text": "Hitbox toggle button: show buildings' hitboxes before, during and after they are demolished, as a border that shifts from green to red with collision hit intensity"
        }
       ]
      }
@@ -1511,6 +2441,10 @@
    {
     "state": "now",
     "text": "N17F. Pipes are hollow: the bore's inside rows carry FLAG.HOLLOW - solid to debris, water and units, but smoke and fire travel the pipe among the cargo (and chimney up the wells); encoding agreed with the physics track (their gas rule: M.PIPE + HOLLOW is open to gas)"
+   },
+   {
+    "state": "now",
+    "text": "N21O. Heat is each pixel's own (your update): a hot pixel glows into the heat tint over its own colour and cools back to it; heat passes pixel to pixel, each material holding it by its own heat capacity (gases little, water a great deal, metal more than rock); smoke starts hot and cools to its own colour; fire stays its own pixel (440ee89). From here on all physics is checked against your reference sources (csm, awesome-physics, STP) - study only, our own code, nothing copied. Next in line: the heat step kept inside its stability limit if the tick rate changes; springs (bending branches, the air grid) on a step that keeps their energy; heaps settling at each material's angle of repose"
    },
    {
     "state": "todo",

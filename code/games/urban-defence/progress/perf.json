@@ -1,6 +1,429 @@
 {
   "charts": [
     {
+      "title": "Blast moment (BLAST L at a tower, real time, the 8 s after): frames over 34 ms, and seconds spent in them x10",
+      "unit": "count",
+      "series": [
+        {
+          "name": "frames over 34 ms",
+          "points": [
+            {
+              "label": "before (1c53e45)",
+              "v": 50
+            },
+            {
+              "label": "after (448ddea + 52c0208)",
+              "v": 3
+            }
+          ]
+        },
+        {
+          "name": "seconds in them x10",
+          "points": [
+            {
+              "label": "before (1c53e45)",
+              "v": 21
+            },
+            {
+              "label": "after (448ddea + 52c0208)",
+              "v": 1.4
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Blast moment: frame time (ms) - p95 and worst",
+      "unit": "ms",
+      "series": [
+        {
+          "name": "p95",
+          "points": [
+            {
+              "label": "before (1c53e45)",
+              "v": 38
+            },
+            {
+              "label": "after (448ddea + 52c0208)",
+              "v": 16
+            }
+          ]
+        },
+        {
+          "name": "worst",
+          "points": [
+            {
+              "label": "before (1c53e45)",
+              "v": 100
+            },
+            {
+              "label": "after (448ddea + 52c0208)",
+              "v": 58
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Blast moment: per-frame draw costs (ms), seconds 1-5 after it - particles and the world raster",
+      "unit": "ms",
+      "series": [
+        {
+          "name": "particles draw",
+          "points": [
+            {
+              "label": "before (1c53e45)",
+              "v": 1.86
+            },
+            {
+              "label": "after (448ddea + 52c0208)",
+              "v": 0.42
+            }
+          ]
+        },
+        {
+          "name": "world base raster (drawBase)",
+          "points": [
+            {
+              "label": "before (1c53e45)",
+              "v": 4.67
+            },
+            {
+              "label": "after (448ddea + 52c0208)",
+              "v": 2.7
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Long session: JS heap after GC (MB) - before: repair queues and pipe cargo never shrank; after: levels off at about 24-26 MB",
+      "unit": "MB",
+      "series": [
+        {
+          "name": "heap before",
+          "points": [
+            {
+              "label": "2 min",
+              "v": 21.8
+            },
+            {
+              "label": "4 min",
+              "v": 21
+            },
+            {
+              "label": "6 min",
+              "v": 23.2
+            },
+            {
+              "label": "8 min",
+              "v": 23.3
+            },
+            {
+              "label": "10 min",
+              "v": 25.5
+            },
+            {
+              "label": "12 min",
+              "v": 26
+            },
+            {
+              "label": "14 min",
+              "v": 27.5
+            },
+            {
+              "label": "16 min",
+              "v": 27.5
+            },
+            {
+              "label": "18 min",
+              "v": 29.7
+            },
+            {
+              "label": "20 min",
+              "v": 29.6
+            }
+          ]
+        },
+        {
+          "name": "heap after",
+          "points": [
+            {
+              "label": "2 min",
+              "v": 21.1
+            },
+            {
+              "label": "4 min",
+              "v": 20.7
+            },
+            {
+              "label": "6 min",
+              "v": 22.8
+            },
+            {
+              "label": "8 min",
+              "v": 22.8
+            },
+            {
+              "label": "10 min",
+              "v": 24.9
+            },
+            {
+              "label": "12 min",
+              "v": 23.2
+            },
+            {
+              "label": "14 min",
+              "v": 24.9
+            },
+            {
+              "label": "16 min",
+              "v": 24.1
+            },
+            {
+              "label": "18 min",
+              "v": 25.5
+            },
+            {
+              "label": "20 min",
+              "v": 24.3
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Long session (seed 7, a building hit every 4 game-min): per-tick cost of the systems that grew - before and after WGM's fixes (8c477e6, a38d254)",
+      "unit": "ms per tick",
+      "series": [
+        {
+          "name": "pipes.step before",
+          "points": [
+            {
+              "label": "2 min",
+              "v": 0.399
+            },
+            {
+              "label": "4 min",
+              "v": 0.644
+            },
+            {
+              "label": "6 min",
+              "v": 0.776
+            },
+            {
+              "label": "8 min",
+              "v": 0.816
+            },
+            {
+              "label": "10 min",
+              "v": 0.874
+            },
+            {
+              "label": "12 min",
+              "v": 0.913
+            },
+            {
+              "label": "14 min",
+              "v": 0.96
+            },
+            {
+              "label": "16 min",
+              "v": 0.993
+            },
+            {
+              "label": "18 min",
+              "v": 1.074
+            },
+            {
+              "label": "20 min",
+              "v": 1.119
+            }
+          ]
+        },
+        {
+          "name": "repair.step before",
+          "points": [
+            {
+              "label": "2 min",
+              "v": 0.097
+            },
+            {
+              "label": "4 min",
+              "v": 0.113
+            },
+            {
+              "label": "6 min",
+              "v": 0.168
+            },
+            {
+              "label": "8 min",
+              "v": 0.187
+            },
+            {
+              "label": "10 min",
+              "v": 0.222
+            },
+            {
+              "label": "12 min",
+              "v": 0.196
+            },
+            {
+              "label": "14 min",
+              "v": 0.255
+            },
+            {
+              "label": "16 min",
+              "v": 0.25
+            },
+            {
+              "label": "18 min",
+              "v": 0.318
+            },
+            {
+              "label": "20 min",
+              "v": 0.319
+            }
+          ]
+        },
+        {
+          "name": "pipes.step after",
+          "points": [
+            {
+              "label": "2 min",
+              "v": 0.337
+            },
+            {
+              "label": "4 min",
+              "v": 0.443
+            },
+            {
+              "label": "6 min",
+              "v": 0.468
+            },
+            {
+              "label": "8 min",
+              "v": 0.465
+            },
+            {
+              "label": "10 min",
+              "v": 0.481
+            },
+            {
+              "label": "12 min",
+              "v": 0.477
+            },
+            {
+              "label": "14 min",
+              "v": 0.486
+            },
+            {
+              "label": "16 min",
+              "v": 0.491
+            },
+            {
+              "label": "18 min",
+              "v": 0.49
+            },
+            {
+              "label": "20 min",
+              "v": 0.474
+            }
+          ]
+        },
+        {
+          "name": "repair.step after",
+          "points": [
+            {
+              "label": "2 min",
+              "v": 0.087
+            },
+            {
+              "label": "4 min",
+              "v": 0.117
+            },
+            {
+              "label": "6 min",
+              "v": 0.168
+            },
+            {
+              "label": "8 min",
+              "v": 0.181
+            },
+            {
+              "label": "10 min",
+              "v": 0.182
+            },
+            {
+              "label": "12 min",
+              "v": 0.135
+            },
+            {
+              "label": "14 min",
+              "v": 0.176
+            },
+            {
+              "label": "16 min",
+              "v": 0.153
+            },
+            {
+              "label": "18 min",
+              "v": 0.202
+            },
+            {
+              "label": "20 min",
+              "v": 0.171
+            }
+          ]
+        },
+        {
+          "name": "life.step after",
+          "points": [
+            {
+              "label": "2 min",
+              "v": 0.035
+            },
+            {
+              "label": "4 min",
+              "v": 0.03
+            },
+            {
+              "label": "6 min",
+              "v": 0.031
+            },
+            {
+              "label": "8 min",
+              "v": 0.031
+            },
+            {
+              "label": "10 min",
+              "v": 0.039
+            },
+            {
+              "label": "12 min",
+              "v": 0.043
+            },
+            {
+              "label": "14 min",
+              "v": 0.048
+            },
+            {
+              "label": "16 min",
+              "v": 0.051
+            },
+            {
+              "label": "18 min",
+              "v": 0.053
+            },
+            {
+              "label": "20 min",
+              "v": 0.052
+            }
+          ]
+        }
+      ]
+    },
+    {
       "title": "BLAST L in town: 5 s after, where the tick goes (p95 per system, seed 828982143)",
       "unit": "ms p95",
       "limit": 16.7,

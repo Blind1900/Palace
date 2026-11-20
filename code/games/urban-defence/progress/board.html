@@ -42,11 +42,21 @@
   .entry.collapsed h4::before { content: '\25B8'; } .entry.collapsed > :not(h4) { display: none; }
   .time { color: var(--dim); font-size: 12px; margin: 2px 0 6px; } .note { white-space: pre-wrap; }
   .lists { display: grid; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); gap: 12px; margin-top: 10px; align-items: start; }
+  .lists section.collapsed > :not(h5) { display: none; }
+  .lists section h5.sec-toggle { cursor: pointer; user-select: none; }
+  .lists section h5.sec-toggle::before { content: '\25BE'; display: inline-block; width: 16px; color: #7c8590; }
+  .lists section.collapsed h5.sec-toggle::before { content: '\25B8'; }
   .lists section { background: var(--bg); border: 1px solid var(--line); border-radius: 5px; padding: 10px 12px; }
   .lists h5 { font-size: 14px; margin: 0 0 6px; } .lists .done h5 { color: var(--green); } .lists .part h5 { color: var(--gold); } .lists .todo h5 { color: var(--blue); }
   .lists h6 { font-size: 11px; color: var(--dim); margin: 10px 0 2px; text-transform: uppercase; letter-spacing: .05em; }
   .lists ul { list-style: none; padding: 0; margin: 0; } .lists li { display: flex; gap: 8px; align-items: baseline; padding: 3px 0; border-bottom: 1px solid #20252c; }
   .lists .t { flex: 1; } .lists .t i { color: #9aa3ad; font-style: normal; } .lists .s { font-size: 11px; color: var(--gold); white-space: nowrap; }
+  .tags { flex: none; display: flex; gap: 3px; align-items: center; }
+  .tags span { font-size: 10px; font-weight: bold; padding: 1px 5px; border-radius: 3px; background: #232831; color: #d8dce2; white-space: nowrap; }
+  .tags .st-done { background: #6cc070; color: #15181d; } .tags .st-part { background: #f0c860; color: #15181d; } .tags .st-todo { background: #8fb4e0; color: #15181d; }
+  .tags .own { background: #45322a; color: #f0b58a; } .tags .own-fable { background: #2a3a52; color: #9ec4f2; } .tags .own-none { background: #2c323b; color: #9aa4b0; }
+  .tags .pct { background: #f0c860; color: #15181d; }
+  .tags .cat { background: #2c323b; color: #cfd6df; }
   .lists .id { min-width: 38px; font-size: 11px; font-weight: bold; text-align: center; border-radius: 3px; color: #15181d; }
   .lists .done .id { background: var(--green); } .lists .part .id { background: var(--gold); } .lists .todo .id { background: var(--blue); }
   ul.steps { list-style: none; padding: 0; margin: 8px 0 0; } ul.steps li { padding: 3px 0 3px 26px; position: relative; }
@@ -66,6 +76,9 @@
   .post button { float: right; background: none; border: 0; color: var(--dim); cursor: pointer; } .post button:hover { color: #f08a8a; }
   textarea.field { min-height: 90px; resize: vertical; } .row { display: flex; gap: 8px; margin: 8px 0; } .go { background: #3d5a2f; border: 1px solid #4f7a44; color: #fff; padding: 6px 16px; border-radius: 4px; cursor: pointer; font: inherit; }
   footer { padding: 10px 20px; font-size: 12px; color: var(--dim); display: flex; flex-wrap: wrap; gap: 20px; justify-content: space-between; }
+  #sysTip { position: fixed; z-index: 20; max-width: 460px; max-height: 60vh; overflow: auto; background: #171a20; border: 1px solid #434b57; border-radius: 6px; padding: 10px 12px; box-shadow: 0 6px 24px rgba(0,0,0,.5); display: none; font-size: 12px; }
+  #sysTip .news { border-top: 1px solid #2c323b; padding: 5px 0; }
+  #sysTip .pin { float: right; color: #9aa3ad; cursor: pointer; } #sysTip .pin:hover { color: #fff; }
   #zoom { position: fixed; inset: 0; background: rgba(0,0,0,.9); display: none; align-items: center; justify-content: center; cursor: zoom-out; z-index: 10; } #zoom img { max-width: 96vw; max-height: 96vh; image-rendering: pixelated; }
   mark { background: #5a4a1a; color: #fff; }
   nav button { position: relative; }
@@ -81,6 +94,7 @@
 </header>
 <nav id="nav">
   <button data-tab="checklist" class="on">Checklist</button>
+  <button data-tab="systems">Systems map</button>
   <button data-tab="shots">Screenshots<span class="count" id="nShots"></span></button>
   <button data-tab="perf">Performance</button>
   <button data-tab="elements">Element table</button>
@@ -107,6 +121,7 @@
   </aside>
   <main>
     <div class="tab on" id="t-checklist"></div>
+    <div class="tab" id="t-systems"></div>
     <div class="tab" id="t-shots"></div>
     <div class="tab" id="t-perf"></div>
     <div class="tab" id="t-elements"><h2>Element table</h2><p class="lead">Every material the physics knows.</p><iframe src="elements.html" title="elements"></iframe></div>
@@ -129,6 +144,14 @@ const passWho = (a) => state.who.has(/opus/i.test(a || '') ? 'Opus' : /fable/i.t
 const passOwner = (o) => state.who.has(o === 'O' ? 'Opus' : o === 'F' ? 'Fable' : 'other');
 const passQ = (...t) => !state.q || t.join(' ').toLowerCase().includes(state.q);
 
+// Tag = progress status (D / P / N), queue number in its section (1, 2, 3...), category (its group), and who works on it.
+const OWNERS = { O: ['Opus', 'own'], F: ['Fable / WGM', 'own-fable'], B: ['Sonnet baseline', 'own-none'] };
+const STATUS = { done: ['D', 'st-done'], part: ['P', 'st-part'], todo: ['N', 'st-todo'] };
+const tagChips = (it, kind, cat) => {
+  const [st, stc] = STATUS[kind] || ['?', ''];
+  const [who, owc] = OWNERS[it.owner] || ['unassigned', 'own-none'];
+  return `<span class="tags" title="${esc(it.id || '')}"><span class="${stc}">${st}</span><span>${it.q}</span><span class="cat">${esc(cat || '')}</span><span class="${owc}">${esc(who)}</span>${(() => { const p = it.pct ?? (kind === 'done' ? 100 : kind === 'todo' ? 0 : 50); return `<span class="pct" title="${it.pct == null ? 'estimated: ' : ''}progress">${p}%</span>`; })()}</span>`;
+};
 function renderChecklist() {
   const keep = (e) => /^(Status|Plan):/.test(e.title);
   let h = '<h2>Checklist</h2><p class="lead">What is done, what is partly built, what is not in yet, and the plan step by step.</p>';
@@ -137,9 +160,9 @@ function renderChecklist() {
     h += `<div class="entry${collapsed.has(key) ? ' collapsed' : ''}" data-key="${esc(key)}"><h4>${esc(e.title)}</h4><div class="time">${esc(e.time)}</div>`;
     if (e.note) h += `<div class="note">${esc(e.note)}</div>`;
     if (e.steps) h += `<ul class="steps">${e.steps.filter((s) => passQ(s.text)).map((s) => `<li class="${esc(s.state)}">${esc(s.text)}</li>`).join('')}</ul>`;
-    if (e.lists) h += `<div class="lists">${e.lists.filter((l) => state.st.has(l.kind)).map((l) => `<section class="${esc(l.kind)}"><h5>${esc(l.heading)}</h5>${l.groups.map((g) => {
+    if (e.lists) h += `<div class="lists">${e.lists.filter((l) => state.st.has(l.kind)).map((l) => `<section class="${esc(l.kind)}${collapsed.has('sec:' + l.kind) ? ' collapsed' : ''}"><h5 class="sec-toggle" title="collapse / expand this progress status">${esc(l.heading)}</h5>${l.groups.map((g) => {
       const items = g.items.filter((it) => passQ(it.text, it.left, it.step, it.id) && passOwner(it.owner));
-      return items.length ? `${g.name ? `<h6>${esc(g.name)}</h6>` : ''}<ul>${items.map((it) => `<li>${it.id ? `<span class="id" title="${it.owner === 'O' ? 'built by Opus' : it.owner === 'F' ? 'built by Fable' : 'owner not assigned'}">${esc(it.id)}${esc(it.owner || '')}</span>` : ''}<span class="t">${esc(it.text)}${it.left ? ` <i>&mdash; still to do: ${esc(it.left)}</i>` : ''}</span><span class="s">${esc(it.step)}</span></li>`).join('')}</ul>` : '';
+      return items.length ? `${g.name ? `<h6>${esc(g.name)}</h6>` : ''}<ul>${items.map((it) => `<li>${tagChips(it, l.kind, g.name)}<span class="t">${esc(it.text)}${it.left ? ` <i>&mdash; still to do: ${esc(it.left)}</i>` : ''}</span><span class="s">${esc(it.step)}</span></li>`).join('')}</ul>` : '';
     }).join('')}</section>`).join('')}</div>`;
     h += '</div>';
   }
@@ -191,7 +214,94 @@ function renderHeader() {
   $('#nShots').textContent = ' ' + entries.reduce((n, e) => n + (e.shots ? e.shots.length : 0), 0);
   $('#latest').innerHTML = entries.filter((e) => !/^(Status|Plan):/.test(e.title)).slice(0, 6).map((e) => `<div class="news"><b>${esc(e.title)}</b><small>${esc(e.author || '')} ${esc(e.time)}</small></div>`).join('');
 }
-function renderAll() { renderHeader(); renderChecklist(); renderShots(); renderPerf(); renderBulletin(); renderNews(); showTab(tab); updateDots(); }
+function renderAll() { renderHeader(); renderChecklist(); renderSystems(); renderShots(); renderPerf(); renderBulletin(); renderNews(); showTab(tab); updateDots(); }
+// Systems map: the code's systems as a tree. Each node lists the open and done checklist items that mention it.
+const SYSTEMS = { name: 'Urban Defence', kids: [
+  { name: 'Physics', kids: [
+    { name: 'Materials & element table', kw: ['element table', 'material'] },
+    { name: 'Movement: powders, liquids, gas', kw: ['flow', 'gas', 'powder', 'movement'] },
+    { name: 'Water & flooding', kw: ['water', 'flood'] },
+    { name: 'Heat & glow', kw: ['heat', 'glow'] },
+    { name: 'Fire & smoke', kw: ['smoke', 'fire', 'smoulder'] },
+    { name: 'Air & wind', kw: ['air', 'wind'] },
+    { name: 'Structure & collapse', kw: ['collapse', 'building', 'structure', 'pancake', 'hollow'] },
+    { name: 'Falling pieces & chunks', kw: ['piece', 'chunk', 'fragment', 'debris', 'hitbox'] },
+    { name: 'Ground & landslides', kw: ['landslide', 'sink', 'slide', 'ground', 'stability', 'sag'] },
+    { name: 'Trees & plants', kw: ['tree', 'leaves', 'branch', 'plant', 'timber'] },
+    { name: 'Life (regrowth)', kw: ['life', 'regrow', 'grass'] },
+  ] },
+  { name: 'Graphics', kids: [
+    { name: 'Renderer & layers', kw: ['render', 'layer', 'look', 'colour', 'color'] },
+    { name: 'Glow & lighting', kw: ['glow', 'light', 'tint'] },
+    { name: 'Tunnel look', kw: ['tunnel'] },
+    { name: 'Pipe look', kw: ['pipe'] },
+    { name: 'Board & tools', kw: ['hitbox', 'toggle', 'tab', 'board', 'button'] },
+  ] },
+  { name: 'World & generation', kids: [
+    { name: 'Terrain', kw: ['terrain', 'mountain', 'soil', 'rock'] },
+    { name: 'Cores & seeds', kw: ['core', 'seed'] },
+    { name: 'Repair & growth', kw: ['repair', 'growth', 'grow'] },
+    { name: 'Pipeline (bundle)', kw: ['pipe', 'pump', 'bundle'] },
+    { name: 'Tunnels & mining', kw: ['tunnel', 'miner', 'ore'] },
+    { name: 'Military bases', kw: ['military', 'garrison', 'peek', 'hangar', 'bunker'] },
+    { name: 'Capitals & towns', kw: ['capital', 'town', 'city'] },
+  ] },
+  { name: 'Units & gameplay', kids: [
+    { name: 'Troopers & miners', kw: ['trooper', 'miner'] },
+    { name: 'Tanks & mechs', kw: ['tank', 'mech', 'jet'] },
+    { name: 'Combat & HUD', kw: ['combat', 'hack', 'capture', 'win'] },
+  ] },
+] };
+function renderSystems() {
+  const items = [];
+  for (const e of entries) for (const l of e.lists || []) for (const g of l.groups) for (const it of g.items) items.push({ it, kind: l.kind, cat: g.name });
+  const linked = (node) => items.filter(({ it }) => node.kw.some((k) => (it.text || '').toLowerCase().includes(k)));
+  // layout: root at left, categories, leaves; each parent sits at the middle of its children
+  const ROW = 34, X = [20, 250, 500], W = [200, 210, 230];
+  let row = 0; const nodes = [], links = [];
+  const place = (n, depth) => {
+    n.depth = depth;
+    if (!n.kids) { n.y = row * ROW + 20; row += 1; }
+    else { for (const k of n.kids) { place(k, depth + 1); links.push([n, k]); } n.y = (n.kids[0].y + n.kids[n.kids.length - 1].y) / 2; n.kw = [...new Set(n.kids.flatMap((k) => k.kw || []))]; }
+    nodes.push(n);
+  };
+  place(SYSTEMS, 0);
+  const H = row * ROW + 40;
+  const at = (n) => ({ x: X[n.depth], y: n.y });
+  const paths = links.map(([a, b]) => { const p = at(a), c = at(b); const x1 = p.x + W[a.depth], x2 = c.x; return `<path d="M${x1} ${p.y + 12} C ${(x1 + x2) / 2} ${p.y + 12}, ${(x1 + x2) / 2} ${c.y + 12}, ${x2} ${c.y + 12}" fill="none" stroke="#3a424d" stroke-width="2"/>`; }).join('');
+  const boxes = nodes.map((n) => {
+    const p = at(n), open = n.kw ? linked(n).filter(({ kind }) => kind !== 'done').length : 0, done = n.kw ? linked(n).filter(({ kind }) => kind === 'done').length : 0;
+    const fill = n.depth === 0 ? '#3d5a2f' : n.depth === 1 ? '#2a3a52' : '#1d2128';
+    const stroke = open ? '#f0c860' : '#434b57';
+    return `<g class="sys" data-node="${esc(n.name)}" style="cursor:pointer"><rect x="${p.x}" y="${p.y}" width="${W[n.depth]}" height="24" rx="5" fill="${fill}" stroke="${stroke}"/><text x="${p.x + 8}" y="${p.y + 16}" fill="#e8ecf2" font-size="12" font-family="Segoe UI, sans-serif">${esc(n.name)}${n.kw ? ` <tspan fill="#f0c860">${open}</tspan><tspan fill="#6cc070"> ${done}</tspan>` : ''}</text></g>`;
+  }).join('');
+  $('#t-systems').innerHTML = `<h2>Systems map</h2><p class="lead">Each node is a system in the code. The numbers show open items (yellow) and done items (green) that mention it. Click a node to list them.</p>
+    <div style="overflow:auto"><svg width="740" height="${H}" viewBox="0 0 740 ${H}">${paths}${boxes}</svg></div><div id="sysDetail" class="post" style="margin-top:12px">Click a system.</div>`;
+  // Hover a leaf: a tip lists the items that touch it (tags, and what each does in the game). Click pins it open.
+  let pinned = null;
+  if (!document.getElementById('sysTip')) document.body.appendChild(Object.assign(document.createElement('div'), { id: 'sysTip' }));
+  const tip = document.getElementById('sysTip');
+  const ownerName = (o) => (o === 'O' ? 'Opus' : o === 'F' ? 'Fable / WGM' : o === 'B' ? 'Sonnet baseline' : 'unassigned');
+  const tipFor = (n) => {
+    const list = linked(n);
+    return `<span class="pin" title="pin / unpin">${pinned === n.name ? '&#128274;' : '&#128275;'}</span><b>${esc(n.name)}</b> - ${list.length} item${list.length === 1 ? '' : 's'}${list.map(({ it, kind, cat }) => `<div class="news"><small>${kind === 'done' ? 'D' : kind === 'part' ? 'P' : 'N'} · ${esc(cat || '')} · ${esc(ownerName(it.owner))} · ${esc(it.id || '')}</small><br>${esc(it.text).slice(0, 260)}</div>`).join('') || '<div>No items mention it yet.</div>'}`;
+  };
+  const placeTip = (ev) => { tip.style.left = Math.min(ev.clientX + 16, innerWidth - 480) + 'px'; tip.style.top = Math.min(ev.clientY + 16, innerHeight - 120) + 'px'; };
+  $$('#t-systems .sys').forEach((g) => {
+    const n = nodes.find((x) => x.name === g.dataset.node);
+    if (!n || !n.kw) return;
+    g.addEventListener('mouseenter', (ev) => { if (pinned) return; tip.innerHTML = tipFor(n); tip.style.display = 'block'; placeTip(ev); });
+    g.addEventListener('mousemove', (ev) => { if (!pinned) placeTip(ev); });
+    g.addEventListener('mouseleave', () => { if (!pinned) tip.style.display = 'none'; });
+    g.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      pinned = pinned === n.name ? null : n.name;
+      tip.innerHTML = tipFor(n); tip.style.display = 'block'; placeTip(ev);
+    });
+  });
+  document.addEventListener('click', (ev) => { if (pinned && !ev.target.closest('#sysTip') && !ev.target.closest('.sys')) { pinned = null; tip.style.display = 'none'; } });
+  tip.addEventListener('click', (ev) => { if (ev.target.classList.contains('pin')) { pinned = null; tip.style.display = 'none'; } });
+}
 // A red dot on a tab means something in it has changed since it was last opened. Each tab's content is
 // fingerprinted; the fingerprint seen when a tab was last open is kept in this browser (localStorage).
 const hash = (t) => { let h = 5381; for (let i = 0; i < t.length; i += 1) h = ((h << 5) + h + t.charCodeAt(i)) | 0; return String(h); };
@@ -251,16 +361,19 @@ async function delPost(id) {
   const list = JSON.parse(localStorage.getItem('board-bulletin') || '[]').filter((p) => p.id !== id);
   localStorage.setItem('board-bulletin', JSON.stringify(list));
 }
+// Queue number: each item's place in its section (1, 2, 3... in board order), set when the board loads.
+function numberQueue() { for (const e of entries) for (const l of e.lists || []) { let k = 0; for (const g of l.groups) for (const it of g.items) it.q = ++k; } }
 async function load() {
   const [b, p, bl] = await Promise.all([get('board', 'board.json'), get('perf', 'perf.json'), getBulletin()]);
   let dirty = false;
-  if (b) { entries = b; dirty = true; } if (p) { perf = p; dirty = true; } if (bl) { posts = bl; dirty = true; }
+  if (b) { entries = b; dirty = true; numberQueue(); } if (p) { perf = p; dirty = true; } if (bl) { posts = bl; dirty = true; }
   if (dirty && !document.activeElement.matches('textarea, input[type=search]')) renderAll();
   $('#sub').textContent = `updated ${new Date().toLocaleTimeString()}`;
   $('#foot').textContent = `${entries.length} board entries`;
 }
 document.addEventListener('click', async (ev) => {
-  const t = ev.target, nav = t.closest('[data-tab]'), h = t.closest('.entry > h4');
+  const t = ev.target, nav = t.closest('[data-tab]'), h = t.closest('.entry > h4'), sec = t.closest('h5.sec-toggle');
+  if (sec) { const box = sec.parentElement, k = 'sec:' + box.className.replace(/\s*collapsed/, '').trim(); collapsed.has(k) ? collapsed.delete(k) : collapsed.add(k); box.classList.toggle('collapsed', collapsed.has(k)); localStorage.setItem('board-collapsed', JSON.stringify([...collapsed])); return; }
   if (nav) showTab(nav.dataset.tab);
   else if (h) { const box = h.parentElement, k = box.dataset.key; collapsed.has(k) ? collapsed.delete(k) : collapsed.add(k); box.classList.toggle('collapsed'); localStorage.setItem('board-collapsed', JSON.stringify([...collapsed])); }
   else if (t.matches('figure img')) { $('#zoom img').src = t.src; $('#zoom').style.display = 'flex'; }
