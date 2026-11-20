@@ -1395,6 +1395,59 @@
     }
     return null;
   }
+
+  // ---- Swaying in the wind (N9) ---------------------------------------------------------------------
+  // Plants' leaves sway in the wind: a crown leans with it and swings about it, all together, its
+  // patches of leaves fluttering a little out of step; the higher in the crown the more (the stem
+  // and the boughs low down hardly move), a bush less than a tree, a tuft's blade tips most of all.
+  // The wood stands. Neighbouring plants and blades swing a little after one another, so a gust is
+  // seen running across a stand of trees or a meadow. Under SWAY_CALM nothing sways.
+  // (Drawn by the renderer's leaf pass: for each leaf cell it takes leafSway once - how far it can
+  // sway, how its swing is timed - and each frame looks up where it is in swayTable: in cells, a
+  // packed (dx + 1) | (dy + 1) << 2, dx and dy each -1, 0 or 1.)
+  const SWAY_CALM = 5;          // cells/s of wind under which nothing sways (a breath of air)
+  const SWAY_FULL = 20;         // cells/s of wind (about 1.4 m/s) a crown sways fully in
+  const SWAY_HZ = 0.55;         // swings a second
+  const SWAY = new Uint8Array(16 * 256), SINE = new Float32Array(256);
+  for (let k = 0; k < 256; k += 1) SINE[k] = Math.sin(k / 256 * Math.PI * 2);
+  // (a leaf cell at (x, y): (amp << 8) | phase - amp 0..15, how far it sways, 0 not at all; phase
+  // 0..255, where in its swing it is)
+  function leafSway(world, x, y) {
+    const f = PW.getFlags(world, x, y);
+    if (!(f & PW.FLAG.FLORA) || (f & (PW.FLAG.WOOD | PW.FLAG.CHARRED))) return 0;
+    const r = recordAt(world, x, y);
+    const flutter = (PW.hash2(x >> 2, y >> 2) & 31) - 16;
+    if (!r) {
+      // (a tuft: its blade from the ground up - the tip swings, the foot stays)
+      const up = world.groundTop[x] - y;
+      return up < 2 ? 0 : Math.min(15, 4 + up * 2) << 8 | ((x * 5 + flutter) & 255);
+    }
+    const tall = Math.max(6, r.row - r.y), up = Math.max(0, r.row - y), share = Math.min(1, up / tall);
+    const amp = Math.round(15 * share * Math.sqrt(share) * Math.min(1, 0.35 + tall / 70));
+    return amp << 8 | ((r.anchorX * 3 + (PW.hash2(r.anchorX, 31) & 63) + flutter) & 255);
+  }
+  // (the table for this frame, by the wind and the time t, in seconds)
+  function swayTable(world, t) {
+    const wind = world.wind || 0, calm = Math.abs(wind) < SWAY_CALM;
+    const w = Math.min(1.5, Math.abs(wind) / SWAY_FULL), dir = wind < 0 ? -1 : 1;
+    // (the swing, and the gusts coming and going on it)
+    const turn = Math.floor(t * SWAY_HZ * 256) & 255, gust = 0.7 + 0.3 * SINE[Math.floor(t * 0.13 * 256) & 255];
+    for (let amp = 0; amp < 16; amp += 1) {
+      const a = amp / 15 * w * gust;
+      for (let ph = 0; ph < 256; ph += 1) {
+        let dx = 0, dy = 0;
+        if (!calm && amp) {
+          // (leaning with the wind, swinging about that; swung far, a leaf at the top dips)
+          const d = a * (0.55 * dir + 0.75 * SINE[(ph + turn) & 255]);
+          dx = d > 0.5 ? 1 : d < -0.5 ? -1 : 0;
+          dy = (d > 1.1 || d < -1.1) && amp > 9 ? 1 : 0;
+        }
+        SWAY[amp << 8 | ph] = (dx + 1) | (dy + 1) << 2;
+      }
+    }
+    return SWAY;
+  }
+  const swayCalm = (world) => Math.abs(world.wind || 0) < SWAY_CALM;
   // After a blast or a slide: the plants it reached settle - whatever lost its footing or was cut
   // off comes down with the ground. Grass and flowers left in the air drop too.
   // (tufts: the box grass and flowers are looked at in, when it is smaller than the plants' - a
@@ -1786,6 +1839,7 @@
 
   PW.generateVegetation = generateVegetation;
 
-  PW.flora = { plant, fell, regenerate, afterBlast, strike, settle, step, recordAt, shed, land, cut, makeGround, frozenGround, FLAT, tuft, bendReach, AIR_DRAG, loose, splitPiece, unflex };
+  PW.flora = { plant, fell, regenerate, afterBlast, strike, settle, step, recordAt, shed, land, cut, makeGround, frozenGround, FLAT, tuft, bendReach, AIR_DRAG, loose, splitPiece, unflex,
+    leafSway, swayTable, swayCalm };
   PW.vegetation = { broadleaf, conifer, birch, bush, deadTree, boulder, reeds, stamp, createSprite, foliage, limb, trim, spanDrop, spanRise };
 })();

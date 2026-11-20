@@ -254,7 +254,7 @@
       // see below - and has its outline made then, when it first needs it: it is drawn from its
       // grid)
       const waits = !spec.data && !spec.flora && N > PARTS_NOW;
-      const { points, faces, ptCell } = waits ? NO_OUTLINE : outlineOf(grid, gw, gh, u0, v0, data, ax, ay);
+      const outline = waits ? NO_OUTLINE : outlineOf(grid, gw, gh, u0, v0, data, ax, ay), { points, faces, ptCell } = outline;
       // data.x/y are world cells as they were when the piece was formed, (ox0, oy0) its anchor
       // cell then; (px, py) is where that anchor's corner is now.
       const piece = { data, n, mass, inertia, grid, gw, gh, u0, v0, points, faces, ptCell, owner: spec.owner || 0, from: spec.from || spec.owner || 0, generation: spec.generation || 0,
@@ -262,7 +262,7 @@
         mode: spec.flex ? 'flex' : spec.pivot ? 'hinge' : spec.drop ? 'drop' : 'fly', dir: spec.dir || 1, age: 0, flora: !!spec.flora,
         spring: spec.flex ? spec.flex.spring : 0, damp: spec.flex ? spec.flex.damp : 0,
         yf: spec.pivot ? spec.pivot.y : spec.floor || 0, crushedRows: 0, base: spec.base ?? H, h0: spec.h0 || gh, still: 0, touched: -1, sunk: spec.sunk || 0,
-        hollow: heavy + thin ? thin / (heavy + thin) : 0, shapeMass: mass, partsDue: partsLater, frame: frameOf(data),
+        hollow: heavy + thin ? thin / (heavy + thin) : 0, shapeMass: mass, partsDue: partsLater, frame: outline.frame || 0,
         // (a great piece of a building just lifted out of the world starts to move on the tick
         // after: the lifting is the work of a tick in itself)
         waits, outlineDue: waits };
@@ -303,8 +303,6 @@
     const OUT = { frame: new Uint8Array(0), outside: new Uint8Array(0), fill: new Int32Array(0), outer: new Int32Array(0), inner: new Int32Array(0) };
     // (an outline still to be made: see spawn)
     const NO_OUTLINE = { points: new Float32Array(0), faces: new Float32Array(0), ptCell: new Int32Array(0) };
-    // (how many cells of frame a piece's data holds - what it strikes with, and holds together by)
-    const frameOf = (data) => { let n = 0; const S = data.solid; for (let k = 0; k < S.length; k += 1) if (S[k] === 1) n += 1; return n; };
     function outlineOf(grid, gw, gh, u0, v0, data, ax, ay) {
       const N = gw * gh, n = data.x.length, X = data.x, Y = data.y, SOL = data.solid;
       if (OUT.frame.length < N) { OUT.frame = new Uint8Array(N); OUT.outside = new Uint8Array(N); OUT.fill = new Int32Array(N); }
@@ -324,11 +322,13 @@
         if (g < N - gw && !frame[g + gw] && !outside[g + gw]) { outside[g + gw] = 1; fill[tail++] = g + gw; }
       }
       // (each kept as cell index and which of its sides are frame - left 1, right 2, top 4, bottom 8)
-      let outers = 0, inners = 0;
+      // (and how many cells of frame it has, all told: see the step)
+      let outers = 0, inners = 0, frameCells = 0;
       for (let k = 0; k < n; k += 1) {
         if (SOL[k] !== 1) continue;
         const u = X[k] - ax, v = Y[k] - ay, gu = u - u0, gv = v - v0, g = gv * gw + gu;
         if (grid[g] !== k + 1) continue;
+        frameCells += 1;
         const l = gu > 0 && frame[g - 1] === 1, r = gu < gw - 1 && frame[g + 1] === 1;
         const t = gv > 0 && frame[g - gw] === 1, b = gv < gh - 1 && frame[g + gw] === 1;
         if (l && r && t && b) continue;
@@ -353,14 +353,14 @@
         faces[j] = picked[k + 2] / len; faces[j + 1] = picked[k + 3] / len;
         ptCell[j >> 1] = (Math.floor(points[j + 1]) - v0) * gw + (Math.floor(points[j]) - u0);
       }
-      return { points, faces, ptCell };
+      return { points, faces, ptCell, frame: frameCells };
     }
     // (a piece that has lost cells: its outline made again from what is left of it, where it is -
     // the hitbox debug view's strike marks start afresh)
     function reoutline(p) {
       const o = outlineOf(p.grid, p.gw, p.gh, p.u0, p.v0, p.data, p.ox0, p.oy0);
       p.points = o.points; p.faces = o.faces; p.ptCell = o.ptCell; p.hitV = null;
-      p.frame = frameOf(p.data);
+      p.frame = o.frame;
       p.outlinedAt = time;
       stats.reoutlined = (stats.reoutlined || 0) + 1;
     }
@@ -1115,7 +1115,7 @@
         if (p.outlineDue) {
           p.outlineDue = false;
           const o = outlineOf(p.grid, p.gw, p.gh, p.u0, p.v0, p.data, p.ox0, p.oy0);
-          p.points = o.points; p.faces = o.faces; p.ptCell = o.ptCell;
+          p.points = o.points; p.faces = o.faces; p.ptCell = o.ptCell; p.frame = o.frame;
         }
         p.age += dt;
         const speed = motion(p);

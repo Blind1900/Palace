@@ -688,7 +688,9 @@
             for (let up = 0; up < 60 && g > 2 && phase[mat[(g - 1) * W + x] & ID_MASK] === POWDER; up += 1) g -= 1;
             if (g < 2 || g >= H - 2) continue;
             const m = mat[g * W + x], id = m & ID_MASK;
-            if (phase[id] !== POWDER || !PW.mat.open[mat[(g - 1) * W + x] & ID_MASK]) continue;
+            // (ground already stirred - a heap sliding, rubble coming down on it - is moving as it
+            // is: the wave adds nothing to see there)
+            if (phase[id] !== POWDER || !PW.mat.open[mat[(g - 1) * W + x] & ID_MASK] || PW.stirred(world, x, g)) continue;
             w.n += 1;
             const h = PW.hash3(x, g, w.n);
             if ((h & 1023) / 1023 > Math.min(0.8, felt * shakeOf[id] * 1.2)) continue;

@@ -292,6 +292,33 @@ check(stability.stats.broken === before, `ground nobody disturbed stands (${stab
   check(more('limbs') > 0 && more('limbBends') > 0 && more('brokeOff') > 0, `falling trees' limbs bend where they strike the ground, and the branches they snap off fall as pieces of their own (${more('limbs')} limbs bent ${more('limbBends')} times; ${more('brokeOff')} of ${more('snapped')} snapped branches fell on by themselves; ${more('stripped')} leaves torn off by the air)`);
 }
 
+// 5b. Plants sway in the wind (N9; drawn by the renderer's leaf pass): a standing tree's leaves
+// sway, the higher the more, its wood not at all; in calm air nothing moves, in a wind the leaves
+// lean the way it blows.
+{
+  const tree = (world.flora || []).find((r) => r.kind === 'tree' && !r.fallen && !r.felled && r.size > 90);
+  if (tree) {
+    let woodSways = 0, high = 0, nHigh = 0, low = 0, nLow = 0;
+    for (let y = tree.y; y < tree.y + tree.height; y += 1) for (let x = tree.x; x < tree.x + tree.width; x += 1) {
+      const f = PW.getFlags(world, x, y);
+      if (!(f & PW.FLAG.FLORA)) continue;
+      const amp = PW.flora.leafSway(world, x, y) >> 8;
+      if (f & PW.FLAG.WOOD) { if (amp) woodSways += 1; continue; }
+      if (y < tree.row - (tree.row - tree.y) * 0.7) { high += amp; nHigh += 1; } else if (y > tree.row - (tree.row - tree.y) * 0.3) { low += amp; nLow += 1; }
+    }
+    const wind0 = world.wind, moved = (wind) => {
+      world.wind = wind;
+      let right = 0, left = 0;
+      for (const t of [0, 0.5, 1, 1.5]) { const tab = PW.flora.swayTable(world, t); for (const v of tab) { if ((v & 3) === 2) right += 1; else if ((v & 3) === 0) left += 1; } }
+      return [right, left];
+    };
+    const [calmR, calmL] = moved(2), [eastR, eastL] = moved(18), [westR, westL] = moved(-18);
+    world.wind = wind0;
+    check(!woodSways && nHigh && high / nHigh > (low / Math.max(1, nLow)) + 3 && !calmR && !calmL && eastR > eastL && westL > westR,
+      `plants sway in the wind: leaves high in a crown sway more than low (amplitude ${(high / Math.max(1, nHigh)).toFixed(1)} against ${(low / Math.max(1, nLow)).toFixed(1)} of 15), wood not at all (${woodSways}); calm air moves nothing; leaves lean the way the wind blows (east ${eastR} right / ${eastL} left, west ${westR} / ${westL})`);
+  }
+}
+
 // 6. Water flows (N61O): a tank of water (70 x 60) on a stone pillar 220 cells up, its side knocked
 // out - the water pours out and falls as a sheet of drops in flight, not a dotted line of cells; the
 // tank empties; it lands in a walled basin below and spreads level across it; none of it is lost.
