@@ -177,6 +177,9 @@
     const xs = (a, b) => [Math.min(X(a), X(b)), Math.max(X(a), X(b))];
     const art = painter(c, X, ground);
     let bodyRight = 0;
+    // N50: the core sits under the farm's storage - under the silo bank, the barn's loft, the
+    // homestead's larder - so the SM stored above goes down through the core into the pipeline.
+    let coreLx = 30;
 
     if (variant === 'silos') {
       const count = Math.min(4, 1 + Math.floor((level - 1) / 2));
@@ -256,8 +259,22 @@
         art.deco(u, walkV + 6, [128, 132, 136]);
         if ((u - legX) % 6 === 0) for (let v = walkV + 1; v < walkV + 6; v += 1) art.deco(u, v, [110, 114, 118]);
       }
+      // N50: the bins discharge down through the core beneath them. The core sits under the
+      // middle of the bank; each bin has a hopper taper at its foot and an enclosed auger run
+      // along the floor to the core's grating, grain gold in the throat and the slots.
+      coreLx = shedWidth + 10 + (((count - 1) * 46 + 36) >> 1);
+      const coreCx = X(coreLx), g0x = coreCx - 11, g1x = coreCx + 11;
+      for (const b of bins) {
+        const bx = X(b.lx0 + b.d / 2);
+        for (const [dx, dy] of [[-2, 3], [-1, 2], [0, 1], [1, 2], [2, 3]]) K.deco(c, bx + dx, ground - dy, [96, 100, 106]);
+        for (let x = Math.min(bx, coreCx); x <= Math.max(bx, coreCx); x += 1) {
+          if (x < g0x || x > g1x) K.deco(c, x, ground - 1, (x & 3) === 0 ? tone(GRAIN, 0.95) : [74, 78, 84]);
+        }
+      }
+      for (let x = g0x + 1; x < g1x; x += 2) K.deco(c, x, ground - 1, tone(GRAIN, 1.1));
     } else if (variant === 'barn') {
       const w = 180, wallH = 72;
+      coreLx = 90;                       // under the hay loft (N50)
       const [b0] = xs(0, w - 1);
       wallBox(c, style, P, b0, b0 + w - 1, ground - wallH, ground - 1);
       // Gambrel roof.
@@ -305,6 +322,7 @@
       c.storage.push({ x: b0 + w / 2, y: ground - 60, capacity: 160 });
     } else if (variant === 'greenhouse') {
       const w = 200, wallH = 46, teeth = 5, toothW = w / teeth;
+      coreLx = 100;                      // under the benches' middle (N50)
       const [g0] = xs(0, w - 1);
       for (let x = g0; x < g0 + w; x += 1) for (let y = ground - wallH; y < ground; y += 1) {
         const d = Math.min(x - g0, g0 + w - 1 - x);
@@ -350,6 +368,7 @@
     } else {
       // Homestead: a two-storey house with a gable roof and chimney, plus a windmill.
       const w = 130;
+      coreLx = 65;                       // under the house (N50)
       const [h0] = xs(0, w - 1);
       wallBox(c, style, P, h0, h0 + w - 1, ground - 2 * S.FLOOR, ground - 1, S.WALL);
       for (let x = h0; x < h0 + w; x += 1) for (let r = 0; r < S.SLAB; r += 1) K.solid(c, x, ground - S.FLOOR + r, M.WOOD, K.slabColor(style, r, x, ground - S.FLOOR + r), ROLE.SLAB);
@@ -456,7 +475,7 @@
       trough(art, yard0 + 58);
       bodyRight = yard1;
     }
-    K.core(c, X(30), ground);
+    K.core(c, X(coreLx), ground);
     K.corePillars(c, style);
     K.bakeLights(c, style);
     const [l, r] = xs(0, bodyRight);

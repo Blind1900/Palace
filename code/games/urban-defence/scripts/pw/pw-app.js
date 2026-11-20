@@ -48,6 +48,8 @@
     world.madeGround = PW.urban.lay(world);
     timings.urban = performance.now() - t; t = performance.now();
   }
+  // With the world finally standing, every pump's cells become its repair print (N50).
+  if (PW.capturePumpPrints && !gallery) PW.capturePumpPrints(world);
   // Generation leaves the simulation idle: the world starts settled.
   world.activeList.length = 0;
   world.simActive.fill(0);

@@ -43,8 +43,13 @@
       // (a scan already under way finishes first; it starts over once it is done, so steady
       // bombardment cannot keep the scanner at column nought for ever)
       if (job.scanCol >= (((world.buildings || [])[id - 1] || {}).canvas || { width: 0 }).width) job.scanCol = 0;
+      job.printAt = 0;   // the prints (N50: the pump) are looked over again on any damage
       jobs.set(id, job);
     };
+    // The flat list of a building's print cells (N50: world-drawn works like the lake pump,
+    // captured at generation, rebuilt by the same translators as the canvas).
+    const printCells = (b) => (b.prints ? (b.printList || (b.printList = b.prints.flatMap((p) => p.cells))) : EMPTY_PRINT);
+    const EMPTY_PRINT = [];
     const coresAlive = (b) => (b.cores || []).filter((core) => {
       // A core is alive while any of its own heart cells still stands.
       for (let dy = -2; dy <= 2; dy += 1) for (let dx = -2; dx <= 2; dx += 1) {
@@ -87,7 +92,34 @@
         }
         stats.scanned += 1;
       }
-      if (job.scanCol >= b.canvas.width && job.queue.length) {
+      // The prints after the canvas (N50): same wounds, same queue, same translators. Print
+      // cells take synthetic indices past the canvas's so the seen set and tombstones hold.
+      const prints = printCells(b);
+      if (job.scanCol >= W && prints.length) {
+        const base = c.width * c.height;
+        let at = job.printAt || 0;
+        for (let n = 0; n < SCAN_COLS * 40 && at < prints.length; n += 1, at += 1) {
+          const pc = prints[at];
+          const key = base + at;
+          const now = PW.get(world, pc.x, pc.y) & ID_MASK;
+          if (pc.mat) {
+            const wanted = pc.mat & ID_MASK;
+            if (wanted === M.CORE) continue;             // hearts are not rebuilt, as in the canvas
+            if ((now !== wanted || PW.getOwner(world, pc.x, pc.y) !== b.id) && !job.seen.has(key)) {
+              job.seen.add(key);
+              job.queue.push({ x: pc.x, y: pc.y, i: key, print: pc, back: false, p: 2 });
+            }
+          } else if (pc.back) {
+            const open = now === M.AIR && (!PW.getLayer(world, 'back', pc.x, pc.y) || PW.getOwner(world, pc.x, pc.y) !== b.id);
+            if ((open || diggable(now, pc.x, pc.y)) && !job.seen.has(-key - 1)) {
+              job.seen.add(-key - 1);
+              job.queue.push({ x: pc.x, y: pc.y, i: key, print: pc, back: true, p: 2 });
+            }
+          }
+        }
+        job.printAt = at;
+      }
+      if (job.scanCol >= b.canvas.width && (job.printAt || 0) >= prints.length && job.queue.length) {
         if (job.dead) { job.queue = job.queue.filter(Boolean); job.dead = 0; job.rot = 0; }
         // The build order (F2): from the bottom up, the cores' pillars running a storey ahead
         // (LEAD), the floors tying them, back then side walls trailing, glass last - and each
@@ -117,6 +149,16 @@
     const FLOORY = (r) => r === ROLES.SLAB || r === ROLES.ROOF || r === ROLES.STAIR;
     function ready(b, cell) {
       const { x, y, p } = cell;
+      if (cell.print) {
+        // A print cell grows against the building's own cells or the earth around the work
+        // (the pump chamber rebuilds inward from the ground it is dug into - N50).
+        const anchored = (ax, ay) => {
+          if (PW.getOwner(world, ax, ay) === b.id) return true;
+          const id = PW.get(world, ax, ay) & ID_MASK;
+          return id !== M.AIR && id !== M.WATER && PW.mat.terrain[id];
+        };
+        return anchored(x - 1, y) || anchored(x + 1, y) || anchored(x, y + 1) || anchored(x, y - 1);
+      }
       if (p === 0) return builtAt(b, x, y + 1) || builtAt(b, x - 1, y + 1) || builtAt(b, x + 1, y + 1) || builtAt(b, x, y - 1);
       if (p === 1) return builtAt(b, x - 1, y) || builtAt(b, x + 1, y) || builtAt(b, x, y + 1);
       if (p === 3) {
@@ -169,14 +211,14 @@
             job.pool += HM_PER_DEBRIS * 0.5; stats.dug = (stats.dug || 0) + 1;
           } else if (now !== M.AIR || (PW.getLayer(world, 'back', cell.x, cell.y) && PW.getOwner(world, cell.x, cell.y) === b.id)) { kill(idx, cell); return 'again'; }
           if (!pay()) return false;
-          PW.setLayer(world, 'back', cell.x, cell.y, c.back[i]);
+          PW.setLayer(world, 'back', cell.x, cell.y, cell.print ? cell.print.back : c.back[i]);
           PW.setOwner(world, cell.x, cell.y, b.id);
           stats.backRestored += 1;
           job.passProgress = (job.passProgress || 0) + 1;
           kill(idx, cell);
           return true;
         }
-        const wanted = c.mat[i] & ID_MASK;
+        const wanted = (cell.print ? cell.print.mat : c.mat[i]) & ID_MASK;
         if (now === wanted && PW.getOwner(world, cell.x, cell.y) === b.id) { kill(idx, cell); return 'again'; }
         const openish = now === M.AIR || now === M.WATER || PW.mat.phase[now] === PW.PHASE.GAS;
         if (!openish && !LOOSE[now] && PW.getOwner(world, cell.x, cell.y) !== b.id) {
@@ -204,10 +246,10 @@
         }
         if (!pay()) return false;
         if (liftTo >= 0) PW.set(world, cell.x, liftTo, PW.get(world, cell.x, cell.y), { quiet: true });
-        PW.set(world, cell.x, cell.y, c.mat[i], { quiet: true });
-        PW.setLayer(world, 'paint', cell.x, cell.y, c.paint[i]);
+        PW.set(world, cell.x, cell.y, cell.print ? cell.print.mat : c.mat[i], { quiet: true });
+        PW.setLayer(world, 'paint', cell.x, cell.y, cell.print ? cell.print.paint : c.paint[i]);
         PW.setOwner(world, cell.x, cell.y, b.id);
-        if (c.deco[i]) PW.setLayer(world, 'deco', cell.x, cell.y, c.deco[i]);
+        if (!cell.print && c.deco[i]) PW.setLayer(world, 'deco', cell.x, cell.y, c.deco[i]);
         stats.restored += 1;
         job.passProgress = (job.passProgress || 0) + 1;
         if (particles && F && (stats.restored & 3) === 0) {
@@ -291,17 +333,18 @@
         // and the scan rebuilds its work from the blueprint.
         if (job.parked) {
           const stock = world.stock && world.stock[b.side];
-          if (job.scanCol === 0 || (stock && stock.hm >= 1)) { job.parked = false; job.scanCol = 0; }
+          if (job.scanCol === 0 || (stock && stock.hm >= 1)) { job.parked = false; job.scanCol = 0; job.printAt = 0; }
           else continue;
         }
-        if (job.scanCol < b.canvas.width) scan(b, job);
+        const printsLen = printCells(b).length;
+        if (job.scanCol < b.canvas.width || (job.printAt || 0) < printsLen) scan(b, job);
         if (job.queue.length - (job.dead || 0) <= 0) {
-          if (job.scanCol >= b.canvas.width) {
+          if (job.scanCol >= b.canvas.width && (job.printAt || 0) >= printsLen) {
             // A pass that built or cleared anything may have unblocked wounds that were dropped
             // while debris or wreckage sat in them (and back walls hidden behind solids are not
             // even seen until the cell clears) - look over the blueprint again. Only a pass that
             // changed nothing ends the work.
-            if ((job.passProgress || 0) > 0) { job.passProgress = 0; job.scanCol = 0; job.queue = []; job.dead = 0; job.rot = 0; }
+            if ((job.passProgress || 0) > 0) { job.passProgress = 0; job.scanCol = 0; job.printAt = 0; job.queue = []; job.dead = 0; job.rot = 0; }
             else { jobs.delete(id); b.growing = false; }
           }
           continue;

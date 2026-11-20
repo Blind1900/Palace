@@ -462,10 +462,52 @@
     const outX = cx + near * 12;
     for (let u = r; u <= 12; u += 1) for (let dy = -1; dy <= 1; dy += 1) pipe(cx + near * u, vy + dy, dy + 1);
     for (let y = vy + 2; y <= floor + wall; y += 1) for (let dx = -1; dx <= 1; dx += 1) pipe(outX + dx, y, dx + 1);
+    // N50: the pump's own small core, sunk in an armoured pocket in the floor on the farm's
+    // side and cabled to the bedplate - a half-size heart that keeps the pump regenerating.
+    const KIT = PW.buildingKit;
+    const coreX = cx + near * 21, coreY = floor - 5, heartY = coreY - 2;
+    for (let dy = -7; dy <= 2; dy += 1) for (let dx = -6; dx <= 6; dx += 1) {
+      const rim = Math.abs(dx) === 6 || dy === -7 || dy === 2;
+      if (rim) put(coreX + dx, coreY + dy, M.FOUNDATION, ((dx + dy) & 1) ? [196, 164, 58] : [58, 58, 62]);
+      else back(coreX + dx, coreY + dy, (dx & 1) ? [30, 32, 40] : [24, 26, 32]);
+    }
+    for (let dy = -3; dy <= 3; dy += 1) for (let dx = -3; dx <= 3; dx += 1) {
+      const d = Math.hypot(dx, dy);
+      if (d > 3.4) continue;
+      put(coreX + dx, heartY + dy, M.CORE, d < 1.3 ? [255, 255, 255] : d < 2.4 ? (KIT ? KIT.CORE_COLOR : [168, 236, 255]) : (KIT ? KIT.CORE_SHADE : [96, 170, 214]));
+    }
+    for (const u of [15, 16, 17]) steel(cx + near * u, floor - 3, u === 16 ? [60, 64, 66] : PUMP_DARK);   // the cable to the pocket
+    let bedTop = bed;
+    for (let dx = -5; dx <= 5; dx += 1) bedTop = Math.min(bedTop, bedAt(cx + dx));
     const left = cx - half - wall, right = cx + half + wall;
     return { x: outX, y: floor + 1, left, right, lake, intakeX: cx, chamber: { x0: cx - half, x1: cx + half, top, floor },
-      span: [left, right] };
+      span: [left, right], core: { x: coreX, y: heartY },
+      box: { x0: left - 1, x1: right + 1, y0: bedTop - 2, y1: floor + wall + 1 } };
   }
+  // N50: a world-drawn work (the lake pump) captured as a print - the cells repair rebuilds
+  // it from, the way a canvas serves a stamped building. Owner-filtered over the given box;
+  // solid cells keep their material and paint, room cells their back wall.
+  function capturePrint(world, owner, box) {
+    const cells = [];
+    for (let y = box.y0; y <= box.y1; y += 1) for (let x = box.x0; x <= box.x1; x += 1) {
+      if (PW.getOwner(world, x, y) !== owner) continue;
+      const mat = PW.get(world, x, y);
+      const back = PW.getLayer(world, 'back', x, y);
+      if (!(mat & 63) && !back) continue;
+      cells.push({ x, y, mat: (mat & 63) ? mat : 0, paint: PW.getLayer(world, 'paint', x, y), back });
+    }
+    return { box, cells };
+  }
+  // Called once generation is COMPLETE (after pipes and made ground): every pump's cells, as
+  // the world finally stands, become the print its repair rebuilds from (N50).
+  function capturePumpPrints(world) {
+    for (const b of world.buildings || []) {
+      if (!b || !b.pump || b.prints) continue;
+      b.prints = [capturePrint(world, b.id, b.pump.box)];
+      b.printList = null;
+    }
+  }
+
   // ---- Tunnels: lined shafts, drifts and rooms (tunnel network lab look) ---------------------------------
   const TUNNEL = { back: [24, 23, 22], floor: [44, 36, 28], prop: [76, 54, 32], lamp: [255, 220, 140], rail: [150, 112, 62], rung: [214, 178, 112] };
   // Carve an axis-aligned interior box; line its rim with orange LINING where it meets ground.
@@ -1270,7 +1312,15 @@
           const inUse = (spans) => (x) => spans.some(([a, c]) => x >= a - 8 && x <= c + 8);
           const taken = (x) => inUse(footprints)(x) || world.settlements.some((s) => inUse(s.footprints || [])(x));
           b.pump = lakePump(world, lake, b.body.left, style, b.id, taken);
-          if (b.pump) footprints.push(b.pump.span);
+          if (b.pump) {
+            footprints.push(b.pump.span);
+            // N50: the pump's own small core joins the farm's cores (orb: it minds itself in
+            // its pocket, no rise). The pump's print is captured by capturePumpPrints at the
+            // END of generation - the pipes and the made ground rework cells in this box
+            // after settlements, and a print taken now would fight them (the seed-3 stall:
+            // repair burned the town's HM "mending" the pump into its pre-pipes shape).
+            b.cores.push({ x: b.pump.core.x, y: b.pump.core.y, kind: 'pump', orb: true, small: true });
+          }
         }
       }
       // Base workings: starter shaft from the core pit to the starter node; neutral mine shafts.
@@ -1500,5 +1550,6 @@
   }
 
   PW.generateSettlements = generateSettlements;
+  PW.capturePumpPrints = capturePumpPrints;
   PW.settlementTools = { terracePad, paveStreet, carveBox, ladder, tunnelLamps, sowField, drawCrop, recountField, fieldY, TUNNEL, PAVING, PAD_DEPTH };
 })();
