@@ -37,9 +37,10 @@
         if (owner) PW.setOwner(world, wx, wy, owner);
       }
     }
-    // Grated drain spans (N64): the cells are solid roof, flagged so water passes through them.
+    // Grated drain spans (N64): the cells are solid roof - and any coping or ridge course the
+    // style lays over them - flagged so water passes through; open air in the span is skipped.
     for (const h of canvas.hatches || []) {
-      for (let y = h.y0; y <= h.y1; y += 1) {
+      for (let y = Math.max(0, h.y0); y <= Math.min(height - 1, h.y1); y += 1) {
         const wy = oy + y;
         if (wy < 0 || wy >= world.height) continue;
         for (let x = h.x0; x <= h.x1; x += 1) {

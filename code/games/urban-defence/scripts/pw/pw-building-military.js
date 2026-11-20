@@ -166,7 +166,9 @@
           if (c.role[i] === ROLE.ROOF) c.paint[i] = K.pack(tone(K.slabColor(style, row, X(lx), floorRow(rearStoreys) + row), slit ? 0.55 : 0.95));
         }
       }
-      c.hatches.push({ x0: Math.min(X(lo), X(hi)), x1: Math.max(X(lo), X(hi)), y0: floorRow(rearStoreys), y1: floorRow(rearStoreys) + S.SLAB - 1 });
+      // (reaching 6 rows up through the roof covering - coping, ridge trim, a parapet course -
+      // so styled roofs drain too; only solid cells in the reach are ever flagged)
+      c.hatches.push({ x0: Math.min(X(lo), X(hi)), x1: Math.max(X(lo), X(hi)), y0: floorRow(rearStoreys) - 6, y1: floorRow(rearStoreys) + S.SLAB - 1 });
     }
     // Rear door on the far side (except the bastion's buried glacis side); an outpost has a door
     // on either side.

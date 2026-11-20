@@ -208,7 +208,11 @@
           if (c.role[i] === ROLE.ROOF) c.paint[i] = K.pack(tone(K.slabColor(style, row, x, roofRow + row), slit ? 0.55 : 0.95));
         }
       }
-      c.hatches.push({ x0: lo, x1: hi, y0: roofRow, y1: roofRow + S.SLAB - 1 });
+      // The span reaches 6 rows up through the roof covering: a style's coping or ridge courses
+      // laid over the slab (the ornaments pass draws them later) are part of the drain, or water
+      // would stand on them and never reach the grate (PS's seed-7 catch). Open air in the
+      // reach is never flagged - the stamp and the repair only flag solid cells.
+      c.hatches.push({ x0: lo, x1: hi, y0: roofRow - 6, y1: roofRow + S.SLAB - 1 });
     }
 
     // Furniture, guard slots and the control panel (top accessible floor).
