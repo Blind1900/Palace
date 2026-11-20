@@ -142,16 +142,23 @@ const out = ruined.flatMap((b) => b.cores.filter(safe));
 check(ruined.length > 0 && out.length === ruined.reduce((n, b) => n + b.cores.length, 0),
   `a ruined building's cores stand in the open on its rubble, or sit settled home in a rebuilt vault (${out.length}/${ruined.reduce((n, b) => n + b.cores.length, 0)} cores of ${ruined.length} ruined buildings; ${ruined.flatMap((b) => b.cores.map((c) => `${c.x},${c.y}${c.free ? 'F' : ''}${c.settled ? 'S' : ''}${c.stopped ? ':' + c.stopped : ''}`)).join(' ')})`);
 if (ruined.length) await view('co-cores-risen', ruined[0].cores[0].x, ruined[0].cores[0].y, 5);
-// Lasting smoke and dust.
-const smoke30 = countIn(A.body.left - 600, A.body.right + 600, A.ground - 900, A.ground, [M.SMOKE]);
+// Lasting smoke and dust. (Smoke: the cells of it in the grid, and the pixels of a plume rising off
+// the ruins in the open.)
+const smokeIn = (x0, x1, y0, y1) => {
+  const P = pwApp.particles, F = PW.PARTICLE;
+  let n = countIn(x0, x1, y0, y1, [M.SMOKE]);
+  for (let i = 0; i < P.stats.count; i += 1) if ((P.flags[i] & F.SMOKE) && P.px[i] >= x0 && P.px[i] <= x1 && P.py[i] >= y0 && P.py[i] <= y1) n += 1;
+  return n;
+};
+const smoke30 = smokeIn(A.body.left - 600, A.body.right + 600, A.ground - 900, A.ground);
 check(dust10 > 1500, `the collapse throws up a dust cloud that hangs (${dust10} dust cells after 10 s)`);
-// (thin by now: the smoke drifts and thins rather than hanging in one spot)
-check(smoke30 > 20 && (world.smoulders || []).length > 0, `the ruins keep smoking for a while (${smoke30} smoke cells after 30 s, ${(world.smoulders || []).length} smouldering spots)`);
-// ...but not for ever, nor in one standing column: the smouldering dies down within about a
-// minute and the smoke drifts off and thins away.
-pwApp.stepWorld(60 * 60);
-const smoke90 = countIn(A.body.left - 600, A.body.right + 600, A.ground - 900, A.ground, [M.SMOKE]);
-check((world.smoulders || []).length === 0 && smoke90 < Math.max(100, smoke30 * 0.5), `the smoke dies down and drifts away (${smoke90} smoke cells after 90 s, ${(world.smoulders || []).length} still smouldering)`);
+// (a plume over the ruins a while after: the smoke drifts and thins rather than hanging in one spot)
+check(smoke30 > 200 && (world.smoulders || []).length > 0, `the ruins keep smoking for a while (${smoke30} smoke cells and plume pixels after 30 s, ${(world.smoulders || []).length} smouldering spots)`);
+// ...but not for ever, nor in one standing column: the smouldering dies down within a minute or
+// two and the smoke drifts off and thins away.
+pwApp.stepWorld(60 * 120);
+const smoke150 = smokeIn(A.body.left - 600, A.body.right + 600, A.ground - 900, A.ground);
+check((world.smoulders || []).length === 0 && smoke150 < Math.max(100, smoke30 * 0.2), `the smoke dies down and drifts away (${smoke150} smoke cells and plume pixels after 150 s, ${(world.smoulders || []).length} still smouldering)`);
 times.sort((a, b) => a - b);
 const p95 = times[Math.floor(times.length * 0.95)];
 check(p95 < 3, `collapse simulation stays in budget (p95 ${p95.toFixed(2)} ms, max ${times[times.length - 1].toFixed(2)} ms)`);

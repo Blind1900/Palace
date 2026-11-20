@@ -2185,7 +2185,8 @@
       if (!h) crushedHeaps.set(key, h = { n: 0, spots: [] });
       h.n += cells;
       if (h.n < SMOULDER_CELLS) return;
-      const seconds = 24 + Math.min(30, h.n / 300);
+      // (its plume hangs over the place a minute or more after a great collapse - see PW.addSmoulder)
+      const seconds = 30 + Math.min(60, h.n / 200);
       const s = smoulder(x, y, seconds, 20 + Math.sqrt(h.n) * 0.6);
       if (s && !h.spots.includes(s)) h.spots.push(s);
       for (const t of h.spots) { t.left = Math.max(t.left, seconds - t.age); t.life = Math.max(t.life, seconds); }

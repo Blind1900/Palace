@@ -224,8 +224,9 @@
     const open = fireball(world, particles, cx, cy, r, power, random);
     // (the smoke it drives into tunnels and rooms, where it is shut in: see smokeBurst)
     smokeBurst(world, cx, cy, r, power, random, open);
-    // A crater (not a blast in the open air) smoulders a little while, wisps of smoke curling up.
-    if (removed > r) addSmoulder(world, cx, Math.min(H - 2, cy + below), 3 + r * 0.12 * power, r * 0.8, { puffs: true });
+    // A crater (not a blast in the open air) smoulders on, its plume hanging over the place long
+    // after the strike - a big one's for a minute and more - dying down as it goes.
+    if (removed > r) addSmoulder(world, cx, Math.min(H - 2, cy + below), 12 + r * 0.5 * power, r * 0.6);
     // Plants that lost their footing or trunk fall; cover that lost its support or most of
     // itself breaks apart. Nothing is left floating over the crater.
     const box = { x0: x0 - 4, y0: y0 - 4, x1: x1 + 4, y1: y1 + 4 };
@@ -519,21 +520,64 @@
   // a `width` wide patch (the first open cells above it), dying down as it goes. It does not pour
   // out of one spot in a steady jet: it comes in puffs that swell and slacken, from all over a patch
   // that spreads as the rubble smoulders on, thinner as it dies down, and it tails off softly.
-  // (`puffs`: in the open it sends up wisps of billowing smoke rather than gas - a blast's crater)
-  function addSmoulder(world, x, y, seconds, width, options = {}) {
+  // Under the open sky it sends up a plume (see plume); shut in - a room, a tunnel - it fills the
+  // space round it with smoke.
+  function addSmoulder(world, x, y, seconds, width) {
     (world.smoulders || (world.smoulders = [])).push({ x, y, width: Math.max(4, width), life: seconds, left: seconds, n: 0, age: 0,
-      seed: (PW.hash2(x | 0, y | 0) & 1023) / 163, puffs: !!options.puffs, cloud: null, next: 0 });
+      seed: (PW.hash2(x | 0, y | 0) & 1023) / 163, acc: 0, sky: false, skyAt: -1e9 });
   }
-  // (a wisp of smoke curling up off smouldering ground in the open: a little clump of smoke pixels)
-  function wisp(world, s, f) {
+  // (the first open cell over the smouldering ground at column x - off the top of what lies on it
+  // - or -1)
+  function smokeFrom(world, x, y) {
+    const { mat, width: W, height: H } = world;
+    if (x < 1 || x >= W - 1) return -1;
+    y = Math.min(H - 2, Math.round(y));
+    for (let up = 0; up < 80 && y > 1 && PW.mat.phase[mat[y * W + x] & ID_MASK] >= PW.PHASE.LIQUID; up += 1) y -= 1;
+    return PW.mat.open[mat[y * W + x] & ID_MASK] ? y : -1;
+  }
+  // (is it under the open sky - nothing over two or more of five places across the middle of it
+  // for SKY_CLEAR cells? A slab of ruin lying across a heap does not shut its smoke in)
+  const SKY_CLEAR = 60;
+  function underSky(world, s) {
+    const { mat, width: W } = world;
+    let clear = 0;
+    for (let q = -2; q <= 2; q += 1) {
+      const x = Math.round(s.x + q * s.width * PLUME_CORE / 4), y = smokeFrom(world, x, s.y);
+      if (y < 0) continue;
+      let open = true;
+      for (let k = 1; k <= SKY_CLEAR && y - k >= 0 && open; k += 1) open = PW.mat.open[mat[(y - k) * W + x] & ID_MASK] === 1;
+      if (open && (clear += 1) >= 2) return true;
+    }
+    return false;
+  }
+  // A plume over smouldering ground in the open - a crater, a heap of rubble in the street: smoke
+  // pixels sent up one by one from all over the patch, dark and thick where they leave it and
+  // thinning as they climb (PARTICLE.THIN), rising and drifting on the wind - stronger the higher
+  // they are - so the column leans over and spreads as it goes, and hangs over the place long after,
+  // dying down as the smouldering does. A stream that swells and slackens: no standing column, no
+  // flat underside.
+  const PLUME_RATE = 1.8;      // smoke pixels a second for each cell across the patch, at its height
+  const PLUME_CORE = 0.35;     // share of the patch's width the column rises from: its hottest middle
+  const PLUME_TONES = [[104, 98, 93], [84, 79, 75], [66, 62, 59]];
+  // (many at once - a battle's worth of strikes - each is the thinner: they never take more than
+  // PLUME_SHARE of the particles between them)
+  const PLUME_SHARE = 0.35;
+  function plume(world, s, f, swell, dt) {
     const particles = world.particles;
-    if (!particles || particles.count > particles.capacity * 0.8) return;
-    s.n += 1;
-    const h = PW.hash3(s.x | 0, s.n, 3), x = s.x + ((h & 1023) / 1023 - 0.5) * s.width;
-    const y = Math.min(s.y, world.groundTop[Math.max(0, Math.min(world.width - 1, x | 0))] - 2);
-    const random = s.random || (s.random = PW.createRandom(h || 1));
-    billow(particles, random, x, y, ((h >>> 14) & 15) - 7.5, -10 - ((h >>> 18) & 15), 2 + ((h >>> 10) & 7) * 0.4, 0.5, 6,
-      PW.PARTICLE.SMOKE, 2 + f * 2.5, SOOT_TONES, 0.4 + 0.3 * f);
+    if (!particles || particles.count > particles.capacity * PLUME_SHARE) return;
+    s.acc += PLUME_RATE * s.width * Math.pow(f, 1.2) * (0.5 + swell) * dt;
+    const spread = s.width * PLUME_CORE * (1 + (1 - f) * 0.9), F = PW.PARTICLE;
+    while (s.acc >= 1) {
+      s.acc -= 1; s.n += 1;
+      const h = PW.hash3(s.x | 0, s.n, 5), h2 = PW.hash3(s.n, s.y | 0, 9);
+      const x = s.x + ((h & 1023) / 1023 - 0.5) * spread, y = smokeFrom(world, Math.round(x), s.y);
+      if (y < 0) continue;
+      // (the darkest leaves the heap's heart; each lighter, thinner the less it smoulders)
+      const t = PLUME_TONES[2 - Math.min(2, Math.floor(((h >>> 10) & 255) / 255 * 1.5 * (1.6 - f) + Math.abs(x - s.x) / Math.max(1, spread) * 2.4))];
+      const alpha = (0.7 + ((h >>> 18) & 15) / 15 * 0.2) * (0.55 + 0.45 * f);
+      particles.spawn(x + 0.5, y + 0.5, (((h >>> 22) & 31) - 15.5) * 0.4, -(16 + (h2 & 31) / 31 * 16), 0, PW.abgr(t[0], t[1], t[2], Math.round(alpha * 255)),
+        F.SMOKE | F.THIN, (9 + ((h2 >>> 5) & 63) / 63 * 7) * (0.6 + 0.4 * f));
+    }
   }
   function stepSmoulders(world, dt) {
     const list = world.smoulders;
@@ -545,11 +589,10 @@
       if (s.left <= 0) { list.splice(k, 1); continue; }
       const f = s.left / s.life;
       const swell = 0.5 + 0.5 * Math.sin(s.age * 2.1 + s.seed) * Math.sin(s.age * 0.83 + s.seed * 1.7);
-      // (in the open, as wisps: one now and then, more often while it smoulders hard)
-      if (s.puffs && s.y - 2 <= world.groundTop[Math.max(0, Math.min(W - 1, s.x | 0))] + 4) {
-        if ((s.next -= dt) <= 0) { wisp(world, s, f); s.next = 0.12 + (1 - f) * 0.35 + (1 - swell) * 0.25; }
-        continue;
-      }
+      // (under the open sky - looked at again now and then: what lay over it can be cleared, or
+      // come down on it - a plume)
+      if (s.age - s.skyAt >= 2) { s.sky = underSky(world, s); s.skyAt = s.age; }
+      if (s.sky) { plume(world, s, f, swell, dt); continue; }
       const rate = Math.pow(f, 1.5) * (2 + s.width / 6) * Math.max(0.08, swell);   // smoke cells per tick
       let n = Math.floor(rate) + ((PW.hash3(s.x | 0, s.n, 11) & 1023) / 1023 < rate % 1 ? 1 : 0);
       const spread = s.width * (1 + (1 - f) * 0.9);

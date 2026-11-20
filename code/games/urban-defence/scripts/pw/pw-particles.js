@@ -25,7 +25,9 @@
   // yellow, orange, dark red as its life runs out, and dies - as a pixel of smoke, of the colour it
   // carries, if that colour is not see-through (alpha 0: it leaves nothing). Smoke fades out as its
   // life runs out.
-  const F = Object.freeze({ LAND: 1, DAMAGE: 2, WATER: 4, GLOW: 8, SMOKE: 16, LEAF: 32, BUBBLE: 64, LOOSE: 128, FIRE: 256, FLOAT: 512, SOAKED: 1024 });
+  // (THIN: smoke that thins as it goes - a plume's, off smouldering ground: it leaves dark and thick
+  // and is a quarter as thick by the end of its life, spread through the air it has climbed into)
+  const F = Object.freeze({ LAND: 1, DAMAGE: 2, WATER: 4, GLOW: 8, SMOKE: 16, LEAF: 32, BUBBLE: 64, LOOSE: 128, FIRE: 256, FLOAT: 512, SOAKED: 1024, THIN: 2048 });
   const FLOAT_LIFE = [14, 30];             // s a leaf floats before it is waterlogged
   const SOAKED_LIFE = 10;                  // s a waterlogged leaf goes on sinking, at most
   const SOAKED_WEIGHT = 45;                // a waterlogged leaf, against water's 30: it sinks, slowly
@@ -960,7 +962,7 @@
         } else if (fl & F.SMOKE) {
           // (its own shade, see-through as it was made, fading out over its last second and a half;
           // still red-hot from the flame it was, a moment, as it cools to that shade)
-          const fade = Math.max(0, Math.min(1, life[i] / 1.5));
+          const fade = Math.max(0, Math.min(1, life[i] / 1.5)) * (fl & F.THIN ? 1 - 0.75 * age[i] / (age[i] + Math.max(0, life[i])) : 1);
           const a = Math.round((c >>> 24) * fade / 32) * 32;
           if (a < 24) continue;
           c = (c & 0x00ffffff | Math.min(255, a) << 24) >>> 0;
