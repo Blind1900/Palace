@@ -89,6 +89,11 @@
       if (spanAt(x, y)) return false;
       const i = y * W + x, id = mat[i] & ID_MASK;
       if (id === M.ORE || id === M.CORE || (structural[id] && !isTunnel(x, y))) return true;
+      // Bare open sky refuses the laying (layCell's own rule), so to the router it is as hard
+      // as rock: a ravine with no wall face to fix to is dived under, never planed across.
+      // (seed 7's climb to the mining riser crossed such a notch - 25 columns of nothing the
+      // watch could only ever read as a wound, and the mend starved against the same sky)
+      if (PW.mat.open[id] && y < world.groundTop[x] && !isTunnel(x, y) && !buildingOwned(x, y) && !PW.getLayer(world, 'back', x, y)) return true;
       return buildingOwned(x, y) && !isTunnel(x, y) && !terrain[id];
     }
     // Pipe top row per column: cover depth under the ground, then below anything in the way.
@@ -131,17 +136,27 @@
         grounds[x - x0] = ground;
         ys[x - x0] = clear(x, ground, ground + depthAt(x));
       }
-      for (let pass = 0; pass < 3; pass += 1) {
-        smooth(ys, SMOOTH);
-        let moved = false;
-        for (let k = 0; k < ys.length; k += 1) {
-          const y = clear(x0 + k, grounds[k], ys[k]);
-          if (y !== ys[k]) { ys[k] = y; moved = true; }
+      // The passes and the slope clamps run to a fixed point TOGETHER: the clamps alone could
+      // lift a column back into what clear() had dodged (seed 7's climb to the mining riser
+      // pinned the bore inside the vein's edge - half-laid columns the watch read as a wound
+      // the mend could never close). Every operation only ever deepens, so this converges:
+      // where ore or works bar the way, the whole stretch dives below them.
+      for (let round = 0; round < 6; round += 1) {
+        for (let pass = 0; pass < 3; pass += 1) {
+          smooth(ys, SMOOTH);
+          let moved = false;
+          for (let k = 0; k < ys.length; k += 1) {
+            const y = clear(x0 + k, grounds[k], ys[k]);
+            if (y !== ys[k]) { ys[k] = y; moved = true; }
+          }
+          if (!moved) break;
         }
-        if (!moved) break;
+        for (let k = 1; k < ys.length; k += 1) ys[k] = Math.max(ys[k], ys[k - 1] - 1);
+        for (let k = ys.length - 2; k >= 0; k -= 1) ys[k] = Math.max(ys[k], ys[k + 1] - 1);
+        let dirty = false;
+        for (let k = 0; k < ys.length && !dirty; k += 1) if (clear(x0 + k, grounds[k], ys[k]) !== ys[k]) dirty = true;
+        if (!dirty) break;
       }
-      for (let k = 1; k < ys.length; k += 1) ys[k] = Math.max(ys[k], ys[k - 1] - 1);
-      for (let k = ys.length - 2; k >= 0; k -= 1) ys[k] = Math.max(ys[k], ys[k + 1] - 1);
       return ys;
     }
     // In place: each value becomes the mean, over k +/- reach, of the running maximum over the same
@@ -195,6 +210,24 @@
           const k = x - x0;
           if (k < 0 || k >= ys.length) continue;
           ys[k] = Math.round(Ta + (Tb - Ta) * ((x - s0) / Math.max(1, s1 - s0)));
+        }
+      }
+      // A column whose bore would hang in bare open sky is tucked under that column's own
+      // ground line instead, and the wells climb the steps this leaves at the edges. The
+      // approach cone to a mountain core planed across a ravine on seed 7 (x~18311): 25
+      // columns of air that layCell rightly refused, which the watch could only ever read
+      // as a wound and the mend could only starve against. Only the bed itself stays as
+      // pinned (through its ports the bundle is carried inside); an eased approach with
+      // nothing under it dives like any other stretch and climbs back in by a well.
+      for (let k = 0; k < ys.length; k += 1) {
+        const x = x0 + k;
+        if (cores.some((c) => Math.abs(x - c.x) <= HOP)) continue;
+        for (let r = 0; r < BORE; r += 1) {
+          const yy = ys[k] + r, id = mat[yy * W + x] & ID_MASK;
+          if (PW.mat.open[id] && yy < world.groundTop[x] && !isTunnel(x, yy) && !buildingOwned(x, yy) && !PW.getLayer(world, 'back', x, yy)) {
+            ys[k] = Math.min(H - 44, world.groundTop[x] + 3);
+            break;
+          }
         }
       }
     }
