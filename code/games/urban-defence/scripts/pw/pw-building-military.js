@@ -617,24 +617,30 @@
   // The military building merges into the building it militarises: the tower grows bulkier -
   // an armour skin plates the outer walls (the body widens), every floor gains a steel
   // under-layer, the roof takes the chamfer-and-parapet cap, and the walls go gunmetal.
-  function militarise(src, style) {
+  // N63 (the user's sketch): the military building merges ON THE TOWER'S SIDE - a plated
+  // annex widening the base, the two bases combined up to 3-4 floors into one building, a
+  // thin armour line carried over the tower's top with a small dish mast. annexSide picks
+  // the flank (the growth passes the side facing away from the city's centre).
+  function militarise(src, style, annexSide = -1) {
+    const ANNEX_W = 48;
     const pad = 7;
-    const c = K.createCanvas(src.width + pad * 2, src.height, src.ground);
+    const padL = annexSide < 0 ? ANNEX_W + 6 : pad, padR = annexSide < 0 ? pad : ANNEX_W + 6;
+    const c = K.createCanvas(src.width + padL + padR, src.height, src.ground);
     for (let y = 0; y < src.height; y += 1) for (let x = 0; x < src.width; x += 1) {
-      const i = y * src.width + x, j = y * c.width + (x + pad);
+      const i = y * src.width + x, j = y * c.width + (x + padL);
       c.mat[j] = src.mat[i]; c.back[j] = src.back[i]; c.deco[j] = src.deco[i];
       c.paint[j] = src.paint[i]; c.role[j] = src.role[i];
     }
-    const sx = (p) => ({ ...p, x: p.x + pad });
+    const sx = (p) => ({ ...p, x: p.x + padL });
     c.meta = { ...src.meta, militarised: true };
-    c.floors = src.floors.map((f) => ({ ...f, left: f.left + pad, right: f.right + pad }));
-    c.stairs = src.stairs.map((s) => ({ ...s, from: s.from + pad, to: s.to + pad }));
-    c.doors = src.doors.map((d) => ({ ...d, x: d.x + pad }));
+    c.floors = src.floors.map((f) => ({ ...f, left: f.left + padL, right: f.right + padL }));
+    c.stairs = src.stairs.map((s) => ({ ...s, from: s.from + padL, to: s.to + padL }));
+    c.doors = src.doors.map((d) => ({ ...d, x: d.x + padL }));
     c.slots = src.slots.map(sx); c.panels = src.panels.map(sx); c.devices = src.devices.map(sx);
     c.windows = src.windows.map(sx); c.storage = (src.storage || []).map(sx);
     c.lamps = (src.lamps || []).map(sx);
-    c.cores = src.cores.map((k) => ({ ...k, x: k.x + pad, vault: k.vault && { ...k.vault, x0: k.vault.x0 + pad, x1: k.vault.x1 + pad } }));
-    c.body = { ...src.body, left: src.body.left + pad, right: src.body.right + pad };
+    c.cores = src.cores.map((k) => ({ ...k, x: k.x + padL, vault: k.vault && { ...k.vault, x0: k.vault.x0 + padL, x1: k.vault.x1 + padL } }));
+    c.body = { ...src.body, left: src.body.left + padL, right: src.body.right + padL };
     const tint = MIL_TINT[style] || MIL_TINT.modern;
     // The whole tower goes to war: walls gunmetal, glazing darkened to armoured glass, and
     // the rooms behind it blacked out to military lighting - a militarised tower must read
@@ -656,10 +662,10 @@
     for (let y = 8; y < c.ground; y += 1) {
       for (let d = 0; d < pad - 1; d += 1) {
         const lx = c.body.left - 1 - d, rx = c.body.right + 1 + d;
-        if (solidNear(c.body.left, y, 1) || solidNear(c.body.left + 1, y, 1)) {
+        if (annexSide > 0 && (solidNear(c.body.left, y, 1) || solidNear(c.body.left + 1, y, 1))) {
           if (!c.mat[y * c.width + lx]) K.solid(c, lx, y, M.STEEL, milPlate(style, d, pad - 1, c.ground - 1 - y, lx, y), ROLE.WALL);
         }
-        if (solidNear(c.body.right, y, -1) || solidNear(c.body.right - 1, y, -1)) {
+        if (annexSide < 0 && (solidNear(c.body.right, y, -1) || solidNear(c.body.right - 1, y, -1))) {
           if (!c.mat[y * c.width + rx]) K.solid(c, rx, y, M.STEEL, milPlate(style, d, pad - 1, c.ground - 1 - y, rx, y), ROLE.WALL);
         }
       }
@@ -701,9 +707,82 @@
       K.solidIfEmpty(c, c.body.left + s, roofY - 1 - d, M.STEEL, col, ROLE.ORNAMENT);
       K.solidIfEmpty(c, c.body.right - s, roofY - 1 - d, M.STEEL, col, ROLE.ORNAMENT);
     }
-    c.body.left -= pad - 1; c.body.right += pad - 1;
+    // N63: THE ANNEX - the grey military building merged on the tower's flank, widening the
+    // base. Three and a half floors of plate armour against the wall, its outer face tapering
+    // in as it rises (a glacis), slit lights per storey, a flat armoured roof with a hazard
+    // lip, a sally door at its foot, and inside, a garrison room cut into the shared wall.
+    {
+      const aH = 3 * S.FLOOR + 20;
+      const aTop = c.ground - aH;
+      const inner = annexSide < 0 ? c.body.left : c.body.right;           // against the tower wall
+      const dirOut = annexSide;
+      for (let y = aTop; y < c.ground; y += 1) {
+        const rise = c.ground - 1 - y;
+        const taper = Math.floor((y - aTop) / 26);                        // leans IN as it rises
+        const wEff = ANNEX_W - (Math.floor(aH / 26) - taper) * 2;
+        for (let k = 0; k < wEff; k += 1) {
+          const x = inner + dirOut * (1 + k);
+          const i = y * c.width + x;
+          if (c.mat[i]) continue;
+          // the sketch's annex is MASS: solid plate armour, hatched grey - a garrison room
+          // is carved at its foot, the rest is armour through and through
+          const room = rise >= 4 && rise < 32 && k >= 5 && k < wEff - 5;
+          if (room) {
+            if (!c.back[i]) c.back[i] = K.pack(tone([36, 40, 48], ((x + y) % 9) ? 1 : 1.3));
+            continue;
+          }
+          K.solid(c, x, y, M.STEEL, milPlate(style, (k * 7 + rise) % 4, 4, rise, x, y), ROLE.WALL);
+        }
+        // slit lights at each storey's band on the outer face
+        if (rise % S.FLOOR === 18) {
+          for (let k = Math.max(5, wEff - 8); k < wEff - 2; k += 1) {
+            const x = inner + dirOut * (1 + k);
+            K.solid(c, x, y, M.GLASS, mix([26, 30, 36], (KIT_P(style).lamp || [255, 220, 140]), 0.4), ROLE.GLASS);
+          }
+        }
+      }
+      // the flat armoured roof with its hazard lip
+      for (let k = 0; k < ANNEX_W - (Math.floor(aH / 26)) * 2 + 2; k += 1) {
+        const x = inner + dirOut * (1 + k);
+        K.solidIfEmpty(c, x, aTop - 1, M.STEEL, ((k >> 1) & 1) ? [196, 164, 58] : tone(tint, 0.85), ROLE.ROOF);
+        K.solidIfEmpty(c, x, aTop, M.STEEL, tone(tint, 1.1), ROLE.ROOF);
+      }
+      // the sally door at the annex's foot, and the opening into the tower
+      for (let y = c.ground - S.DOOR_H; y < c.ground; y += 1) {
+        for (let d = 0; d < 3; d += 1) {
+          const x = inner + dirOut * (ANNEX_W - Math.floor(aH / 26) * 2 - d);
+          const i = y * c.width + x;
+          if (c.mat[i]) { c.mat[i] = 0; c.role[i] = 0; c.paint[i] = 0; }
+          if (!c.back[i]) c.back[i] = K.pack(tone([40, 44, 52], 0.9));
+        }
+        for (let d = 0; d < 4; d += 1) {
+          const x = inner - dirOut * d + dirOut;                          // through the shared wall
+          const i = y * c.width + x;
+          if (c.mat[i] && c.role[i] === ROLE.WALL) { c.mat[i] = 0; c.role[i] = 0; c.paint[i] = 0; c.back[i] = c.back[i] || K.pack([40, 44, 52]); }
+        }
+      }
+      c.doors.push({ x: inner + dirOut * (ANNEX_W - Math.floor(aH / 26) * 2 - 1), side: dirOut, top: c.ground - S.DOOR_H, bottom: c.ground - 1 });
+      // the thin armour line carried over the tower's top, and the little dish on its stick
+      const crownX0 = Math.min(c.body.left, c.body.right), crownX1 = Math.max(c.body.left, c.body.right);
+      for (let x = crownX0; x <= crownX1; x += 1) {
+        let y = 0;
+        while (y < c.ground && !c.mat[y * c.width + x]) y += 1;
+        if (y > 2 && y < c.ground) K.solidIfEmpty(c, x, y - 1, M.STEEL, tone(tint, ((x >> 2) & 1) ? 1.05 : 0.9), ROLE.ORNAMENT);
+      }
+      const mastX = annexSide < 0 ? c.body.left + 10 : c.body.right - 10;
+      for (let k = 1; k <= 10; k += 1) K.solidIfEmpty(c, mastX, roofY - 1 - k, M.STEEL, (k % 4) ? [76, 80, 88] : [100, 104, 112], ROLE.ORNAMENT);
+      for (const [dx, dy] of [[-2, 9], [-1, 10], [0, 11], [1, 10], [2, 9]]) K.deco(c, mastX + (annexSide < 0 ? dx : -dx), roofY - 1 - dy, [168, 174, 182]);
+      // the plinth: one flush plated course tying the combined footprint at the grade
+      for (let x = Math.min(c.body.left, inner + dirOut * ANNEX_W) - 3; x <= Math.max(c.body.right, inner + dirOut * ANNEX_W) + 3; x += 1) {
+        const i = (c.ground - 1) * c.width + x;
+        if (!c.mat[i]) K.solid(c, x, c.ground - 1, M.FOUNDATION, ((x >> 2) & 1) ? [74, 78, 84] : [64, 67, 73], ROLE.ORNAMENT);
+      }
+    }
+    c.body.left -= annexSide < 0 ? ANNEX_W + 4 : pad - 1;
+    c.body.right += annexSide < 0 ? pad - 1 : ANNEX_W + 4;
     return c;
   }
+  const KIT_P = (style) => STYLES[style] || STYLES.modern;
 
   function military(options) {
     return options.variant === 'tower' ? militaryTower(options) : militaryBase(options);

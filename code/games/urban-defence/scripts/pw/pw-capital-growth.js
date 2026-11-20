@@ -140,8 +140,11 @@
       }
 
       let cv = T[lot.type](opts);
-      // N55: a militarised tower is rebuilt bulkier - armour skin, steel floors, gunmetal.
-      if (lot.mil && lot.type === 'population' && PW.militarise) cv = PW.militarise(cv, city.style);
+      // N55/N63: a militarised tower is rebuilt bulkier - armour skin, steel floors, gunmetal,
+      // and the grey annex merged on its outward flank (the user's sketch).
+      if (lot.mil && lot.type === 'population' && PW.militarise) {
+        cv = PW.militarise(cv, city.style, lot.side === 'left' ? -1 : 1);
+      }
       return cv;
     }
     const bodyWidth = (canvas) => canvas.body.right - canvas.body.left + 1;
