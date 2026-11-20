@@ -39,6 +39,22 @@
     const dbg = [];
     const rand = PW.createRandom((opts.seed || 1) + 4242);
     let seedN = (opts.seed || 1) * 31 + 7;
+    // N4 (first slice): a faction city's growth is paid for and paced by what the bundle
+    // actually delivers to its side's stock - HM pays for the works, and the levels only
+    // rise at full pace while the city is watered and fed. The lab's sandbox cities carry
+    // no faction and grow free, as a design lab should.
+    const COST_HM = { lot: 24, level: 50, mil: 40 };
+    const RESERVE_HM = 60;       // the war chest the growth never spends into
+    const purseOf = (city) => (city && city.faction && world.stock && world.stock[city.faction]) || null;
+    function pay(city, kind) {
+      const purse = purseOf(city);
+      if (!purse) return true;
+      const cost = COST_HM[kind] || 0;
+      if ((purse.hm || 0) < cost + RESERVE_HM) return false;
+      purse.hm -= cost;
+      return true;
+    }
+    const supplied = (city) => { const p = purseOf(city); return !p || ((p.water || 0) >= 20 && (p.sm || 0) >= 20); };
 
     // ---- Reading the land --------------------------------------------------------------------
     const surf = (x) => (world.surface0 || world.groundTop)[Math.max(0, Math.min(world.width - 1, x))];
@@ -131,7 +147,7 @@
     const skylineStoreys = (level) => Math.max(4, Math.round(1.6 + level * 2.5));
     function canvasFor(city, lot) {
       const level = lot.type === 'military' ? (lot.variant === 'tower' ? Math.max(1, Math.min(6, lot.level)) : Math.max(2, Math.min(5, 1 + lot.level))) :
-        lot.type === 'farm' ? Math.max(1, Math.min(6, lot.level)) : Math.max(1, Math.min(7, lot.level));
+        lot.type === 'farm' ? Math.max(1, Math.min(7, lot.level)) : Math.max(1, Math.min(7, lot.level));   // N69: farms reach as high as the rest
       const opts = { style: city.style, level, variant: lot.variant, seed: lot.seedN, facing: lot.side === 'left' ? 1 : -1 };
       if (lot.type === 'population' && lot.ring >= 0) opts.storeys = skylineStoreys(level);
       if (lot.type === 'military') {
@@ -421,6 +437,68 @@
       regradeCount += 1;
       return true;
     }
+    // N69: a farm SMOOTHS the ground it grows over and keeps the slope - the profile is
+    // eased toward its own windowed mean, so the land keeps its shape with the bumps and
+    // nicks taken out, never flattened to a line. Moves are clamped to the budget rather
+    // than refused, and a column the works may not touch (wet, paved, built, rock in the
+    // cut) is frozen where it lies, the easing relaxing into it over a couple of cells.
+    function smoothGrade(xa, xb, maxMove, reach = 18) {
+      const x0 = Math.max(8, Math.round(Math.min(xa, xb))), x1 = Math.min(world.width - 9, Math.round(Math.max(xa, xb)));
+      if (x1 - x0 < 10) return false;
+      const n = x1 - x0 + 1;
+      const g = new Int32Array(n), t = new Int32Array(n), frozen = new Uint8Array(n);
+      const soilish = (id) => id === M.GRASS || id === M.TOPSOIL || id === M.SOIL || id === M.LOOSE_SOIL || id === M.SAND;
+      for (let k = 0; k < n; k += 1) g[k] = world.groundTop[x0 + k];
+      for (let k = 0; k < n; k += 1) {
+        let sum = 0, wsum = 0;
+        for (let d = -reach; d <= reach; d += 1) {
+          const j = Math.max(0, Math.min(n - 1, k + d));
+          const w = reach + 1 - Math.abs(d);
+          sum += g[j] * w; wsum += w;
+        }
+        t[k] = g[k] + Math.max(-maxMove, Math.min(maxMove, Math.round(sum / wsum) - g[k]));
+      }
+      for (let k = 0; k < n; k += 1) {
+        const x = x0 + k, gk = g[k];
+        let ok = (PW.get(world, x, gk) & 63) !== M.WATER
+          && !(PW.getFlags(world, x, gk) & (FLAG.ROAD | FLAG.FIELD))
+          && !PW.getOwner(world, x, gk) && !PW.getOwner(world, x, gk - 1);
+        for (let y = Math.min(gk, t[k]); ok && y < Math.max(gk, t[k]); y += 1) {
+          if (y >= gk && !soilish(PW.get(world, x, y) & 63)) ok = false;
+          if (PW.getOwner(world, x, y)) ok = false;
+        }
+        if (!ok) { t[k] = gk; frozen[k] = 1; }
+      }
+      // (the easing never steps more than two cells a column into a frozen stretch)
+      for (let pass = 0; pass < 3; pass += 1) {
+        for (let k = 1; k < n; k += 1) if (!frozen[k]) t[k] = Math.max(t[k - 1] - 2, Math.min(t[k - 1] + 2, t[k]));
+        for (let k = n - 2; k >= 0; k -= 1) if (!frozen[k]) t[k] = Math.max(t[k + 1] - 2, Math.min(t[k + 1] + 2, t[k]));
+      }
+      let changed = false, lo = 1e9, hi = -1e9;
+      for (let k = 0; k < n; k += 1) {
+        if (Math.abs(t[k] - g[k]) < 2) continue;
+        const x = x0 + k, gk = g[k], tk = t[k];
+        if (gk < tk) {
+          for (let y = gk; y < tk; y += 1) PW.set(world, x, y, M.AIR, Q);
+          PW.setLayer(world, 'deco', x, gk - 1, 0);
+        } else {
+          for (let y = tk; y < gk; y += 1) {
+            const d = y - tk;
+            PW.set(world, x, y, (d < 3 ? M.GRASS : d < 16 ? M.TOPSOIL : M.SOIL) | (PW.hash2(x >> 3, y >> 3) & 3) << 6, Q);
+          }
+        }
+        for (let y = tk; y < tk + 3; y += 1) {
+          if ((PW.get(world, x, y) & 63) !== M.AIR) PW.set(world, x, y, M.GRASS | (PW.hash2(x, y) & 3) << 6, Q);
+        }
+        for (let y = tk - 30; y < tk; y += 1) PW.setLayer(world, 'deco', x, y, 0);
+        world.surface0[x] = tk;
+        PW.refreshGroundTop(world, x);
+        changed = true;
+        lo = Math.min(lo, Math.min(gk, tk)); hi = Math.max(hi, Math.max(gk, tk));
+      }
+      if (changed) { clearSimAround(x0, lo - 4, x1, hi + 6); regradeCount += 1; }
+      return changed;
+    }
     // A long span grades in strides: a polyline of straight slopes along the original shape,
     // each stride cut and filled on its own (a refused stride stays as it was).
     function regradeRun(xa, xb, grade) {
@@ -497,6 +575,7 @@
         if (b2) { city.blocked[side] = b2.kind; return false; }
       }
       far = cursor + dir * (w + 6);
+      if (!pay(city, 'lot')) { city.blocked[side] = 'upkeep'; return false; }   // N4: the works are paid for
       lot.canvas = canvas;
       lot.owner = allotOwner();
       const center = cursor + dir * (w / 2 + 2);
@@ -557,6 +636,7 @@
         lot.canvas = canvas;
         lot.gapWant = GAP_MIN + rand.int(2, 10);
         lot.massEdge = best.i === 0 ? null : lots[best.i - 1].massEdge;
+        if (!pay(city, 'lot')) return false;   // N4
         lot.owner = allotOwner();
         if (!placeLot(city, lot, center)) { world.buildings.pop(); continue; }
         lots.splice(best.i, 0, lot);
@@ -738,9 +818,10 @@
         city.blocked[side] = null;
         return true;
       }
-      // N54: the farm flattens its land first - lighter earthworks than a town's; what they
-      // refuse, the old slope gate still judges.
-      regrade(from, to, FARM_GRADE.maxSlope, FARM_GRADE.maxMove);
+      // N54/N69: the farm smooths its land first - the slope KEEPS its relative height,
+      // the shape just eased (never flattened to a line); what the smoothing cannot
+      // touch, the old slope gate still judges.
+      smoothGrade(from, to, FARM_GRADE.maxMove);
       for (let x = Math.min(from, to) + 16; x <= Math.max(from, to); x += 1) {
         if (Math.abs(surf(x) - surf(x - 16)) > 9) { city.blocked[side] = 'farm-mountain'; return false; }
       }
@@ -782,6 +863,7 @@
       const far = cursor + dir * (w + 8);
       if (Math.min(cursor, far) < 80 || Math.max(cursor, far) > world.width - 80) { city.blocked[side] = 'edge'; return false; }
       if (barrierIn(cursor, far) || claimed(cursor, far, city)) return false;
+      if (!pay(city, 'lot')) { city.blocked[side] = 'upkeep'; return false; }   // N4
       lot.canvas = canvas;
       lot.owner = allotOwner();
       if (!placeLot(city, lot, cursor + dir * (w / 2 + 2))) { world.buildings.pop(); return false; }
@@ -810,6 +892,7 @@
             variant: 'tower', seedN: seedN += 17, owner: 0, gapWant: GAP_MIN + rand.int(2, 8) };
           lot.canvas = canvasFor(city, lot);
           lot.massEdge = i === 0 ? null : lots[i - 1].massEdge;
+          if (!pay(city, 'mil')) return { ok: false, note: 'the war chest is short' };   // N4
           lot.owner = allotOwner();
           if (!placeLot(city, lot, Math.round((lo + hi) / 2))) { world.buildings.pop(); continue; }
           lots.splice(i, 0, lot);
@@ -824,6 +907,7 @@
       // stand on the left, the right, or both sides, each joining the building beside it.
       const secondWing = (l) => {
         if (nearBlast(l.placed.worksL, l.placed.worksR)) return { ok: false, note: 'under fire - wait for the dust' };
+        if (!pay(city, 'mil')) return { ok: false, note: 'the war chest is short' };   // N4
         l.milBoth = true; l.canvas = null;
         clearWeld(l, 'weldL'); clearWeld(l, 'weldR');
         seatChain(city, l.side, l.ring);
@@ -850,6 +934,7 @@
         return secondWing(best);
       }
       if (nearBlast(best.placed.worksL, best.placed.worksR)) return { ok: false, note: 'under fire - wait for the dust' };
+      if (!pay(city, 'mil')) return { ok: false, note: 'the war chest is short' };   // N4
       best.mil = true; best.canvas = null;
       seatChain(city, best.side, best.ring);
       if (!best.placed) { best.mil = false; best.canvas = null; seatChain(city, best.side, Math.min(best.ring, city.rings[best.side].length)); return { ok: false, note: 'the works would not fit' }; }
@@ -1127,6 +1212,7 @@
       const w = bodyWidth(canvas);
       const cursor = city.edge[side] + dir * 14;
       if (barrierIn(cursor, cursor + dir * (w + 8)) || claimed(cursor, cursor + dir * (w + 8), city)) return false;
+      if (!pay(city, 'lot')) { city.blocked[side] = 'upkeep'; return false; }   // N4
       lot.canvas = canvas;
       lot.owner = allotOwner();
       if (!placeLot(city, lot, cursor + dir * (w / 2 + 2))) { world.buildings.pop(); return false; }
@@ -1142,7 +1228,7 @@
     // park in its ground hall - whichever suits the pair - and at its middle a NEW PRIMAL
     // CORE in its own vault. When either neighbour re-seats, the joint is taken down first
     // and the pair may merge again once they stand still.
-    const JOINT_EVERY = 200, JOINT_MIN = 34, JOINT_MAX = 110;
+    const JOINT_EVERY = 200, JOINT_MIN = 10, JOINT_MAX = 110;   // N70: a tight slot is the divided wall - it joints too
     const KIT = PW.buildingKit;
     const tone = KIT.tone;
     function jointDecorKind(a, b) {
@@ -1194,9 +1280,13 @@
     // The joint's canvas: three floors on the kit's own pitch, slabs and back walls in the
     // pair's style, frame columns at the seams, the decor in the ground hall, the primal
     // core's vault under the middle.
-    function buildJoint(style, w, decorKind) {
+    // N70: where two bases meet they CONNECT - the joint roots its core in the centre of
+    // the gap, and a central PILLAR rises from the joint block to the shorter tower's
+    // roofline, tying the two through their floors (slab arms at every storey row) and
+    // their roofs (the spine's cap). `rise` is how far the spine climbs above the block.
+    function buildJoint(style, w, decorKind, rise = 0) {
       const S2 = KIT.S, P = KIT.STYLES[style], R = KIT;
-      const ground = 3 * S2.FLOOR + 10;
+      const ground = 3 * S2.FLOOR + 10 + Math.max(0, rise);
       const c = R.createCanvas(w, ground + R.VAULT_DEPTH + 5, ground);
       c.meta = { type: 'joint', style, decor: decorKind };
       const floorRow = (k) => ground - k * S2.FLOOR;
@@ -1215,7 +1305,37 @@
       for (const lx of [0, 1, w - 2, w - 1]) {
         for (let y = floorRow(3) - S2.SLAB; y < ground; y += 1) R.solid(c, lx, y, M.STEEL, tone(P.frame, lx < 2 ? 1.05 : 0.8), 1);
       }
-      jointDecor(c, decorKind, w >> 1, ground, P);
+      // The spine: the central pillar over the core, arms at every storey row, the cap.
+      if (rise > S2.FLOOR && w >= 12) {
+        const cx = w >> 1;
+        const spineTop = floorRow(3) - rise;                 // rows above the block it climbs
+        const arms = Math.floor((rise - 8) / S2.FLOOR);
+        for (let y = Math.max(6, spineTop); y <= floorRow(3); y += 1) {
+          for (let dx = -3; dx <= 4; dx += 1) {
+            const edge = dx === -3 || dx === 4;
+            const band = ((floorRow(3) - y) % S2.FLOOR) < 2;
+            R.solid(c, cx + dx, y, M.PILLAR, tone(P.frame, edge ? 0.78 : band ? 1.18 : 1), 1);
+          }
+        }
+        for (let j = 1; j <= arms; j += 1) {
+          const ay = floorRow(3 + j);
+          if (ay < Math.max(6, spineTop) + 4) break;
+          for (let x = 0; x < w; x += 1) {
+            for (let r = 0; r < S2.SLAB; r += 1) R.solid(c, x, ay + r, M.CONCRETE, R.slabColor(style, r, x, ay + r), 2);
+          }
+          // a thin rail over the open bridge, posts every few cells
+          for (let x = 3; x < w - 3; x += 6) {
+            for (let r = 1; r <= 3; r += 1) R.solidIfEmpty(c, x, ay - r, M.STEEL, tone(P.ornament, r === 3 ? 1.1 : 0.85), 4);
+          }
+          R.ceilingLamp(c, style, cx - 8, ay - S2.CLEAR + 10);
+        }
+        const capY = Math.max(4, spineTop - 2);
+        for (let x = 0; x < w; x += 1) {
+          for (let r = 0; r < S2.SLAB; r += 1) R.solid(c, x, capY + r, M.CONCRETE, R.slabColor(style, r, x, capY + r), 4);
+        }
+        for (const lx of [1, w - 2]) for (let r = 1; r <= 2; r += 1) R.solidIfEmpty(c, lx, capY - r, M.CONCRETE, tone(P.ornament, 0.9), 4);
+      }
+      if (w >= 26) jointDecor(c, decorKind, w >> 1, ground, P);   // (a narrow slot has no room for the piece)
       R.core(c, w >> 1, ground);
       R.corePillars(c, style);
       R.bakeLights(c, style);
@@ -1223,7 +1343,7 @@
       return c;
     }
     function eraseJoint(city, J) {
-      eraseLot({ owner: J.owner, placed: J.placed });
+      eraseLot({ owner: J.owner, placed: J.placed, faction: J.faction || city.faction || null });
       const un = (ow) => {
         for (const side of ['left', 'right']) for (const l of city.rings[side]) if (l.owner === ow) l.jointWith = null;
       };
@@ -1242,6 +1362,20 @@
       }
     }
     function tryJoint(city) {
+      // N70: a joint its towers have OUTGROWN rebuilds with a taller spine - the user's
+      // case: two towers aged past their stubby early joint, a dead shaft of air between
+      // them. One rebuild a pass; the ordinary pair scan re-joints it next call.
+      const storeysOf = (ow) => { const r3 = world.buildings[ow - 1]; return (r3 && r3.canvas && r3.canvas.meta && r3.canvas.meta.storeys) || 3; };
+      const riseFor = (aOw, bOw) => Math.max(0, Math.min(10 * KIT.S.FLOOR, (Math.min(storeysOf(aOw), storeysOf(bOw)) - 3) * KIT.S.FLOOR - 6));
+      for (let ji = 0; ji < city.joints.length; ji += 1) {
+        const J = city.joints[ji];
+        if (riseFor(J.a, J.b) > (J.rise || 0) + KIT.S.FLOOR) {
+          eraseJoint(city, J);
+          city.joints.splice(ji, 1);
+          note(city, 'the towers outgrew their joint: the spine rises taller');
+          break;   // (fall through: the pair scan below re-joints it in this same call)
+        }
+      }
       for (const side of ['left', 'right']) {
         const dir = side === 'left' ? -1 : 1, lots = city.rings[side];
         for (let i = 0; i + 1 < lots.length; i += 1) {
@@ -1256,7 +1390,9 @@
           // works' edge is wider than the visible wall - a flush joint, no slit of air)
           const x0 = L2.placed.worksR - 2, w = gap + 6;
           const decorKind = jointDecorKind(A.type, B.type);
-          const canvas = buildJoint(city.style, w, decorKind);
+          // N70: the spine climbs to the SHORTER tower's roofline, tying floors and roofs.
+          const rise = riseFor(A.owner, B.owner);
+          const canvas = buildJoint(city.style, w, decorKind, rise);
           const owner = allotOwner();
           const res = PW.foundations.place(world, canvas, x0, { style: city.style, owner });
           if (!res) { world.buildings.pop(); continue; }
@@ -1267,11 +1403,46 @@
           const placed = { x0: res.stamp.x, y0: res.stamp.y, x1: res.stamp.x + res.stamp.width - 1,
             y1: res.stamp.y + res.stamp.height - 1, worksL: res.works[0], worksR: res.works[1] };
           for (let x = placed.worksL - 2; x <= placed.worksR + 2; x += 1) PW.refreshGroundTop(world, x);
+          // N70: doorways through both towers' walls at every arm row with a room behind it,
+          // so the floors genuinely run through the spine (the N66 weld's probe rule).
+          {
+            const S3 = KIT.S;
+            const groundW = world.buildings[owner - 1].ground;
+            const arms = Math.floor((rise - 8) / S3.FLOOR);
+            for (let j = 1; j <= arms + 3; j += 1) {
+              const fy = groundW - j * S3.FLOOR;
+              for (const [wallX0, probeX, into] of [[placed.worksL, placed.worksL + 9, L2], [placed.worksR - 7, placed.worksR - 9, R2]]) {
+                let roomRows = 0;
+                for (let yy = fy - S3.DOOR_H; yy < fy; yy += 1) {
+                  if ((PW.get(world, probeX + (into === L2 ? -14 : 14), yy) & 63) === M.AIR && PW.getLayer(world, 'back', probeX + (into === L2 ? -14 : 14), yy)) roomRows += 1;
+                }
+                if (roomRows < S3.DOOR_H * 0.6) continue;
+                for (let yy = fy - S3.DOOR_H; yy < fy; yy += 1) {
+                  for (let d = 0; d < 8; d += 1) {
+                    const x = wallX0 + d;
+                    if (PW.getOwner(world, x, yy) !== into.owner) continue;
+                    const id = PW.get(world, x, yy) & 63;
+                    if (!PW.mat.structural[id] && id !== M.GLASS) continue;
+                    PW.set(world, x, yy, M.AIR, Q);
+                    PW.setLayer(world, 'paint', x, yy, 0);
+                    if (!PW.getLayer(world, 'back', x, yy)) PW.setLayer(world, 'back', x, yy, PW.abgr(40, 44, 52, 255));
+                  }
+                }
+              }
+            }
+          }
+          // N70/slice 2: the joint's primal core threads the faction's bundle like any other.
+          if (city.faction && world.pipes && world.pipes.connectCore) {
+            for (const k of rec.cores) {
+              if (k.orb || k.standing || !k.vault) continue;
+              world.pipes.connectCore(k.x, k.y, city.faction, world.pipes.TAPS.population, owner);
+            }
+          }
           clearSimAround(placed.x0 - 6, placed.y0 - 6, placed.x1 + 6, placed.y1 + 40);
           flashes.push({ box: placed, age: 0 });
-          city.joints.push({ owner, side, a: A.owner, b: B.owner, ringA: A.ring, ringB: B.ring, placed, decor: decorKind });
+          city.joints.push({ owner, side, a: A.owner, b: B.owner, ringA: A.ring, ringB: B.ring, placed, decor: decorKind, faction: city.faction || null, rise });
           A.jointWith = B.owner; B.jointWith = A.owner;
-          note(city, `a ${decorKind} joins the two: the merged base roots a new primal core`);
+          note(city, `a ${decorKind} joins the two: core at the centre, the spine ties their floors`);
           return true;
         }
       }
@@ -1384,7 +1555,7 @@
       if (city.kind === 'capital') {
         const lots = city.rings.left.length + city.rings.right.length;
         if (lots >= city.level * 2 && city.level < MAX_LEVEL
-          && !nearBlast(city.edge.left, city.edge.right)) return levelUp(city);   // N60: no compaction under fire
+          && !nearBlast(city.edge.left, city.edge.right)) { if (!pay(city, 'level')) return false; return levelUp(city); }   // N60 fire gate; N4 paid
         // The edge creeps out on its own slow clock; the towers level by age, not here (N48).
         const sides = city.rings.left.length <= city.rings.right.length ? ['left', 'right'] : ['right', 'left'];
         for (const s of sides) {
@@ -1400,10 +1571,10 @@
       }
       if (city.kind === 'farm') {
         if (city.actions % 5 === 4) {
-          if (city.level < 6 && city.actions % 10 === 9) {
+          if (city.level < 7 && city.actions % 10 === 9 && pay(city, 'level')) {   // N69 cap; N4 paid
             city.level += 1;
             eraseLot(city.main);
-            city.main.level = Math.min(6, city.level + 1);
+            city.main.level = Math.min(7, city.level + 1);
             city.main.variant = city.level >= 4 ? 'silos' : 'homestead';
             city.main.canvas = null;
             if (!placeLot(city, city.main, city.main.x)) { city.main.level -= 1; city.main.canvas = null; placeLot(city, city.main, city.main.x); }
@@ -1472,7 +1643,8 @@
         if (city.kind === 'capital') {
           city.appendClock.left += dt; city.appendClock.right += dt;
           city.infillClock += dt;
-          for (const side of ['left', 'right']) for (const l of city.rings[side]) l.age += dt;
+          const feed = supplied(city) ? 1 : 0.25;   // N4: unwatered, unfed - the levels rise slow
+          for (const side of ['left', 'right']) for (const l of city.rings[side]) l.age += dt * feed;
         }
         city.jointClock += dt;
         if (city.jointClock >= JOINT_EVERY) {   // N58: close neighbours join through a merge point
