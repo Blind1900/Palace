@@ -31,6 +31,7 @@
     const TW = Math.ceil(AW / TILE), TH = Math.ceil(AH / TILE);
     const p = new Float32Array(AW * AH), vx = new Float32Array(AW * AH), vy = new Float32Array(AW * AH);
     const wall = new Uint8Array(AW * AH);          // air cell mostly solid: the air does not pass
+    const glassless = new Uint8Array(AW * AH);     // air cell looked over for glass since it woke (see shatter)
     const active = new Map();                      // tile -> steps it has been quiet
     const live = new Uint8Array(TW * TH);          // (the same, as a flag per tile: what every gas
                                                    // cell asks of the air each tick - see at)
@@ -47,6 +48,7 @@
         if (phase[mat[y * W + x] & ID_MASK] >= PW.PHASE.POWDER) solid += 1;
       }
       wall[ay * AW + ax] = solid > (S * S / 4) * 0.6 ? 1 : 0;
+      glassless[ay * AW + ax] = 0;
     }
     // Start working a tile (its walls are looked at again). A tile that is solid all through is not
     // worked - no air moves in it - but its walls are kept, so the air beside it is turned back.
@@ -78,6 +80,7 @@
         if (d >= 1) continue;
         all += 1 - d * d;
         const i = ay * AW + ax;
+        glassless[i] = 0;
         if (wall[i]) continue;
         open += 1 - d * d;
         cells.push(i, 1 - d * d);
@@ -180,7 +183,12 @@
       stats.ms = performance.now() - t0;
     }
     // Shatter the glass in air cell (ax, ay); the shards fly with the wind in air cell `from`.
+    // (once its glass is gone - or it had none - it is not looked over again while the wave lasts:
+    // a wave stays over a cell for several passes, and every wall beside it is looked at too)
     function shatter(ax, ay, from) {
+      const a = ay * AW + ax;
+      if (glassless[a]) return;
+      glassless[a] = 1;
       const fx = from % AW, wx = (vx[from] + (fx > 0 ? vx[from - 1] : 0)) * S * 1.5, wy = (vy[from] + (from >= AW ? vy[from - AW] : 0)) * S * 1.5;
       const xe = Math.min(W, ax * S + S), ye = Math.min(H, ay * S + S), GLASS = M.GLASS;
       for (let y = ay * S; y < ye; y += 1) for (let x = ax * S, i = y * W + x; x < xe; x += 1, i += 1) {
@@ -197,8 +205,9 @@
       const tx = t % TW, ty = (t / TW) | 0;
       let n = 0;
       for (let ay = ty * TILE; ay < Math.min(AH, ty * TILE + TILE) && n < 12; ay += 1) for (let ax = tx * TILE; ax < Math.min(AW, tx * TILE + TILE) && n < 12; ax += 1) {
-        const i = ay * AW + ax, gust = Math.hypot(vx[i], vy[i]);
-        if (gust < LIFT || wall[i]) continue;
+        const i = ay * AW + ax, gust2 = vx[i] * vx[i] + vy[i] * vy[i];
+        if (gust2 < LIFT * LIFT || wall[i]) continue;
+        const gust = Math.sqrt(gust2);
         // (the loose surface under this air cell)
         const x = ax * S + (PW.hash3(ax, ay, stats.lifted) & 7);
         if (x < 1 || x >= W - 1) continue;

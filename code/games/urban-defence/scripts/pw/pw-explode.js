@@ -15,44 +15,54 @@
   // scorch until it is repaired.
   function scorchBuildings(world, cx, cy, r, power) {
     const { mat, width: W, height: H } = world;
-    const { structural, open, palettes } = PW.mat;
-    const reach = r * (1.35 + 0.25 * Math.min(1, power)), x0 = Math.max(1, Math.floor(cx - reach)), x1 = Math.min(W - 2, Math.ceil(cx + reach));
-    const y0 = Math.max(1, Math.floor(cy - reach)), y1 = Math.min(H - 2, Math.ceil(cy + reach * 0.8));
-    // (solid cells between the blast and (x, y), not counting (x, y) itself - counted from (x, y)
-    // back towards the blast, where the wall it is part of is: past `most` the count stops)
-    const between = (x, y, most) => {
-      const dx = x - cx, dy = y - cy, n = Math.ceil(Math.max(Math.abs(dx), Math.abs(dy)));
-      let hit = 0;
-      for (let s = n - 1; s >= 1; s -= 1) {
-        const px = Math.round(cx + dx * s / n), py = Math.round(cy + dy * s / n);
-        if (!open[mat[py * W + px] & ID_MASK] && (mat[py * W + px] & ID_MASK) !== M.WATER && (hit += 1) > most) return hit;
-      }
-      return hit;
-    };
+    const { structural, open, palettes, terrain } = PW.mat;
+    const reach = r * (1.35 + 0.25 * Math.min(1, power)), icx = Math.round(cx), icy = Math.round(cy), R = Math.ceil(reach) + 2;
+    const x0 = Math.max(1, icx - R), x1 = Math.min(W - 2, icx + R), y0 = Math.max(1, icy - R), y1 = Math.min(H - 2, Math.ceil(cy + reach * 0.8));
+    if (icx < x0 || icx > x1 || icy < y0 || icy > y1) return;
+    // How many solid cells lie between the blast and each cell (not counting the cell itself), up
+    // to 3: the count of the cell before it on the line back to the middle, plus that cell if it is
+    // solid. So it is worked out from the middle outward, a quarter at a time, row by row - the
+    // cell before always done first - and each cell is scorched as it is reached.
+    const bw = x1 - x0 + 1, hidden = new Uint8Array(bw * (y1 - y0 + 1));
     const darken = (color, k) => { const c = PW.unpack(color); return PW.abgr(c[0] * k + 4, c[1] * k + 3, c[2] * k + 2); };
-    for (let y = y0; y <= y1; y += 1) {
+    const { CHUNK_SHIFT: CS, CHUNK_MASK: CM } = PW, CX = world.chunksX, backs = world.back;
+    for (let sy = 1; sy >= -1; sy -= 2) for (let ay = sy > 0 ? 0 : 1; ; ay += 1) {
+      const dy = ay * sy, y = icy + dy;
+      if (y < y0 || y > y1) break;
       // (only the cells of the row within reach: the disc's span of it, a cell to spare)
-      const half = Math.sqrt(Math.max(0, reach * reach - (y - cy) * (y - cy)));
-      for (let x = Math.max(x0, Math.floor(cx - half) - 1), xe = Math.min(x1, Math.ceil(cx + half) + 1); x <= xe; x += 1) {
-        const d = Math.hypot(x - cx, y - cy) / reach;
+      const half = Math.sqrt(Math.max(0, reach * reach - (y - cy) * (y - cy))) + 1;
+      for (let sx = 1; sx >= -1; sx -= 2) for (let ax = sx > 0 ? 0 : 1; ax <= half; ax += 1) {
+        const dx = ax * sx, x = icx + dx;
+        if (x < x0 || x > x1) break;
+        let between = 0;
+        const n = ax > ay ? ax : ay;
+        if (n > 1) {
+          // (the cell before it: a step back along its longer side, the other side in proportion)
+          const px = ax >= ay ? x - sx : icx + Math.round(dx * (n - 1) / n), py = ax >= ay ? icy + Math.round(dy * (n - 1) / n) : y - sy;
+          const id = mat[py * W + px] & ID_MASK;
+          between = hidden[(py - y0) * bw + (px - x0)] + (!open[id] && id !== M.WATER ? 1 : 0);
+          hidden[(y - y0) * bw + (x - x0)] = between > 3 ? 3 : between;
+        }
+        const d = Math.sqrt((x - cx) * (x - cx) + (y - cy) * (y - cy)) / reach;
         if (d >= 1) continue;
         // (a ragged edge: the soot thins out in patches)
         const near = 1 - d;
         if ((PW.hash2(x >> 1, y >> 1) & 255) / 255 > near * 2.4) continue;
         const i = y * W + x, id = mat[i] & ID_MASK;
         // (bare ground, and open air with no wall behind it: nothing there takes soot)
-        if (id === M.AIR ? !PW.getLayer(world, 'back', x, y) : PW.mat.terrain[id]) continue;
+        if (id === M.AIR) { const ch = backs[(y >> CS) * CX + (x >> CS)]; if (!ch || !ch[(y & CM) << CS | x & CM]) continue; }
+        else if (terrain[id]) continue;
         const owner = PW.getOwner(world, x, y);
         const building = owner > 0 && owner < 50000;
         const again = (PW.getFlags(world, x, y) & PW.FLAG.SCORCH) !== 0;
         const k = again ? 0.9 : 1 - 0.58 * Math.min(1, near * 1.7);
-        if (id !== M.AIR && (structural[id] || building) && !PW.mat.terrain[id]) {
-          if (between(x, y, 2) > 2) continue;
+        if (id !== M.AIR && (structural[id] || building)) {
+          if (between > 2) continue;
           const paint = PW.getLayer(world, 'paint', x, y) || palettes[id][((mat[i] >> 6) * 2 + (PW.hash2(x, y) & 1)) & 7];
           PW.setLayer(world, 'paint', x, y, darken(paint, k));
           PW.setFlag(world, x, y, PW.FLAG.SCORCH);
         } else if (id === M.AIR && building && PW.getLayer(world, 'back', x, y)) {
-          if (between(x, y, 0) > 0) continue;
+          if (between > 0) continue;
           PW.setLayer(world, 'back', x, y, darken(PW.getLayer(world, 'back', x, y), k));
           PW.setFlag(world, x, y, PW.FLAG.SCORCH);
         }
@@ -81,26 +91,29 @@
     // (how hot what it throws out of (x, y) is: as hot as its heat leaves the cell - see heatDisc
     // below - so what flies from the heart of it glows)
     const heatPeak = 380 + 420 * power, heatR = r * 1.15;
-    const hotAt = (x, y) => { const d = Math.hypot(x - cx, y - cy) / heatR; return d < 1 ? PW.AMBIENT + (heatPeak - PW.AMBIENT) * Math.pow(1 - d, 1.5) : PW.AMBIENT; };
+    const hotAt = (x, y) => { const d = Math.sqrt((x - cx) * (x - cx) + (y - cy) * (y - cy)) / heatR; return d < 1 ? PW.AMBIENT + (heatPeak - PW.AMBIENT) * (1 - d) * Math.sqrt(1 - d) : PW.AMBIENT; };
     const fling = (x, y, speed, up) => {
-      const dx = x - cx, dy = y - cy, d = Math.hypot(dx, dy) || 1;
+      const dx = x - cx, dy = y - cy, d = Math.sqrt(dx * dx + dy * dy) || 1;
       const a = speed * (0.55 + random() * 0.8);
       return [dx / d * a + (random() - 0.5) * speed * 0.5, dy / d * a * 0.6 - up * (0.6 + random() * 0.7)];
     };
     // What the blast has to pass through on its way to each cell takes strength out of it: rock
     // shields what lies behind it, so in a mountain a blast chips out a small rough hole where in
-    // soil it blows out a wide crater. (Worked outward ring by ring: each cell's shielding is
-    // that of the cell one step nearer the centre plus what that cell resists.)
+    // soil it blows out a wide crater. (Worked outward from the middle: each cell's shielding is
+    // that of the cell before it on the line back to the middle plus what that cell resists - a
+    // quarter at a time, row by row, as the scorch is: see scorchBuildings.)
     const bw = x1 - x0 + 1, bh = y1 - y0 + 1, shield = new Float32Array(bw * bh);
     const icx = Math.round(cx), icy = Math.round(cy), resist = PW.mat.blastResist;
-    for (let k = 1; k <= Math.max(bw, bh); k += 1) {
-      for (let dy = -k; dy <= k; dy += 1) {
-        const step = Math.abs(dy) === k ? 1 : 2 * k;
-        for (let dx = -k; dx <= k; dx += step) {
-          const x = icx + dx, y = icy + dy;
-          if (x < x0 || x > x1 || y < y0 || y > y1) continue;
-          const d = Math.hypot(dx, dy), px = Math.round(x - dx / d), py = Math.round(y - dy / d);
-          if (px < x0 || px > x1 || py < y0 || py > y1 || (px === icx && py === icy)) continue;
+    if (icx >= x0 && icx <= x1 && icy >= y0 && icy <= y1) {
+      for (let sy = 1; sy >= -1; sy -= 2) for (let ay = sy > 0 ? 0 : 1; ; ay += 1) {
+        const dy = ay * sy, y = icy + dy;
+        if (y < y0 || y > y1) break;
+        for (let sx = 1; sx >= -1; sx -= 2) for (let ax = sx > 0 ? 0 : 1; ; ax += 1) {
+          const dx = ax * sx, x = icx + dx;
+          if (x < x0 || x > x1) break;
+          const n = ax > ay ? ax : ay;
+          if (n < 2) continue;
+          const px = ax >= ay ? x - sx : icx + Math.round(dx * (n - 1) / n), py = ax >= ay ? icy + Math.round(dy * (n - 1) / n) : y - sy;
           shield[(y - y0) * bw + (x - x0)] = shield[(py - y0) * bw + (px - x0)] + resist[mat[py * W + px] & ID_MASK];
         }
       }
@@ -397,6 +410,7 @@
   const SMOKE_RATE = 2.36 + 5.31 * PW.mat.advection[M.SMOKE];   // k, per second
   const SMOKE_REACH = 4;         // it goes at most this many times as far as it would in the open
   const ROOMY = 0.7, CRAMPED = 0.45;   // (share of open-air room a ring of it had: see stepSmokeBursts)
+  const SMOKE_VISITS = 12000;    // cells a tick the bursts' rings are worked out over, at most
   function smokeBurst(world, cx, cy, r, power, random, open = 0) {
     const { mat, width: W, height: H } = world;
     // (the tongues: a few directions in which it carries further)
@@ -418,9 +432,31 @@
     if (start < 0) return;
     // (out in the open, its billows carry it: the gas goes only where it is shut in, and is not
     // looked for far beyond the billows' reach)
+    const dist = distances();
+    dist.set(start % W, (start / W) | 0, 0);
     (world.smokeBursts || (world.smokeBursts = [])).push({ cx, cy, reach, seed: PW.hash2(cx | 0, cy | 0),
       volume: Math.PI * radius * radius * 1.6 * (1 - 0.7 * open), used: 0, age: 0, maxD: radius * (open > 0.5 ? 1.6 : SMOKE_REACH),
-      billows: open >= 0.35, buckets: [[start]], dist: new Map([[start, 0]]), b: 0 });
+      billows: open >= 0.35, buckets: [[start]], dist, b: 0 });
+  }
+  // (a burst's distances out along the ways open to it, cell by cell: kept in square pages of the
+  // world, made as it reaches them - it can go hundreds of cells along a tunnel - and read with
+  // the page last used at hand, as its neighbours nearly always are)
+  const PAGE = 5, PAGE_MASK = (1 << PAGE) - 1;
+  function distances() {
+    const pages = new Map();
+    let lastKey = -1, last = null;
+    const pageOf = (x, y, make) => {
+      const key = (y >> PAGE) * 65536 + (x >> PAGE);
+      if (key === lastKey) return last;
+      let p = pages.get(key);
+      if (!p) { if (!make) return null; p = new Float32Array(1 << PAGE * 2).fill(-1); pages.set(key, p); }
+      lastKey = key; last = p;
+      return p;
+    };
+    return {
+      get(x, y) { const p = pageOf(x, y, false); return p ? p[(y & PAGE_MASK) << PAGE | x & PAGE_MASK] : -1; },
+      set(x, y, d) { pageOf(x, y, true)[(y & PAGE_MASK) << PAGE | x & PAGE_MASK] = d; },
+    };
   }
   // Let out as much of each blast's smoke as is due by now: the next rings of open cells out from
   // it (a ring: the cells the same distance out along the ways open to it), each laid when it is
@@ -431,26 +467,32 @@
     if (!list || !list.length) return;
     const { mat, width: W, height: H } = world;
     const OPEN = PW.mat.open;
+    // (the rings are worked out SMOKE_VISITS cells a tick at most, all bursts together: out in the
+    // open, where the billows carry the smoke and no gas is laid, the rings are wide and none of
+    // them uses any of it up - the search runs on to its reach - so a burst there spreads its
+    // search over the moments after the blast, as the billows go out)
+    let visits = SMOKE_VISITS;
     for (let k = list.length - 1; k >= 0; k -= 1) {
       const s = list[k];
       s.age += dt;
       const due = s.volume * Math.min(1, (1 - Math.exp(-SMOKE_RATE * s.age)) * 1.04);
-      while (s.used < due && s.b < s.buckets.length && s.b <= s.maxD) {
+      while (s.used < due && s.b < s.buckets.length && s.b <= s.maxD && visits > 0) {
         const cells = s.buckets[s.b] || [];
         s.buckets[s.b] = null;
+        visits -= cells.length;
         const ring = [];
         for (let q = 0; q < cells.length; q += 1) {
           const i = cells[q];
           if (!OPEN[mat[i] & ID_MASK]) continue;
           ring.push(i);
-          const x = i % W, y = (i / W) | 0, d = s.dist.get(i);
+          const x = i % W, y = (i / W) | 0, d = s.dist.get(x, y);
           for (let dy = -1; dy <= 1; dy += 1) for (let dx = -1; dx <= 1; dx += 1) {
             if (!dx && !dy) continue;
             const nx = x + dx, ny = y + dy, j = ny * W + nx;
-            if (nx < 1 || ny < 1 || nx >= W - 1 || ny >= H - 1 || s.dist.has(j) || !OPEN[mat[j] & ID_MASK]) continue;
+            if (nx < 1 || ny < 1 || nx >= W - 1 || ny >= H - 1 || !OPEN[mat[j] & ID_MASK] || s.dist.get(nx, ny) >= 0) continue;
             const a = Math.atan2(ny - s.cy, nx - s.cx);
             const nd = d + (dx && dy ? 1.414 : 1) / s.reach[((a / (Math.PI * 2) * 256) | 0) & 255];
-            s.dist.set(j, nd);
+            s.dist.set(nx, ny, nd);
             const nb = Math.floor(nd);
             (s.buckets[nb] || (s.buckets[nb] = [])).push(j);
           }

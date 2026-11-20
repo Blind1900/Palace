@@ -863,7 +863,7 @@
   Object.assign(PW, {
     abgr, unpack, hash2, hash3, createRandom, createNoise1D, createNoise2D,
     createWorld, chunkIndex, inside, markDirty, markWaterDirty, wake, wakeCell, wakeArea, clearSimRect, stir, stirred,
-    get, id, set, swapCells, sinkColumn, touchGroundTop, refreshGroundTop, rebuildGroundTop,
+    get, id, set, swapCells, sinkColumn, touchGroundTop, refreshGroundTop, rebuildGroundTop, shapeChanged,
     getLayer, setLayer, layerCell, clearPaintAt, isSolid, isOpen, groundBelow, supportBelow, traceShot,
     getOwner, setOwner, growing, isGrowing, getFlags, setFlag, AMBIENT, heatAt, setHeat, addHeat, heatChunk, clearHeatBox,
     GLOW_FROM, GLOW_FULL, glowAt, glowing,

@@ -37,12 +37,19 @@
   // their gap by twice the flux, as with equal capacities, so the exchange stays as stable.)
   const SHARE = new Float32Array(64 * 64);
   for (let a = 0; a < 64; a += 1) for (let b = 0; b < 64; b += 1) SHARE[a * 64 + b] = 2 * CAP[b] / (CAP[a] + CAP[b]);
+  // (a cell counts as warm while it holds more than COLD degrees' worth of rock's heat - but never
+  // longer than COLD degrees above the air: see heatTick)
+  const HOLDS = CAP.map((c) => Math.min(1, c));
   // (the metals that melt, at MELT °C: steel beams and plate, bridge steel, metal cover, a pipe's
   // casing - mended like any break in it. Never a core: the god's metal does not melt)
   const MELT = 1350;
   const MELTS = new Uint8Array(64);
   for (const id of [M.STEEL, M.BRIDGE, M.COVER_METAL, M.PIPE]) if (id !== undefined) MELTS[id] = 1;
   const quench = (a, b) => (a === M.WATER) !== (b === M.WATER) && !open[a === M.WATER ? b : a];
+  // (KK[a * 64 + b]: the share of their difference a cell of a and one of b trade each heat tick -
+  // the lesser conductivity, or QUENCH)
+  const KK = new Float32Array(64 * 64);
+  for (let a = 0; a < 64; a += 1) for (let b = 0; b < 64; b += 1) KK[a * 64 + b] = quench(a, b) ? QUENCH : Math.min(conduct[a], conduct[b]);
   const RISE = 0.3;                 // share of hot air's excess carried up per heat tick
   const SMOKE_CHANCE = 0.3;         // per burning cell per heat tick
 
@@ -51,7 +58,7 @@
     const burning = new Map();      // flat index -> { fuel (s), deco (bool), wood (bool), owner }
     const charredAt = new Map();    // flat index -> tick a plant's wood there was charred
     const CHAR_COOL = 60 * 60;      // ticks before charcoal can catch again (a later fire, not this one)
-    const rects = new Map();        // chunk -> [x0, y0, x1, y1] local rectangle holding heat
+    const rects = new Map();        // chunk -> { warm, next: its warm tiles; box: [x0, y0, x1, y1] round them } (see heatTick)
     const stats = { ms: 0, chunks: 0, burning: 0, ignited: 0, burnedOut: 0, boiled: 0 };
     let tick = 0;
     world.fireByOwner = new Map();  // building / infrastructure id -> burning cells (construction delays)
@@ -256,34 +263,71 @@
     // ---- Heat transfer -----------------------------------------------------------------------------
     // Exchange between cells a and b (flat indices, temperatures in their chunk arrays).
     function chunkOf(x, y) { return (y >> CHUNK_SHIFT) * chunksX + (x >> CHUNK_SHIFT); }
-    function heatTick() {
+    // (each chunk is worked every EVERY ticks, the chunks taking turns - a quarter of them a tick,
+    // neighbours on different ticks - so a blast's heat, chunks of it at once, is not all worked
+    // in the one tick)
+    const turnOf = (c) => ((c % chunksX) + (((c / chunksX) | 0) << 1)) % EVERY;
+    // (what of a chunk is worked: its warm tiles, 8 x 8 cells - those holding a warm cell when it
+    // was last worked, or set since - and the tiles round them, as heat goes a cell a pass either
+    // way. A blast's hot rubble lies scattered over chunks round it for many seconds: only the
+    // tiles it lies in are worked, not all the chunk between)
+    const TS = 3, TN = CHUNK >> TS, TILES = TN * TN;
+    const work = new Uint8Array(TILES), spans = new Int32Array(TILES * 2), spanAt = new Int32Array(TN + 1);
+    function heatTick(turn) {
       const list = world.heatList;
       const keep = [];
       for (let n = 0; n < list.length; n += 1) {
         const c = list[n];
+        if (turnOf(c) !== turn) { keep.push(c); continue; }
         const T = world.heat[c];
         if (!T) { world.heatActive[c] = 0; rects.delete(c); PW.clearHeatBox(world, c); continue; }
         const cx = (c % chunksX) << CHUNK_SHIFT, cy = ((c / chunksX) | 0) << CHUNK_SHIFT;
-        // (the warm cells it knew of, and those set since - where heat was added, or carried in
-        // by a moving cell; a chunk just warmed holds only those)
+        const xEnd = Math.min(CHUNK, W - cx), yEnd = Math.min(CHUNK, H - cy);
+        // (the warm tiles it knew of, and those of the cells set since - where heat was added, or
+        // carried in by a moving cell; a chunk just warmed holds only those)
         const B = world.heatBox, k4 = c << 2;
-        let r = rects.get(c);
-        if (!r) { r = [B[k4], B[k4 + 1], B[k4 + 2], B[k4 + 3]]; rects.set(c, r); }
-        else if (B[k4] <= B[k4 + 2]) {
-          if (B[k4] < r[0]) r[0] = B[k4];
-          if (B[k4 + 1] < r[1]) r[1] = B[k4 + 1];
-          if (B[k4 + 2] > r[2]) r[2] = B[k4 + 2];
-          if (B[k4 + 3] > r[3]) r[3] = B[k4 + 3];
+        let st = rects.get(c);
+        if (!st) { st = { warm: new Uint8Array(TILES), next: new Uint8Array(TILES) }; rects.set(c, st); }
+        const warm = st.warm, next = st.next;
+        if (B[k4] <= B[k4 + 2]) {
+          for (let ty = B[k4 + 1] >> TS; ty <= B[k4 + 3] >> TS; ty += 1) for (let tx = B[k4] >> TS; tx <= B[k4 + 2] >> TS; tx += 1) warm[ty * TN + tx] = 1;
         }
         PW.clearHeatBox(world, c);
-        // Grow by one cell so heat can spread, then work the rectangle.
-        const lx0 = Math.max(0, r[0] - 1), ly0 = Math.max(0, r[1] - 1), lx1 = Math.min(CHUNK - 1, r[2] + 1), ly1 = Math.min(CHUNK - 1, r[3] + 1);
-        let nx0 = CHUNK, ny0 = CHUNK, nx1 = -1, ny1 = -1;
-        for (let ly = ly0; ly <= ly1; ly += 1) {
+        work.fill(0);
+        for (let t = 0; t < TILES; t += 1) {
+          if (!warm[t]) continue;
+          const tx = t % TN, ty = (t / TN) | 0;
+          for (let v = Math.max(0, ty - 1); v <= Math.min(TN - 1, ty + 1); v += 1) for (let u = Math.max(0, tx - 1); u <= Math.min(TN - 1, tx + 1); u += 1) work[v * TN + u] = 1;
+        }
+        // (the runs of worked tiles along each row of them, as cells [from, to): row ty's are
+        // spans[spanAt[ty]] up to spans[spanAt[ty + 1]])
+        let ns = 0;
+        for (let ty = 0; ty < TN; ty += 1) {
+          spanAt[ty] = ns;
+          for (let tx = 0; tx < TN; tx += 1) {
+            if (!work[ty * TN + tx]) continue;
+            let te = tx;
+            while (te + 1 < TN && work[ty * TN + te + 1]) te += 1;
+            if (tx << TS < xEnd) { spans[ns++] = tx << TS; spans[ns++] = Math.min(xEnd, (te + 1) << TS); }
+            tx = te;
+          }
+        }
+        spanAt[TN] = ns;
+        next.fill(0);
+        let anyWarm = false;
+        for (let ly = 0; ly < yEnd; ly += 1) {
+          const s0 = spanAt[ly >> TS], s1 = spanAt[(ly >> TS) + 1];
+          if (s0 === s1) continue;
           const y = cy + ly;
-          for (let lx = lx0; lx <= lx1; lx += 1) {
+          for (let s = s0; s < s1; s += 2) for (let lx = spans[s], lxEnd = spans[s + 1]; lx < lxEnd; lx += 1) {
             const x = cx + lx, li = ly << CHUNK_SHIFT | lx, i = y * W + x;
             let t = T[li];
+            // (it and the two it trades with, right and below, all at the air's heat near enough:
+            // nothing to work - as is most of a chunk a blast warmed, round what is still hot)
+            if (lx < CHUNK - 1 && ly < CHUNK - 1) {
+              const a = t - AMBIENT, b = T[li + 1] - AMBIENT, d = T[li + CHUNK] - AMBIENT;
+              if (a <= COLD && a >= -COLD && b <= COLD && b >= -COLD && d <= COLD && d >= -COLD) continue;
+            }
             const id = mat[i] & ID_MASK;
             const k = conduct[id];
             // Right and down neighbours (inside this chunk directly, across edges via the core).
@@ -292,7 +336,7 @@
             // water takes a great deal to warm - and the pair never overshoot each other)
             const row = id << 6;
             if (x + 1 < W) {
-              const j1 = mat[i + 1] & ID_MASK, kj = conduct[j1], kk = quench(id, j1) ? QUENCH : k < kj ? k : kj;
+              const j1 = mat[i + 1] & ID_MASK, kk = KK[row | j1];
               const tj = lx < CHUNK - 1 ? T[li + 1] : PW.heatAt(world, x + 1, y);
               const flux = kk * (t - tj);
               if (flux > 0.02 || flux < -0.02) {
@@ -302,7 +346,7 @@
               }
             }
             if (y + 1 < H) {
-              const j1 = mat[i + W] & ID_MASK, kj = conduct[j1], kk = quench(id, j1) ? QUENCH : k < kj ? k : kj;
+              const j1 = mat[i + W] & ID_MASK, kk = KK[row | j1];
               const tj = ly < CHUNK - 1 ? T[li + CHUNK] : PW.heatAt(world, x, y + 1);
               const flux = kk * (t - tj);
               if (flux > 0.02 || flux < -0.02) {
@@ -347,20 +391,31 @@
               } else if (id === M.WATER) t -= excess * LOSS_WATER;
               else t -= excess * LOSS_SOLID;
               T[li] = t;
-              excess = t - AMBIENT;
+              // (what keeps the chunk worked is the heat a cell holds: air a few degrees warm
+              // holds less than rock a degree warm, and is let go with it - the last breath of a
+              // fireball's heat, risen and spread over chunks of sky, is not worked for seconds)
+              excess = (t - AMBIENT) * HOLDS[id];
               if (excess > COLD || excess < -COLD) {
-                if (lx < nx0) nx0 = lx; if (lx > nx1) nx1 = lx; if (ly < ny0) ny0 = ly; if (ly > ny1) ny1 = ly;
+                next[(ly >> TS) * TN + (lx >> TS)] = 1; anyWarm = true;
                 if (t >= BOIL) effects(i, x, y, id, t);
               }
             } else T[li] = t;
           }
         }
-        if (nx1 < 0) {
+        if (!anyWarm) {
           // Cold again: drop the chunk's array.
           world.heat[c] = null; world.heatActive[c] = 0; rects.delete(c);
           continue;
         }
-        r[0] = nx0; r[1] = ny0; r[2] = nx1; r[3] = ny1;
+        st.warm = next; st.next = warm;
+        // (and the box round its warm tiles, for its glow: see glowImage)
+        let bx0 = TN, by0 = TN, bx1 = -1, by1 = -1;
+        for (let t = 0; t < TILES; t += 1) {
+          if (!next[t]) continue;
+          const tx = t % TN, ty = (t / TN) | 0;
+          if (tx < bx0) bx0 = tx; if (tx > bx1) bx1 = tx; if (ty < by0) by0 = ty; if (ty > by1) by1 = ty;
+        }
+        st.box = [bx0 << TS, by0 << TS, ((bx1 + 1) << TS) - 1, ((by1 + 1) << TS) - 1];
         keep.push(c);
       }
       // Chunks that gained heat during the pass were appended to the live list.
@@ -406,11 +461,12 @@
     }
 
     function step(dtTicks = 1) {
-      tick += dtTicks;
-      if (tick % EVERY !== 0) return stats;
       const started = performance.now();
-      heatTick();
-      burnTick();
+      for (let k = 0; k < dtTicks; k += 1) {
+        tick += 1;
+        heatTick(tick % EVERY);
+        if (tick % EVERY === 0) burnTick();
+      }
       stats.ms = performance.now() - started;
       return stats;
     }
@@ -459,7 +515,7 @@
     const GLOW_FROM = PW.GLOW_FROM, glowAt = PW.glowAt, phaseOf = PW.mat.phase;
     const glowImages = new Map();   // chunk -> { canvas, ctx, made (heat tick), w, h, lx, ly, any }
     function glowImage(c, T) {
-      const r = rects.get(c);
+      const r = rects.has(c) ? rects.get(c).box : null;
       let e = glowImages.get(c);
       const made = Math.floor(tick / EVERY);
       if (e && e.made === made) return e;

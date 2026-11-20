@@ -199,10 +199,16 @@
       if (soon) b.floodAt = tick;
       due.set(id, soon ? Math.min(due.get(id) ?? Infinity, tick + 2) : Math.max(tick + 2, (last.get(id) ?? -1e9) + REPEAT));
     }
+    // (what is found to come away is lifted out of the world as a falling piece on the tick after:
+    // for a tower the search and the lifting are each tens of thousands of cells, and are not done
+    // in the one tick - nor is anything else looked at in the tick it is lifted)
+    const spawnQueue = [];
+    const spawnLater = (spec) => { spawnQueue.push(spec); };
     let sweepAt = 0, blueprintAt = 0;
     function step(budgetMs = 1.5) {
       tick += 1;
       const t0 = performance.now();
+      while (spawnQueue.length) fragments.spawn(spawnQueue.shift());
       // (when each building was last being built - see PW.isGrowing - and so a site: see analyse)
       // (it becomes one once it has been judged as it stands, and stands: what damage started the
       // work is judged first)
@@ -222,10 +228,11 @@
       }
       for (const [id, at] of due) {
         if (at > tick) continue;
+        // (the time has gone - on pieces lifted out, or the last building looked at)
+        if (!PW.DETERMINISTIC && performance.now() - t0 > budgetMs) break;
         due.delete(id);
         last.set(id, tick);
         analyse(building(id));
-        if (!PW.DETERMINISTIC && performance.now() - t0 > budgetMs) break;
       }
       // (with time to spare, one building a tick has its blueprint worked out ahead of the first
       // blow to it, so the analysis right after a blast does not pay for that too - it is the same
@@ -349,7 +356,7 @@
           if (part.length < CRUMBLE_ONLY) { crumble(part); stats.crumbled += part.length; continue; }
           // A big part drops into the footprint under it, grinding down; a small one tumbles.
           const big = part.length >= 300;
-          fragments.spawn({ cells: part.concat(fittingsOn(S, part)), owner: b.id, drop: big, floor: b.ground, base: b.ground,
+          spawnLater({ cells: part.concat(fittingsOn(S, part)), owner: b.id, drop: big, floor: b.ground, base: b.ground,
             omega: big ? 0 : ((PW.hash2(x, y) % 7) - 3) * 0.05 });
           if (big) (b.failures || (b.failures = [])).push('drop');
           stats.detached += 1;
@@ -555,13 +562,13 @@
       if (piece.length < CRUMBLE_ONLY) { crumble(piece.concat(band)); fail.cells = piece.length + band.length; return; }
       crumble(band);
       for (const i of band) if ((PW.hash2(i, 3) & 7) === 0) fragments.puff(i % W, ((i / W) | 0) - 1, 2, 4, 2);
-      if (fail.reason === 'pancake') fragments.spawn({ cells: piece, owner: b.id, drop: true, floor: yf, base: b.ground, dir: fail.dir });
+      if (fail.reason === 'pancake') spawnLater({ cells: piece, owner: b.id, drop: true, floor: yf, base: b.ground, dir: fail.dir });
       else if (fail.reason === 'swept') {
         // (shoved off the way the water pushes: the push over what the row held, over its weight)
         const vx = fail.dir * Math.min(SWEEP_MAX, PW.GRAVITY * (fail.push - fail.holds) / (piece.length * FRAME_WEIGHT) * SWEEP_TIME);
-        fragments.spawn({ cells: piece, owner: b.id, floor: yf, base: b.ground, dir: fail.dir, vx });
+        spawnLater({ cells: piece, owner: b.id, floor: yf, base: b.ground, dir: fail.dir, vx });
         stats.swept = (stats.swept || 0) + 1;
-      } else fragments.spawn({ cells: piece, owner: b.id, floor: yf, base: b.ground, dir: fail.dir });
+      } else spawnLater({ cells: piece, owner: b.id, floor: yf, base: b.ground, dir: fail.dir });
       fail.cells = piece.length + band.length;
       b.collapses = (b.collapses || 0) + 1;
       (b.failures || (b.failures = [])).push(fail.reason);

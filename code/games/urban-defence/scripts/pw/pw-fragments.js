@@ -102,13 +102,19 @@
         let k = 0;
         // (the layers are read and cleared straight from their chunks: a whole building can be
         // tens of thousands of cells)
-        const { CHUNK_SHIFT, CHUNK_MASK } = PW;
-        const touched = new Set();
-        let lastChunk = -1;
-        for (const i of spec.cells) {
-          const x = i % W, y = (i / W) | 0;
-          const c = (y >> CHUNK_SHIFT) * world.chunksX + (x >> CHUNK_SHIFT), l = (y & CHUNK_MASK) << CHUNK_SHIFT | (x & CHUNK_MASK);
-          const backs = world.back[c], decos = world.deco[c], paints = world.paint[c], owners = world.owner[c];
+        // (its ground and frame are cleared to air straight in the grid too, and what has to be
+        // kept in step with that - the sky line, the light, the drawing - is done once a column
+        // or a chunk, after: what PW.set does a cell)
+        const { CHUNK_SHIFT, CHUNK_MASK } = PW, groundTop = world.groundTop, chunksX = world.chunksX, cells = spec.cells;
+        const BACK = world.back, DECO = world.deco, PAINT = world.paint, OWNER = world.owner, terrain = PW.mat.terrain, POWDER = PW.PHASE.POWDER;
+        const DX = data.x, DY = data.y, DC = data.color, DB = data.byte, DS = data.solid;
+        const touched = new Set(), shaded = new Set(), skyline = [];
+        // (the chunk's layers, kept while the cells run on in the same chunk)
+        let lastChunk = -1, lastShaded = -1, backs = null, decos = null, paints = null, owners = null;
+        for (let q = 0; q < n; q += 1) {
+          const i = cells[q], y = (i / W) | 0, x = i - y * W;
+          const c = (y >> CHUNK_SHIFT) * chunksX + (x >> CHUNK_SHIFT), l = (y & CHUNK_MASK) << CHUNK_SHIFT | (x & CHUNK_MASK);
+          if (c !== lastChunk) { backs = BACK[c]; decos = DECO[c]; paints = PAINT[c]; owners = OWNER[c]; touched.add(c); lastChunk = c; }
           const m = mat[i], id = m & ID_MASK;
           // (a core is held where it is by its own field, as the bedrock is by the earth: no piece
           // ever carries it off - what falls breaks away around it)
@@ -117,27 +123,34 @@
           // A building's back wall is part of its frame: it has weight and it strikes what it
           // falls on. But it is a thin panel: broken up, it leaves far less rubble than the
           // pillars, floors and outer walls (THIN, see wallBits).
-          const heavy = phase[id] >= PW.PHASE.POWDER;
+          const heavy = phase[id] >= POWDER;
           const wall = !heavy && back !== 0 && spec.owner && owners && owners[l] === spec.owner;
           const solid = heavy || wall;
           // (ground keeps the look it had in the world: its strata, its depth, its grain)
-          const paint = heavy ? ((paints && paints[l]) || (world.colorAt && PW.mat.terrain[id] ? world.colorAt(x, y) : palettes[id][(m >> 6) * 2 + (PW.hash2(x, y) & 1)])) : 0;
+          const paint = heavy ? ((paints && paints[l]) || (world.colorAt && terrain[id] ? world.colorAt(x, y) : palettes[id][(m >> 6) * 2 + (PW.hash2(x, y) & 1)])) : 0;
           const color = deco || paint || back;
           if (!color && !solid) continue;
-          data.x[k] = x; data.y[k] = y; data.color[k] = color; data.byte[k] = wall ? M.DEBRIS : solid ? m : 0; data.solid[k] = heavy ? 1 : wall ? THIN : 0;
+          DX[k] = x; DY[k] = y; DC[k] = color; DB[k] = wall ? M.DEBRIS : solid ? m : 0; DS[k] = heavy ? 1 : wall ? THIN : 0;
           k += 1;
-          if (heavy) PW.set(world, x, y, M.AIR, { quiet: true });
+          if (heavy) {
+            mat[i] = M.AIR;
+            if (paints) paints[l] = 0;
+            if (groundTop[x] === y) skyline.push(x);
+            if (c !== lastShaded) { shaded.add(c); lastShaded = c; }
+          }
           if (backs) backs[l] = 0;
           if (decos) decos[l] = 0;
           if (owners) owners[l] = 0;
-          if (c !== lastChunk) { touched.add(c); lastChunk = c; }
         }
         // Re-raster every chunk the piece left (both layers, its whole area).
         for (const c of touched) {
           const cx = (c % world.chunksX) << CHUNK_SHIFT, cy = ((c / world.chunksX) | 0) << CHUNK_SHIFT, e = (1 << CHUNK_SHIFT) - 1;
           PW.markDirty(world, cx, cy, PW.DIRTY_BASE | PW.DIRTY_DECO);
           PW.markDirty(world, cx + e, cy + e, PW.DIRTY_BASE | PW.DIRTY_DECO);
+          if (shaded.has(c)) PW.shapeChanged(world, cx, cy);
         }
+        // (a column whose top it took: its sky line goes down to what is left under it)
+        for (const x of skyline) PW.touchGroundTop(world, x, groundTop[x], M.AIR);
         for (const key of ['x', 'y', 'color', 'byte', 'solid', 'girth']) if (data[key]) data[key] = data[key].slice(0, k);
       }
       const n = data.x.length, X = data.x, Y = data.y, SOL = data.solid;
@@ -235,7 +248,10 @@
         mode: spec.flex ? 'flex' : spec.pivot ? 'hinge' : spec.drop ? 'drop' : 'fly', dir: spec.dir || 1, age: 0, flora: !!spec.flora,
         spring: spec.flex ? spec.flex.spring : 0, damp: spec.flex ? spec.flex.damp : 0,
         yf: spec.pivot ? spec.pivot.y : spec.floor || 0, crushedRows: 0, base: spec.base ?? H, h0: spec.h0 || gh, still: 0, touched: -1, sunk: spec.sunk || 0,
-        hollow: heavy + thin ? thin / (heavy + thin) : 0, shapeMass: mass, partsDue: partsLater };
+        hollow: heavy + thin ? thin / (heavy + thin) : 0, shapeMass: mass, partsDue: partsLater,
+        // (a great piece of a building just lifted out of the world starts to move on the tick
+        // after: the lifting is the work of a tick in itself)
+        waits: !spec.data && !spec.flora && N > PARTS_NOW };
       if (parent) {
         const [c, s] = cosSin(parent);
         [piece.px, piece.py] = toWorld(parent, c, s, ax - parent.ox0, ay - parent.oy0);
@@ -1044,6 +1060,7 @@
       limbDraws = 0;
       for (let k = list.length - 1; k >= 0; k -= 1) {
         const p = list[k];
+        if (p.waits) { p.waits = false; continue; }
         p.age += dt;
         const speed = motion(p);
         const sub = Math.min(p.mass > 2000 ? 12 : 6, Math.max(1, Math.ceil(speed * dt)));
@@ -1765,11 +1782,20 @@
       // (a plant pressed into what it struck - slid or turned in over it - is put back out of it the
       // way that faces, as deep as its wood that touches lies in it on the whole, a cell a sub-step
       // at most: it lies on the ground, never sinks on into it)
+      // (or the way it came, if that is the shorter way out: the face of what it touches, turned
+      // wrong over a hollow under a pond's edge, never presses it on into the ground)
       if (p.flora) {
-        let deep = 0;
+        let deep = 0, ox = nx, oy = ny;
         for (let q = 0; q < wentN; q += 1) deep += depthAt(at[q * 2], at[q * 2 + 1], nx, ny);
         deep /= wentN;
-        if (deep > REST_DEPTH) { const d = Math.min(1, deep - REST_DEPTH); p.px += nx * d; p.py += ny * d; }
+        const v = Math.hypot(vx, vy);
+        if (deep > REST_DEPTH && v > 0) {
+          let back = 0;
+          for (let q = 0; q < wentN; q += 1) back += depthAt(at[q * 2], at[q * 2 + 1], -vx / v, -vy / v);
+          back /= wentN;
+          if (back < deep) { deep = back; ox = -vx / v; oy = -vy / v; }
+        }
+        if (deep > REST_DEPTH) { const d = Math.min(1, deep - REST_DEPTH); p.px += ox * d; p.py += oy * d; }
       }
       if (hit <= 0) return false;            // (touching it, but already moving off it)
       // (it does not sink into what it struck: it is put back out, the way that faces, as far as

@@ -197,25 +197,40 @@
       for (const g of groups.values()) {
         const kind = kindOf(pend.byte[g[0]]), rule = BREAK[kind];
         const holds = g.length > 1 && (PW.hash3(g.tx, g.ty, kind + 17) & 1023) < rule.chunky * 1024;
-        // (cells of the tile that touch each other are one chunk)
-        const at = new Map();
-        for (const k of g) at.set(Math.floor(pend.y[k]) * 65536 + Math.floor(pend.x[k]), k);
-        const done = new Set();
+        // (cells of the tile that touch each other are one chunk: looked up in a small grid over
+        // the tile, stamped for this tile alone - a blast lets go of tens of thousands at once)
+        stamp += 1;
+        let gx0 = Infinity, gy0 = Infinity, gx1 = -Infinity, gy1 = -Infinity;
+        if (holds) for (const k of g) { const x = Math.floor(pend.x[k]), y = Math.floor(pend.y[k]); if (x < gx0) gx0 = x; if (x > gx1) gx1 = x; if (y < gy0) gy0 = y; if (y > gy1) gy1 = y; }
+        const small = gx1 - gx0 < TILE_GRID - 2 && gy1 - gy0 < TILE_GRID - 2;
+        const at = holds && !small ? new Map() : null;
+        if (holds) for (const k of g) {
+          const x = Math.floor(pend.x[k]), y = Math.floor(pend.y[k]);
+          if (at) { at.set(y * 65536 + x, k); continue; }
+          const c = (y - gy0 + 1) * TILE_GRID + x - gx0 + 1;
+          tileAt[c] = k; tileStamp[c] = stamp;
+        }
         for (const k of g) {
-          if (done.has(k)) continue;
+          if (doneStamp[k] === stamp) continue;
           const part = [k];
-          done.add(k);
+          doneStamp[k] = stamp;
           if (holds) for (let q = 0; q < part.length && part.length < CHUNK_CELLS; q += 1) {
             const cx = Math.floor(pend.x[part[q]]), cy = Math.floor(pend.y[part[q]]);
             for (let dy = -1; dy <= 1; dy += 1) for (let dx = -1; dx <= 1; dx += 1) {
-              const j = at.get((cy + dy) * 65536 + cx + dx);
-              if (j !== undefined && !done.has(j) && part.length < CHUNK_CELLS) { done.add(j); part.push(j); }
+              let j;
+              if (at) j = at.get((cy + dy) * 65536 + cx + dx);
+              else { const c = (cy + dy - gy0 + 1) * TILE_GRID + cx + dx - gx0 + 1; j = tileStamp[c] === stamp ? tileAt[c] : undefined; }
+              if (j !== undefined && doneStamp[j] !== stamp && part.length < CHUNK_CELLS) { doneStamp[j] = stamp; part.push(j); }
             }
           }
           launch(part, kind, rule);
         }
       }
     }
+    const TILE_GRID = 32;
+    const tileAt = new Int32Array(TILE_GRID * TILE_GRID), tileStamp = new Uint32Array(TILE_GRID * TILE_GRID), doneStamp = new Uint32Array(PEND_MAX);
+    const lumpAt = new Uint32Array(64 * 64);
+    let stamp = 0, lumpStamp = 0;
     // Send the cells `part` (pending entries) off as one chunk - or, a single cell, as a grain; some
     // go as dust, some as shrapnel thrown off faster.
     function launch(part, kind, rule) {
@@ -252,22 +267,26 @@
       if (i < 0) return;
       const c = freeChunks.pop(), base = c * CHUNK_CELLS;
       chunkOf[i] = c; chunkN[c] = m;
-      const cells = new Set();
+      // (its cells by place, stamped in a small grid round its anchor - (dx, dy) to (dx + 32,
+      // dy + 63): a chunk is never wider than its tile)
+      lumpStamp += 1;
       for (let q = 0; q < m; q += 1) {
         const k = keep[q];
         chunkDx[base + q] = Math.max(-127, Math.min(127, Math.floor(pend.x[k]) - ax));
         chunkDy[base + q] = Math.max(-127, Math.floor(pend.y[k]) - bottom);
         chunkByte[base + q] = pend.byte[k];
         chunkColor[base + q] = pend.rgba[k] || paletteColor(pend.byte[k], pend.x[k], pend.y[k]);
-        cells.add(chunkDy[base + q] * 256 + chunkDx[base + q]);
+        const dx = chunkDx[base + q], dy = chunkDy[base + q];
+        if (dx > -31 && dx < 31 && dy > -63) lumpAt[(dy + 63) * 64 + dx + 32] = lumpStamp;
       }
+      const has = (dx, dy) => dx > -32 && dx < 32 && dy > -64 && dy <= 0 && lumpAt[(dy + 63) * 64 + dx + 32] === lumpStamp;
       // (a lump of something: lit along its top and left edges, in shadow along its bottom and
       // right - it reads as a solid lump, in the air and where it comes to rest)
       if (m >= 4) {
         for (let q = 0; q < m; q += 1) {
           const dx = chunkDx[base + q], dy = chunkDy[base + q];
-          const top = !cells.has((dy - 1) * 256 + dx), lft = !cells.has(dy * 256 + dx - 1);
-          const bot = !cells.has((dy + 1) * 256 + dx), rgt = !cells.has(dy * 256 + dx + 1);
+          const top = !has(dx, dy - 1), lft = !has(dx - 1, dy);
+          const bot = !has(dx, dy + 1), rgt = !has(dx + 1, dy);
           const k = top ? LUMP_LIT : bot ? LUMP_SHADE : lft ? (LUMP_LIT + 1) / 2 : rgt ? (LUMP_SHADE + 1) / 2 : 1;
           if (k !== 1) chunkColor[base + q] = shade(chunkColor[base + q], k);
         }
@@ -500,11 +519,15 @@
       if (id === M.PIPE) return HOLLOW !== 0 && (PW.getFlags(world, x | 0, y | 0) & HOLLOW) !== 0;
       return OPEN[id] === 1 && id !== M.WATER;
     };
+    // (what is left of its own speed after a tick: thrown, at first, and then - the same for every
+    // one, worked out once a step)
+    let brakeThrown = 1, brakeAfter = 1, brakeDt = 0;
     function stepGas(i, fl, dt) {
       const fire = (fl & F.FIRE) !== 0;
       const x = px[i], y = py[i];
       const wind = world.air && world.air.wind ? world.air.wind(x | 0, y | 0) : NO_WIND;
-      const brake = Math.exp(-(age[i] < 0.4 ? GAS_BRAKE : GAS_LOSS) * dt);
+      if (dt !== brakeDt) { brakeDt = dt; brakeThrown = Math.exp(-GAS_BRAKE * dt); brakeAfter = Math.exp(-GAS_LOSS * dt); }
+      const brake = age[i] < 0.4 ? brakeThrown : brakeAfter;
       // (a flame bursting out spreads first and rises as it slows: the heat lifts it once it has
       // stopped being thrown)
       const rise = fire ? FIRE_RISE * Math.min(1, age[i] * 2.5) * (0.4 + life[i] / (age[i] + life[i])) : SMOKE_RISE;
@@ -515,9 +538,10 @@
       const dx = vx[i] * dt, dy = vy[i] * dt;
       const steps = Math.max(1, Math.ceil(Math.max(Math.abs(dx), Math.abs(dy))));
       let cx = x, cy = y, sx = dx / steps, sy = dy / steps;
+      // (a step that stays in the cell it is in needs no looking at)
       for (let s = 0; s < steps; s += 1) {
-        if (sx) { if (gasOpen(cx + sx, cy)) cx += sx; else { vx[i] *= -0.15; sx = 0; } }
-        if (sy) { if (gasOpen(cx, cy + sy)) cy += sy; else { vy[i] *= -0.15; sy = 0; } }
+        if (sx) { const nx = cx + sx; if ((nx | 0) === (cx | 0) || gasOpen(nx, cy)) cx = nx; else { vx[i] *= -0.15; sx = 0; } }
+        if (sy) { const ny = cy + sy; if ((ny | 0) === (cy | 0) || gasOpen(cx, ny)) cy = ny; else { vy[i] *= -0.15; sy = 0; } }
       }
       px[i] = cx; py[i] = cy;
       if (cy < -H * 0.3) life[i] = 0;
