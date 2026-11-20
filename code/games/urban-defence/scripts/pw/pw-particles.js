@@ -504,7 +504,9 @@
       return false;
     }
     const OPEN = PW.mat.open;
-    const open = (id, fl) => OPEN[id] === 1 || (id === M.WATER && (fl & F.WATER) === 0);
+    // (and a drop of water falls through a grate - stairs, the opening over a flight: M.PLATFORM -
+    // as water in the grid runs through it: see pw-sim's underGrate)
+    const open = (id, fl) => OPEN[id] === 1 || (id === M.WATER && (fl & F.WATER) === 0) || (id === M.PLATFORM && (fl & F.WATER) !== 0);
     // A pixel of smoke or flame moves as the air takes it (see F): towards the air's own motion and
     // its rise, losing the speed it was thrown with, a little restless; cell by cell, sliding along
     // anything not open to it (water too), never into it.
@@ -512,6 +514,9 @@
     // (and the hollow inside of a supply pipe's bore: smoke and flame pass along it among the
     // cargo, up its wells and out where it is broken - see pw-pipes' FLAG.HOLLOW)
     const HOLLOW = PW.FLAG.HOLLOW || 0;
+    // (a roof's drain hatch over its stairwell: concrete flagged FLAG.HATCH, a grate to water while
+    // it stands - see the step, and pw-sim's grate)
+    const HATCH = PW.FLAG.HATCH || 0;
     const gasOpen = (x, y) => {
       if (x < 1 || x >= W - 1 || y >= H - 1) return false;
       if (y < 0) return true;
@@ -750,7 +755,11 @@
           if (buoyant && OPEN[id]) {
             if (land(i, x, y)) { kill(i); removed = true; break; }
           }
-          if (open(id, fl)) {
+          const hatch = (fl & F.WATER) !== 0 && HATCH !== 0 && structural[id] === 1 && (PW.getFlags(world, cx, cy) & HATCH) !== 0;
+          if (open(id, fl) || hatch) {
+            // (a drop going through a grate - stairs, the opening over a flight, a roof's drain
+            // hatch - drips straight down out of it: the grating breaks its run - see pw-sim's grate)
+            if (id === M.PLATFORM || hatch) vx[i] = 0;
             // Fast heavy debris knocks down plants and smashes lamps and fittings it flies through.
             if ((fl & F.DAMAGE) && (Math.abs(vx[i]) + Math.abs(vy[i])) > 110 && PW.getLayer(world, 'deco', cx, cy)) {
               // (the blow: its speed and weight - a fast lump of rubble about 1.5)

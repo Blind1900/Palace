@@ -287,5 +287,65 @@ check(stability.stats.broken === before, `ground nobody disturbed stands (${stab
     check(water() === water0, `the falling water is all kept (${water0} -> ${water()})`);
   }
 }
+
+// 7. Water goes down a stairwell (N64F): the stairs and the openings over their flights are grated
+// (M.PLATFORM), and water runs through them. Water let go over the top of a tower's stairs drops
+// down the well storey by storey to its ground floor: none of it is left standing on the storeys
+// between, and none of it is lost.
+{
+  const towers = world.buildings.filter((b) => b.type === 'population' && (b.health === undefined || b.health >= 1) && !b.ruined)
+    .sort((a, b) => (b.ground - b.body.top) - (a.ground - a.body.top));
+  // (its stairs: the grated cells inside it - the band of columns they stand in, top and bottom)
+  const stairsOf = (b) => {
+    let sx0 = Infinity, sx1 = -Infinity, sy0 = Infinity, sy1 = -Infinity;
+    for (let y = b.body.top; y < b.ground; y += 1) for (let x = b.body.left; x <= b.body.right; x += 1) {
+      if (id(x, y) !== M.PLATFORM) continue;
+      if (x < sx0) sx0 = x; if (x > sx1) sx1 = x; if (y < sy0) sy0 = y; if (y > sy1) sy1 = y;
+    }
+    return sx1 - sx0 >= 6 && sy1 - sy0 >= 60 ? { sx0, sx1, sy0, sy1 } : null;
+  };
+  let T = null, S = null;
+  for (const b of towers) { S = stairsOf(b); if (S) { T = b; break; } }
+  if (T) {
+    const P = pwApp.particles, water = () => pwApp.countWater() + P.airWater();
+    const box = { x0: T.body.left - 300, x1: T.body.right + 300 };
+    const wetIn = (y0, y1) => { let n = 0; for (let y = y0; y <= y1; y += 1) for (let x = box.x0; x <= box.x1; x += 1) if (id(x, y) === M.WATER) n += 1; return n; };
+    // (the ceiling of its ground storey: the lowest row over it closed across most of the tower -
+    // water standing in it is not)
+    let ceiling = S.sy0;
+    for (let y = T.ground - 4; y > S.sy0; y -= 1) {
+      let closed = 0;
+      for (let x = T.body.left + 2; x <= T.body.right - 2; x += 1) if (!openAt(x, y) && id(x, y) !== M.WATER) closed += 1;
+      if (closed >= (T.body.right - T.body.left - 3) * 0.5) { ceiling = y; break; }
+    }
+    // (let go on the roof over its drain hatch - its concrete flagged FLAG.HATCH, over the stairwell
+    // - or, a tower with none, in the open cells over the top of the stairs, across their band)
+    // (its span: all its rows, from the top of the roof's covering down)
+    let hx0 = Infinity, hx1 = -Infinity, hy = -1, hyBottom = -1;
+    for (let y = T.body.top - 8; y < S.sy0; y += 1) for (let x = T.body.left; x <= T.body.right; x += 1) {
+      if (!(PW.getFlags(world, x, y) & (PW.FLAG.HATCH || 0)) || !PW.mat.structural[id(x, y)]) continue;
+      if (hy < 0) hy = y;
+      hyBottom = y; hx0 = Math.min(hx0, x); hx1 = Math.max(hx1, x);
+    }
+    const [px0, px1, py1] = hy >= 0 ? [hx0, hx1, hy] : [S.sx0, S.sx1, S.sy0];
+    // (the roof, down to the underside of its hatch: what lies on it - in its gutters, between its
+    // ornaments - is still where it was let go)
+    const roofBase = hy >= 0 ? hyBottom : py1 - 1;
+    // (what is left where it was let go, and on the storeys between; the rest has gone down to the
+    // ground storey - and on from there, out of its door - as none is lost: see the next check)
+    const top0 = wetIn(py1 - 20, roofBase), between0 = wetIn(roofBase + 1, ceiling);
+    let placed = 0;
+    for (let y = py1 - 14; y < py1; y += 1) for (let x = px0; x <= px1; x += 1) if (id(x, y) === M.AIR) { PW.set(world, x, y, M.WATER); placed += 1; }
+    const water0 = water();
+    PW.wakeArea(world, S.sx0 - 10, S.sy0 - 20, S.sx1 + 10, T.ground);
+    pwApp.stepWorld(60 * 12);
+    for (let s = 0; s < 10 && P.airWater(); s += 1) pwApp.stepWorld(60);
+    const top = wetIn(py1 - 20, roofBase) - top0, between = wetIn(roofBase + 1, ceiling) - between0, down = placed - top - between;
+    await view('stairwell-water', (S.sx0 + S.sx1) / 2, S.sy0 + 40, 5);
+    // (a roof's gutters, and the pockets between its ornaments, keep a little)
+    check(placed >= 100 && down >= placed * 0.6 && between <= placed * 0.1, `water let go ${hy >= 0 ? `on a tower's roof over its drain hatch (${hx1 - hx0 + 1} wide)` : 'over a tower\'s stairs'} goes down the stairwell to its ground floor (${placed} cells let go, stairs ${S.sy1 - S.sy0} tall: ${down} went down to the ground storey, ${between} left on the storeys between, ${top} on the roof where it was let go)`);
+    check(water() === water0, `the water going down the stairwell is all kept (${water0} -> ${water()})`);
+  } else check(false, 'a standing tower with stairs to pour water down');
+}
 pwApp.setPaused(false);
 return { checks, shots: shots.length, holes, stability: stability.stats };

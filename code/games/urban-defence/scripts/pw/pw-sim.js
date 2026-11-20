@@ -63,6 +63,27 @@
     const isAir = (m) => OPEN[m & ID_MASK] === 1;
     const isWater = (m) => (m & ID_MASK) === M.WATER;
     const isEmpty = (m) => (m & ID_MASK) === M.AIR;
+    // Grates water runs through: stairs and the openings over their flights (M.PLATFORM), and the
+    // drain hatches in a roof over its stairwell - its concrete flagged FLAG.HATCH, a grate while it
+    // stands (debris lying in a hatch blown open stops it up). (Cell j at (x, y).)
+    const HATCH = PW.FLAG.HATCH || 0;
+    function grate(j, x, y) {
+      const id = mat[j] & ID_MASK;
+      if (id === M.PLATFORM) return true;
+      if (!HATCH || !structural[id]) return false;
+      const f = world.flags[(y >> CHUNK_SHIFT) * chunksX + (x >> CHUNK_SHIFT)];
+      return !!f && (f[(y & CHUNK_MASK) << CHUNK_SHIFT | x & CHUNK_MASK] & HATCH) !== 0;
+    }
+    // (the open cell under the grate starting at cell j, (x, y), that water runs through it to - a
+    // slab's opening can lie on a step of the flight under it; -1 if what is under it is not open)
+    const GRATE_DEPTH = 16;
+    function underGrate(j, x, y) {
+      for (let n = 0; n < GRATE_DEPTH && y + n < H - 1; n += 1, j += W) {
+        if (grate(j, x, y + n)) continue;
+        return n && OPEN[mat[j] & ID_MASK] === 1 ? j : -1;
+      }
+      return -1;
+    }
     // (a fluid - air, a gas or a liquid - lighter than a grain weighing `w`: what it can fall, sink
     // or slide into. A grain's weight is its whole byte's: a wood splinter floats - see
     // PW.mat.byteWeight)
@@ -329,6 +350,36 @@
         }
         return true;
       }
+      // Stairs, the openings over their flights and a roof's hatch over them are grated (a floor
+      // to feet, grains and smoke - see grate): water runs through them to the open space under
+      // the grate, and so on down a stairwell, storey by storey - dripping straight down out of
+      // it, whatever way it was running (the grating breaks its run). (The water standing on it
+      // follows it down a row.)
+      if (grate(i + W, x, y + 1)) {
+        const j = underGrate(i + W, x, y + 1);
+        if (j >= 0) {
+          const jy = (j / W) | 0;
+          // (over a long way down - a stairwell - it pours through as drops, as fast as the water
+          // standing on the grate drives it, as out of a hole: see flyWater)
+          if (world.particles && openBelow(j, jy) >= FLY_WATER) {
+            const keep = [lastHead, lastTopX, lastTopY];
+            const v = Math.sqrt(2 * WATER_G * (headAt(x, y) + 1)), n = Math.max(1, Math.min(OUTFLOW_MAX, Math.round(v / 60)));
+            [lastHead, lastTopX, lastTopY] = keep;
+            for (let b = 0; b < n && isWater(mat[i]); b += 1) {
+              PW.set(world, x, y, M.AIR, { quiet: true });
+              world.particles.spawn(x + 0.5, jy + 0.5 + b * v / 60 / n, 0, v, M.WATER, 0, PW.PARTICLE.WATER, 8);
+              shiftColumn(x, y, 1);
+              stats.waterFlown = (stats.waterFlown || 0) + 1;
+            }
+            PW.wakeArea(world, x - 2, y - 2, x + 2, jy + 2);
+            return true;
+          }
+          mat[i] = M.WATER;
+          move(i, x, y, j, x, jy, 'grate');
+          shiftColumn(x, y, 1);
+          return true;
+        }
+      }
       const dir = ((x + y + world.tick) & 1) ? 1 : -1;
       // Pressurised water (more water above it) squirts sideways into open space and keeps
       // sliding: this is what empties a column or a breach quickly. Surface water has nothing
@@ -374,14 +425,17 @@
         if (nx < 0 || nx >= W) continue;
         if (isAir(mat[i + d]) && isAir(mat[i + W + d])) { move(i, x, y, i + W + d, nx, y + 1, 'diag'); return true; }
       }
-      // Sideways towards the nearest drop within reach.
+      // Sideways towards the nearest drop within reach (a grate it runs through is one; and it runs
+      // on through a grate in its way - the foot of a flight of stairs - never stopping in it).
       for (let k = 0; k < 2; k += 1) {
         const d = k ? -dir : dir;
         for (let s = 1; s <= DROP_SEARCH; s += 1) {
           const nx = x + d * s;
-          if (nx < 0 || nx >= W || !isAir(mat[i + d * s])) break;
-          if (isAir(mat[i + d * s + W])) {
-            const go = Math.min(s, DROP_STEP);
+          if (nx < 0 || nx >= W) break;
+          if (!isAir(mat[i + d * s])) { if (grate(i + d * s, nx, y)) continue; break; }
+          if (isAir(mat[i + d * s + W]) || (grate(i + d * s + W, nx, y + 1) && underGrate(i + d * s + W, nx, y + 1) >= 0)) {
+            let go = Math.min(s, DROP_STEP);
+            while (go < s && !isAir(mat[i + d * go])) go += 1;
             sweep(x, y, d, go, RUN_SPEED);
             move(i, x, y, i + d * go, x + d * go, y, 'drop');
             return true;
