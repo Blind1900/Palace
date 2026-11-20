@@ -249,6 +249,10 @@
         PW.set(world, cell.x, cell.y, cell.print ? cell.print.mat : c.mat[i], { quiet: true });
         PW.setLayer(world, 'paint', cell.x, cell.y, cell.print ? cell.print.paint : c.paint[i]);
         PW.setOwner(world, cell.x, cell.y, b.id);
+        // A rebuilt grated drain span gets its HATCH flag back (N64: water passes through it).
+        if ((b.hatches || []).some((h) => cell.x >= h.x0 && cell.x <= h.x1 && cell.y >= h.y0 && cell.y <= h.y1)) {
+          PW.setFlag(world, cell.x, cell.y, PW.FLAG.HATCH);
+        }
         if (!cell.print && c.deco[i]) PW.setLayer(world, 'deco', cell.x, cell.y, c.deco[i]);
         stats.restored += 1;
         job.passProgress = (job.passProgress || 0) + 1;

@@ -51,6 +51,9 @@
       mat: new Uint8Array(n), paint: new Uint32Array(n), role: new Uint8Array(n),
       back: new Uint32Array(n), deco: new Uint32Array(n), light: new Float32Array(0),
       floors: [], stairs: [], doors: [], slots: [], cores: [], lamps: [], devices: [], panels: [], windows: [],
+      // hatches: grated drain spans (N64) - the cells stay solid; stamping flags them HATCH so
+      // the water physics passes through them (the roof over a stairwell drains down the well).
+      hatches: [],
       meta: {},
     };
   }

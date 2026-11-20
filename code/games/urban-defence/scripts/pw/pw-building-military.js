@@ -150,6 +150,24 @@
       }
       c.stairs.push({ storey: k, dir: dir * facing, from: X(start), to: X(start + dir * 39), floorRow: floorRow(k), upperRow: floorRow(k + 1) });
     }
+    // N64: the rear block's roof carries the stair chain's grated drain hatch (the switchback's
+    // next flight position). Paint and a stamp-time HATCH flag only - the cells stay roof
+    // concrete, so collapse is untouched; the water rule drains the roof down the stairwell.
+    {
+      const k = rearStoreys - 1;
+      const dir = k % 2 === 0 ? 1 : -1;
+      const start = dir > 0 ? bandLeft + S.LANDING : bandLeft + S.LANDING + S.STAIR_RUN - 1;
+      const lo = Math.min(start, start + dir * 39) - 2, hi = Math.max(start, start + dir * 39) + 2;
+      const mid = (lo + hi) / 2;
+      for (let lx = lo; lx <= hi; lx += 1) {
+        const slit = Math.abs(lx - mid) % 4 < 2;
+        for (let row = 0; row < S.SLAB; row += 1) {
+          const i = (floorRow(rearStoreys) + row) * c.width + X(lx);
+          if (c.role[i] === ROLE.ROOF) c.paint[i] = K.pack(tone(K.slabColor(style, row, X(lx), floorRow(rearStoreys) + row), slit ? 0.55 : 0.95));
+        }
+      }
+      c.hatches.push({ x0: Math.min(X(lo), X(hi)), x1: Math.max(X(lo), X(hi)), y0: floorRow(rearStoreys), y1: floorRow(rearStoreys) + S.SLAB - 1 });
+    }
     // Rear door on the far side (except the bastion's buried glacis side); an outpost has a door
     // on either side.
     if (variant !== 'bastion') {
@@ -635,6 +653,7 @@
     c.meta = { ...src.meta, militarised: true };
     c.floors = src.floors.map((f) => ({ ...f, left: f.left + padL, right: f.right + padL }));
     c.stairs = src.stairs.map((s) => ({ ...s, from: s.from + padL, to: s.to + padL }));
+    c.hatches = (src.hatches || []).map((h) => ({ ...h, x0: h.x0 + padL, x1: h.x1 + padL }));
     c.doors = src.doors.map((d) => ({ ...d, x: d.x + padL }));
     c.slots = src.slots.map(sx); c.panels = src.panels.map(sx); c.devices = src.devices.map(sx);
     c.windows = src.windows.map(sx); c.storage = (src.storage || []).map(sx);

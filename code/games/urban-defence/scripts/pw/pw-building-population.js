@@ -187,6 +187,29 @@
       }
       c.stairs.push({ storey: k, dir, from: flightStart, to: flightStart + dir * (S.STAIR_RUN - 1), floorRow: fRow, upperRow: upper });
     }
+    // N64: the stair chain reaches the roof as a grated drain hatch, continuing the switchback
+    // where the next flight would run. The cells STAY roof concrete - the grate is paint and a
+    // HATCH flag set at stamp time - so collapse breaks the roof exactly as before, while the
+    // physics track's water rule (through platforms and hatch-flagged structure) drains the
+    // roof down the stairwell level by level.
+    {
+      const k = storeys - 1;
+      const dir = (k % 2 === 0 ? 1 : -1) * facing;
+      const flightStart = dir > 0 ? bandLeft + S.LANDING : bandLeft + S.LANDING + S.STAIR_RUN - 1;
+      const lo = Math.min(flightStart, flightStart + dir * (S.STAIR_RUN - 1)) - 2;
+      const hi = Math.max(flightStart, flightStart + dir * (S.STAIR_RUN - 1)) + 2;
+      const roofRow = floorRow(storeys);
+      const mid = (lo + hi) / 2;
+      for (let x = lo; x <= hi; x += 1) {
+        // (slit pattern about the band's centre, so a mirrored building grates the same)
+        const slit = Math.abs(x - mid) % 4 < 2;
+        for (let row = 0; row < S.SLAB; row += 1) {
+          const i = (roofRow + row) * c.width + x;
+          if (c.role[i] === ROLE.ROOF) c.paint[i] = K.pack(tone(K.slabColor(style, row, x, roofRow + row), slit ? 0.55 : 0.95));
+        }
+      }
+      c.hatches.push({ x0: lo, x1: hi, y0: roofRow, y1: roofRow + S.SLAB - 1 });
+    }
 
     // Furniture, guard slots and the control panel (top accessible floor).
     const bandLo = bandLeft - 2, bandHi = bandLeft + BAND + 2;

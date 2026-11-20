@@ -37,6 +37,17 @@
         if (owner) PW.setOwner(world, wx, wy, owner);
       }
     }
+    // Grated drain spans (N64): the cells are solid roof, flagged so water passes through them.
+    for (const h of canvas.hatches || []) {
+      for (let y = h.y0; y <= h.y1; y += 1) {
+        const wy = oy + y;
+        if (wy < 0 || wy >= world.height) continue;
+        for (let x = h.x0; x <= h.x1; x += 1) {
+          const wx = ox + x;
+          if (wx >= 0 && wx < world.width && canvas.mat[y * width + x]) PW.setFlag(world, wx, wy, PW.FLAG.HATCH);
+        }
+      }
+    }
     return { x: ox, y: oy, width, height, canvas };
   }
 
@@ -56,6 +67,7 @@
       slots: canvas.slots.map(pt), panels: canvas.panels.map(pt),
       cores: canvas.cores.map((c) => ({ ...pt(c), vault: c.vault && { x0: c.vault.x0 + ox, x1: c.vault.x1 + ox, top: c.vault.top + oy, bottom: c.vault.bottom + oy, lid: c.vault.lid + oy } })),
       devices: canvas.devices.map(pt), windows: canvas.windows.map(pt), storage: (canvas.storage || []).map(pt),
+      hatches: (canvas.hatches || []).map((h) => ({ x0: h.x0 + ox, x1: h.x1 + ox, y0: h.y0 + oy, y1: h.y1 + oy })),
       hangar: canvas.hangar && { ...box(canvas.hangar), door: { x: canvas.hangar.door.x + ox, top: canvas.hangar.door.top + oy, bottom: canvas.hangar.door.bottom + oy },
         spawn: pt(canvas.hangar.spawn) },
       runway: canvas.runway && { ...canvas.runway, from: canvas.runway.from + ox, y: canvas.runway.y + oy },
