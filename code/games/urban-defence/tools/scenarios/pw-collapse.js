@@ -90,6 +90,9 @@ check(fragments.list.length === 0, `everything has come to rest after 30 s (${fr
 // (N40O: falling buildings never sink into the ground; they come apart as they fall - shedding
 // their loosest cells, the parts that no longer hang together going their own ways)
 check(worstSunk < 0.1, `no falling piece sinks into the ground (at worst ${(worstSunk * 100).toFixed(0)}% of a piece's frame in it${sunkNote ? `: ${sunkNote}` : ''})`);
+// (nor falls through it and out of the world: a piece shaken down to its back-wall panels, with no
+// frame left to strike with, comes apart where it is)
+check(!(fragments.stats.fellOut > 0), `no falling piece drops through the world (${fragments.stats.fellOut || 0} fell out of it; ${fragments.stats.frameless || 0} shaken down to bare panels came apart in the air)`);
 check((fragments.stats.shed || 0) > 0 && (fragments.stats.parted || 0) > 0, `falling buildings come apart as they fall (${fragments.stats.shed || 0} cells shaken loose in the air, ${fragments.stats.parted || 0} parts gone their own ways)`);
 {
   const totals = [...turned.values()].map((r) => r.total), most = Math.max(0, ...totals), half = totals.filter((a) => a > Math.PI).length;

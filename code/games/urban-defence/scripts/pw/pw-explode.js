@@ -12,26 +12,36 @@
   // Soot and scorch on the buildings round a blast: the faces it reached - walls and floors a
   // couple of cells deep, and back walls in the open - are darkened, deepest by the hole and
   // thinning out raggedly to nothing; what lies behind a wall is shielded. A building keeps its
-  // scorch until it is repaired.
+  // scorch until it is repaired. (It is worked out a quarter round the blast a tick, over the ticks
+  // after it - see scorchPart - not in the moment of the blast with everything else.)
   function scorchBuildings(world, cx, cy, r, power) {
-    const { mat, width: W, height: H } = world;
-    const { structural, open, palettes, terrain } = PW.mat;
+    const { width: W, height: H } = world;
     const reach = r * (1.35 + 0.25 * Math.min(1, power)), icx = Math.round(cx), icy = Math.round(cy), R = Math.ceil(reach) + 2;
     const x0 = Math.max(1, icx - R), x1 = Math.min(W - 2, icx + R), y0 = Math.max(1, icy - R), y1 = Math.min(H - 2, Math.ceil(cy + reach * 0.8));
     if (icx < x0 || icx > x1 || icy < y0 || icy > y1) return;
-    // How many solid cells lie between the blast and each cell (not counting the cell itself), up
-    // to 3: the count of the cell before it on the line back to the middle, plus that cell if it is
-    // solid. So it is worked out from the middle outward, a quarter at a time, row by row - the
-    // cell before always done first - and each cell is scorched as it is reached.
-    const bw = x1 - x0 + 1, hidden = new Uint8Array(bw * (y1 - y0 + 1));
+    const bw = x1 - x0 + 1;
+    (world.scorches || (world.scorches = [])).push({ cx, cy, reach, icx, icy, x0, x1, y0, y1, bw, hidden: new Uint8Array(bw * (y1 - y0 + 1)), part: 0 });
+  }
+  // How many solid cells lie between the blast and each cell (not counting the cell itself), up to
+  // 3: the count of the cell before it on the line back to the middle, plus that cell if it is
+  // solid. So it is worked out from the middle outward, row by row - the cell before always done
+  // first - and each cell is scorched as it is reached. Part by part: below the middle's row and on
+  // it, right then left; above, right then left (each needs only cells nearer the middle, in the
+  // parts before it). True when the last is done.
+  function scorchPart(world, job) {
+    const { mat, width: W } = world;
+    const { structural, open, palettes, terrain } = PW.mat;
+    const { cx, cy, reach, icx, icy, x0, x1, y0, y1, bw, hidden } = job;
+    const sy = job.part < 2 ? 1 : -1, sx = job.part % 2 ? -1 : 1;
+    job.part += 1;
     const darken = (color, k) => { const c = PW.unpack(color); return PW.abgr(c[0] * k + 4, c[1] * k + 3, c[2] * k + 2); };
     const { CHUNK_SHIFT: CS, CHUNK_MASK: CM } = PW, CX = world.chunksX, backs = world.back;
-    for (let sy = 1; sy >= -1; sy -= 2) for (let ay = sy > 0 ? 0 : 1; ; ay += 1) {
+    for (let ay = sy > 0 ? 0 : 1; ; ay += 1) {
       const dy = ay * sy, y = icy + dy;
       if (y < y0 || y > y1) break;
       // (only the cells of the row within reach: the disc's span of it, a cell to spare)
       const half = Math.sqrt(Math.max(0, reach * reach - (y - cy) * (y - cy))) + 1;
-      for (let sx = 1; sx >= -1; sx -= 2) for (let ax = sx > 0 ? 0 : 1; ax <= half; ax += 1) {
+      for (let ax = sx > 0 ? 0 : 1; ax <= half; ax += 1) {
         const dx = ax * sx, x = icx + dx;
         if (x < x0 || x > x1) break;
         let between = 0;
@@ -68,6 +78,7 @@
         }
       }
     }
+    return job.part >= 4;
   }
 
   function explode(world, particles, spec) {
@@ -118,6 +129,10 @@
         }
       }
     }
+    // (the layers read cell by cell straight from their chunks - tens of thousands of cells)
+    const { CHUNK_SHIFT: CS, CHUNK_MASK: CM } = PW, CX = world.chunksX;
+    const layer = (L, x, y) => { const ch = L[(y >> CS) * CX + (x >> CS)]; return ch ? ch[(y & CM) << CS | x & CM] : 0; };
+    const DECO = world.deco, BACK = world.back, PIPE = world.pipe, PAINT = world.paint, OWNER = world.owner;
     for (let y = y0; y <= y1; y += 1) {
       for (let x = x0; x <= x1; x += 1) {
         const nx = (x - cx) / r, ny = (y - cy) / (y > cy ? below : r);
@@ -128,7 +143,7 @@
         // Vegetation and props in the blast: what is in the heart of it is torn to pieces (leaves
         // flung off, wood thrown out as splinters that land as wood rubble); a plant the blast
         // only reached is knocked over or broken up after the blast (see PW.flora.afterBlast).
-        const deco = PW.getLayer(world, 'deco', x, y);
+        const deco = layer(DECO, x, y);
         const flora = deco && PW.flora && (PW.getFlags(world, x, y) & PW.FLAG.FLORA);
         if (flora && s <= 1.1) {
           const plant = PW.flora.recordAt(world, x, y);
@@ -163,8 +178,8 @@
         // Back walls and everything fixed to them break in the blast: a building's walls (the
         // building is told), a tunnel's or shaft's lining and timbering, ladders, rails, belts and
         // pipes on the wall. Underground the rock behind shows through, blackened.
-        const backOwner = PW.getOwner(world, x, y);
-        const back = strength > 0.3 ? PW.getLayer(world, 'back', x, y) : 0;
+        const backOwner = layer(OWNER, x, y);
+        const back = strength > 0.3 ? layer(BACK, x, y) : 0;
         if (back) {
           const building = backOwner > 0 && backOwner < 50000;
           const rock = !building && y > world.groundTop[x] ? BLASTED_ROCK[PW.hash2(x, y) & 3] : 0;
@@ -182,7 +197,7 @@
           }
         }
         // A pipe fixed to the wall of a tunnel or a cave is torn off with it.
-        const wallPipe = strength > 0.3 ? PW.getLayer(world, 'pipe', x, y) : 0;
+        const wallPipe = strength > 0.3 ? layer(PIPE, x, y) : 0;
         if (wallPipe) {
           PW.setLayer(world, 'pipe', x, y, 0);
           if (random() < 0.2) {
@@ -192,8 +207,9 @@
         }
         if (id === M.AIR) continue;
         if (id !== M.WATER && strength < hardness[id]) continue;
-        const paint = PW.getLayer(world, 'paint', x, y);
-        const ownerId = PW.getOwner(world, x, y);
+        const paint = layer(PAINT, x, y);
+        // (the owner read above: only an open cell's is cleared with its back wall)
+        const ownerId = backOwner;
         PW.set(world, x, y, M.AIR);
         removed += 1;
         if (id === M.WATER) {
@@ -411,7 +427,7 @@
   const SMOKE_RATE = 2.36 + 5.31 * PW.mat.advection[M.SMOKE];   // k, per second
   const SMOKE_REACH = 4;         // it goes at most this many times as far as it would in the open
   const ROOMY = 0.7, CRAMPED = 0.45;   // (share of open-air room a ring of it had: see stepSmokeBursts)
-  const SMOKE_VISITS = 12000;    // cells a tick the bursts' rings are worked out over, at most
+  const SMOKE_VISITS = 6000;     // cells a tick the bursts' rings are worked out over, at most
   function smokeBurst(world, cx, cy, r, power, random, open = 0) {
     const { mat, width: W, height: H } = world;
     // (the tongues: a few directions in which it carries further)
@@ -437,7 +453,7 @@
     dist.set(start % W, (start / W) | 0, 0);
     (world.smokeBursts || (world.smokeBursts = [])).push({ cx, cy, reach, seed: PW.hash2(cx | 0, cy | 0),
       volume: Math.PI * radius * radius * 1.6 * (1 - 0.7 * open), used: 0, age: 0, maxD: radius * (open > 0.5 ? 1.6 : SMOKE_REACH),
-      billows: open >= 0.35, buckets: [[start]], dist, b: 0 });
+      billows: open >= 0.35, buckets: [[start]], dist, b: 0, wait: 1 });
   }
   // (a burst's distances out along the ways open to it, cell by cell: kept in square pages of the
   // world, made as it reaches them - it can go hundreds of cells along a tunnel - and read with
@@ -462,8 +478,13 @@
   // Let out as much of each blast's smoke as is due by now: the next rings of open cells out from
   // it (a ring: the cells the same distance out along the ways open to it), each laid when it is
   // whole. How much room a ring had - its size against a ring as far out in the open - says how
-  // the smoke lies in it: roomy, thin and patchy; cramped, thick and filling it.
+  // the smoke lies in it: roomy, thin and patchy; cramped, thick and filling it. (And the soot of
+  // the blasts, a quarter a tick: see scorchPart.)
+  // (A burst starts on the tick after the blast's first: the blast's own moment - the crater, the
+  // fireball, its debris - is the heaviest there is, and nothing of the smoke shows in it.)
   function stepSmokeBursts(world, dt) {
+    const scorches = world.scorches;
+    if (scorches && scorches.length) for (let k = scorches.length - 1; k >= 0; k -= 1) if (scorchPart(world, scorches[k])) scorches.splice(k, 1);
     const list = world.smokeBursts;
     if (!list || !list.length) return;
     const { mat, width: W, height: H } = world;
@@ -475,6 +496,7 @@
     let visits = SMOKE_VISITS;
     for (let k = list.length - 1; k >= 0; k -= 1) {
       const s = list[k];
+      if (s.wait) { s.wait -= 1; continue; }
       s.age += dt;
       const due = s.volume * Math.min(1, (1 - Math.exp(-SMOKE_RATE * s.age)) * 1.04);
       while (s.used < due && s.b < s.buckets.length && s.b <= s.maxD && visits > 0) {

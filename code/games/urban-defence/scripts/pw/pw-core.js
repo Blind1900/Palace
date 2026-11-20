@@ -425,6 +425,8 @@
       heatActive: new Uint8Array(chunkCount),
       heatList: [],
       heatBox: new Int16Array(chunkCount * 4),
+      // (the arrays of chunks gone cold, for the next to warm: see heatChunk)
+      heatPool: [],
       tick: 0,
     };
     for (let c = 0; c < chunkCount; c += 1) { clearSimRect(world, c); clearHeatBox(world, c); }
@@ -666,7 +668,10 @@
   }
   function heatChunk(world, c) {
     let chunk = world.heat[c];
-    if (!chunk) { chunk = world.heat[c] = new Float32Array(CHUNK_CELLS).fill(AMBIENT); }
+    if (!chunk) {
+      const kept = world.heatPool && world.heatPool.pop();
+      chunk = world.heat[c] = (kept || new Float32Array(CHUNK_CELLS)).fill(AMBIENT);
+    }
     if (!world.heatActive[c]) { world.heatActive[c] = 1; world.heatList.push(c); }
     return chunk;
   }

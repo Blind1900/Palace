@@ -61,6 +61,8 @@
     const stats = { ms: 0, chunks: 0, burning: 0, ignited: 0, burnedOut: 0, boiled: 0 };
     let tick = 0;
     world.fireByOwner = new Map();  // building / infrastructure id -> burning cells (construction delays)
+    const HEAT_POOL = 128;          // cold chunks' arrays kept for chunks warming, at most
+    world.heatPool = world.heatPool || [];
 
     const decoAt = (x, y) => PW.getLayer(world, 'deco', x, y);
     const isOpenCell = (i) => open[mat[i] & ID_MASK] === 1;
@@ -395,6 +397,8 @@
         }
         if (!anyWarm) {
           // Cold again: drop the chunk's array.
+          // (its array kept for the next chunk to warm: see PW.heatChunk)
+          if (world.heatPool.length < HEAT_POOL) world.heatPool.push(T);
           world.heat[c] = null; world.heatActive[c] = 0; rects.delete(c);
           continue;
         }
@@ -445,9 +449,11 @@
       }
       // (wood the fire is beside is scorched black, even where it has not caught)
       if (t >= BARK_SCORCH && (PW.hash3(x, y, tick) & 3) === 0 && isWood(x, y) && !(PW.getFlags(world, x, y) & FLAG.CHARRED)) scorchBark(x, y, 0.6);
-      if (t >= PLANT_IGNITE && !burning.has(i)) {
+      // (only what can catch is tried: fuel, a plant in the open, splintered wood - not the hot
+      // rubble of a building, cell after cell, heat tick after heat tick)
+      if (t >= PLANT_IGNITE && (ignite[id] ? t >= ignite[id] : open[id] || woodRubble(i)) && !burning.has(i)) {
         // Catching is a little uneven, so fronts are ragged and sparse fuel lets a fire die.
-        if ((PW.hash3(x, y, tick) & 7) < 3 && (t >= ignite[id] || open[id])) igniteCell(x, y);
+        if ((PW.hash3(x, y, tick) & 7) < 3) igniteCell(x, y);
       }
     }
 

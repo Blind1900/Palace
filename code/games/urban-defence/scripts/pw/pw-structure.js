@@ -117,12 +117,22 @@
         y0: Math.max(0, b.oy - 4), y1: Math.min(H - 1, b.ground + (b.base ? 190 : 40)) };
       return b.area;
     }
+    // (the grids an analysis works on, building-sized, kept and cleared for the next one: one
+    // analysis after another round a falling building, they were megabytes a second to the garbage
+    // collector. An analysis is never inside another)
+    const GRIDS = new Map();
+    function grid(key, Type, n, clear = true) {
+      let a = GRIDS.get(key);
+      if (!a || a.length < n) { a = new Type(Math.max(n, a ? a.length * 2 : 0)); GRIDS.set(key, a); }
+      else if (clear) a.fill(0, 0, n);
+      return a;
+    }
     // Classify every cell the building owns: frame (structure, back wall) and fittings in front.
     // Reads the sparse layers chunk by chunk (no per-cell lookups).
     function scan(b) {
       const { x0, x1, y0, y1 } = areaOf(b);
       const gw = x1 - x0 + 3, gh = y1 - y0 + 3;
-      const cls = new Uint8Array(gw * gh);
+      const cls = grid('cls', Uint8Array, gw * gh);
       const at = (x, y) => (y - y0 + 1) * gw + (x - x0 + 1);
       let fx0 = Infinity, fy0 = Infinity, fx1 = -Infinity, fy1 = -Infinity, count = 0;
       const fits = [];
@@ -311,11 +321,11 @@
       const report = { id: b.id, frame: 0, anchored: 0, detached: 0, failed: null, orphans: 0 };
       if (S.fx1 < S.fx0) { b.health = 0; b.ruined = true; loosePanels(b); return report; }
       // Anchored frame: joined to ground or to structure the building does not own (8-connected).
-      const state = new Uint8Array(gw * gh);           // 1 anchored frame
+      const state = grid('state', Uint8Array, gw * gh);   // 1 anchored frame
       [report.frame, report.anchored] = anchor(b, S, state);
       // (the parts not anchored are searched cell by cell, on cls indices: frame lies inside the
       // scan's padded box, so a cell's 8 neighbours are k + NEAR)
-      const queue = new Int32Array(S.count + 1), NEAR = [-gw - 1, -gw, -gw + 1, -1, 1, gw - 1, gw, gw + 1];
+      const queue = grid('queue', Int32Array, S.count + 1, false), NEAR = [-gw - 1, -gw, -gw + 1, -1, 1, gw - 1, gw, gw + 1];
       // A building going up - built or repaired cell by cell (b.growing) - is a construction site
       // (b.site) from the first time it is worked until it is all but whole (SITE_DONE), even
       // while the work pauses or stalls. What is being put up is not yet joined to what holds it -
@@ -331,7 +341,7 @@
       const lost = site && !!b.asBuilt && report.frame < (b.grownFrame ?? 0) - GROW_LOSS;
       // Parts no longer joined to anything fall; small bits crumble.
       if (report.anchored < report.frame) {
-        const seen = new Uint8Array(gw * gh);
+        const seen = grid('seen', Uint8Array, gw * gh);
         // (world index of the cell at cls index k)
         const toCell = (k) => ((k / gw | 0) - 1 + S.y0) * W + (k % gw) - 1 + S.x0;
         for (let y = S.fy0; y <= S.fy1; y += 1) for (let x = S.fx0, k0 = at(S.fx0, y); x <= S.fx1; x += 1, k0 += 1) {
@@ -477,7 +487,7 @@
     const AROUND = (gw) => [-gw - 1, -gw, -gw + 1, -1, 0, 1, gw - 1, gw, gw + 1];
     function fittingsOn(S, part) {
       const { cls, at, gw, x0, y0 } = S, around = AROUND(gw);
-      const out = [], seen = new Uint8Array(cls.length);
+      const out = [], seen = grid('fitSeen', Uint8Array, S.gw * S.gh);
       const queue = [];
       for (const i of part) queue.push(at(i % W, (i / W) | 0));
       for (let q = 0; q < queue.length; q += 1) {
@@ -494,7 +504,7 @@
     // while it is joined to standing frame or stands on something solid.
     function clearFittings(b, S, state) {
       const { cls, gw, gh, x0, y0 } = S;
-      const held = new Uint8Array(gw * gh);
+      const held = grid('held', Uint8Array, gw * gh);
       const queue = [];
       // (fittings over the frame travel with it; these are the free-standing ones)
       for (const k of S.fits) {

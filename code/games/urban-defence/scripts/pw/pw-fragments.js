@@ -250,7 +250,11 @@
         if (!wgt) continue;
         inertia += wgt * ((X[k] - ax + 0.5 - gcx) ** 2 + (Y[k] - ay + 0.5 - gcy) ** 2);
       }
-      const { points, faces, ptCell } = outlineOf(grid, gw, gh, u0, v0, data, ax, ay);
+      // (a great piece of a building just lifted out of the world waits a tick before it moves -
+      // see below - and has its outline made then, when it first needs it: it is drawn from its
+      // grid)
+      const waits = !spec.data && !spec.flora && N > PARTS_NOW;
+      const { points, faces, ptCell } = waits ? NO_OUTLINE : outlineOf(grid, gw, gh, u0, v0, data, ax, ay);
       // data.x/y are world cells as they were when the piece was formed, (ox0, oy0) its anchor
       // cell then; (px, py) is where that anchor's corner is now.
       const piece = { data, n, mass, inertia, grid, gw, gh, u0, v0, points, faces, ptCell, owner: spec.owner || 0, from: spec.from || spec.owner || 0, generation: spec.generation || 0,
@@ -261,7 +265,7 @@
         hollow: heavy + thin ? thin / (heavy + thin) : 0, shapeMass: mass, partsDue: partsLater,
         // (a great piece of a building just lifted out of the world starts to move on the tick
         // after: the lifting is the work of a tick in itself)
-        waits: !spec.data && !spec.flora && N > PARTS_NOW };
+        waits, outlineDue: waits };
       if (parent) {
         const [c, s] = cosSin(parent);
         [piece.px, piece.py] = toWorld(parent, c, s, ax - parent.ox0, ay - parent.oy0);
@@ -297,6 +301,8 @@
     // tens of thousands of cells, its outline made again as it crumbles: flat arrays, kept and
     // reused, read by grid index.)
     const OUT = { frame: new Uint8Array(0), outside: new Uint8Array(0), fill: new Int32Array(0), outer: new Int32Array(0), inner: new Int32Array(0) };
+    // (an outline still to be made: see spawn)
+    const NO_OUTLINE = { points: new Float32Array(0), faces: new Float32Array(0), ptCell: new Int32Array(0) };
     function outlineOf(grid, gw, gh, u0, v0, data, ax, ay) {
       const N = gw * gh, n = data.x.length, X = data.x, Y = data.y, SOL = data.solid;
       if (OUT.frame.length < N) { OUT.frame = new Uint8Array(N); OUT.outside = new Uint8Array(N); OUT.fill = new Int32Array(N); }
@@ -1102,6 +1108,11 @@
       for (let k = list.length - 1; k >= 0; k -= 1) {
         const p = list[k];
         if (p.waits) { p.waits = false; continue; }
+        if (p.outlineDue) {
+          p.outlineDue = false;
+          const o = outlineOf(p.grid, p.gw, p.gh, p.u0, p.v0, p.data, p.ox0, p.oy0);
+          p.points = o.points; p.faces = o.faces; p.ptCell = o.ptCell;
+        }
         p.age += dt;
         const speed = motion(p);
         const sub = Math.min(p.mass > 2000 ? 12 : 6, Math.max(1, Math.ceil(speed * dt)));
@@ -1201,6 +1212,15 @@
             p.reshape = false;
             reoutline(p);
           }
+          // (its frame all shaken off - only panels of back wall left, which strike nothing: it
+          // can hold together no longer, and comes apart where it is, as a scrap does - see spawn.
+          // Kept whole, nothing would ever stop it)
+          if (!done && !p.outlineDue && !p.points.length) {
+            const [c, s] = cosSin(p);
+            settle(place(p, p.data, c, s), p.vx, p.vy);
+            stats.frameless = (stats.frameless || 0) + 1;
+            done = true;
+          }
         }
         if (!done && p.footTouch) { p.footTouch = false; if (p.mode === 'hinge') eatFoot(p); }
         if (!done) {
@@ -1216,7 +1236,7 @@
           const held = p.age - p.touched < 0.25 || (p.floatedAt !== undefined && p.age - p.floatedAt < 0.25);
           if (now > REST_SPEED * 2 || gaining) p.still = 0;
           else if (now < REST_SPEED && held && p.age > 0.3) p.still += dt;
-          if (p.py > H + 400) done = true;
+          if (p.py > H + 400) { done = true; stats.fellOut = (stats.fellOut || 0) + 1; }
           else if (p.still > (p.floatedAt !== undefined && p.age - p.floatedAt < 0.25 ? 1.2 : 0.3) || p.age > MAX_AGE || (p.age > 10 && now < 40)) { finish(p); done = true; }
         }
         if (done) list.splice(k, 1);

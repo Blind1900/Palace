@@ -706,6 +706,17 @@
     // (can the gas `id`, rising or sinking, move into the cell m?)
     const passes = (m, id, up) => isEmpty(m) || (phase[m & ID_MASK] <= PHASE.LIQUID && phase[m & ID_MASK] >= PHASE.GAS
       && (up ? weight[m & ID_MASK] > weight[id] : weight[m & ID_MASK] < weight[id]));
+    // (can the gas `id` at i - not on the world's edge - go nowhere this tick, by any of stepGas's
+    // ways: on the way it rises or sinks, straight or slipping either side; sideways into empty
+    // air; a thick cell pouring down; carried up or down by a blast's wind?)
+    function stuck(i, id, density) {
+      const up = RISE[id] > 0, v = up ? -W : W;
+      if (passes(mat[i + v], id, up) || passes(mat[i + v - 1], id, up) || passes(mat[i + v + 1], id, up)) return false;
+      if (isEmpty(mat[i - 1]) || isEmpty(mat[i + 1])) return false;
+      if (density === 3 && isEmpty(mat[i + W])) return false;
+      if (airBusy && (passes(mat[i - W], id, true) || passes(mat[i + W], id, false))) return false;
+      return true;
+    }
     world.wind = world.wind || 0;
     const windNoise = PW.createNoise1D((world.windSeed || 1) * 31 + 7, 1);
     const gustNoise = PW.createNoise1D((world.windSeed || 1) * 17 + 3, 1);
@@ -756,6 +767,12 @@
         density -= 1;
         mat[i] = id | density << 6;
         PW.markDirty(world, x, y, PW.DIRTY_BASE, true);
+      }
+      // (nowhere it can go, by any of the ways below - the inside of a room full of smoke, a layer
+      // of dust on a floor: it only thins)
+      if (x > 0 && y > 0 && x < W - 1 && y < H - 1 && stuck(i, id, density)) {
+        PW.wakeCell(world, x, y);
+        return false;
       }
       // The weather's wind, and where a blast has stirred the air, its wind too: each gas goes
       // with the air as much as the element table's `wind` says.

@@ -686,6 +686,16 @@
     // in a box after every look, round a damaged building when it is looked at, and now and then
     // round each ruin, in case what held them went without a look.)
     const PANEL_NEAR = 5, PANEL_UP = 300, PANEL_SIDE = 48, PANEL_EVERY = 10;
+    // (the grids a look at the panels in a box works on, kept and cleared for the next: looked at
+    // several times a tick round a fallen building, they were tens of megabytes a second to the
+    // garbage collector)
+    const PANEL_GRIDS = { mark: new Uint8Array(0), seen: new Uint8Array(0), dist: new Int16Array(0) };
+    function scratch(key, n) {
+      let a = PANEL_GRIDS[key];
+      if (a.length < n) a = PANEL_GRIDS[key] = new a.constructor(Math.max(n, a.length * 2));
+      else a.fill(0, 0, n);
+      return a;
+    }
     const solidAt = (x, y) => x >= 0 && y >= 0 && x < W && y < H && phase[mat[y * W + x] & ID_MASK] === PW.PHASE.SOLID;
     function panels(x0, y0, x1, y1) {
       x0 = Math.max(1, Math.floor(x0)); y0 = Math.max(1, Math.floor(y0)); x1 = Math.min(W - 2, Math.ceil(x1)); y1 = Math.min(H - 2, Math.ceil(y1));
@@ -705,7 +715,7 @@
               if (!back[l] || !flags || !(flags[l] & PANEL)) continue;
               // (a wall a building or something fixed to the ground took back: no longer a panel)
               if (owner && owner[l]) { flags[l] &= ~PANEL; continue; }
-              (mark || (mark = new Uint8Array(w * h)))[(y - y0) * w + (x - x0)] = 1;
+              (mark || (mark = scratch('mark', w * h)))[(y - y0) * w + (x - x0)] = 1;
               n += 1;
             }
           }
@@ -713,7 +723,7 @@
       }
       if (!n) return 0;
       // (each clump of them: what holds it, where it touches solid)
-      const seen = new Uint8Array(w * h), dist = new Int16Array(w * h), drop = [];
+      const seen = scratch('seen', w * h), dist = scratch('dist', w * h), drop = [];
       for (let k0 = 0; k0 < w * h; k0 += 1) {
         if (mark[k0] !== 1 || seen[k0]) continue;
         const clump = [k0];
