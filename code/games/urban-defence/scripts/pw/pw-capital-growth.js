@@ -19,8 +19,10 @@
   const FARM_BRIDGE_LEVEL = 3;   // N46: farms bridge small water from this level...
   const FARM_BRIDGE_MAX = 72;    // ...and only this narrow (a lesser bridge)
   const CAPITAL_BRIDGE_MAX = 1400;
-  const GAP0 = 12, GAP_RING = 9, TIGHTEN = 3, GAP_MIN = 7;   // N43: ring gaps and their tightening
+  const TIGHTEN = 3, GAP_MIN = 7;    // N43: gaps tighten toward the centre as the city levels
+  const GAP0 = 12, GAP_RING = 9;     // (fallback only: lots carry their own gap now - N51)
   const APPEND_EVERY = 110;      // growth-seconds before a side's edge creeps out another ring
+  const INFILL_EVERY = 160;      // growth-seconds between looks for a gap worth filling in (N51)
   const AGE_PER_LEVEL = 140;     // N48: a building levels up as it stands - one level per this much age
   const CLAIM = 46;              // land a city claims beyond its built edge (where merges happen)
   const RIPEN = 1 / 260;         // crop growth per growth-second: a field ripens in ~4 lab minutes
@@ -240,6 +242,7 @@
       if (other) return { ok: false, note: `claimed by ${other.kind} ${other.id}` };
       const city = { id: cities.length + 1, kind, style, x, level: 1, clock: 0, actions: 0,
         appendClock: { left: APPEND_EVERY, right: APPEND_EVERY },   // the first rings come at once
+        infillClock: 0,
         rings: { left: [], right: [] }, edge: { left: x, right: x }, capEdge: { left: x, right: x },
         blocked: { left: null, right: null }, fields: [], fieldEdge: { left: x, right: x },
         bridges: [], merged: new Set(), notes: [] };
@@ -261,7 +264,19 @@
 
     // ---- Capital growth (N43 rings, N45 skyline) ---------------------------------------------
     const POP_LOT_VARIANTS = ['slab', 'setback', 'tapered', 'spire', 'needle', 'crown'];
-    const gapFor = (city, lot) => Math.max(GAP_MIN, GAP0 + lot.ring * GAP_RING - TIGHTEN * (city.level - lot.bornLevel));
+    // N51: spacing is no uniform row. Each lot carries its own gap, set when it is placed -
+    // a little jitter on level land, and mostly the lie of the ground: where the terrain
+    // rises or falls across the span, the buildings stand further apart.
+    function terrainGap(xa, xb) {
+      let lo = 1e9, hi = -1e9;
+      for (let x = Math.max(4, Math.min(xa, xb)); x <= Math.min(world.width - 5, Math.max(xa, xb)); x += 2) {
+        const s = surf(x);
+        lo = Math.min(lo, s); hi = Math.max(hi, s);
+      }
+      return hi < lo ? 0 : Math.max(0, Math.min(46, Math.round((hi - lo) * 1.4)));
+    }
+    const gapFor = (city, lot) => Math.max(GAP_MIN,
+      (lot.gapWant ?? (GAP0 + lot.ring * GAP_RING)) - TIGHTEN * (city.level - lot.bornLevel));
 
     function tryAppend(city, side) {
       if (city.blocked[side] === 'merged' || city.blocked[side] === 'edge') return false;
@@ -273,7 +288,12 @@
         variant: POP_LOT_VARIANTS[rand.int(0, POP_LOT_VARIANTS.length - 1)], seedN: seedN += 17, owner: 0 };
       const canvas = canvasFor(city, lot);
       const w = bodyWidth(canvas);
-      let cursor = city.edge[side] + dir * (GAP0 + ring * GAP_RING);
+      // N51: the town spreads out - gaps start loose and varied, with the odd plaza-sized hole
+      // left open (one lot in six), and the infill fills them in as it grows (the tightening
+      // on level-up pulls the centre in besides).
+      lot.gapWant = GAP_MIN + rand.int(8, 34) + (rand.int(0, 5) === 0 ? 110 + rand.int(0, 50) : 0)
+        + terrainGap(city.edge[side], city.edge[side] + dir * (w + 36));
+      let cursor = city.edge[side] + dir * lot.gapWant;
       let far = cursor + dir * (w + 6);
       if (far < 80 || far > world.width - 80) { city.blocked[side] = 'edge'; return false; }
       const b = barrierIn(cursor, far);
@@ -309,12 +329,61 @@
         city.edge[side] += dir * 12;
         return false;
       }
+      // N51: if the newcomer's works reached back and swallowed the gap, re-seat it further out.
+      {
+        const got = Math.abs((dir > 0 ? lot.placed.worksL : lot.placed.worksR) - city.edge[side]);
+        if (got + 3 < lot.gapWant) {
+          const c2 = center + dir * (lot.gapWant - got);
+          eraseLot(lot);
+          if (!placeLot(city, lot, c2)) placeLot(city, lot, center);
+          if (!lot.placed) { world.buildings.pop(); return false; }
+        }
+      }
       city.rings[side].push(lot);
       const prevEdge = city.edge[side];
       city.edge[side] = dir > 0 ? Math.max(prevEdge, lot.placed.worksR + 2) : Math.min(prevEdge, lot.placed.worksL - 2);
       paveSegment(city, prevEdge, dir > 0 ? lot.placed.worksL : lot.placed.worksR);
       city.blocked[side] = null;
       return true;
+    }
+
+    // N51: as the town grows it fills its gaps in. The widest hole between two neighbours (or
+    // against the capital's works) that can take a level-1 tower with its margins gets one -
+    // a young, small building squeezed in between its elders (N48 keeps it low until it has
+    // stood a while). The newcomer takes the inner lot's land mass.
+    function tryInfill(city) {
+      for (const side of ['left', 'right']) {
+        const dir = side === 'left' ? -1 : 1;
+        const lots = city.rings[side];
+        if (!lots.length) continue;
+        let best = null;
+        for (let i = 0; i < lots.length; i += 1) {
+          if (!lots[i].placed) continue;
+          const inner = i === 0 ? city.capEdge[side] : (dir > 0 ? lots[i - 1].placed.worksR : lots[i - 1].placed.worksL);
+          const outer = dir > 0 ? lots[i].placed.worksL : lots[i].placed.worksR;
+          if (dir > 0 ? outer <= inner : outer >= inner) continue;   // out of order: never fill into a scramble
+          const room = Math.abs(outer - inner);
+          if (!best || room > best.room) best = { i, room, inner, outer };
+        }
+        if (!best) continue;
+        const lot = { type: 'population', level: 1, age: 0, ring: best.i, side, bornLevel: city.level,
+          variant: 'slab', seedN: seedN += 17, owner: 0 };   // the narrowest design takes the slot
+        const canvas = canvasFor(city, lot);
+        const w = bodyWidth(canvas);
+        if (best.room < w + 2 * GAP_MIN + 6) { dbg.push(`infill-tight ${side} room${best.room} need${w + 2 * GAP_MIN + 6}`); if (dbg.length > 40) dbg.shift(); continue; }
+        if (barrierIn(best.inner, best.outer)) { dbg.push(`infill-barrier ${side}`); if (dbg.length > 40) dbg.shift(); continue; }
+        lot.canvas = canvas;
+        lot.gapWant = GAP_MIN + rand.int(2, 10);
+        lot.massEdge = best.i === 0 ? null : lots[best.i - 1].massEdge;
+        lot.owner = allotOwner();
+        const center = Math.round((best.inner + best.outer) / 2);
+        if (!placeLot(city, lot, center)) { world.buildings.pop(); continue; }
+        lots.splice(best.i, 0, lot);
+        lots.forEach((l, k) => { l.ring = k; });
+        note(city, 'a gap fills in');
+        return true;
+      }
+      return false;
     }
 
     // Seat one lot at its tightened gap from `edge`. A lot stays on the land mass it was born
@@ -328,17 +397,34 @@
       const b = barrierIn(cursor, cursor + dir * (w + 6));
       if (b) {
         if ((dir > 0 && lot.x <= b.x0) || (dir < 0 && lot.x >= b.x1)) {
-          // its own shore: hold short of the barrier, or stay put if the mass is packed full
+          // its own shore: hold short of the barrier. If the shore is already full, there is
+          // no seat left on this land mass - the lot is dismantled rather than stamped over
+          // its neighbour (the overlap that scrambled the gothic waterfront).
           const shore = dir > 0 ? b.x0 - 6 - w : b.x1 + 6 + w;
           cursor = dir > 0 ? Math.min(cursor, shore) : Math.max(cursor, shore);
-          if (dir > 0 ? cursor < edge + GAP_MIN : cursor > edge - GAP_MIN) cursor = null;
+          if (dir > 0 ? cursor < edge + GAP_MIN : cursor > edge - GAP_MIN) return null;
         } else {
           cursor = dir > 0 ? b.x1 + 8 : b.x0 - 8;   // born beyond it: the bridge or road is laid
         }
       }
       let center = cursor === null ? lot.x : cursor + dir * (w / 2 + 2);
-      if (center - w / 2 < 60 || center + w / 2 > world.width - 60) { center = lot.x; city.blocked[lot.side] = 'edge'; }
+      // The map's edge: the chain may not push past it - the caller holds everything from
+      // here at its old seat (jumping some lots and holding others scrambled the order, and
+      // the infill then stamped into the scramble).
+      if (center - w / 2 < 60 || center + w / 2 > world.width - 60) return 'stop';
       if (!placeLot(city, lot, center) && !placeLot(city, lot, center + dir * 8) && !placeLot(city, lot, lot.x)) return null;
+      // N51: honour the gap as the eye sees it. A building's works (retaining walls, stages)
+      // can reach back toward its inner neighbour and swallow the spacing - if they did,
+      // re-seat once, further out by what was lost.
+      if (cursor !== null && !b) {
+        const want = Math.abs(cursor - edge);
+        const got = Math.abs((dir > 0 ? lot.placed.worksL : lot.placed.worksR) - edge);
+        if (got + 3 < want) {
+          const c2 = center + dir * (want - got);
+          eraseLot(lot);
+          if (!placeLot(city, lot, c2) && !placeLot(city, lot, center)) return null;
+        }
+      }
       return dir > 0 ? lot.placed.worksR + 2 : lot.placed.worksL - 2;
     }
     // Re-seat a side's rings from `fromRing` outward: everything shuffles to its tightened gap
@@ -350,9 +436,19 @@
       for (const l of chain) eraseLot(l);
       let edge = fromRing === 0 ? city.capEdge[side] :
         (dir > 0 ? lots[fromRing - 1].placed.worksR + 2 : lots[fromRing - 1].placed.worksL - 2);
-      for (const l of chain) {
-        const e = seatOne(city, l, dir, edge);
-        if (e === null) { l.placed = null; continue; }
+      for (let n = 0; n < chain.length; n += 1) {
+        const e = seatOne(city, chain[n], dir, edge);
+        if (e === 'stop') {
+          // against the map's edge: this lot and all beyond it keep exactly their old seats
+          city.blocked[side] = 'edge';
+          for (let m = n; m < chain.length; m += 1) {
+            const r = chain[m];
+            if (!placeLot(city, r, r.x)) r.placed = null;
+            else edge = dir > 0 ? r.placed.worksR + 2 : r.placed.worksL - 2;
+          }
+          break;
+        }
+        if (e === null) { chain[n].placed = null; continue; }
         edge = e;
       }
       city.rings[side] = lots.filter((l) => l.placed);
@@ -371,6 +467,7 @@
     function ageLots(city) {
       for (const lot of [...city.rings.left, ...city.rings.right].sort((a, b) => a.ring - b.ring)) {
         if (lot.type !== 'population') continue;
+        if (city.blocked[lot.side] === 'edge') continue;   // pinned at the map's edge: no room to grow
         const target = Math.min(MAX_LEVEL, city.level, 1 + Math.floor(lot.age / AGE_PER_LEVEL));
         if (target <= lot.level) continue;
         lot.level += 1;
@@ -509,6 +606,10 @@
           if (tryAppend(city, s)) { city.appendClock[s] = 0; return true; }
           city.appendClock[s] = APPEND_EVERY * 0.6;   // blocked: look again a little later
         }
+        if (city.infillClock >= INFILL_EVERY) {       // N51: the town fills its gaps as it grows
+          city.infillClock = 0;
+          if (tryInfill(city)) return true;
+        }
         return false;
       }
       if (city.kind === 'farm') {
@@ -546,6 +647,7 @@
         }
         if (city.kind === 'capital') {
           city.appendClock.left += dt; city.appendClock.right += dt;
+          city.infillClock += dt;
           for (const side of ['left', 'right']) for (const l of city.rings[side]) l.age += dt;
         }
         city.clock += dt;
