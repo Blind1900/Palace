@@ -1,5 +1,12 @@
 [
  {
+  "title": "Opus: a big blast's garbage down another quarter; the sway and the tanks done; a blast storm measured in real time (f678789, P2, N9, N10)",
+  "author": "Opus",
+  "time": "2026-11-20",
+  "note": "N9 and N10 are done. Fable's leaf pass draws the sway (checked live: in a strong wind about 6,000 pixels of a stand of trees move in 0.3 s, in calm none), and the TANK button is on the toolbar: click to drop a tank, A/D or the arrow keys to drive, S to stop, R to back up, click to aim the gun, click the tank to let it go. P2: in the 6 s after a big blast the game makes about half the garbage it did this morning: 52.5 MB of large arrays, then 34-39 MB with Fable's fix to the drawing, now 27-30 MB. Pieces coming down reuse their working arrays, and the drawing of pieces and tanks no longer remakes its canvas for each slightly bigger piece. Rubble that has come to lie under a falling piece is squeezed out sideways, clear of it; thrown up, it only landed back under it. On a quiet machine, the frames over 34 ms in the 8 s after the blast were 0, 1 and 0 in three runs. A blast storm, measured in real time for the first time: 24 big blasts in 12 s over two grown capitals in the capital lab. The game holds 42 fps through it, but for the 6 s after it drops to about 20 fps. The rubble settling everywhere has the drawing redraw about 45 chunks a frame (the light in their hollows worked out again each time), half of every frame; the ticks are about 8 ms (heat, air, rubble settling, particles). The fix is shared: a per-frame budget for redrawing chunks, in Fable's renderer (proposed), and less churn from the physics after a storm (mine, next). Suites 19/19 on seeds 7, 3 and 11.",
+  "shots": []
+ },
+ {
   "title": "Fable: the crowns sway in the wind - the renderer half of N9 - and the TANK button is live (8c490a4)",
   "author": "Fable",
   "time": "2026-11-20 (late night)",
@@ -1884,6 +1891,29 @@
         "text": "DMG machinery feels mythical in the ball's own black-and-white language: a white pulse glides each line and dies at wounds, wellheads and pump mouths keep watch with the ball's atom in miniature, connectors blink as cargo passes a bed, and the god's attention rests on each open mouth while a line regrows (47795ed)"
        }
       ]
+     },
+     {
+      "name": "Units and combat",
+      "items": [
+       {
+        "text": "Polish: foliage swaying, loose ground shivering from distant blasts",
+        "step": "3e9b440 + 8c490a4",
+        "id": "N9",
+        "owner": "O",
+        "pct": 100,
+        "left": "",
+        "done": true
+       },
+       {
+        "id": "N10",
+        "owner": "O",
+        "step": "f712380 + 8c490a4",
+        "text": "Tanks in two sprites: the tracks are one sprite that always adjusts to the terrain under it, the turret with its long-range gun barrel is another that stays stabilised, aiming forward or at its target",
+        "pct": 100,
+        "left": "",
+        "done": true
+       }
+      ]
      }
     ]
    },
@@ -1896,8 +1926,8 @@
       "items": [
        {
         "text": "Performance pass: bundle routing 3x faster; no memory growth in a 9-minute real-time repair session; the blast-moment hitch fixed (gas-only redraws every third frame, particles as one image, a frame budget for catch-up ticks: 50 long frames after a BLAST L down to 2-4) DONE frame budget + gas throttle (448ddea, ee33930).",
-        "step": "b8e9780",
-        "left": "the drawing's throwaway arrays after a blast (18 MB in 6 s, Fable is on it); the post-blast tick stays ~9 ms on average (the gas sim at its 3 ms limit by design), frames hold 60 FPS",
+        "step": "f678789",
+        "left": "blast storms: 24 big blasts in 12 s hold 42 fps, but the 6 s after drop to ~20 fps - ~45 chunk redraws a frame as the rubble settles (a per-frame redraw budget proposed for Fable's renderer) and ~8 ms ticks (heat, air, settling, particles: Opus, next)",
         "id": "P2",
         "owner": "O",
         "pct": 95,
@@ -2222,26 +2252,16 @@
         "id": "N8"
        },
        {
-        "text": "Polish: foliage swaying, loose ground shivering from distant blasts",
-        "step": "3e9b440",
-        "id": "N9",
-        "owner": "O",
-        "pct": 75,
-        "left": "the leaf pass that draws the sway: Fable's renderer (agreed; the plants' half is in, PW.flora.leafSway / swayTable / swayCalm)"
-       },
-       {
-        "id": "N10",
-        "owner": "O",
-        "step": "f712380",
-        "text": "Tanks in two sprites: the tracks are one sprite that always adjusts to the terrain under it, the turret with its long-range gun barrel is another that stays stabilised, aiming forward or at its target",
-        "pct": 90,
-        "left": "a TANK button on the toolbar (Fable's; the hand tool is ready: PW.tanks.tool / key)"
-       },
-       {
         "id": "N71",
         "owner": "O",
         "step": "M5",
         "text": "Tank clipping and turret (user, 2026-11-20, screenshot of the tank ramp): the tank must not clip into its body when facing up or down. The turret head moves with the body. Only the gun barrel moves up and down, and its elevation range follows the body of the tank."
+       },
+       {
+        "id": "N72",
+        "owner": "O",
+        "step": "M5",
+        "text": "Tank body symmetry (user, 2026-11-20): the bottom tank body is symmetrical, so only the tank head rotates when the tank switches direction."
        }
       ]
      }
