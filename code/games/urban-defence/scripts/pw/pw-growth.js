@@ -66,7 +66,9 @@
           const site = PW.seeds.drop(world, x, side);
           if (!site) continue;
           const b = PW.seeds.grow(world, site, { style: s.style });
-          if (!b) continue;
+          // N80: a refused grow UNPLANTS the seed - a bare core must never stand in the
+          // wild with no building ever coming (the user's cut-off cores, one class of).
+          if (!b) { if (PW.seeds.unplant) PW.seeds.unplant(world, site); continue; }
           stock.hm -= SEED_HM;
           // The street paves out to the newcomer's door, easing onto its ground line.
           const tools = PW.settlementTools;

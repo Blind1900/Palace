@@ -1546,6 +1546,29 @@
         armour(x, y, d === depth, (x & 7) === 0 && (y & 7) === 0);
       }
     }
+    // N79: the blockhouse BEARS. The gallery carve runs under the fort, and its ceiling
+    // lining sat a few rows below the plinth - the whole keep hung on static building
+    // cells over an air seam (the user's floating-spawn bug class). Underpin every short
+    // gap between the fort's lowest cell and the first solid below with its own masonry:
+    // the piers between galleries carry it, the gallery spans themselves stay open rooms.
+    const fort = world.buildings[id - 1];
+    if (fort && fort.body) {
+      for (let x = fort.body.left - 2; x <= fort.body.right + 2; x += 1) {
+        let base = -1;
+        for (let y = fort.ground + 40; y >= fort.body.top; y -= 1) {
+          if (PW.getOwner(world, x, y) === id && (PW.get(world, x, y) & 63) !== 0) { base = y; break; }
+        }
+        if (base < 0) continue;
+        let gap = 0;
+        while (gap < 9 && (PW.get(world, x, base + 1 + gap) & 63) === 0) gap += 1;
+        if (gap === 0 || gap >= 9) continue;   // seated, or spanning a room by design
+        for (let g = 1; g <= gap; g += 1) {
+          PW.set(world, x, base + g, M.MASONRY, { quiet: true });
+          PW.setOwner(world, x, base + g, id);
+          PW.setLayer(world, 'paint', x, base + g, rgb([74 - g * 3, 76 - g * 3, 80 - g * 3]));
+        }
+      }
+    }
     return { footprints, galleries: [g1, g2], shaft: { x: shaftX, top: Y, bottom: shaftBottom } };
   }
   // A HESCO gabion on a terrace tread: a wire basket of ballast, drawn as a sand-coloured block

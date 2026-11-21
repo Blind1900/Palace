@@ -28,9 +28,33 @@
     PW.stampBuilding(world, c, x - 18, groundY, { owner: 0 });
     const coreY = groundY + oy - c.ground;
     const tap = world.pipes && world.pipes.connectCore ? world.pipes.connectCore(x, coreY, side) : null;
-    const site = { x, y: coreY, side, tap };
+    // (the stamped box, kept so a refused grow can UNPLANT the unit - N80: no core may
+    // stand in the wild with no building ever coming)
+    const site = { x, y: coreY, side, tap, box: { x0: x - 18, y0: groundY - c.ground, x1: x + 17, y1: groundY - c.ground + 47 } };
     (world.seedCores = world.seedCores || []).push(site);
     return site;
+  }
+
+  // N80: take a planted seed back out of the ground - the unit's own cells only (steel,
+  // core matter, grating), never the terrain round it - and let the line go of its thread.
+  function unplant(world, site) {
+    const { M } = PW;
+    if (site.box) {
+      for (let y = site.box.y0; y <= site.box.y1; y += 1) {
+        for (let x = site.box.x0; x <= site.box.x1; x += 1) {
+          const id = PW.get(world, x, y) & 63;
+          if (id !== M.CORE && id !== M.STEEL && id !== M.PLATFORM) continue;
+          if (PW.getOwner(world, x, y)) continue;   // someone else's works overlap: not ours
+          PW.set(world, x, y, M.AIR, { quiet: true });
+          PW.setLayer(world, 'deco', x, y, 0);
+        }
+      }
+    }
+    if (world.pipes && world.pipes.releaseSeedCore) world.pipes.releaseSeedCore(site.side, site.x);
+    if (world.seedCores) {
+      const i = world.seedCores.indexOf(site);
+      if (i >= 0) world.seedCores.splice(i, 1);
+    }
   }
 
   function grow(world, site, options = {}) {
@@ -107,5 +131,5 @@
     return record;
   }
 
-  PW.seeds = { drop, grow };
+  PW.seeds = { drop, grow, unplant };
 })();
