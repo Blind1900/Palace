@@ -1,5 +1,29 @@
 [
  {
+  "title": "Fable: pumps tap the trunk, bends roll smooth, the pipeline goes cyberpunk - and the vehicle rule is a suite (N38/N34 checks + N3; d9c88f9, 566e5a0)",
+  "author": "Fable",
+  "time": "2026-11-21",
+  "note": "The four pipe checks, each verified:\n1. PUMPS CONNECT LIKE BUILDINGS: the trunk bundle now spans the town's own works only. The stretch out to a lake intake is the pump's slim conduit - dark sheath, ONE glowing water run - tee'd off the trunk with flanges at the town edge. No more three-lane bundle dragged to the shore reading as 'the pump's own pipeline cutting the main one'. All five pump runs on seed 7 marked and repainted; the water still truly travels it.\n2. SMOOTH TURNS: the connector approaches follow an S-curve instead of a straight cone - zero slope leaving every bed's shelf, so the line rolls off with no corner. The lake-bank descents curve through their whole drop (the riser screenshot).\n3. CYBERPUNK, VERTICAL = HORIZONTAL: near-black gunmetal shell with a teal sheen, lanes as neon conduits - violet ore, acid-green soft materials, electric-cyan water - glowing coupler rings down every segment. The risers are the SAME pipe turned: same shell, same rings, same channels, seen plainly where two of them drop through the mountain outpost's crown.\n4. GARRISON HOLES: removed outright per the earlier decree - zero shoot-out openings pierce any mountain base (re-verified). The one opening that remains is the outposts' resupply ENTRANCE, cut by the clean-edge cutter: continuous flare arriving at the face, corners chamfered into bare rock, no isolated nubs.\nAlso landed: pw-vehicle joins the suite matrix (23 suites) as the first capital-lab suite - a friendly tank crosses the whole grown ring (Opus's 60-degree climb takes the sloped vault pits), the enemy stops inside the defences, every tower keeps its mass. 23/23 across seeds 7/3/11 at Opus's tank tip.",
+  "shots": [
+   {
+    "src": "shots/pipe2-riser.png",
+    "caption": "The pump station: the slim intake rolls down the bank in one smooth curve, and the vertical tee wears the same shell, rings and channels as the run"
+   },
+   {
+    "src": "shots/pipe2-cross-25800.png",
+    "caption": "The crossing the user flagged, after: both lines in the same neon-conduit language"
+   },
+   {
+    "src": "shots/pipe2-intake-left.png",
+    "caption": "The lake intake as the pump's own slim tap - one electric water run in a dark sheath"
+   },
+   {
+    "src": "shots/portal-home-flank.png",
+    "caption": "Two risers drop through the outpost crown - vertical and horizontal, one design"
+   }
+  ]
+ },
+ {
   "title": "Fable: the peek hole's mouth flares wide and its corners merge into the rock (N32 refine done; d6affbf, on Opus's settling fix 6dc05c2)",
   "author": "Fable",
   "time": "2026-11-21",
@@ -2161,7 +2185,7 @@
         "id": "N71",
         "owner": "O",
         "step": "0b2eefa",
-        "text": "Tank clipping and turret (user, 2026-11-20, screenshot of the tank ramp): the tank must not clip into its body when facing up or down. The turret head moves with the body. Only the gun barrel moves up and down, and its elevation range follows the body of the tank. Tank reference images (user, 2026-11-21, forward-facing tanks, three photos): the reference for how the head turns to point the gun barrel.",
+        "text": "Tank clipping and turret (user, 2026-11-20, screenshot of the tank ramp): the tank must not clip into its body when facing up or down. The turret head moves with the body. Only the gun barrel moves up and down, and its elevation range follows the body of the tank. Tank reference images (user, 2026-11-21, forward-facing tanks, three photos): the reference for how the head turns to point the gun barrel. Refs: the three forward-facing tank photos.",
         "pct": 100,
         "done": true,
         "left": ""
@@ -2170,7 +2194,7 @@
         "id": "N72",
         "owner": "O",
         "step": "0b2eefa",
-        "text": "Tank body symmetry (user, 2026-11-20): the bottom tank body is symmetrical, so only the tank head rotates when the tank switches direction.",
+        "text": "Tank body symmetry (user, 2026-11-20): the bottom tank body is symmetrical, so only the tank head rotates when the tank switches direction. Tank movement and turret (user, 2026-11-21, screenshots in the checklist chat): tanks drive up steeper terrain, including mountains and stairs. The gun barrel does not overlap the tank head. The head looks like a head while it rotates, and the top-view turret must read as part of the same rotating sprite as the side view. Tank passage and ramming (user, 2026-11-21): friendly tanks move completely through friendly buildings, colliding only with roads and terrain. Tanks run over, crush or crash into enemy buildings and decor, pushing them over in the direction the tank is heading and flattening the debris. Slope limit (user, 2026-11-21): tanks climb terrain up to a maximum slope of 43 degrees.",
         "pct": 100,
         "done": true,
         "left": ""
@@ -2181,15 +2205,7 @@
       "name": "Growth and economy",
       "items": [
        {
-        "id": "N37",
-        "owner": "F",
-        "step": "E, H",
-        "text": "Visual check of the live world (2026-11-19, while the user looked at it): the pump boxes on the main pipe line sit on the line with the pipe broken beside them; pipe junctions near the pumps look cut; the soil strata show blocky horizontal banding in the lower dirt. To confirm at close zoom. DONE 0186f3c + 6e2c8b5.",
-        "done": true,
-        "pct": 100
-       },
-       {
-        "id": "N37",
+        "id": "N37b",
         "owner": "F",
         "step": "H, E",
         "text": "Tunnel fixes (user, 2026-11-19, from shots/incline.png): pipes are part of the background walls, not drawn over the tunnels; the roof above stairs is higher; every tunnel is walkable for a ground trooper, so the whole network can be explored on foot. DONE 0186f3c + 6e2c8b5.",
@@ -2232,7 +2248,7 @@
         "id": "N35",
         "owner": "F",
         "step": "D, F2",
-        "text": "Cores come first, buildings grow from them: the pixels that make up the cores must not be cut off from the buildings and their generation (user screenshot, 2026-11-19). Design order is cores, then the buildings that hang off them, so a core is never left separated from its building. DONE 7b11f77. Build order (user, 2026-11-20): cores first, then growth extends outward from the core; the pipes come out from the sides and the pillars go up the top side.",
+        "text": "Cores come first, buildings grow from them: the pixels that make up the cores must not be cut off from the buildings and their generation (user screenshot, 2026-11-19). Design order is cores, then the buildings that hang off them, so a core is never left separated from its building. DONE 7b11f77. Build order (user, 2026-11-20): cores first, then growth extends outward from the core; the pipes come out from the sides and the pillars go up the top side. Core tiers (user, 2026-11-21): main, descendant and sub cores each have their own design. Main cores are the largest, descendant cores are smaller than main, and sub cores are smaller than descendant.",
         "done": true,
         "pct": 100
        },
@@ -2426,21 +2442,14 @@
         "step": "N44",
         "text": "Capital growth lab (capital-lab.html) runs smoothly under heavy development and explosions: it crashes today when many buildings grow and blasts go off at once. Keep the lab steady at its controllable speeds (frame time and memory held in check, growth and blasts spread over ticks). DONE - growth half earlier (storm cover, heavy-work gating, blast ring), physics half in PS's P2 (9564f8e: one long frame at the blast at most, worst tick 81 -> 40 ms). Re-verified at the current tip on seeds 7 AND 11: six cities, 35-42 lots, twelve simultaneous blasts at growth x20 - tick p95 17-20 ms, worst moment 54/140 ms (the old repro killed the browser), heap +16/+50 MB over the storm, and growth carries straight on (44 -> 50 records in the minute after).",
         "done": true,
-        "pct": 0
-       }
-      ]
-     },
-     {
-      "name": "In progress",
-      "items": [
+        "pct": 100
+       },
        {
-        "text": "Performance pass: bundle routing 3x faster; no memory growth in a 9-minute real-time repair session; the blast-moment hitch fixed (gas-only redraws every third frame, particles as one image, a frame budget for catch-up ticks: 50 long frames after a BLAST L down to 2-4) DONE frame budget + gas throttle (448ddea, ee33930).",
-        "step": "f678789",
-        "left": "blast storms in the capital lab: 42 fps through 24 blasts, ~20 fps for the 6 s after - the map redrawn ~45 chunks a frame as the rubble settles: a per-frame redraw budget, Fable's renderer (next on their list). The physics after it is measured and within budget (heat ~3 ms a tick from the hot rubble of 23 buildings; the live world holds ~100 fps after a storm)",
-        "id": "P2",
-        "owner": "O",
-        "pct": 95,
-        "done": true
+        "id": "N32",
+        "owner": "F",
+        "step": "C2, K",
+        "text": "REMOVED 2026-11-21 (user): military mountain base garrison peek holes are removed altogether. The mountain bases keep their other features; this item is no longer a feature. Earlier note: garrison peek holes are openings troops can shoot out of at wide angles, or enter the building through. The edges have no sharp cut-off: the corners smooth out and merge into the terrain or building structure at both ends. Same rules as the pipe: clean edges, not wider than needed. Earlier note: military bases level up by hollowing out more of the mountain, with more rooms and defences at each level; at max level a deployment hangar sits at the base of the mountain. Refs: the underground defence facility and bunker cross-sections the user sent. Garrison holes connect to the building and terrain with no sharp cut-off at the edges; the corners blend into both (user, 2026-11-21).",
+        "pct": 100
        }
       ]
      }
@@ -2467,6 +2476,15 @@
         "step": "L",
         "text": "Performance baseline regenerated at HEAD on seeds 7, 3, 11 in a clean worktree (wt-base), by a Sonnet chat (low); writes baseline.json; the checklist chat posts results to the Performance tab",
         "pct": 50
+       },
+       {
+        "text": "Performance pass: bundle routing 3x faster; no memory growth in a 9-minute real-time repair session; the blast-moment hitch fixed (gas-only redraws every third frame, particles as one image, a frame budget for catch-up ticks: 50 long frames after a BLAST L down to 2-4) Landed: frame budget + gas throttle (448ddea, ee33930).",
+        "step": "f678789",
+        "left": "blast storms in the capital lab: 42 fps through 24 blasts, ~20 fps for the 6 s after - the map redrawn ~45 chunks a frame as the rubble settles: a per-frame redraw budget, Fable's renderer (next on their list). The physics after it is measured and within budget (heat ~3 ms a tick from the hot rubble of 23 buildings; the live world holds ~100 fps after a storm)",
+        "id": "P2",
+        "owner": "O",
+        "pct": 95,
+        "done": true
        }
       ]
      }
@@ -2483,7 +2501,7 @@
         "owner": "F",
         "step": "E",
         "text": "REOPENED 2026-11-20 (user): the bore must be hollow for the resource pipe, not open to the water. Water and other particles must not flow through the pipe and disturb its inner function; only smoke and fire pass the bore. Debris that gets into a pipe and cannot escape is pushed along by the resource pixels until it reaches a core, where it disintegrates and ignites from the core energy. Earlier note: Hollow pipes: every in-casing bore cell carries FLAG.HOLLOW - smoke and flame pixels travel the bore among the cargo, heat moves like shut-in air and climbs the wells, grid smoke is drawn in at the open mouths (de74721; PS 640fd75, a42a88c)",
-        "pct": 100
+        "pct": 0
        }
       ]
      },
@@ -2491,10 +2509,45 @@
       "name": "Growth and economy",
       "items": [
        {
+        "id": "N37",
+        "owner": "F",
+        "step": "E, H",
+        "text": "Pump boxes on the main pipe line (user, 2026-11-19; reopened 2026-11-21): each pump connects to the pipeline with its own pipe, rather than spawning on top of the line. Pipe junctions near the pumps must not look cut. Soil strata banding in the lower dirt: the earlier fix (0186f3c + 6e2c8b5) is still to be confirmed at close zoom.",
+        "done": true,
+        "pct": 0
+       },
+       {
+        "id": "N82",
+        "owner": "F",
+        "step": "H, A2",
+        "pct": 0,
+        "text": "Terraria-style world gen and environment (user, 2026-11-21): keep Urban Defence's style and use Terraria's world generation as the guide for how buildings are placed on the environment, and how units use it. Use Powder Toy for material and structure behaviour, and Game of Life for how structures and plants regrow. Units should behave against the environment (ground, water, blasts, falling debris). Study for behaviour only; our own code. WGM and PS each send a plan before building."
+       },
+       {
+        "id": "N81",
+        "owner": "F",
+        "step": "E",
+        "pct": 0,
+        "text": "Pipes turn smoothly, no blockage at level changes (user, 2026-11-21, live-world screenshot): a pipe switching to a vertical run blocks its flow. Bends and vertical changes must be smooth swept curves so cargo lanes stay open through the turn. Add a check that cargo passes every bend and level change on seeds 7, 3 and 11. Extends N34 and N30."
+       },
+       {
+        "id": "N80",
+        "owner": "F",
+        "step": "F, G",
+        "pct": 0,
+        "text": "Cores cut off from their buildings (user, 2026-11-21, two live-world screenshots of pixel-world.html): the building generator still crops cores out of some buildings. Every core (main, descendant, sub) must stay connected to its own building and its bed/connector, for every building type and seed. Add a regression check that fails if any core has no owned path to its building."
+       },
+       {
+        "id": "N79",
+        "owner": "F",
+        "step": "G, K",
+        "text": "Floating roofs over modern settlements (user, 2026-11-21, live game, two screenshots): certain buildings spawn broken, leaving a roof floating above the modern-territory settlements. Fix the spawn so every roof sits on its building, and check the stability pass does not leave it floating."
+       },
+       {
         "id": "N38",
         "owner": "F",
         "step": "E, D, C",
-        "text": "REOPENED 2026-11-20 (user): pipes are still not right. The pipe background follows the same rule as the pipe. When a tube end is destroyed, its resource pixels push out and clear debris at that end. Pipes must not be fed by water flowing through them. Cores and peek holes are reopened with the same rules. Earlier note: Pipes, cores and peek holes become terrain, not deco blocks (user, 2026-11-19). Pipes: two parallel lines hollowed out of the terrain itself, running together and turning only where needed; resource pixels travel inside the tube. If a tube end is destroyed before it reconnects, its resource pixels push out and destroy the debris at that end. Cores: the same change, the core is part of the terrain, not a deco block. The white energy is a light equation that gives an atom-like motion of vibrations. Military peek holes: they stop at the structure or terrain, and do not jut outward at the top end or corner. status: was done - all four notes live. The hollowed tube flipped ON for good in 8cf66f3 (PS's joint flip on my 7feb6b6/01aa5fb groundwork): the bore's lanes are real carved space, the old gas-through-solid machinery is deleted, and the pw-pipe-cavity scenario guards it in every matrix run. The follow-up found soaking the live world is FIXED in 36d25eb: the 25-column stretch at x~18311 was the approach cone to the mountain core planing across a RAVINE - bare sky the laying rightly refused, born unlaid, the mend starving against air. The router now treats bare sky as rock (dives under), the passes and slope clamps run to a fixed point together, and an approach column with nothing under it tucks beneath its own ground, wells climbing the edges. Soak 25 broken -> 0; matrix 18/18 x 7/3/11.",
+        "text": "REOPENED 2026-11-20 (user): pipes are still not right. The pipe background follows the same rule as the pipe. When a tube end is destroyed, its resource pixels push out and clear debris at that end. Pipes must not be fed by water flowing through them. Cores and peek holes are reopened with the same rules. Earlier note: Pipes, cores and peek holes become terrain, not deco blocks (user, 2026-11-19). Pipes: two parallel lines hollowed out of the terrain itself, running together and turning only where needed; resource pixels travel inside the tube. If a tube end is destroyed before it reconnects, its resource pixels push out and destroy the debris at that end. Cores: the same change, the core is part of the terrain, not a deco block. The white energy is a light equation that gives an atom-like motion of vibrations. Military peek holes: they stop at the structure or terrain, and do not jut outward at the top end or corner. status: was done - all four notes live. The hollowed tube flipped ON for good in 8cf66f3 (PS's joint flip on my 7feb6b6/01aa5fb groundwork): the bore's lanes are real carved space, the old gas-through-solid machinery is deleted, and the pw-pipe-cavity scenario guards it in every matrix run. The follow-up found soaking the live world is FIXED in 36d25eb: the 25-column stretch at x~18311 was the approach cone to the mountain core planing across a RAVINE - bare sky the laying rightly refused, born unlaid, the mend starving against air. The router now treats bare sky as rock (dives under), the passes and slope clamps run to a fixed point together, and an approach column with nothing under it tucks beneath its own ground, wells climbing the edges. Soak 25 broken -> 0; matrix 18/18 x 7/3/11. Water pumps connect to the resource pipeline the way buildings do: they join the pipeline and never create their own pipeline that other buildings then build off, cutting off the main one (user, 2026-11-21).",
         "done": true,
         "pct": 0
        },
@@ -2502,15 +2555,8 @@
         "id": "N34",
         "owner": "F",
         "step": "E",
-        "text": "REOPENED 2026-11-20 (user): pipe bends are still wrong. The outer sides must be two parallel lines that curve smoothly, even at sharp angles; the inner curves must not overlap; vertical and horizontal pipe variants must merge into one design so they connect without blockage. Earlier note: Pipe elbows (user, 2026-11-19): a pipe turning 90 degrees (up to 111) is one continuous pipe. The design compensates through the bend, so it never splits in two. Refs: stainless 90-degree pipe elbow; water distribution pipe bend diagram. was done c4f84b0.",
+        "text": "REOPENED 2026-11-20 (user): pipe bends are still wrong. The outer sides must be two parallel lines that curve smoothly, even at sharp angles; the inner curves must not overlap; vertical and horizontal pipe variants must merge into one design so they connect without blockage. Earlier note: Pipe elbows (user, 2026-11-19): a pipe turning 90 degrees (up to 111) is one continuous pipe. The design compensates through the bend, so it never splits in two. Refs: stainless 90-degree pipe elbow; water distribution pipe bend diagram. was done c4f84b0. Refs (user, 2026-11-21): smooth pipe bends (stainless 90-degree elbow, pipe-bend diagram). The pipe and its background turn smoothly, never a sharp corner. The look is cyberpunk sci-fi, and the vertical and horizontal pipes look exactly the same.",
         "done": true,
-        "pct": 100
-       },
-       {
-        "id": "N32",
-        "owner": "F",
-        "step": "C2, K",
-        "text": "REOPENED 2026-11-21 (user): garrison peek holes are openings troops can shoot out of at wide angles, or enter the building through. The edges have no sharp cut-off: the corners smooth out and merge into the terrain or building structure at both ends. Same rules as the pipe: clean edges, not wider than needed. Earlier note: military bases level up by hollowing out more of the mountain, with more rooms and defences at each level; at max level a deployment hangar sits at the base of the mountain. Refs: the underground defence facility and bunker cross-sections the user sent.",
         "pct": 0
        },
        {
@@ -2561,6 +2607,13 @@
       "name": "Units and combat",
       "items": [
        {
+        "id": "N84",
+        "owner": "O",
+        "step": "M5 (before)",
+        "pct": 0,
+        "text": "Tunnel generation and ground-troop traversal lab (user, 2026-11-21): a separate lab page where tunnels are generated and seen as they grow, and ground troopers walk through them (stairs, slopes, ladders, tunnel cover). Build it after Opus's current queue is clear and before the ground-unit work (N5/M5)."
+       },
+       {
         "text": "Units at GIF scale: troopers, guards, miners, tanks, mechs, jets; the item bar (rifle, 3 grenades, drills); hand-drilled secret dirt tunnels",
         "step": "M5",
         "id": "N5",
@@ -2588,7 +2641,7 @@
         "id": "N77",
         "owner": "O",
         "step": "M5, M8",
-        "text": "Bullets and vehicle combat (user, 2026-11-21): bullet physics for tank shots, plane missiles, ground troop fire and mech shooting. Vehicles take damage and are destroyed in blasts, leaving smoke from the blast. A destroyed vehicle becomes part of the terrain, like a building leaves recognisable ruins."
+        "text": "Bullets and vehicle combat (user, 2026-11-21): bullet physics for tank shots, plane missiles, ground troop fire and mech shooting. Vehicles take damage and are destroyed in blasts, leaving smoke from the blast. A destroyed vehicle becomes part of the terrain, like a building leaves recognisable ruins. Ramming and crushing: a tank crushing an enemy building or decor flattens the debris along its path, the same way a destroyed vehicle becomes terrain."
        },
        {
         "id": "N78",
@@ -2606,7 +2659,7 @@
         "step": "F",
         "id": "D15",
         "owner": "F",
-        "pct": 100
+        "pct": 0
        }
       ]
      }
