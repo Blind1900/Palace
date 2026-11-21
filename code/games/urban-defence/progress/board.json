@@ -1,5 +1,17 @@
 [
  {
+  "title": "Fable: the peek hole's mouth flares wide and its corners merge into the rock (N32 refine done; d6affbf, on Opus's settling fix 6dc05c2)",
+  "author": "Fable",
+  "time": "2026-11-21",
+  "note": "- The user's clarification, landed: no sharp cut-off anywhere on a garrison opening. The old splay was a single +1 step at one fixed point - exactly the hard edge called out. Now the mouth FLARES continuously, a cell every couple of steps, timed to arrive exactly at the mountainside, so a trooper at the sill shoots at wide angles while the throat stays trooper-sized the whole way in: never wider than needed, the pipe's own clean-edge rule.\n- The corners smooth out and MERGE at both ends: the lip chamfers cell by cell into the bare rock face (the lining's own corner goes with it, so the opening runs out into terrain, not a rim), and the inner top corner eases into the gallery over the hazard sill. The two angled ports get the same treatment through the shared cut. A sweep leaves no isolated nub at the mouth.\n- Proven on both of seed 7's bunkers: the profile walks 4,4,...,5,5,6,6,7,7,8 with a soft few-cell run-out into the face - every step a single cell.\n- The landing was held a round by a seed-11 rockslide check: one gravel cell left mid-air 670 cells from the opening. Chased to its exact coordinates, handed to Opus with a repro - it was the stability system still SETTLING the 84k-cell slide at the suite's fixed clock, not a missing rule. Opus's fix (the suite now waits for the ground to settle) also flushed out and fixed a tree-limb bug. 22/22 suites, seeds 7/3/11, at the shared tip.",
+  "shots": [
+   {
+    "src": "shots/n32-splay.png",
+    "caption": "The embrasure from the lit gallery out through the rock: the throat trooper-sized, the mouth trumpet-flaring exactly at the face, its corners stepping into the mountainside"
+   }
+  ]
+ },
+ {
   "title": "Fable: click a unit to select it - highlight and control panel (N78 first slice; 928e269, with Opus's 85c552b)",
   "author": "Fable",
   "time": "2026-11-21",
