@@ -13,6 +13,7 @@
   const LOOSE = new Uint8Array(64);
   // (a ruin - a piece of the building come to rest whole - it shoulders aside too)
   for (const id of [M.DEBRIS, M.RUBBLE, M.LOOSE_SOIL, M.LOOSE_STONE, M.SAND, M.ASH, M.RUIN]) LOOSE[id] = 1;
+  if (M.WRECK) LOOSE[M.WRECK] = 1;   // N77: a rising core pushes through a wreck on its pit
   const SETTLE = 60;        // ticks after the gratings blow before the cores start to rise (1 s)
   const FLOAT_HOLD = 120;   // D15: a risen ball floats this long before it will descend (2 s)
   const RISE_EVERY = 1;     // ticks per row risen (60 rows a second: up through a tower's heap in seconds)

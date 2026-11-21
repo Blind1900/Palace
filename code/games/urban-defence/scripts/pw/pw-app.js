@@ -328,6 +328,8 @@
       if (structure) structure.step(1.5);
       if (fragments) fragments.step(DT);
       if (PW.tanks) PW.tanks.step(world, DT);
+      // (N77 rounds step inside PW.tanks.step - the suites' scenarios manual-step it, so
+      // the loop does not claim them with the looped flag; PS's default stands)
       if (PW.streetProps) PW.streetProps.step(world, particles);
       if (PW.flora && PW.flora.step) PW.flora.step(world, particles);
       if (cores) cores.step();

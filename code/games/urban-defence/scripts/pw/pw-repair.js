@@ -29,6 +29,7 @@
   const LEAD = [48, 0, -8, -16, -24, -24];        // sort-row head start per priority class
   const LOOSE = new Uint8Array(64);
   for (const id of [M.DEBRIS, M.RUBBLE, M.LOOSE_SOIL, M.LOOSE_STONE, M.SAND, M.ASH, M.RUIN]) LOOSE[id] = 1;
+  if (M.WRECK) LOOSE[M.WRECK] = 1;   // N77: crews salvage a burnt hull for HM like any ruin
   // The resurrection is on: the structure side knows construction sites (b.growing) now.
   if (PW.REBUILD_RUINS === undefined) PW.REBUILD_RUINS = true;
 

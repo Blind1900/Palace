@@ -219,7 +219,8 @@
       // (repair and the pipeline ride the lab's speed, in step with the growth clock)
       if (repair) repair.step(DT * speed);
       if (pipes) pipes.step(DT * speed);
-      if (PW.tanks) PW.tanks.step(world, DT);   // (N3 vehicle rule: tanks test the lab's streets)
+      if (PW.tanks) PW.tanks.step(world, DT);   // (N3 vehicle rule: tanks test the lab's streets;
+      // N77 rounds step inside it - the lab stays the suites' bench, so no looped flag here)
       if (stability) stability.step();
       if (air) air.step();
       if (PW.stepSmokeBursts) PW.stepSmokeBursts(world, DT);
@@ -256,6 +257,7 @@
     if (pipes) pipes.draw(renderer, now / 1000);   // (N75: the cargo moves in the lab too)
     growth.draw(renderer, now / 1000);
     if (PW.debugHitboxes && fragments && fragments.drawHitboxes) fragments.drawHitboxes(renderer);
+    if (PW.drawUnitsHook) PW.drawUnitsHook(renderer);   // N77: the lab shows its tanks too
     PW.drawEffects(world, renderer, (now - (frame.prev || now)) / 1000);
     frame.prev = now;
     frames += 1;
