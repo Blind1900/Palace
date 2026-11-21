@@ -89,8 +89,10 @@ else {
   });
   const sizes = T.STYLES.map((s) => `${s} ${looks[s].pic.w}x${looks[s].pic.h}`).join(', ');
   const ratios = T.STYLES.map((s) => looks[s].pic.w / looks[s].pic.h);
-  check(T.STYLES.every((s) => looks[s].pic.w >= 140 && looks[s].pic.w <= 175 && looks[s].pic.h >= 40 && looks[s].pic.h <= 52) && ratios.every((q) => q > 3.17 * 0.8 && q < 3.17 * 1.25),
-    `a tank is a main battle tank's size - about 8 m of hull, 2.7 m to its turret roof, its gun reaching 2.5 m past its nose - and the GIF's long low build (38x12 px there, ${ratios.map((q) => q.toFixed(2)).join(' / ')} long to tall here; ${sizes} cells)`);
+  const tall = T.STYLES.map((s) => looks[s].tank.art.height);
+  check(T.STYLES.every((s) => looks[s].pic.w >= 140 && looks[s].pic.w <= 175 && looks[s].pic.h >= 30 && looks[s].pic.h <= looks[s].tank.art.height + 2)
+    && tall[0] === 35 && tall[0] >= tall[1] && tall[1] >= tall[2] && tall[2] <= 33 && ratios.every((q) => q > 3.6 && q < 5.2),
+    `a tank is a main battle tank's real size - about 8 m of hull, its gun reaching 2.5 m past its nose - and its own army's height: an M1 Abrams 2.44 m to its turret roof, ${tall[0]} cells with its cupola, a Type 99 ${tall[1]}, a low T-64 ${tall[2]} - under a gate hall's 36 clear (${ratios.map((q) => q.toFixed(2)).join(' / ')} long to tall, as a real one with its gun; ${sizes} cells)`);
   const { modern, asian, gothic } = Object.fromEntries(T.STYLES.map((s) => [s, looks[s].pic]));
   check(modern.r > modern.g && modern.g > modern.b && modern.r > 140 && asian.g > asian.r && asian.g > asian.b && gothic.g > gothic.r && gothic.g < asian.g && gothic.cross > 8 && asian.star > 2,
     `each side's tank in its army's colours: the M1 sand tan (${modern.r | 0},${modern.g | 0},${modern.b | 0}), the Type 99 olive with its red star (${asian.r | 0},${asian.g | 0},${asian.b | 0}; ${asian.star} star pixels), the T-64 dark green with its white cross (${gothic.r | 0},${gothic.g | 0},${gothic.b | 0}; ${gothic.cross} cross pixels)`);
@@ -225,6 +227,37 @@ else {
     check(tipped > 15 * deg && !c.falling && Math.abs(frontY - (cg + 41)) < 3 && seated(c) <= 2,
       `with the ground blown away from under its front it tips over the edge nose down (to ${(tipped / deg).toFixed(0)} deg) and comes to rest across it, its front wheels on the floor of the hole 40 cells down (${(frontY - cg).toFixed(0)} down; ${c.falling ? 'still falling' : 'resting'})`);
     world.tanks.length = 0;
+  }
+}
+
+// 5. Through its own side's gate hall (N3, the vehicle rule): a hall 36 cells clear under a slab, its
+// piers marked as a building's gates (a record of the test's own, of the left side). A tank of the
+// left drives through the piers and on out the far side; a tank of the right stops nose to them.
+{
+  const G = site(700);
+  if (!G) check(false, 'a stretch of the wilds for the gate hall');
+  else {
+    const { x0, g } = G, hx = x0 + 330, piers = [hx - 40, hx - 39, hx - 38, hx + 38, hx + 39, hx + 40, hx, hx + 1];
+    for (let x = hx - 60; x <= hx + 60; x += 1) for (let y = g - 40; y <= g - 37; y += 1) PW.set(world, x, y, M.CONCRETE, { quiet: true });   // (the slab over it)
+    for (const x of piers) for (let y = g - 36; y <= g - 1; y += 1) PW.set(world, x, y, M.STEEL, { quiet: true });
+    // (and the troops' flight of stairs up from it, standing in the hall)
+    for (let d = 0; d < 24; d += 1) PW.set(world, hx + 8 + d, g - 1 - d, M.PLATFORM, { quiet: true });
+    const rec = { id: 990001, type: 'test-hall', faction: 'left', side: 'left', body: { left: hx - 60, right: hx + 60, top: g - 40, bottom: g - 1 }, gates: piers.map((x) => ({ x, y0: g - 36, y1: g - 1 })) };
+    world.buildings.push(rec);
+    const friend = T.create(world, { style: 'modern', side: 'left', x: x0 + 120, y: g, facing: 1 });
+    T.drive(friend, 1);
+    run(friend, 8);
+    const through = friend.x > hx + 120 && !friend.falling;
+    world.tanks.length = 0;
+    const foe = T.create(world, { style: 'gothic', side: 'right', x: x0 + 120, y: g, facing: 1 });
+    T.drive(foe, 1);
+    run(foe, 8);
+    const nose = (hx - 40) - (foe.x + 58);
+    await view('tank-gate', hx - 20, g - 30, 6);
+    check(through && foe.v === 0 && foe.blocked && nose >= 0 && nose < 12,
+      `through its own side's gate hall: a tank of the building's side drives under its slab, through its gate piers and past the flight of stairs in it (${through ? `out the far side, ${(friend.x - hx).toFixed(0)} cells past its middle` : `stopped at ${(friend.x - hx).toFixed(0)}: ${friend.blocked}`}); a tank of the other side stops nose to the piers (${foe.blocked || 'not stopped'}, ${nose.toFixed(0)} cells off)`);
+    world.tanks.length = 0;
+    world.buildings.splice(world.buildings.indexOf(rec), 1);
   }
 }
 

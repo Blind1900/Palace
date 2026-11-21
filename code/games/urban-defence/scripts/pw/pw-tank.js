@@ -1,7 +1,8 @@
 'use strict';
 // Tanks (N10, N71, N72), after the user's TankMovement and TankAim GIFs, drawn at their real size
-// (a cell is about 7 cm: a main battle tank's hull about 116 cells long, 38 to its turret roof) and
-// in two parts, as the user asked:
+// (a cell is about 7 cm: a main battle tank's hull about 116 cells long, and each its own army's
+// height - an M1 Abrams 2.44 m to its turret roof, 35 cells with its cupola; a Type 99 34; a low
+// T-64 32), in two parts, as the user asked:
 // - the hull and its running gear: each road wheel finds the ground under it on its own spring
 //   (SPRING_UP / SPRING_DOWN cells of travel), the hull lies along the line through them, and the
 //   track belt wraps the wheels as they lie - so the tracks always follow the ground under them.
@@ -17,6 +18,11 @@
 // slopes up to MAX_SLOPE and steps up to STEP cells. It will not go into a wall, a tunnel (it has
 // no room there), deep water or over a drop; and where the ground is blown away from under it, it
 // tips over the edge and falls.
+// It drives through its own side's buildings (N3, the vehicle rule): every tower, military mass and
+// spine stands on a gate hall at grade, its piers marked (the building record's gates); a tank of the
+// building's own side passes the piers as water passes a roof's hatch - every check of its hull
+// reads them as open - while to anything else, an enemy tank too, they stay the solid walls they
+// are (an enemy stops nose to the facade).
 // Each side's tanks are a real army's of its region (as its troopers are - see pw-unit-art):
 //   modern - a US M1 Abrams: sand tan, an angular turret with a long bustle, side skirts, 7 wheels;
 //   asian  - a PLA Type 99: olive green with digital camouflage, a long wedge turret, 6 wheels;
@@ -36,7 +42,6 @@
   const LOOK = 48;              // cells ahead of its leading wheel it looks at the ground (room to brake)
   const NOSE = 60;              // cells from its middle its nose and lower plate reach, and a little
   const SPAN = 16;              // cells a slope is measured over (a kerb within it is a step, not a slope)
-  const HEADROOM = 40;          // cells of open space it needs over its tracks (no tunnels)
   const DEEP = 26;              // cells of water it fords at most
   const SPRING_UP = 5, SPRING_DOWN = 4;   // cells of travel each road wheel has, up and down
   const WHEEL = 6;              // cells a road wheel's radius (about 0.85 m across)
@@ -51,12 +56,13 @@
 
   // ---- The look --------------------------------------------------------------------------------------
   const STYLES = {
-    modern: { base: [196, 174, 126], dark: [148, 128, 90], wheel: [96, 92, 82], wheels: 7, span: 46, skirt: [-50, 50, -18, -9], barrel: 76,
+    // (deck: the hull's roof, in cells over the track's bottom run; the turret stands 11 on it)
+    modern: { base: [196, 174, 126], dark: [148, 128, 90], wheel: [96, 92, 82], wheels: 7, span: 46, skirt: [-50, 50, -18, -9], barrel: 76, deck: 24,
       turret: [[-34, -3], [-32, -10], [18, -11], [26, -5], [24, 0], [-25, 0]] },
-    asian: { base: [96, 112, 68], dark: [66, 80, 48], wheel: [76, 82, 66], wheels: 6, span: 42, skirt: [-47, 47, -17, -12], barrel: 80,
+    asian: { base: [96, 112, 68], dark: [66, 80, 48], wheel: [76, 82, 66], wheels: 6, span: 42, skirt: [-47, 47, -17, -12], barrel: 80, deck: 23,
       camo: { spots: [[64, 82, 48], [130, 126, 86], [102, 86, 58], [120, 144, 82]], density: 0.42 },
       turret: [[-28, -2], [-25, -10], [10, -11], [31, -3], [25, 0], [-23, 0]], star: true },
-    gothic: { base: [64, 78, 52], dark: [44, 54, 36], wheel: [70, 76, 60], wheels: 6, span: 40, skirt: null, barrel: 74,
+    gothic: { base: [64, 78, 52], dark: [44, 54, 36], wheel: [70, 76, 60], wheels: 6, span: 40, skirt: null, barrel: 74, deck: 21,
       turret: null, era: true, cross: true },
   };
   const rgb = (c, k = 1) => PW.abgr(Math.min(255, c[0] * k), Math.min(255, c[1] * k), Math.min(255, c[2] * k));
@@ -98,28 +104,32 @@
     // The hull (u along it, v down; v = 0 the bottom of the track's run under it), the same at both
     // ends: its upper body, a sloped plate and a lower plate at each end, the fenders over the
     // tracks, and the side skirts where it has them.
-    const body = [[-58, -20], [-32, -27], [32, -27], [58, -20], [58, -18], [53, -16], [-53, -16], [-58, -18]];
+    const deck = st.deck;
+    const body = [[-58, -19], [-32, -deck], [32, -deck], [58, -19], [58, -18], [53, -16], [-53, -16], [-58, -18]];
     const skirt = st.skirt;
     // (a cell's distance along from the middle, the same for a cell and its mirror: cells x and
     // -x - 1 are each other's)
     const along = (x) => Math.abs(x + 0.5) - 0.5;
-    const hull = sprite(-60, -30, 60, -6, (u, v) => inPoly(body, u, v) || (skirt && u >= skirt[0] && u <= skirt[1] && v >= skirt[2] && v <= skirt[3] - ((Math.floor(Math.abs(u)) & 7) === 0 ? 1 : 0)), (u, v, light) => {
+    // (the body tested on its |u|: a cell and its mirror come out alike even where an edge runs
+    // through cell corners)
+    const hull = sprite(-60, -30, 60, -6, (u, v) => inPoly(body, Math.abs(u), v) || (skirt && u >= skirt[0] && u <= skirt[1] && v >= skirt[2] && v <= skirt[3] - ((Math.floor(Math.abs(u)) & 7) === 0 ? 1 : 0)), (u, v, light) => {
       let c = camoAt(st, u, v), k = light;
       const au = along(u);
       if (v === -17 || v === -18) k *= 0.62;                       // (the fender's edge)
       if (skirt && v > -17) k *= 0.9;
       // (reactive armour on the sloped plates: blocks in rows along them)
-      if (st.era && au >= 34 && v <= -20) c = (au - 34) % 5 === 0 || (v + 30) % 3 === 0 ? st.dark : ERA;
+      if (st.era && au >= 34 && v <= -19) c = (au - 34) % 5 === 0 || (v + 30) % 3 === 0 ? st.dark : ERA;
       if (au === 57) k *= 0.8;
       return rgb(c, k);
     });
     // The turret, facing right (t forward, s down across it; s = 0 its ring on the hull's roof),
-    // with its commander's cupola and a machine gun on top, and the mantlet the gun pivots in.
+    // with its commander's cupola and a machine gun beside it, low on its roof, and the mantlet the
+    // gun pivots in.
     const shape = st.turret || Array.from({ length: 19 }, (_, k) => { const a = Math.PI * k / 18; return [26 * Math.cos(a), -11.5 * Math.sin(a)]; });
-    const turret = sprite(-36, -17, 30, 0, (t, s) => inPoly(shape, t, s) || (t >= -9 && t <= 0 && s >= -14 && s <= -10) || (t >= 0 && t <= 9 && s >= -15.5 && s <= -14.5)
+    const turret = sprite(-36, -17, 30, 0, (t, s) => inPoly(shape, t, s) || (t >= -9 && t <= 0 && s >= -12 && s <= -10) || (t >= 1 && t <= 8 && s >= -12.5 && s <= -11.5)
       || (t >= 15 && t <= 24 && s >= -9 && s <= -3), (t, s, light) => {
       let c = camoAt(st, t, s), k = light;
-      if (t >= 0 && t <= 9 && s < -14) { c = [40, 40, 42]; k = 1; }            // (the machine gun)
+      if (t >= 1 && t <= 8 && s === -12) { c = [40, 40, 42]; k = 1; }          // (the machine gun)
       if (st.cross && t >= -16 && t <= -6 && s >= -8 && s <= -2 && (t === -11 || t === -12 || s === -5)) { c = [222, 222, 214]; k = 1; }
       if (st.star && t >= -14 && t <= -10 && s >= -7 && s <= -3 && Math.abs(t + 12) + Math.abs(s + 5) <= 2) { c = [196, 44, 36]; k = 1; }
       if (st.era && t >= 12 && s >= -10 && s <= -2) c = (t - 12) % 4 === 0 || (s + 10) % 3 === 0 ? st.dark : ERA;
@@ -129,7 +139,7 @@
     // same, raised; small return rollers under the belt's top run)
     const wheels = Array.from({ length: st.wheels }, (_, k) => -st.span + (2 * st.span) * k / (st.wheels - 1));
     a = { style, st, hull, turret, wheels, R: WHEEL, sprocket: [-52, -9, 6], idler: [52, -9, 6], rollers: [-30, 0, 30].map((u) => [u, -13, 1.5]),
-      trunnion: [20, -6], barrel: st.barrel, ring: [0, -27], nose: NOSE - st.span };
+      trunnion: [20, -6], barrel: st.barrel, ring: [0, -deck + 1], height: deck + 11, nose: NOSE - st.span };
     ART.set(style, a);
     return a;
   }
@@ -139,38 +149,70 @@
   // passes like a trooper does, at another depth)
   const { phase, passable } = PW.mat, POWDER = PW.PHASE.POWDER;
   const isSupport = (m) => { const id = m & ID_MASK; return phase[id] >= POWDER && !passable[id]; };
+  // A building's gate piers (N3): kept by column, x -> [y0, y1, side, ...], made again when the
+  // buildings change (and now and then, a ruin's gone). A building's side: its faction.
+  let gateCache = { list: null, n: -1, at: -1e9, map: new Map() };
+  function gatesOf(world) {
+    const list = world.buildings || [], now = world.tick || 0;
+    if (gateCache.list === list && gateCache.n === list.length && now - gateCache.at < 60) return gateCache.map;
+    // (each column's spans: y0, y1, side, and what passes there - PIER, every cell of a pier;
+    // HALL, the stairs standing in the hall between its piers, up to the storey over it - the
+    // troops' way up, a flight at the back of the hall, the lane at its front)
+    const map = new Map(), add = (x, y0, y1, side, kind) => { let a = map.get(x); if (!a) map.set(x, a = []); a.push(y0, y1, side, kind); };
+    for (const b of list) {
+      const side = b.faction || b.side;
+      if (!b.gates || !b.gates.length || !side || b.ruined) continue;
+      let gx0 = Infinity, gx1 = -Infinity;
+      for (const g of b.gates) { add(g.x, g.y0, g.y1, side, PIER); gx0 = Math.min(gx0, g.x); gx1 = Math.max(gx1, g.x); }
+      const { y0, y1 } = b.gates[0];
+      for (let x = gx0 + 1; x < gx1; x += 1) add(x, y0, y1, side, HALL);
+    }
+    gateCache = { list, n: list.length, at: now, map };
+    return map;
+  }
+  const PIER = 0, HALL = 1;
+  // (does a tank of `side` pass cell y (of stuff id) of a column whose gate spans are `spans`? A
+  // pier of a building of its own side, or a flight of stairs in its hall)
+  function passes(spans, side, y, id) {
+    for (let k = 0; k < spans.length; k += 4) if (y >= spans[k] && y <= spans[k + 1] && spans[k + 2] === side && (spans[k + 3] === PIER || id === M.PLATFORM)) return true;
+    return false;
+  }
+  const spansFor = (world, t, x) => (t && t.side ? gatesOf(world).get(x) : undefined);
   // (the top of what can bear a tank in column x, from `from`: the top of the ground `from` is in -
   // looked for up as far as it climbs and a little more, a wall higher than that given as that
   // height - or, `from` in the open, the ground under it, down as far as it might go; -1 if nothing)
-  function surface(world, x, from) {
+  // (for tank t: its own side's gate piers are no support, nor in its way - see passes)
+  function surface(world, x, from, t) {
     const { mat, width: W, height: H } = world;
     if (x < 1 || x >= W - 1) return -1;
     const f = Math.max(1, Math.min(H - 1, Math.round(from))), y0 = Math.max(1, f - STEP - 4), y1 = Math.min(H - 1, f + 120);
-    if (isSupport(mat[f * W + x])) {
+    const spans = spansFor(world, t, x), side = t && t.side;
+    const bears = spans ? (y) => isSupport(mat[y * W + x]) && !passes(spans, side, y, mat[y * W + x] & ID_MASK) : (y) => isSupport(mat[y * W + x]);
+    if (bears(f)) {
       let y = f;
-      while (y > y0 && isSupport(mat[(y - 1) * W + x])) y -= 1;
+      while (y > y0 && bears(y - 1)) y -= 1;
       return y;
     }
-    for (let y = f + 1; y <= y1; y += 1) if (isSupport(mat[y * W + x])) return y;
+    for (let y = f + 1; y <= y1; y += 1) if (bears(y)) return y;
     return -1;
   }
   // (where a road wheel's rim meets the ground: the highest of the ground across its lower arc, so
   // it rolls up onto the corner of a step rather than dropping into it, and bridges a crack)
   const ARC = [-4, -3, -2, -1, 0, 1, 2, 3, 4].map((d) => [d, WHEEL - Math.sqrt(WHEEL * WHEEL - d * d)]);
-  function wheelGround(world, x, from) {
+  function wheelGround(world, x, from, t) {
     let best = -1;
     for (const [d, lift] of ARC) {
-      const y = surface(world, Math.round(x) + d, from);
+      const y = surface(world, Math.round(x) + d, from, t);
       if (y >= 0 && (best < 0 || y + lift < best)) best = y + lift;
     }
     return best;
   }
   let current = null;
-  // (spec.facing: the way its turret faces, -1 / +1)
+  // (spec.facing: the way its turret faces, -1 / +1; spec.side: its side, whose gates it passes)
   function create(world, spec) {
     const art = artOf(spec.style || 'modern'), facing = spec.facing || 1;
     const x = spec.x, y = spec.y ?? world.groundTop[Math.round(x)];
-    const t = { art, style: art.style, x, y, facing, angle: 0, spin: 0,
+    const t = { art, style: art.style, side: spec.side || null, x, y, facing, angle: 0, spin: 0,
       v: 0, vy: 0, drive: 0, travel: 0, falling: false, tipping: false, blocked: '', dead: false,
       springs: new Float32Array(art.wheels.length), contact: new Uint8Array(art.wheels.length),
       target: null, elevation: 0, turning: 0 };
@@ -195,7 +237,7 @@
     let sx = 0, sy = 0, sxx = 0, sxy = 0, k = 0, lo = -1, hi = -1;
     for (let i = 0; i < n; i += 1) {
       const [wx, wy] = toWorld(t, wheels[i], 0);
-      const y = wheelGround(world, wx, wy);
+      const y = wheelGround(world, wx, wy, t);
       WX[i] = wx; WY[i] = y;
       t.contact[i] = 0;
       if (y < 0 || y > wy + SPRING_DOWN + 2) { WY[i] = -1; continue; }
@@ -253,19 +295,21 @@
     const { mat, width: W } = world;
     const { wheels } = t.art, lead = dir > 0 ? wheels.length - 1 : 0;
     const [lx, ly] = toWorld(t, wheels[lead], t.springs[lead]);
-    let x = Math.round(lx), prev = surface(world, x, ly);
+    let x = Math.round(lx), prev = surface(world, x, ly, t);
     if (prev < 0) return '';
     const tanMax = Math.tan(MAX_SLOPE * deg);
     HS[0] = prev;
     const stop = (k, why) => { t.room = k - t.art.nose; return why; };
     for (let k = 1; k <= LOOK; k += 1) {
       x += dir;
-      const h = surface(world, x, prev);
+      const h = surface(world, x, prev, t);
       HS[k] = h;
       if (h < 0 || h - prev > DROP) return stop(k - 1, 'drop');
       for (let s = 1; s <= Math.min(k, SPAN); s += 1) if (HS[k - s] - h > Math.max(STEP, s * tanMax)) return stop(k - s, 'too steep');
-      for (let up = 1; up <= HEADROOM && h - up >= 0; up += 1) {
-        if (isSupport(mat[(h - up) * W + x])) return stop(k, 'no room');
+      // (room for its height over its tracks: no tunnel, no overhang - its own side's gates aside)
+      const spans = spansFor(world, t, x);
+      for (let up = 1; up <= t.art.height && h - up >= 0; up += 1) {
+        if (isSupport(mat[(h - up) * W + x]) && !(spans && passes(spans, t.side, h - up, mat[(h - up) * W + x] & ID_MASK))) return stop(k, 'no room');
         if (up <= 4 && (PW.getFlags(world, x, h - up) & PW.FLAG.TUNNEL)) return stop(k, 'tunnel');
       }
       let water = 0;
@@ -529,7 +573,13 @@
     // (on the ground, a road or a bridge - not on a building's roof)
     const id = mat[gy * W + gx] & ID_MASK;
     if (!(PW.mat.terrain[id] || id === M.ASPHALT || id === M.ROADBED || id === M.BRIDGE) || PW.getOwner(world, gx, gy)) return null;
-    held = create(world, { style: Object.keys(STYLES)[nextStyle++ % 3], x: gx, y: gy, facing: gx < W / 2 ? 1 : -1 });
+    // (of the side of the buildings nearest it: it passes their gates)
+    let side = null, best = Infinity;
+    for (const b of world.buildings || []) {
+      const s = b.faction || b.side, bx = b.body ? (b.body.left + b.body.right) / 2 : b.x;
+      if (s && Number.isFinite(bx) && Math.abs(bx - gx) < best) { best = Math.abs(bx - gx); side = s; }
+    }
+    held = create(world, { style: Object.keys(STYLES)[nextStyle++ % 3], side, x: gx, y: gy, facing: gx < W / 2 ? 1 : -1 });
     return held;
   }
   function key(event) {
@@ -542,6 +592,6 @@
     return true;
   }
 
-  PW.tanks = { create, step, draw, drive, aimAt, muzzle, settle, ahead, tool, key, held: () => held, reach, STYLES: Object.keys(STYLES),
+  PW.tanks = { create, step, draw, drive, aimAt, muzzle, settle, ahead, tool, key, held: () => held, reach, gatesOf, STYLES: Object.keys(STYLES),
     VMAX, ACCEL, GUN_UP, GUN_DOWN, MAX_SLOPE, STEP, SPRING_UP, SPRING_DOWN, TURN };
 })();
