@@ -116,7 +116,70 @@
         }
         line.cores = line.cores.filter((c) => c.building !== building);
         stats.cores -= before - line.cores.length;
+        // N81: the building's risers go WITH its cores - a pit riser left standing is a
+        // plugged ghost mouth every later packet jams behind. Cargo climbing the dead
+        // shaft spills into the works; cargo bound for it in-lane re-routes next step.
+        const dead = [];
+        line.risers = line.risers.filter((r) => { if (r.building === building) { dead.push(r); return false; } return true; });
+        if (dead.length) {
+          for (const p of line.packets) {
+            if (p.done || !p.dst || !dead.includes(p.dst.riser)) continue;
+            if (p.stage === 2) { p.done = true; stats.spilled += 1; }
+            else p.dst = null;
+          }
+        }
       }
+    }
+    // N80: let go of ONE bare seed core, by position - a planted seed whose building never
+    // came (grow refused the ground) is unplanted, and its thread on the line goes with it.
+    // releaseBuilding(side, 0) would shed every seed core of the side at once.
+    function releaseSeedCore(side, x) {
+      for (const line of lines) {
+        if (line.side !== side) continue;
+        const before = line.cores.length;
+        for (const c of line.cores) {
+          if (c.building === 0 && Math.abs(c.x - x) <= 2) pendingHeals.push({ line, x0: c.x - HOP - 4, x1: c.x + HOP + 4 });
+        }
+        line.cores = line.cores.filter((c) => !(c.building === 0 && Math.abs(c.x - x) <= 2));
+        stats.cores -= before - line.cores.length;
+      }
+    }
+    // N81/N25F: any pass that can move the run's level snapshots its risers first and lays
+    // every riser whose column moved again afterwards - an old ladder tops out at a row
+    // that no longer exists, and every climbing packet jams at the ceiling for ever (the
+    // silent HM famine). Cargo caught mid-shaft spills into the works.
+    function snapRisers(line) {
+      const m = new Map();
+      for (const r of line.risers) m.set(r, line.ys[Math.max(0, Math.min(line.ys.length - 1, r.x - line.x0))]);
+      return m;
+    }
+    function relayMovedRisers(line, snap) {
+      for (let i = 0; i < line.risers.length; i += 1) {
+        const r = line.risers[i];
+        const now = line.ys[Math.max(0, Math.min(line.ys.length - 1, r.x - line.x0))];
+        if (snap.has(r) && snap.get(r) === now) continue;
+        for (const p of line.packets) {
+          if (p.done) continue;
+          if (p.riser === r || (p.dst && p.dst.riser === r && p.stage === 2)) { p.done = true; stats.spilled += 1; }
+          else if (p.dst && p.dst.riser === r) p.dst = null;
+        }
+        line.risers[i] = layRiser(line, { x: r.x, y: r.anchorY, flow: r.flow, kind: r.kind, resource: r.resource, building: r.building, op: r.op, main: r.main });
+      }
+    }
+    // N81: the LAW, enforced on any stretch a lay, merge or re-thread touched - after it,
+    // neighbouring columns differ by at most one cell outside a registered well. The
+    // sweeps only ever DEEPEN (always safe to lay into), the bed rows are re-pinned each
+    // round, every column that moved is taken up and laid again, and layWells re-reads
+    // the stretch so any step the pins force (a deep trunk against a bed's shelf) stands
+    // as a proper shaft with its swept elbows - never a bare cliff through the lanes.
+    function enforceGrade(line, k0, k1) {
+      // N81: a step a lay/merge/re-thread spliced in must stand as a SWEPT bend or a
+      // proper shaft, not a bare cliff that walls the lanes - layWells turns every step
+      // over one cell (down to a mitred bend, a shaft for the taller ones) into open
+      // pipe. No global deepening: that dragged the whole run below the made ground that
+      // beds it (seed 3's gothic neutral). The turn stays where the contour put it.
+      const a = Math.max(0, k0 - 2), b = Math.min(line.ys.length - 1, k1 + 2);
+      if (b > a) layWells(line, a, b);
     }
     function runHeals() {
       if (!pendingHeals.length) return;
@@ -251,15 +314,13 @@
           const k = core.x + dx - x0;
           if (k >= 0 && k < ys.length) ys[k] = T;
         }
-        // N34: the approach bounds follow an S-curve, not the old |d| cone - zero slope
-        // leaving the plateau, so the line rolls off the connector shelf with no corner
-        // (the kink at every cabinet rim in the user's close looks).
-        const R2 = RAMP + SPAN;
-        for (let d = 1; d <= R2; d += 1) {
-          const t = d / R2, E = Math.max(1, Math.round(R2 * (3 * t * t - 2 * t * t * t)));
+        // The approach eases to the connector row one cell a column (the |d| cone): the
+        // span itself sits on the row, and each column out differs from the last by at
+        // most one - a smooth roll-off, no corner (N34), lanes open the whole way.
+        for (let d = 1; d <= RAMP + SPAN; d += 1) {
           for (const k of [core.x - SPAN - d - x0, core.x + SPAN + d - x0]) {
             if (k < 0 || k >= ys.length) continue;
-            ys[k] = Math.max(Math.min(ys[k], T + E), T - E);
+            ys[k] = Math.max(Math.min(ys[k], T + d), T - d);
           }
         }
       }
@@ -272,6 +333,8 @@
         if (b.x - a.x > 140) continue;
         const Ta = a.y - 3, Tb = b.y - 3;
         const s0 = a.x + SPAN, s1 = b.x - SPAN;
+        // The shelf runs straight bed to bed; any single level change it leaves is turned
+        // into a swept mitred bend or a well by layWells (N81), never a bare cliff.
         for (let x = s0; x <= s1; x += 1) {
           const k = x - x0;
           if (k < 0 || k >= ys.length) continue;
@@ -493,7 +556,7 @@
         layCell(line, xc + 7, vy + 1, [205, 209, 213]);
         layCell(line, xc + 7, vy, STEEL);
       }
-      return { x: anchor.x, y0: yA, y1: yB, anchorY: anchor.y, flow: anchor.flow, kind: anchor.kind, resource: anchor.resource,
+      return { x: anchor.x, y0: yA, y1: yB, anchorY: anchor.y, flow: anchor.flow, kind: anchor.kind, resource: anchor.resource, main: anchor.main,
         tTop: lineY - 9, tBot: lineY + BORE + 9,   // (the T-piece and valve hardware live in this band)
         building: anchor.building, op: anchor.op, occ: new Uint8Array(yB - yA + 1), timer: 0, pending: 0 };
     }
@@ -551,7 +614,11 @@
       for (let k = Math.max(1, k0); k <= Math.min(line.ys.length - 1, k1); k += 1) {
         const a = line.ys[k - 1], b = line.ys[k];
         const dy = Math.abs(b - a);
-        if (dy <= 2) continue;
+        // N81: a 2-cell step is NOT flat enough to leave bare - the neighbour casing juts
+        // into the lane and walls the cargo (the user's blocked vertical run). It is a
+        // small mitred bend like the 3-6 steps: the bore's rows carried across the joint,
+        // lanes unbroken. (One cell is a true flat run.)
+        if (dy <= 1) continue;
         const xc = line.x0 + k;
         const yTop = Math.min(a, b), yBot = Math.max(a, b) + BORE - 1;
         // A shaft standing within a few columns of another is merged into it instead (the
@@ -683,7 +750,9 @@
             // The main core: the bundle rises into the pit floor beside the pedestal.
             const rx = orb.x - 26, ry = b.ground + b.pit.depth - 1;
             addSpan({ x0: rx - 3, x1: rx + 3, y0: ry - 2, y1: ry + 12, building: b.id });
-            anchors.push({ x: rx, y: ry, kind: 'core', resource: 'water', flow: 'in', building: b.id, main: true });
+            // (the pit riser is the town's STORES intake: every lane delivers here - ore,
+            // soft materials and water alike - so no resource tag)
+            anchors.push({ x: rx, y: ry, kind: 'core', flow: 'in', building: b.id, main: true });
             mainCore = b;
           }
           if (b.pump) anchors.push({ x: b.pump.x, y: b.pump.y + 2, kind: 'pump', resource: 'water', flow: 'out', building: b.id });
@@ -725,6 +794,7 @@
           layFlange(line, z, ly + BORE);
         }
         capEnd(line, -1); capEnd(line, 1);
+        enforceGrade(line, 0, line.ys.length - 1);   // N81: born lawful
         stats.cells += x1 - x0 + 1;
         stats.cores += cores.length;
         lines.push(line);
@@ -754,6 +824,7 @@
         layWells(line);
         if (x0 < line.x0 + 1) capEnd(line, -1);
         if (x1 > line.x1 - 1) capEnd(line, 1);
+        enforceGrade(line, 0, line.ys.length - 1);   // N81: the long reach obeys the law
         stats.cores += grown.length;
       }
       stats.lines = lines.length;
@@ -1040,6 +1111,9 @@
       }
       layWells(line);
       capEnd(line, -1); capEnd(line, 1);
+      // N81: the fused JOIN obeys the law (windowed - a whole-line sweep per merge blew
+      // the collapse suite's frame budget under the adoption era's churn)
+      enforceGrade(line, Math.max(0, M.x0 - line.x0 - 60), Math.min(line.ys.length - 1, M.x1 - line.x0 + 60));
       checkSpan(line, Math.max(0, M.x0 - line.x0 - 2), Math.min(line.ys.length - 1, M.x1 - line.x0 + 2));
       stats.cores += 0;   // (the cores only changed hands)
       stats.merged = (stats.merged || 0) + 1;
@@ -1103,12 +1177,16 @@
       if (x - SPAN - 4 < line.x0 || x + SPAN + 4 > line.x1) {
         // Beyond an end: the line runs on to it.
         const x0 = Math.min(line.x0, x - SPAN - 4), x1 = Math.max(line.x1, x + SPAN + 4);
+        const oldX0 = line.x0, oldX1 = line.x1;
         const fresh = contour(x0, x1, depthAt);
         snapToCores(fresh, x0, line.cores);
         extendTo(line, x0, x1, (c) => fresh[c - x0]);
         layWells(line);
         if (x0 < line.x0 + 1) capEnd(line, -1);
         if (x1 > line.x1 - 1) capEnd(line, 1);
+        // N81: only the grown stretch needs the law (windowed for the frame budget)
+        if (x0 < oldX0) enforceGrade(line, 0, Math.min(line.ys.length - 1, oldX0 - x0 + 80));
+        if (x1 > oldX1) enforceGrade(line, Math.max(0, oldX1 - x0 - 80), line.ys.length - 1);
         // N75: the grown line may now touch another of its side - they become one.
         mergeTouching(line);
         return core;
@@ -1125,6 +1203,7 @@
       const a = Math.max(0, aX - line.x0), bk = Math.min(line.ys.length - 1, bX - line.x0);
       const fresh = contour(line.x0 + a, line.x0 + bk, depthAt);
       snapToCores(fresh, line.x0 + a, line.cores.filter((c) => c.x >= line.x0 + a - SPAN && c.x <= line.x0 + bk + SPAN));
+      const rsnap = snapRisers(line);   // N81/N25F: risers the splice moves are laid again below
       const ease = (t) => t * t * (3 - 2 * t);
       for (let j = 0; j <= bk - a; j += 1) {
         const k = a + j, old = line.ys[k];
@@ -1153,6 +1232,8 @@
       }
       for (let k = a; k <= bk; k += 1) layColumn(line, line.x0 + k);
       layWells(line, a, bk);
+      relayMovedRisers(line, rsnap);
+      enforceGrade(line, a, bk);   // N81: the window's seams obey the law
       // N3: the re-lay closes its own window now - stale marks clear here, not when the
       // starved crews get round to them.
       for (let k = a; k <= bk; k += 1) if (line.broken[k] && intactAt(line, line.x0 + k)) clearBroken(line, k);
@@ -1198,6 +1279,9 @@
     function destinations(line, resource) {
       const out = [];
       for (const core of line.cores) if (core.taps[resource] === 'in') out.push({ core });
+      // Every in-riser is a stores intake (the pit drinks every lane; a hopper is a source,
+      // not listed). The grade law (swept bends, no bare cliff) is what keeps the lanes open
+      // to them - the deadlock watch in pw-pipe-flow proves cargo reaches them.
       for (const r of line.risers) if (r.flow === 'in') out.push({ riser: r });
       return out;
     }
@@ -1290,6 +1374,20 @@
         return true;
       }
       if (p.stage === 1) {
+        // N81: a destination that died mid-journey (its building released, its riser gone,
+        // its core off the line) re-routes the cargo to a living mouth - or spills it into
+        // the works if the side has none left. Nothing waits for ever on a ghost.
+        if (!p.dst || (p.dst.riser && !line.risers.includes(p.dst.riser))
+          || (p.dst.core && !line.cores.includes(p.dst.core))) {
+          const targets = destinations(line, p.resource);
+          if (!targets.length) {
+            line.occ[laneOf(line, p.x, p.lane)] = 0;
+            p.done = true; stats.spilled += 1;
+            return true;
+          }
+          p.dst = targets[line.next[p.resource]++ % targets.length];
+          p.dstX = p.dst.core ? p.dst.core.x : p.dst.riser.x;
+        }
         // Arrived: a core counts it in at its port; a riser is climbed first.
         if (p.dst.core && Math.abs(p.x - p.dst.core.x) <= HOP) {
           line.occ[laneOf(line, p.x, p.lane)] = 0;
@@ -1577,7 +1675,7 @@
       }
     }
 
-    const api = { build, step, draw, attach, carry, connectCore, releaseBuilding, notifyDamage, openEnds, unite, lines, stats, flowing, lineFor, contour, BORE, BED, LANES, TAPS };
+    const api = { build, step, draw, attach, carry, connectCore, releaseBuilding, releaseSeedCore, notifyDamage, openEnds, unite, lines, stats, flowing, lineFor, contour, BORE, BED, LANES, TAPS };
     return api;
   }
 
