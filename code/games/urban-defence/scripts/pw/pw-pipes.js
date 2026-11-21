@@ -1182,6 +1182,47 @@
         // instead of teleporting between the levels.
         const ty = rowOf(line, nx, p.lane);
         if (Math.abs(ty - p.y) > 1) { p.y += Math.sign(ty - p.y) * Math.min(3, Math.abs(ty - p.y)); return true; }
+        // N17 (the pipes half): a stray lump sitting in the lane - debris in through a breach,
+        // the rubble of a blown divider - is PUSHED ALONG by the stream, one cell a step, and
+        // at the core's connector it reaches it disintegrates and ignites (the user's rule:
+        // what gets in and cannot escape is walked to a core and burns).
+        const sid = mat[ty * W + nx] & ID_MASK;
+        // Only the loose junk is walked or ground - the blast's own debris family (as the
+        // N38 mouth-clearing). A heart, a steel, a water cell in the lane just stops the
+        // stream: hearts are sacred, water is conserved (N42O), and both leave by their
+        // own rules.
+        const loose = sid === M.DEBRIS || sid === M.RUBBLE || sid === M.SAND || sid === M.ASH
+          || sid === M.LOOSE_SOIL || sid === M.LOOSE_STONE;
+        // Everything else in a lane - water spilled at a cut, collapsed ground at a wound,
+        // a fallen heart - is some other rule's business (the drain, the regrow, the rise),
+        // and the stream rides past it as it always did.
+        if (loose) {
+          const atPort = line.cores.some((c) => Math.abs(nx - c.x) === HOP);
+          if (atPort && PW.boreBurn && PW.boreBurn(world, nx, ty)) {
+            stats.burned = (stats.burned || 0) + 1;
+          } else {
+            let shifted = false;
+            for (let m = 1; m <= 10 && !shifted; m += 1) {
+              const qx = nx + dir * m;
+              if (qx < line.x0 + 1 || qx > line.x1 - 1) break;
+              const qid = mat[ty * W + qx] & ID_MASK;
+              if (qid === M.PIPE) break;   // jammed against casing or a well wall: nothing rolls
+              if (qid === M.AIR || PW.mat.phase[qid] <= PW.PHASE.GAS) {
+                for (let j = m - 1; j >= 0; j -= 1) PW.swapCells(world, ty * W + nx + dir * j, ty * W + nx + dir * (j + 1));
+                stats.pushed = (stats.pushed || 0) + m;
+                shifted = true;
+              }
+            }
+            if (!shifted) {
+              // A jam the stream cannot roll on - a run too long, or hard against casing -
+              // is ground down a cell a step instead, the way the mouth-choking debris goes
+              // (N38): the lane must never wall itself shut behind a lump too big to walk.
+              PW.set(world, nx, ty, M.AIR, { quiet: true, lay: true });
+              stats.ground = (stats.ground || 0) + 1;
+              return false;   // (the stream waits this step; the way is open next)
+            }
+          }
+        }
         if (!free(line, nx, p.lane)) {
           // Two streams meet head-on in the one lane: the packets slip past each other. The
           // lookup is indexed per tick - searching the whole packet list for every blocked

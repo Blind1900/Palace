@@ -161,8 +161,63 @@ await view('pp-repaired', cutX, cutY - 6, 6);
 const coresBefore = water.cores.length, endBefore = water.x1;
 const planted = PW.seeds && PW.seeds.drop(world, water.x1 + 260, 'left');
 pwApp.stepWorld(60 * 2);
-for (let s = 0; s < 40 && [...water.broken].some(Boolean); s += 1) pwApp.stepWorld(60);
-check(!!planted && water.cores.length === coresBefore + 1 && water.x1 > endBefore && ![...water.broken].some(Boolean),
-  `a planted seed core joins the bundle (${coresBefore} -> ${water.cores.length} cores, end ${endBefore} -> ${water.x1}, line whole)`);
+// (whole-ness is judged on the grown stretch: with the towns alive, the line is for ever
+// being cut and healed by re-seats somewhere else along it)
+const grownCut = () => {
+  for (let k = Math.max(0, endBefore - 12 - water.x0); k < water.broken.length; k += 1) if (water.broken[k]) return true;
+  return false;
+};
+for (let s = 0; s < 40 && grownCut(); s += 1) pwApp.stepWorld(60);
+check(!!planted && water.cores.length === coresBefore + 1 && water.x1 > endBefore && !grownCut(),
+  `a planted seed core joins the bundle (${coresBefore} -> ${water.cores.length} cores, end ${endBefore} -> ${water.x1}, the grown stretch whole)`);
 if (planted) await view('pp-seed', planted.x, planted.y - 4, 6);
+
+// 6. N17, the pipes half: a lump sitting in a lane is pushed along by the stream, one cell
+// a step, and at the core's connector it reaches it disintegrates and ignites. Three lumps
+// go in (one per lane) on a flat stretch beside the main core; whichever lanes carry
+// traffic walk theirs to the port and burn them, and the line never reads as cut.
+const main = water.cores.reduce((a, c) => (!a || Math.abs(c.x - water.coreX) < Math.abs(a.x - water.coreX) ? c : a), null);
+// Lumps go a few cells outside the connector (the pass-through spans HOP=11 columns), one
+// per lane on its own column, so the first packets on ANY lane walk theirs in and burn it.
+let px = null;
+const clear = (x) => {
+  const k = x - water.x0;
+  if (k < 2 || k >= water.ys.length - 2) return false;
+  if ((water.wells || []).some((w) => Math.abs(w.x - x) <= 4)) return false;
+  if (water.risers.some((r) => Math.abs(r.x - x) <= 5)) return false;
+  return true;
+};
+for (const d of [13, 14, 15, 16, 17]) {
+  if (clear(main.x - d) && clear(main.x + d)) { px = main.x - d; break; }
+}
+check(px !== null, `stretches beside the main core's ports take the test lumps (${px})`);
+if (px !== null) {
+  // both flanks, one lump per lane per side: whichever way the traffic runs, some stream
+  // meets a lump and walks it the few cells into its port
+  const seats = [];
+  for (const side of [-1, 1]) {
+    for (const ln of [0, 1, 2]) {
+      const x = main.x + side * (main.x - px) - side * ln;
+      const k = x - water.x0;
+      seats.push([x, water.ys[k] + pipes.LANES[ln].row]);
+    }
+  }
+  for (const [x, y] of seats) PW.set(world, x, y, M.DEBRIS);
+  const kk = px - water.x0;
+  const pushed0 = pipes.stats.pushed || 0, burned0 = pipes.stats.burned || 0;
+  pwApp.stepWorld(60 * 35);
+  const pushed = (pipes.stats.pushed || 0) - pushed0, burned = (pipes.stats.burned || 0) - burned0;
+  check(pushed >= 2 && burned >= 1, `the stream walks a lump to the connector and burns it (${pushed} pushes, ${burned} burned)`);
+  // (a lane with no traffic in the window leaves its lump sitting - that is the rule working,
+  // not failing: only the stream moves a lump)
+  const sitting = seats.filter(([x, y]) => (PW.get(world, x, y) & 63) === M.DEBRIS).length;
+  check(sitting < seats.length, `the travelled lanes' lumps are gone from their seats (${sitting} of ${seats.length} still sitting)`);
+  // (scoped to the test stretch: with the towns alive, the line is being re-seated elsewhere)
+  let cutHere = 0;
+  for (let k2 = Math.max(0, px - 4 - water.x0); k2 <= Math.min(water.broken.length - 1, main.x + 4 - water.x0); k2 += 1) {
+    if (water.broken[k2]) cutHere += 1;
+  }
+  check(cutHere === 0, `a pushed lump never reads as a cut on its stretch (${cutHere} marks)`);
+  await view('pp-pushed', main.x - 8, water.ys[kk] - 4, 6);
+}
 return { checks, stats: pipes.stats, stock: world.stock, shots: shots.length };
