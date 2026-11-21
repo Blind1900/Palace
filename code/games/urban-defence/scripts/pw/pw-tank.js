@@ -243,6 +243,7 @@
   }
   let current = null;
   // (spec.facing: the way its turret faces, -1 / +1; spec.side: its side, whose gates it passes)
+  let tankN = 0;
   function create(world, spec) {
     const art = artOf(spec.style || 'modern'), facing = spec.facing || 1;
     const x = spec.x, y = spec.y ?? world.groundTop[Math.round(x)];
@@ -250,7 +251,8 @@
       v: 0, vy: 0, drive: 0, travel: 0, falling: false, tipping: false, blocked: '', dead: false,
       springs: new Float32Array(art.wheels.length), contact: new Uint8Array(art.wheels.length),
       target: null, elevation: 0, turning: 0,
-      hp: ARMOUR, ammo: spec.ammo || 'he', reload: 0, recoil: 0, rear: -facing, scars: [], fumes: 0, hurtBy: '' };
+      hp: ARMOUR, ammo: spec.ammo || 'he', reload: 0, recoil: 0, rear: -facing, scars: [], fumes: 0, hurtBy: '',
+      holes: null, chipped: 0, seed: ++tankN };
     (world.tanks || (world.tanks = [])).push(t);
     current = world;
     settle(world, t, 0);
@@ -421,6 +423,8 @@
   // tracks as it drives over it: what lies in its hull's way and under it down to the ground is
   // gone, and what was there is left on the ground a third as deep, packed hard as rubble in its
   // own colours; the way it has come is flat. (Each column once: what is left is no longer loose.)
+  // Only what is over the ground there: where its hull dips into the ground - its tail, nose-up on
+  // a slope - what is under that ground is not its to press (scree under a crust of rock).
   const PRESS_DEEP = 40;        // cells under its tracks it presses loose debris down through, at most
   function flatten(world, t) {
     const { mat, width: W, height: H } = world, c = Math.cos(t.angle), s = Math.sin(t.angle);
@@ -428,22 +432,23 @@
     for (let u = -56; u <= 56; u += 1) {
       const x = Math.round(t.x + u * c), yl = Math.round(t.y + u * s);
       if (x < 1 || x >= W - 1) continue;
-      let n = 0, paint = 0, y = Math.max(1, yl - t.art.height);
-      for (const end = Math.min(H - 2, yl + PRESS_DEEP); y <= end; y += 1) {
-        const m = mat[y * W + x];
-        if (CRUSHED[m & ID_MASK]) {
-          if (!paint) paint = PW.getLayer(world, 'paint', x, y);
-          PW.set(world, x, y, M.AIR);
-          n += 1;
-        } else if (y >= yl && isSupport(m)) break;   // (the ground its tracks are on)
+      // (the ground under its track there: the top of what bears it, under any loose heap)
+      const floor = surface(world, x, yl, t);
+      if (floor < 0 || floor - yl > PRESS_DEEP) continue;
+      let n = 0, paint = 0;
+      for (let y = Math.max(1, yl - t.art.height); y < floor; y += 1) {
+        if (!CRUSHED[mat[y * W + x] & ID_MASK]) continue;
+        if (!paint) paint = PW.getLayer(world, 'paint', x, y);
+        PW.set(world, x, y, M.AIR);
+        n += 1;
       }
       if (!n) continue;
       pressed += n;
       // (packed down onto that ground)
-      for (let k = 1, m = Math.ceil(n / 3); k <= m && y - k > 1; k += 1) {
-        if (isSupport(mat[(y - k) * W + x])) break;
-        PW.set(world, x, y - k, M.RUBBLE | (PW.hash2(x, y - k) & 3) << 6);
-        if (paint) PW.setLayer(world, 'paint', x, y - k, paint);
+      for (let k = 1, m = Math.ceil(n / 3); k <= m && floor - k > 1; k += 1) {
+        if (isSupport(mat[(floor - k) * W + x])) break;
+        PW.set(world, x, floor - k, M.RUBBLE | (PW.hash2(x, floor - k) & 3) << 6);
+        if (paint) PW.setLayer(world, 'paint', x, floor - k, paint);
       }
     }
     if (pressed) t.flattened = (t.flattened || 0) + pressed;
@@ -831,12 +836,15 @@
     const tt = Math.floor((rdx * P.tny - rdy * P.tnx) / P.det), ts = Math.floor((rdy * P.tfx - rdx * P.tfy) / P.det);
     let col = at(P.turn, tt, ts);
     const gun = gunAt(t, P, wx, wy);
+    // (what is chipped off it is not there: see chip)
+    if (col && t.holes && !P.turned && t.holes.turret[(ts - P.turn.y0) * P.turn.w + tt - P.turn.x0]) col = 0;
     if (gun && (!col || GUN_D >= P.turn.depth[(ts - P.turn.y0) * P.turn.w + tt - P.turn.x0] - 0.5)) { PART = GUN; return gun; }
     if (col) { PART = TURRET; return t.scars.length && !P.turned ? scarred(t, col, TURRET, tt, ts) : col; }
     // The hull and its running gear, along the ground under it.
     const dx = wx - t.x, dy = wy - t.y;
     const u = Math.floor(dx * P.c + dy * P.s), v = Math.floor(dy * P.c - dx * P.s);
     col = at(art.hull, u, v);
+    if (col && t.holes && t.holes.hull[(v - art.hull.y0) * art.hull.w + u - art.hull.x0]) col = 0;
     if (col) { PART = HULL; return t.scars.length ? scarred(t, col, HULL, u, v) : col; }
     const gu = u - GEAR.u0, gv = v - GEAR.v0;
     if (gu >= 0 && gv >= 0 && gu < GEAR.w && gv < GEAR.h) {
@@ -904,10 +912,11 @@
   // high-explosive shell, 'he'), laid by its fire control (see lay); it reloads in RELOAD. What it
   // takes - a round striking its own pixels, a blast in reach - comes off its armour: a dart that
   // strikes it takes 60 of its 100 (less on its tracks, little on its gun), a high-explosive shell
-  // its hit and its burst, a missile nearly all; a rifle bullet only sparks off it. Hurt, it smokes
-  // from its engine deck and goes slower; badly hurt it burns. When its armour is gone it is
-  // destroyed: its ammunition goes up - its turret blown off its ring and thrown, if what killed
-  // it went in hard - and what is left of it, burnt black, falls as a wreck: rigid pieces (see
+  // its hit and its burst, a missile nearly all; a rifle bullet only sparks off it. Hurt, it is
+  // chipped away as a building is (see chip), smokes from its engine deck and goes slower; badly
+  // hurt it burns. When its armour is gone it is destroyed: its fuel and ammunition go up in a
+  // burst of flame and smoke - no blast, only fire (see cookOff) - its turret thrown off its ring,
+  // if what killed it went in hard - and what is left of it, burnt black, falls as a wreck: rigid pieces (see
   // pw-fragments) that come to rest as ruin - part of the ground, its shape and its burnt colours
   // still its own, as a building's ruins are - burning a while, its smoke hanging over the place
   // long after; the town's crews clear it in time, as any ruin.
@@ -945,32 +954,105 @@
     },
     strike(world, t, s, x, y, part) {
       const share = part === GUN ? 0.25 : part === RUNNING ? 0.6 : 1, dmg = (s.k.damage || 0) * share;
-      if (dmg > 0) scar(t, x, y, part, s.k.blast ? 5 : 3);
-      else if (PW.shots && PW.shots.spark) PW.shots.spark(world, x, y, -s.vx * 0.05, -s.vy * 0.05, 3);
+      if (dmg > 0) {
+        scar(t, x, y, part, s.k.blast ? 5 : 3);
+        // (a bite out of its plate where it struck, thrown on the way the round went)
+        if (part !== GUN && part !== RUNNING) chipAt(world, t, x, y, part, 1.2 + Math.sqrt(dmg) * 0.55, s.vx * 0.15, s.vy * 0.15);
+      } else if (PW.shots && PW.shots.spark) PW.shots.spark(world, x, y, -s.vx * 0.05, -s.vy * 0.05, 3);
       hurt(world, t, dmg, s.kind);
       return true;
     },
   };
-  // (a scar where it was struck, kept in its part's own frame: see scarred)
-  function scar(t, x, y, part, r) {
-    let a, b;
+  // (where world point (x, y) is in a part's own frame: its turret's - t along it, s down - or its
+  // hull's - u along it, v down)
+  function partFrame(t, x, y, part) {
     if (part === TURRET || part === GUN) {
       const P = poseOf(t), rdx = x - P.rx, rdy = y - P.ry;
-      a = (rdx * P.tny - rdy * P.tnx) / P.det; b = (rdy * P.tfx - rdx * P.tfy) / P.det;
-      part = TURRET;
-    } else {
-      const dx = x - t.x, dy = y - t.y, c = Math.cos(t.angle), s = Math.sin(t.angle);
-      a = dx * c + dy * s; b = dy * c - dx * s;
-      part = HULL;
+      return [TURRET, (rdx * P.tny - rdy * P.tnx) / P.det, (rdy * P.tfx - rdx * P.tfy) / P.det];
     }
-    t.scars.push([part, a, b, r]);
+    const dx = x - t.x, dy = y - t.y, c = Math.cos(t.angle), s = Math.sin(t.angle);
+    return [HULL, dx * c + dy * s, dy * c - dx * s];
+  }
+  // (a scar where it was struck, kept in its part's own frame: see scarred)
+  function scar(t, x, y, part, r) {
+    const [p, a, b] = partFrame(t, x, y, part);
+    t.scars.push([p, a, b, r]);
     if (t.scars.length > 10) t.scars.shift();
+  }
+  // Chipped, as a building's walls are (N77): what strikes it bites its plate away - a ragged hole
+  // where a round went in, a bite out of its edge where a blast caught it - and as it is hurt more
+  // its edges are chipped away all over, its skirts, fenders and bustle racks first: how much of it
+  // is gone shows how near it is to going up. A chip is gone from it - the round, the eye and its
+  // wreck all see the hole (see pixel) - and its bits of plate are thrown off as metal debris. (The
+  // holes are kept in each part's own frame: its hull's, and its turret's as seen side on - a
+  // turret part way round, turning, shows them again when it has turned.)
+  const CHIP_EVERY = 4;         // armour's worth of hurt a chip off its edges takes (25 by the time it goes up)
+  const METAL_DEBRIS = M.DEBRIS | PW.DEBRIS_KIND.METAL << 6;
+  // (a part's sprite and its holes: its hull's, or its turret's side on)
+  function partOf(t, part) {
+    const s = part === TURRET ? turnFrame(t.art, 0) : t.art.hull;
+    const holes = t.holes || (t.holes = { hull: new Uint8Array(t.art.hull.w * t.art.hull.h), turret: new Uint8Array(turnFrame(t.art, 0).w * turnFrame(t.art, 0).h) });
+    return [s, part === TURRET ? holes.turret : holes.hull];
+  }
+  // (the world point of (a, b) in a part's frame - see partFrame)
+  function partPoint(t, part, a, b) {
+    if (part === TURRET) { const P = poseOf(t); return [P.rx + a * P.tfx + b * P.tnx, P.ry + a * P.tfy + b * P.tny]; }
+    return toWorld(t, a, b);
+  }
+  // (bite a ragged hole of radius r out of a part at (a, b) in its frame, its bits thrown off with
+  // (fx, fy) on what flings them out from the hole; the number of its cells gone)
+  function chip(world, t, part, a, b, r, fx = 0, fy = 0) {
+    const [s, holes] = partOf(t, part), particles = world.particles, F = PW.PARTICLE;
+    let n = 0;
+    for (let y = Math.floor(b - r - 1); y <= Math.ceil(b + r + 1); y += 1) for (let x = Math.floor(a - r - 1); x <= Math.ceil(a + r + 1); x += 1) {
+      if (x < s.x0 || y < s.y0 || x > s.x1 || y > s.y1) continue;
+      const k = (y - s.y0) * s.w + (x - s.x0);
+      if (!s.px[k] || holes[k]) continue;
+      const h = PW.hash3(x + t.seed * 131, y, part), dx = x + 0.5 - a, dy = y + 0.5 - b, d = Math.hypot(dx, dy);
+      if (d > r * (0.65 + (h & 15) / 25)) continue;
+      holes[k] = 1;
+      n += 1;
+      if (particles && F && (h >>> 4 & 1) === 0) {
+        const [wx, wy] = partPoint(t, part, x + 0.5, y + 0.5), out = 30 + (h >>> 5 & 63);
+        particles.spawn(wx, wy, fx + (dx / (d || 1)) * out, fy + (dy / (d || 1)) * out - 20, METAL_DEBRIS, s.px[k], F.LAND, 6);
+      }
+    }
+    return n;
+  }
+  // (a chip where world point (x, y) struck a part)
+  function chipAt(world, t, x, y, part, r, fx, fy) {
+    const [p, a, b] = partFrame(t, x, y, part);
+    return chip(world, t, p, a, b, r, fx, fy);
+  }
+  // (each part's edge cells, as its sprite has them: where it is chipped as it is worn down)
+  function edgesOf(s) {
+    if (s.edges) return s.edges;
+    const e = [];
+    for (let y = s.y0; y <= s.y1; y += 1) for (let x = s.x0; x <= s.x1; x += 1) {
+      const k = (y - s.y0) * s.w + (x - s.x0);
+      if (!s.px[k]) continue;
+      if (x === s.x0 || x === s.x1 || y === s.y0 || y === s.y1 || !s.px[k - 1] || !s.px[k + 1] || !s.px[k - s.w] || !s.px[k + s.w]) e.push(x, y);
+    }
+    return (s.edges = Int32Array.from(e));
+  }
+  // (worn down to its armour's worth left: a chip off its edges for each CHIP_EVERY of it gone -
+  // three of each four off its hull, the fourth off its turret - thrown out from its middle)
+  function wear(world, t) {
+    const due = Math.floor((ARMOUR - Math.max(0, t.hp)) / CHIP_EVERY);
+    while (t.chipped < due) {
+      t.chipped += 1;
+      const h = PW.hash3(t.seed, t.chipped, 97), part = (h & 3) === 3 ? TURRET : HULL;
+      const e = edgesOf(part === TURRET ? turnFrame(t.art, 0) : t.art.hull), j = ((h >>> 2) % (e.length >> 1)) * 2;
+      const [wx, wy] = partPoint(t, part, e[j] + 0.5, e[j + 1] + 0.5);
+      chip(world, t, part, e[j] + 0.5, e[j + 1] + 0.5, 2 + (h >>> 12 & 7) / 3.5, (wx - t.x) * 0.6, -20);
+    }
   }
   function hurt(world, t, amount, cause) {
     if (t.dead || !(amount > 0)) return;
     t.hp -= amount;
     t.hurtBy = cause;
     if (t.hp <= 0) destroy(world, t, cause);
+    else wear(world, t);
   }
   // A blast (PW.explode) hurts the tanks in its reach - the nearer its hull and the harder, the more
   // - and a heavy one close by throws one.
@@ -992,7 +1074,11 @@
         t.v += Math.sign(t.x - cx || 1) * 80 * (k - 0.7);
       }
       const cu = Math.max(-58, Math.min(58, u)), cv = Math.max(-t.art.height + 12, Math.min(-2, v));
-      if (k > 0.3) scar(t, t.x + cu * c - cv * s, t.y + cu * s + cv * c, HULL, Math.min(9, 2 + r * 0.35));
+      if (k > 0.3) {
+        const sx = t.x + cu * c - cv * s, sy = t.y + cu * s + cv * c;
+        scar(t, sx, sy, HULL, Math.min(9, 2 + r * 0.35));
+        chipAt(world, t, sx, sy, HULL, Math.min(6, 1 + r * 0.25) * k, (sx - cx) * 2, (sy - cy) * 2);
+      }
       hurt(world, t, 55 * k * k + (d < 1 ? 15 * power : 0), 'blast');
     }
   }
@@ -1021,15 +1107,14 @@
         into.x.push(x); into.y.push(y); into.c.push(burnt(col, x, y));
       }
     }
-    // (the cook-off, at its turret ring)
-    if (PW.explode) PW.explode(world, world.particles, { x: P.rx, y: P.ry - 3, radius: 7, power: 0.6 });
+    cookOff(world, t, P);
     const data = (l) => {
       const n = l.x.length;
       return { x: Int32Array.from(l.x), y: Int32Array.from(l.y), color: Uint32Array.from(l.c), byte: new Uint8Array(n).fill(M.STEEL), solid: new Uint8Array(n).fill(1) };
     };
     const fr = world.fragments, h = PW.hash3(t.x | 0, t.y | 0, ++wreckN), r1 = (h & 1023) / 1023, r2 = (h >>> 10 & 1023) / 1023;
     if (fr) {
-      // (thrown up a few metres - and on by the cook-off's own blast - and off to one side, landing
+      // (thrown up a few metres by its ammunition going up under it, and off to one side, landing
       // 10 to 20 m away, as a turret blown off its ring does)
       const side = r1 < 0.5 ? -1 : 1;
       if (top.x.length) fr.spawn({ data: data(top), vx: t.v * 0.4 + side * (60 + r2 * 60), vy: -(170 + r2 * 90), omega: side * (2 + r2 * 3), wreck: true });
@@ -1040,13 +1125,50 @@
     if (PW.addSmoulder) PW.addSmoulder(world, t.x, t.y - 2, 60, 44);
     stats.destroyed += 1;
   }
-  // (a wreck's fire: flames out of the top of it, dying down, each leaving a pixel of soot)
+  // Going up (the user's: no blast, an exothermic burst): its fuel and ammunition burn off in a burst
+  // of flame and black smoke out of its hatches and engine deck. Nothing is blown out of the ground
+  // round it and nothing near it is thrown or hurt by a blast - only its heat, which sets alight what
+  // will burn close by (trees, timber, wood rubble): see pw-heat.
+  const COOK_REACH = 24;        // cells round its turret ring its burst's heat reaches (about 1.7 m)
+  const COOK_HEAT = 760;        // degrees at its heart (wood catches at 380)
+  const COOK_FLAMES = 320;      // flame pixels in its burst: a ball of fire rolling up off it
+  const COOK_SMOKE = 16;        // cells' radius of the black smoke it billows up in, over its turret
+  function cookOff(world, t, P) {
+    if (world.heatSystem) world.heatSystem.heatDisc(P.rx, P.ry - 4, COOK_REACH, COOK_HEAT);
+    // (its smoke: thick, in the air over it - the world's own smoke, to rise and drift and thin)
+    const { mat, width: W, height: H } = world, sx = P.rx, sy = P.ry - COOK_SMOKE - 6;
+    for (let y = Math.floor(sy - COOK_SMOKE); y <= sy + COOK_SMOKE; y += 1) for (let x = Math.floor(sx - COOK_SMOKE * 1.3); x <= sx + COOK_SMOKE * 1.3; x += 1) {
+      if (x < 1 || y < 1 || x >= W - 1 || y >= H - 1 || (mat[y * W + x] & ID_MASK) !== M.AIR) continue;
+      const dx = (x - sx) / 1.3, dy = y - sy, h = PW.hash3(x, y, t.seed);
+      if (dx * dx + dy * dy > COOK_SMOKE * COOK_SMOKE * (0.7 + (h & 7) / 20)) continue;
+      PW.set(world, x, y, M.SMOKE | (2 + (h >>> 3 & 1)) << 6);
+    }
+    const particles = world.particles, F = PW.PARTICLE;
+    if (!particles || !F) return;
+    for (let k = 0; k < COOK_FLAMES; k += 1) {
+      const h = PW.hash3(t.seed, k, 53), r1 = (h & 1023) / 1023, r2 = (h >>> 10 & 1023) / 1023, r3 = (h >>> 20 & 1023) / 1023;
+      // (out of its turret ring and hatches, and along its engine deck behind)
+      const [x, y] = k % 3 ? [P.rx + (r1 - 0.5) * 34, P.ry - 2 - r3 * 6] : toWorld(t, (r1 - 0.5) * 100, t.art.ring[1] - 1);
+      const a = -Math.PI / 2 + (r2 - 0.5) * 1.6, sp = 20 + r3 * r3 * 120;
+      particles.spawn(x, y, Math.cos(a) * sp * 0.7, Math.sin(a) * sp, 0, PW.abgr(46, 42, 40, 220), F.FIRE, 0.5 + r2 * 1.1);
+    }
+  }
+  // (a wreck's fire: flames out of the top of it, dying down, each leaving a pixel of soot - and its
+  // heat, setting alight what will burn against it, a little less as it dies down)
+  const WRECK_HEAT_EVERY = 0.5;
   function stepWrecks(world, dt) {
     const list = world.wrecks, particles = world.particles, F = PW.PARTICLE;
     for (let q = list.length - 1; q >= 0; q -= 1) {
       const w = list[q];
       w.left -= dt;
       if (w.left <= 0) { list.splice(q, 1); continue; }
+      w.warm = (w.warm || 0) - dt;
+      if (w.warm <= 0 && world.heatSystem) {
+        w.warm = WRECK_HEAT_EVERY;
+        let y = Math.round(w.y) - 2;
+        while (y > 1 && Math.round(w.y) - y < 48 && !PW.mat.open[PW.get(world, Math.round(w.x), y) & ID_MASK]) y -= 1;
+        world.heatSystem.heatDisc(w.x, y, 14, 400 + 300 * w.left / BURN_OUT);
+      }
       if (!particles || !F) continue;
       w.acc += dt * 70 * (w.left / BURN_OUT);
       while (w.acc >= 1) {

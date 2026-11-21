@@ -128,9 +128,11 @@ const diff = (a) => { const o = {}; for (const k in S.stats) o[k] = S.stats[k] -
 }
 
 // 5. The tank duel: a tank lays its gun on another by its fire control and fires - recoil, the
-// report - its dart takes 60 of the other's armour (a scar where it struck, the other smoking and
-// slowed); the second destroys it: its ammunition goes up, its turret thrown off, and its wreck
-// falls and comes to rest as wreck, burnt black, burning, its smoke hanging over it.
+// report - its dart takes 60 of the other's armour (a scar where it struck, a hole bitten out of
+// it there and its edges chipped away, the other smoking and slowed); the second destroys it: it
+// goes up in a burst of flame and smoke with no blast - the ground round it whole, the tank beside
+// it unhurt, only its heat - its turret thrown off, and its wreck falls and comes to rest as wreck,
+// burnt black, burning, its smoke hanging over it.
 let duel = null;
 {
   const C = site(700);
@@ -140,6 +142,8 @@ let duel = null;
     world.tanks = [];
     const a = T.create(world, { style: 'modern', side: 'left', x: x0 + 100, y: g, facing: 1, ammo: 'ap' });
     const b = T.create(world, { style: 'gothic', side: 'right', x: x0 + 520, y: g, facing: -1 });
+    // (and one of its side's beside it, past it: out of the line of fire, in reach of a blast)
+    const c = T.create(world, { style: 'asian', side: 'right', x: x0 + 655, y: g, facing: -1 });
     // (laid on the middle of its hull)
     T.aimAt(a, b.x, b.y - 20);
     run(1.5);
@@ -148,11 +152,25 @@ let duel = null;
     const kicked = a.v < v0 && a.recoil > 0 && a.reload > 0, report = pwApp.particles.count - p0;
     run(0.4);
     const hp1 = b.hp, scars = b.scars.length, smoking = b.hp < 60;
+    const holes = b.holes ? b.holes.hull.reduce((n, v) => n + v, 0) + b.holes.turret.reduce((n, v) => n + v, 0) : 0;
+    await view('tank-chipped', b.x, b.y - 20, 8);
     const early = T.fire(world, a);   // (still loading: no round)
     run(3.2);
+    // (the ground round it, as it is before it goes up)
+    const ground = () => count(Math.round(b.x) - 90, Math.round(b.y) - 4, Math.round(b.x) + 90, Math.round(b.y) + 30, (x, y) => PW.mat.terrain[idAt(x, y)] && idAt(x, y) !== M.WRECK);
+    const ground0 = ground();
+    // (the flames let fly as it goes up)
+    const P = pwApp.particles, spawn0 = P.spawn;
+    let fire0 = 0;
+    P.spawn = function (...s) { if (s[6] & PW.PARTICLE.FIRE) fire0 += 1; return spawn0.apply(this, s); };
     T.fire(world, a);
     let k = 0;
     while (!b.dead && k < 60) { run(DT); k += 1; }
+    P.spawn = spawn0;
+    const hot = PW.heatAt(world, Math.round(b.x), Math.round(b.y) - 24), ground1 = ground(), cHp = c.hp;
+    // (a third of a second on, the world running: its burst)
+    pwApp.stepWorld(20);
+    await view('tank-goes-up', b.x, b.y - 40, 6);
     const d = diff(before), frags = world.fragments ? world.fragments.list.length - frags0 : 0;
     duel = { x0, g, bx: b.x, by: b.y };
     // (the wreck comes to rest: the world run on)
@@ -166,8 +184,10 @@ let duel = null;
     }
     const dark = ruin ? sum / ruin : 255, smoulders = (world.smoulders || []).filter((s) => Math.abs(s.x - duel.bx) < 40).length;
     if (!ruin) console.log(`duel wreck: b at ${b.x.toFixed(0)},${b.y.toFixed(0)} g ${g}; wreck ruins ${(world.ruins || []).filter((r) => r.wreck).map((r) => `${r.x0}..${r.x1},${r.y0}..${r.y1}:${r.cells}`).join(' ')}; wreck pieces ${world.fragments.list.filter((p) => p.wreck).map((p) => `${p.mass.toFixed(0)}@${p.px.toFixed(0)},${p.py.toFixed(0)}`).join(' ')}`);
-    check(r1 && kicked && report >= 20 && !early && hp1 === 40 && scars >= 1 && smoking && b.dead && !world.tanks.includes(b) && d.units >= 2 && frags >= 2 && ruin > 1500 && dark < 90 && smoulders >= 1,
-      `the tank duel: laid by its fire control, the dart fired (recoil ${kicked ? 'and reload' : 'MISSING'}, the report ${report} pixels of flash, smoke and dust; none fired while loading: ${!early}) takes 60 of the other's armour (${hp1} left, ${scars} scar, smoking: ${smoking}); the second destroys it (${b.dead ? 'destroyed' : 'standing'}, ${d.units} hits) - turret and hull thrown as ${frags} pieces, at rest 8 s on - the world running - as ${ruin} cells of wreck, part of the ground, burnt black (mean ${dark.toFixed(0)}), ${smoulders} plume over it`);
+    check(r1 && kicked && report >= 20 && !early && hp1 === 40 && scars >= 1 && holes > 150 && b.chipped === 15 && smoking && b.dead && !world.tanks.includes(b) && d.units >= 2 && frags >= 2 && ruin > 1500 && dark < 90 && smoulders >= 1,
+      `the tank duel: laid by its fire control, the dart fired (recoil ${kicked ? 'and reload' : 'MISSING'}, the report ${report} pixels of flash, smoke and dust; none fired while loading: ${!early}) takes 60 of the other's armour (${hp1} left, ${scars} scar, ${holes} cells of its plate chipped away - a hole where it struck and ${b.chipped} bites off its edges - smoking: ${smoking}); the second destroys it (${b.dead ? 'destroyed' : 'standing'}, ${d.units} hits) - turret and hull thrown as ${frags} pieces, at rest 8 s on - the world running - as ${ruin} cells of wreck, part of the ground, burnt black (mean ${dark.toFixed(0)}), ${smoulders} plume over it`);
+    check(b.dead && ground1 === ground0 && cHp === 100 && fire0 > 120 && hot > 380,
+      `it goes up in a burst of flame and smoke with no blast (${fire0} flames): the ground round it whole (${ground0 - ground1} cells of it gone), the tank beside it, ${(c.x - b.x).toFixed(0)} cells off, unhurt (${cHp}), and only its heat about it - ${hot.toFixed(0)} degrees a metre and a half over its hull, enough to set wood alight`);
     world.tanks.length = 0;
   }
 }
