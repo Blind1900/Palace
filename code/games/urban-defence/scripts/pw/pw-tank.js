@@ -309,7 +309,7 @@
       // (room for its height over its tracks: no tunnel, no overhang - its own side's gates aside)
       const spans = spansFor(world, t, x);
       for (let up = 1; up <= t.art.height && h - up >= 0; up += 1) {
-        if (isSupport(mat[(h - up) * W + x]) && !(spans && passes(spans, t.side, h - up, mat[(h - up) * W + x] & ID_MASK))) return stop(k, 'no room');
+        if (isSupport(mat[(h - up) * W + x]) && !(spans && passes(spans, t.side, h - up, mat[(h - up) * W + x] & ID_MASK))) { t.stopCell = [x, h - up]; return stop(k, 'no room'); }
         if (up <= 4 && (PW.getFlags(world, x, h - up) & PW.FLAG.TUNNEL)) return stop(k, 'tunnel');
       }
       let water = 0;
