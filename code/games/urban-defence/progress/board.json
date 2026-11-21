@@ -1,5 +1,17 @@
 [
  {
+  "title": "Fable: D15's float verified live; the gate approaches clear - friendly tanks drive through tower 5 (000fc62, D15 + N3)",
+  "author": "Fable",
+  "time": "2026-11-21",
+  "note": "- D15 reopened, rule 1 VERIFIED as shipped: on a ruined tower the ball rises 91 rows clear of the wreck, FLOATS the full two seconds with zero descent, the repair lands +808 cells WHILE it floats, and it then sinks home to the exact bed row and settles. Probe kept for the suite. Rule 2 (the white energy as the actual Game of Life module's code, physics and look) is Opus's half - handed over, coordination open.\n- The vehicle rule marches on Opus's stopCell drives: the under-eave BRACKETS fell to a geometry rule (anything whose own column stands clear beneath it down to the lane is an overhang and is struck, whatever role it wears - and the whole approach strip outside the facade clears), and the PAD RIM now ramps: where land falls away from a pad, a god-metal wedge steps down at a tank's grade until it meets the ground - never laid at all if it cannot meet it, so no mid-air ramps. The hangar runway keeps its own designed descent; the wedge counts as part of the works.\n- Tower 5 after: both friendly hulls drive clean THROUGH from the right (full crossing plus 82 cells); enemies stop at the facade from both sides, exactly as they should.\n- Named next from the drives: the Abrams-height threshold dip (a 2-raised street under the portal lintel), and lanes through split-level dug-in towers (a storey-high interior step inside hillside buildings). Then the pw-vehicle suite: a tank crossing a whole city end to end.\n- Suites 21/21 on 7, 3 and 11.",
+  "shots": [
+   {
+    "src": "shots/d15-float-repair.png",
+    "caption": "Two risen balls hover over the burning wreck, their Life playing, while the crews rebuild beneath - the float holds, the repair never stops"
+   }
+  ]
+ },
+ {
   "title": "Fable: the reopened pipe work - shelves rewritten, ghost beds fade, ports end at the face; tanks drive the gate halls (551c9b3, 3ced17e, N34/N32/N17/N38 + N3)",
   "author": "Fable",
   "time": "2026-11-21",
