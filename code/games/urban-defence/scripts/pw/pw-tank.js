@@ -497,9 +497,10 @@
   PW.drawUnitsHook = (renderer) => { if (before) before(renderer); draw(renderer); };
 
   // ---- By hand (a toolbar's TANK tool) -------------------------------------------------------------------
-  // A click drops a tank on the ground under it (each side's in turn) and takes it in hand; with a
-  // tank in hand a click lays its gun on that spot, a click on the tank lets it go (its gun back to
-  // level ahead), and a shift-click drops another. A / D or the arrow keys drive it left or right,
+  // A click drops a tank on the ground under it - open ground, a road or a bridge, not a roof -
+  // each side's in turn, and takes it in hand; with a tank in hand a click lays its gun on that
+  // spot, a click on the tank lets it go (its gun back to level ahead), and a shift-click drops
+  // another. A / D or the arrow keys drive it left or right,
   // S or the down arrow stops it, R has it back up rather than turn round (and R again, not).
   let held = null, nextStyle = 0;
   function tool(world, x, y, shift = false) {
@@ -519,6 +520,9 @@
       while (gy < H - 1 && !isSupport(mat[gy * W + gx])) gy += 1;
       if (gy >= H - 1) return null;
     }
+    // (on the ground, a road or a bridge - not on a building's roof)
+    const id = mat[gy * W + gx] & ID_MASK;
+    if (!(PW.mat.terrain[id] || id === M.ASPHALT || id === M.ROADBED || id === M.BRIDGE) || PW.getOwner(world, gx, gy)) return null;
     held = create(world, { style: Object.keys(STYLES)[nextStyle++ % 3], x: gx, y: gy, facing: gx < W / 2 ? 1 : -1 });
     return held;
   }

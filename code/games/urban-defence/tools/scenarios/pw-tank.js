@@ -210,7 +210,10 @@ else {
 {
   const D = used.length ? used[0] : null;
   if (D) {
-    // (by hand: a click drops one on the ground under it, D drives it right, a click lays its gun)
+    // (by hand: a click on a building's roof drops nothing; a click drops one on the ground under
+    // it, D drives it right, a click lays its gun)
+    const house = world.buildings.find((b) => b.body && b.body.right - b.body.left > 40);
+    const onRoof = house ? T.tool(world, Math.round((house.body.left + house.body.right) / 2), house.body.top - 10) : null;
     const hx = D[0] + 320, hg = world.groundTop[hx];
     const h = T.tool(world, hx, hg - 150);
     const placed = !!h && Math.abs(h.y - hg) < 1 && T.held() === h;
@@ -221,7 +224,7 @@ else {
     run(h, 1.5);
     const laid = placed && h.target && h.elevation > 15 * deg;
     T.key({ code: 'KeyS' });
-    check(placed && drove && laid, `by hand: a click drops a tank on the ground under it (${placed ? 'on it' : 'not placed'}), D drives it off (${drove ? `${(h.x - hx).toFixed(0)} cells in 2.5 s` : 'did not'}), a click lays its gun on the spot (${laid ? `${(h.elevation / deg).toFixed(0)} deg up` : 'not laid'})`);
+    check(house && !onRoof && placed && drove && laid, `by hand: a click on a roof drops nothing (${!house ? 'no building' : onRoof ? 'a tank on the roof' : 'nothing'}), a click drops a tank on the ground under it (${placed ? 'on it' : 'not placed'}), D drives it off (${drove ? `${(h.x - hx).toFixed(0)} cells in 2.5 s` : 'did not'}), a click lays its gun on the spot (${laid ? `${(h.elevation / deg).toFixed(0)} deg up` : 'not laid'})`);
     world.tanks.length = 0;
     const t = T.create(world, { style: 'modern', x: D[0] + 120, y: world.groundTop[D[0] + 120], facing: 1 });
     T.drive(t, 1);
