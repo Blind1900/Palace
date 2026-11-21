@@ -17,6 +17,9 @@
   const SETTLE = 60;        // ticks after the gratings blow before the cores start to rise (1 s)
   const FLOAT_HOLD = 120;   // D15: a risen ball floats this long before it will descend (2 s)
   const RISE_EVERY = 1;     // ticks per row risen (60 rows a second: up through a tower's heap in seconds)
+  const CLEAR_RISE = 50;    // N86: once clear of the wreck the ball climbs on - at least this many
+                            // rows above the rubble over it (the user's 50 px at the default zoom,
+                            // 1.0: one cell per pixel) - before it frees to float
   const SWEEP_EVERY = 6;    // ticks between sweeps once a core stands in the open
   const PER_SWEEP = 80;     // cells a core throws off per sweep (a heap can rain down on it)
   const REACH = 13;         // the core unit with its connector sockets: 13 cells either side of its axis
@@ -181,6 +184,7 @@
     // keeps its lanes through the connectors) - and the grating closes over it.
     function settle(b, core) {
       core.free = false;
+      core.clearRise = 0;   // (N86: the next rise counts its 50 clear rows afresh)
       // Home, redrawn and owned by its building again: no longer managed by rise/sweep (whose
       // spans see only unowned cells, so they would mistake it for gone and free it again).
       core.settled = true;
@@ -374,7 +378,11 @@
         // it, rise dug it back to the open, and it traded the same three rows for ever (PS's
         // trace of the no-hinge seed-7 stall - the loop was 1803F/1806/1803F once a second).
         // Standing exposed, it holds its ground until the repair opens the way.
-        if (b.coresOpen && tick % 2 === 0) {
+        // N86: the descent runs at the RISE'S OWN PACE - every tick, one row (the user's
+        // rule: back down at the same speed it went up). The old half-rate gate and the
+        // 30-row snap-home are gone: the ball TRAVELS down whenever home is ready and the
+        // way is open, and the field carries it (settle) only when a sink step is blocked.
+        if (b.coresOpen && tick % RISE_EVERY === 0) {
           for (const core of b.cores) {
             if (core.orb || !core.free) continue;
             // D15: risen clear of the wreck, the ball FLOATS two seconds - its Life burning
@@ -386,8 +394,10 @@
             // always was - but never onto NOTHING: settling over a void stamped the floating
             // grating box of the user's screenshot)
             if (core.y >= core.homeY) { if (bedStands(b, core)) settle(b, core); continue; }
-            if (core.y < core.homeY && core.homeY - core.y <= 30 && homeOpen(b, core) && bedStands(b, core) && sink(b, core)) continue;
-            if (homeOpen(b, core) && bedStands(b, core)) settle(b, core);
+            if (homeOpen(b, core) && bedStands(b, core)) {
+              if (sink(b, core)) continue;   // travelling down, a row a tick
+              settle(b, core);               // blocked mid-way with home ready: the field takes it the rest
+            }
           }
         }
         // The vaults close only once the ruin is over (while it stands, closing them would only
@@ -406,17 +416,27 @@
           // rule below serves for that too: up through the void and its own wreck towards
           // the vault, where the go-home branch settles it once the bed stands again)
           if (!core.free && tick % RISE_EVERY === 0) {
-            if (exposed(core) || !rise(b, core)) {
+            // N86: clear of the wreck the ball CLIMBS ON - at least CLEAR_RISE rows above
+            // the rubble that covered it (the user's 50 px) - and only then frees to
+            // float. Blocked overhead it frees where it stands: obstruction caps the climb.
+            const clear = exposed(core);
+            if (clear && (core.clearRise || 0) >= CLEAR_RISE) {
               core.free = true;
               core.freeAt = tick;   // (D15: the two-second float starts here)
               // (what the gratings and the core held up is looked at again, and comes down)
               if (world.onDamage) world.onDamage(b.id);
+            } else if (!rise(b, core)) {
+              core.free = true;
+              core.freeAt = tick;
+              if (world.onDamage) world.onDamage(b.id);
+            } else if (clear) {
+              core.clearRise = (core.clearRise || 0) + 1;
             }
           } else if (core.free && tick % SWEEP_EVERY === 0) {
             sweep(b, core);
             // (buried again by the heap slumping onto it, it rises again)
             // (checked every third of a second: heaps of rubble can rain down on it at any time)
-            if (tick % (SWEEP_EVERY * 2) === 0 && !exposed(core)) core.free = false;
+            if (tick % (SWEEP_EVERY * 2) === 0 && !exposed(core)) { core.free = false; core.clearRise = 0; }
           }
         }
       }
