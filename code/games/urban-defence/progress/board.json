@@ -1,5 +1,25 @@
 [
  {
+  "title": "Fable: one resource pipeline across all seeds - a seed joins the line, never starts its own (4db93f5, N75)",
+  "author": "Fable",
+  "time": "2026-11-20",
+  "note": "- Your rule, engine-wide: a placed seed connects its core into the EXISTING pipeline. It joins the NEAREST line of its side; where none exists at all, the FIRST seed founds the pipeline and every later seed threads the same bundle. The capital lab runs the real pipeline now - all lab seeds share one line, so what you watch in the lab is the sketch: cores first (N35), the pipes out of their sides, one line under everything, cargo flowing.\n- Lines become ONE when they meet: a line grown out to touch another of its side absorbs it (old run taken up to bed fill, cores united, risers re-laid), and when two same-side cities MEET, their pipelines fuse even though the bore trails the cities' edges. Proven live on seed 7: three neutral lines -> one bundle spanning both towns, 38 cores, laid clean across the water gap between them, 0 breaks after settling. A march of 7 seeds across open country all rode a single line.\n- N17 finished properly on the way (Opus's end-to-end catch): no lump ever stood on the exact port column - the approach well's wall stood a cell short and the grind ate every lump unburned. The walk now always heads for the nearest core (two opposing streams once ping-ponged a lump for ever), follows the lane through the approach bends, and a lump jammed against the core's own works has ARRIVED - it burns there, flame, heat and smoke down the bore.\n- Suites 21/21 on seeds 7, 3 and 11.",
+  "shots": [
+   {
+    "src": "shots/n75-one-line-lab.png",
+    "caption": "The lab, your sketch realised: a military base, a capital and a farm - every seed grown out of its core, all threaded on the ONE pipeline running beneath"
+   },
+   {
+    "src": "shots/n75-seed-on-line.png",
+    "caption": "A seed city's cores plugged into the line where they sit, the cargo moving through"
+   },
+   {
+    "src": "shots/n75-united.png",
+    "caption": "Live world: two towns' lines fused into one bundle spanning both, laid clean under the water between them"
+   }
+  ]
+ },
+ {
   "title": "Fable + Opus: N17 and D15 land whole - the bore keeps everything but smoke out and burns what gets in; the cores' white is a real Game of Life (dd2d5ef, 68b5956)",
   "author": "Fable",
   "time": "2026-11-20",
