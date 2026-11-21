@@ -18,6 +18,8 @@ const SUITES = [
   { name: 'pw-pipes' }, { name: 'pw-made-ground' }, { name: 'pw-physics', params: 'det=1' }, { name: 'pw-ore' }, { name: 'pw-fields' }, { name: 'pw-styles' }, { name: 'pw-sandbox' }, { name: 'pw-views' }, { name: 'pw-repair' },
   { name: 'pw-slopes', params: 'gallery=slopes' }, { name: 'pw-mirror', params: 'gallery=mirror' }, { name: 'pw-pipe-cavity', params: 'det=1' }, { name: 'pw-tank', params: 'det=1' }, { name: 'pw-bore', params: 'det=1' }, { name: 'pw-core-life', params: 'det=1' }, { name: 'pw-shots', params: 'det=1' },
   { name: 'pw-fire', alone: true, params: 'det=1' }, { name: 'pw-collapse', alone: true, params: 'det=1' },
+  // the first capital-lab suite: the vehicle rule end to end (N3) - heavy, so it runs alone
+  { name: 'pw-vehicle', alone: true, page: 'capital-lab.html', ready: 'window.pwLab && pwLab.ready', params: 'det=1' },
 ].filter((s) => !args.only || args.only.split(',').includes(s.name));
 const root = path.resolve(__dirname, '..');
 const out = path.join(os.tmpdir(), 'claude-scratch', 'shots');
@@ -26,7 +28,8 @@ function run(suite, attempt = 1) {
   return new Promise((resolve) => {
     const started = Date.now();
     const params = suite.params ? `${suite.params}&seed=${seed}` : `seed=${seed}`;
-    const child = spawn(process.execPath, [path.join(__dirname, 'check-beta-game.cjs'), '--page=pixel-world.html', `--params=${params}`,
+    const child = spawn(process.execPath, [path.join(__dirname, 'check-beta-game.cjs'), `--page=${suite.page || 'pixel-world.html'}`, `--params=${params}`,
+      ...(suite.ready ? [`--ready=${suite.ready}`] : []),
       '--wait=300', '--size=1600x900', `--timeout=${(limit - 10) * 1000}`, `--out=${out}`, `--scenario=tools/scenarios/${suite.name}.js`],
     { cwd: root, env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' } });
     let text = '';
