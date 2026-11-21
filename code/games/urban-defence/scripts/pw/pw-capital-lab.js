@@ -112,6 +112,10 @@
   const cores = PW.createCores ? PW.createCores(world, particles) : null;
   const stability = world.stability = PW.createStability ? PW.createStability(world, particles) : null;
   const air = world.air = PW.createAir ? PW.createAir(world, particles) : null;
+  // N75: the lab runs the one pipeline too. No settlements here, so build() lays nothing -
+  // the FIRST seed founds the line, and every later seed threads the same bundle.
+  const pipes = PW.createPipes ? PW.createPipes(world) : null;
+  if (pipes) pipes.build();
 
   const growth = PW.createCapitalGrowth(world, { seed });
 
@@ -201,8 +205,9 @@
       if (structure) structure.step(1.5);
       if (fragments) fragments.step(DT);
       if (cores) cores.step();
-      // (repair rides the lab's speed, so a staged lot rises in step with the growth clock)
+      // (repair and the pipeline ride the lab's speed, in step with the growth clock)
       if (repair) repair.step(DT * speed);
+      if (pipes) pipes.step(DT * speed);
       if (stability) stability.step();
       if (air) air.step();
       if (PW.stepSmokeBursts) PW.stepSmokeBursts(world, DT);
@@ -234,6 +239,7 @@
     heat.draw(renderer, now / 1000);
     particles.draw(renderer);
     if (cores && cores.draw) cores.draw(renderer, now);
+    if (pipes) pipes.draw(renderer, now / 1000);   // (N75: the cargo moves in the lab too)
     growth.draw(renderer, now / 1000);
     if (PW.debugHitboxes && fragments && fragments.drawHitboxes) fragments.drawHitboxes(renderer);
     PW.drawEffects(world, renderer, (now - (frame.prev || now)) / 1000);
@@ -250,7 +256,9 @@
 
   window.pwLab = { world, renderer, sim, particles, growth, seed, timings, ready: true,
     stepWorld, explode,
-    drop: (x, kind, s) => growth.drop(x, kind, s || style),
+    // N75: every lab seed carries the one lab faction, so they all thread a single pipeline
+    // (free of any purse - the lab has no stock).
+    drop: (x, kind, s) => growth.drop(x, kind, s || style, 'lab'),
     setSpeed: (k) => { speed = k; },
     setPaused: (value) => { paused = value; },
     focus: (x, y, zoomIndex) => renderer.focus(x, y, zoomIndex) };

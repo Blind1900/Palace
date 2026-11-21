@@ -171,6 +171,13 @@
       for (let x = p.worksR + 2; x <= Math.min(world.width - 3, p.worksR + 18); x += 1) sig += world.groundTop[x];
       return sig;
     };
+    // N75: when two same-side cities meet, their pipelines become one - the engine's own
+    // merge event is the authoritative touch (the lines trail the cities' edges by their
+    // approach spans, so distance alone never closes a welded seam's twin bundles).
+    function linkLines(city, other) {
+      if (!city || !other || !city.faction || other.faction !== city.faction) return;
+      if (world.pipes && world.pipes.unite) world.pipes.unite(city.faction, Math.min(city.x, other.x), Math.max(city.x, other.x));
+    }
     // N73: a lot whose building is still rising from its core (its first build job working).
     const stillBuilding = (lot) => {
       const r = lot && lot.owner ? world.buildings[lot.owner - 1] : null;
@@ -637,6 +644,7 @@
           city.blocked[side] = 'merged';
           if (!city.merged.has(other.id)) {
             city.merged.add(other.id); other.merged.add(city.id);
+            linkLines(city, other);   // N75: met - one pipeline now
             const oside = other.x > city.x ? 'left' : 'right';
             other.blocked[oside] = 'merged';
             paveSegment(city, city.edge[side], dir > 0 ? other.edge.left : other.edge.right);
@@ -648,6 +656,7 @@
         lot.massEdge = cursor;
         if (!city.merged.has(other.id)) {
           city.merged.add(other.id); other.merged.add(city.id);
+          linkLines(city, other);   // N75
           note(city, 'the town grows alongside the base');
         }
         const past = cursor + dir * (w + 6);
@@ -930,11 +939,11 @@
         if (other.kind === 'military') {
           // N59: the base never stops the farm - the fields pass it and carry on beyond
           city.fieldEdge[side] = dir > 0 ? other.edge.right + CLAIM + 4 : other.edge.left - CLAIM - 4;
-          if (!city.merged.has(other.id)) { city.merged.add(other.id); other.merged.add(city.id); note(city, 'the fields pass the base'); }
+          if (!city.merged.has(other.id)) { city.merged.add(other.id); other.merged.add(city.id); linkLines(city, other); note(city, 'the fields pass the base'); }
           return true;
         }
         city.blocked[side] = 'merged';
-        if (!city.merged.has(other.id)) { city.merged.add(other.id); other.merged.add(city.id); note(city, `fields meet ${other.kind} ${other.id}`); }
+        if (!city.merged.has(other.id)) { city.merged.add(other.id); other.merged.add(city.id); linkLines(city, other); note(city, `fields meet ${other.kind} ${other.id}`); }
         return false;
       }
       const field = ST.sowField(world, Math.min(from, to), Math.max(from, to), (x) => world.groundTop[x], rand);

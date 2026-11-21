@@ -100,15 +100,18 @@
     // line the churn outran the starved crews and the breaks froze (the adoption-era pool).
     let pendingHeals = [];
     function releaseBuilding(side, building) {
-      const line = lines.find((l) => l.side === side) || null;
       removeSpans(building);
-      if (!line) return;
-      const before = line.cores.length;
-      for (const c of line.cores) {
-        if (c.building === building) pendingHeals.push({ line, x0: c.x - HOP - 4, x1: c.x + HOP + 4 });
+      // (N75: a side may hold several lines until they merge - the release walks them all,
+      // so a core threaded on the second line never gets orphaned on the first)
+      for (const line of lines) {
+        if (line.side !== side) continue;
+        const before = line.cores.length;
+        for (const c of line.cores) {
+          if (c.building === building) pendingHeals.push({ line, x0: c.x - HOP - 4, x1: c.x + HOP + 4 });
+        }
+        line.cores = line.cores.filter((c) => c.building !== building);
+        stats.cores -= before - line.cores.length;
       }
-      line.cores = line.cores.filter((c) => c.building !== building);
-      stats.cores -= before - line.cores.length;
     }
     function runHeals() {
       if (!pendingHeals.length) return;
@@ -631,8 +634,11 @@
         return Math.round(DEPTH + Math.min(1, dist / DEEP_EASE) * (DEEP - DEPTH));
       };
     }
+    // (owners come off a sequence, never lines.length: a merge splices lines out (N75), and a
+    // recycled owner would hand one line's leavings to another)
+    let lineSeq = 0;
     function newLine(side, settlement, x0, x1, cores, coreX) {
-      return { id: lines.length, side, settlement, spec: { bundle: true }, owner: OWNER_BASE + lines.length,
+      return { id: lineSeq, side, settlement, spec: { bundle: true }, owner: OWNER_BASE + (lineSeq += 1) - 1,
         x0, x1, ys: null, coreX, cores, risers: [], broken: new Uint8Array(x1 - x0 + 1), brokenAt: new Int32Array(x1 - x0 + 1),
         occ: new Uint8Array((x1 - x0 + 1) * 3), packets: [], next: { sm: 0, hm: 0, water: 0 } };
     }
@@ -946,13 +952,102 @@
     // A core grown after the world was made - a dropped seed, a new building - joins its side's
     // bundle: the line grows out to it if it must, or the span around it is taken up and re-laid
     // through its connectors, and its taps go live.
+    // N75: the nearest line of the side, by distance to its span - a seed joins the pipeline
+    // closest to where it lands, never "the first one built" half a map away.
+    function lineNear(side, x) {
+      let best = null, bestD = Infinity;
+      for (const l of lines) {
+        if (l.side !== side) continue;
+        const d = x < l.x0 ? l.x0 - x : x > l.x1 ? x - l.x1 : 0;
+        if (d < bestD) { bestD = d; best = l; }
+      }
+      return best;
+    }
+    // N75: one pipeline. A line grown out to a seed that reaches another line of its own side
+    // ABSORBS it - every core threads the one bundle, the old run is taken up back to bed
+    // fill, its risers are laid again on the survivor (the user's rule: a single resource
+    // pipeline across all seeds, joining friendly lines wherever their cores sit on it).
+    const MERGE_TOUCH = 30;
+    function absorb(line, M) {
+      // the old run goes first, while its ys still describe it - bore, caps and wreckage
+      for (let k = 0; k < M.ys.length; k += 1) {
+        const x = M.x0 + k, y0 = M.ys[k];
+        for (let y = Math.max(1, y0 - 9); y <= Math.min(H - 2, y0 + BORE + 9); y += 1) {
+          if (takeUp(M, x, y)) PW.setLayer(world, 'pipe', x, y, 0);
+        }
+      }
+      for (const r of M.risers) {
+        const yA = Math.max(1, Math.min(r.tTop ?? r.y0, r.y0) - 2), yB = Math.min(H - 2, Math.max(r.tBot ?? r.y1, r.y1) + 2);
+        for (let x = r.x - 8; x <= r.x + 8; x += 1) {
+          for (let y = yA; y <= yB; y += 1) if (takeUp(M, x, y)) PW.setLayer(world, 'pipe', x, y, 0);
+        }
+      }
+      const x0 = Math.min(line.x0, M.x0), x1 = Math.max(line.x1, M.x1);
+      line.cores = [...line.cores, ...M.cores].sort((p, q) => p.x - q.x);
+      const fresh = contour(x0, x1, depthAt);
+      snapToCores(fresh, x0, line.cores);
+      extendTo(line, x0, x1, (c) => fresh[c - x0]);
+      for (const a of M.risers) {
+        line.risers.push(layRiser(line, { x: a.x, y: a.anchorY, flow: a.flow, kind: a.kind, resource: a.resource, building: a.building, op: a.op, main: a.main }));
+      }
+      layWells(line);
+      capEnd(line, -1); capEnd(line, 1);
+      checkSpan(line, Math.max(0, M.x0 - line.x0 - 2), Math.min(line.ys.length - 1, M.x1 - line.x0 + 2));
+      stats.cores += 0;   // (the cores only changed hands)
+      stats.merged = (stats.merged || 0) + 1;
+    }
+    // N75: the city engine says two same-side cities have MET - every line of the side
+    // within reach of the pair fuses into one, the connecting stretch laid whole. (The
+    // lines trail the cities' edges by the approach spans, so span-touch alone would
+    // leave twin bundles under a welded seam for ever.)
+    function unite(side, xa, xb) {
+      const near = lines.filter((l) => l.side === side && l.x1 >= xa - 420 && l.x0 <= xb + 420);
+      if (near.length < 2) return false;
+      let keep = near[0];
+      for (const l of near) if ((l.x1 - l.x0) > (keep.x1 - keep.x0)) keep = l;
+      for (const M of near) {
+        if (M === keep) continue;
+        const at = lines.indexOf(M);
+        if (at >= 0) lines.splice(at, 1);
+        absorb(keep, M);
+      }
+      stats.lines = lines.length;
+      return true;
+    }
+    function mergeTouching(line) {
+      for (let i = lines.length - 1; i >= 0; i -= 1) {
+        const M = lines[i];
+        if (M === line || M.side !== line.side) continue;
+        if (M.x0 > line.x1 + MERGE_TOUCH || M.x1 < line.x0 - MERGE_TOUCH) continue;
+        lines.splice(i, 1);
+        absorb(line, M);
+        stats.lines = lines.length;
+      }
+    }
     function connectCore(x, y, side, taps, building) {
-      const line = lineFor(side);
-      if (!line) return null;
+      let line = lineNear(side, x);
       // A core the map cannot hold cannot thread (a walked-off append once offered one at
       // negative x, and the line extended right off the world after it).
       if (x < 80 || x > world.width - 80) return null;
       const core = { x, y, building: building || 0, type: taps ? 'building' : 'seed', taps: taps || { hm: 'in', sm: 'in', water: 'in' }, timer: 0 };
+      // N75: no line of this side anywhere - the FIRST seed founds the pipeline: a short
+      // run through its own connectors, capped both ends. Every later seed joins THIS line.
+      if (!line) {
+        const f0 = Math.max(4, x - SPAN - 6), f1 = Math.min(world.width - 5, x + SPAN + 6);
+        line = newLine(side, null, f0, f1, [], x);
+        line.ys = contour(f0, f1, depthAt);
+        lines.push(line);
+        registerSpan(core, building || 0);
+        line.cores.push(core);
+        stats.cores += 1;
+        snapToCores(line.ys, f0, line.cores);
+        for (let c = f0; c <= f1; c += 1) layColumn(line, c);
+        layWells(line);
+        capEnd(line, -1); capEnd(line, 1);
+        stats.cells += f1 - f0 + 1;
+        stats.lines = lines.length;
+        return core;
+      }
       registerSpan(core, building || 0);
       line.cores.push(core);
       line.cores.sort((p, q) => p.x - q.x);
@@ -966,6 +1061,8 @@
         layWells(line);
         if (x0 < line.x0 + 1) capEnd(line, -1);
         if (x1 > line.x1 - 1) capEnd(line, 1);
+        // N75: the grown line may now touch another of its side - they become one.
+        mergeTouching(line);
         return core;
       }
       // Mid-run: the stretch around it is taken up and re-laid through its connectors.
@@ -1003,7 +1100,7 @@
     function lineFor(side) { return lines.find((l) => l.side === side) || null; }
     // Connect a mining operation opened during play: grow the bundle to it, riser up to its hopper.
     function attach(op) {
-      const line = lineFor(op.side);
+      const line = op.riser ? lineNear(op.side, op.riser.x) : null;   // (N75: the nearest, as seeds do)
       if (!line || !op.riser) return false;
       const x = op.riser.x;
       const grow = [];
@@ -1197,28 +1294,55 @@
         // a fallen heart - is some other rule's business (the drain, the regrow, the rise),
         // and the stream rides past it as it always did.
         if (loose) {
-          const atPort = line.cores.some((c) => Math.abs(nx - c.x) === HOP);
+          // (<= HOP + 2, not === HOP: the bed's socket juts a cell or two proud of the port
+          // column, and a lump rolled up against it must burn there, not grind - PS's
+          // end-to-end catch: every lump at line 0's core ground away, none ever burned)
+          const atPort = line.cores.some((c) => Math.abs(nx - c.x) <= HOP + 2);
           if (atPort && PW.boreBurn && PW.boreBurn(world, nx, ty)) {
             stats.burned = (stats.burned || 0) + 1;
           } else {
+            // The walk always heads for the NEAREST core, whichever way the shoving packet
+            // travels - two streams meeting over a lump once ping-ponged it round an
+            // equilibrium outside the burn mouth for ever (141 shoves, nothing burned).
+            // The stream's job is disposal: every shove moves the lump portward.
+            let home = null;
+            for (const c of line.cores) if (!home || Math.abs(nx - c.x) < Math.abs(nx - home.x)) home = c;
+            const dirL = home ? (Math.sign(home.x - nx) || dir) : dir;
+            // The walk follows the LANE, row by row - the bore eases toward every bed over
+            // its ramp, and a straight-row shove jammed lumps into the bend's casing where
+            // the grind quietly ate them short of the mouth (12 shoves, nothing burned).
+            const rowAt = (qx) => line.ys[Math.max(0, Math.min(line.ys.length - 1, qx - line.x0))] + LANES[p.lane].row;
             let shifted = false;
             for (let m = 1; m <= 10 && !shifted; m += 1) {
-              const qx = nx + dir * m;
+              const qx = nx + dirL * m;
               if (qx < line.x0 + 1 || qx > line.x1 - 1) break;
-              const qid = mat[ty * W + qx] & ID_MASK;
-              if (qid === M.PIPE) break;   // jammed against casing or a well wall: nothing rolls
+              const qy = rowAt(qx);
+              const qid = mat[qy * W + qx] & ID_MASK;
+              if (qid === M.PIPE) break;   // jammed against true casing: nothing rolls
               if (qid === M.AIR || PW.mat.phase[qid] <= PW.PHASE.GAS) {
-                for (let j = m - 1; j >= 0; j -= 1) PW.swapCells(world, ty * W + nx + dir * j, ty * W + nx + dir * (j + 1));
+                for (let j = m - 1; j >= 0; j -= 1) {
+                  const ax = nx + dirL * j, bx = nx + dirL * (j + 1);
+                  PW.swapCells(world, rowAt(ax) * W + ax, rowAt(bx) * W + bx);
+                }
                 stats.pushed = (stats.pushed || 0) + m;
                 shifted = true;
               }
             }
             if (!shifted) {
-              // A jam the stream cannot roll on - a run too long, or hard against casing -
-              // is ground down a cell a step instead, the way the mouth-choking debris goes
-              // (N38): the lane must never wall itself shut behind a lump too big to walk.
-              PW.set(world, nx, ty, M.AIR, { quiet: true, lay: true });
-              stats.ground = (stats.ground || 0) + 1;
+              // Jammed against the line's own works INSIDE a core's approach, the lump has
+              // ARRIVED: the socket, the approach well's wall, the casing before the port
+              // are the core's works, and its energy takes the lump there. (PS's end-to-end
+              // catch, twice over: nothing ever stood on the exact port column - the
+              // approach well stood a cell or two short, and the grind ate every lump
+              // unburned.) Elsewhere a jam is ground down a cell a step, the way the
+              // mouth-choking debris goes (N38): a lane never walls itself shut.
+              const nearCore = line.cores.some((c) => Math.abs(nx - c.x) <= SPAN + RAMP);
+              if (nearCore && PW.boreBurn && PW.boreBurn(world, nx, ty)) {
+                stats.burned = (stats.burned || 0) + 1;
+              } else {
+                PW.set(world, nx, ty, M.AIR, { quiet: true, lay: true });
+                stats.ground = (stats.ground || 0) + 1;
+              }
               return false;   // (the stream waits this step; the way is open next)
             }
           }
@@ -1385,7 +1509,7 @@
       }
     }
 
-    const api = { build, step, draw, attach, carry, connectCore, releaseBuilding, notifyDamage, openEnds, lines, stats, flowing, lineFor, contour, BORE, BED, LANES, TAPS };
+    const api = { build, step, draw, attach, carry, connectCore, releaseBuilding, notifyDamage, openEnds, unite, lines, stats, flowing, lineFor, contour, BORE, BED, LANES, TAPS };
     return api;
   }
 

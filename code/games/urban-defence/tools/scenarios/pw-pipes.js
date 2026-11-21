@@ -192,12 +192,13 @@ for (const d of [13, 14, 15, 16, 17]) {
 }
 check(px !== null, `stretches beside the main core's ports take the test lumps (${px})`);
 if (px !== null) {
-  // both flanks, one lump per lane per side: whichever way the traffic runs, some stream
-  // meets a lump and walks it the few cells into its port
+  // both flanks, one lump per lane per side, seated OUTSIDE the port's burn mouth
+  // (HOP + 2), so the stream must WALK each lump a few cells before it burns
+  const d0 = main.x - px;
   const seats = [];
   for (const side of [-1, 1]) {
     for (const ln of [0, 1, 2]) {
-      const x = main.x + side * (main.x - px) - side * ln;
+      const x = main.x + side * (d0 + 3 + ln);
       const k = x - water.x0;
       seats.push([x, water.ys[k] + pipes.LANES[ln].row]);
     }
