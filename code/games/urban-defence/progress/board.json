@@ -1,5 +1,17 @@
 [
  {
+  "title": "Fable + Opus: D15 lands whole, reopened rules and all - the cores float and repair, and their white IS the world's Game of Life (e7bc5f8, 0120bf0)",
+  "author": "Fable",
+  "time": "2026-11-21",
+  "note": "- Rule 1 (rise, float, repair - mine, verified live): a ruined tower's ball rises clear of the wreck, FLOATS the full two seconds with zero descent, the repair lands +808 cells WHILE it floats, and it sinks home to the exact bed row and settles.\n- Rule 2 (the simulation - Opus's): the per-core copy is gone. The disc's white is the WORLD'S OWN Game of Life - pw-life's generation, its 7.5-a-second rhythm, the LIFE tool's exact white - entered into world.lifeGame around each ball and following it as it moves. The white lives on the core's body, its steel bed and open air; rubble, ground and water smother it; sparks come from the heart, poles-heavy, fiercer when the ball is roused; a blast shocks the disc and a dead core goes dark.\n- The capital lab runs the real Life module now (0120bf0) - one simulation for the discs, the repair crews' white foam (newly possible in the lab), and whatever comes later. Opus verified my wiring at my hash: 37 cores, 740 live disc cells, no errors.\n- Suites 21/21 on 7, 3 and 11. (Noted for the record: NO suite loads the capital lab page yet - the coming pw-vehicle suite will be the first, closing that blind spot.)",
+  "shots": [
+   {
+    "src": "shots/d15-world-life.png",
+    "caption": "Three vault balls on the one bundle, each disc alive with the world's own Life - the same white the LIFE tool paints"
+   }
+  ]
+ },
+ {
   "title": "Fable: D15's float verified live; the gate approaches clear - friendly tanks drive through tower 5 (000fc62, D15 + N3)",
   "author": "Fable",
   "time": "2026-11-21",
