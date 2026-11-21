@@ -380,16 +380,32 @@
         deco(c, x, g - 1, (d & 1) ? [188, 158, 48] : [30, 30, 32]);
         if (d < 3) deco(c, x, top - 1, (d & 1) ? [188, 158, 48] : [30, 30, 32]);
       }
-      // the eave recess: tile canopies and brackets overhanging the portal pinch the
-      // street's headroom under armour height (PS's drive: an asian eave at g-37 over a
-      // g-2 street stopped every tank at the facade) - the portal's reach is cut clear
-      for (let d = -1; d < 9; d += 1) {
+      // the eave recess: canopies AND brackets overhanging the portal pinch the street's
+      // headroom under armour height (PS's drives: an asian eave at g-37, then wooden
+      // brackets at left-3 and right+3 that wore other roles and survived the first cut).
+      // The rule is geometric now: in the eight rows over the portal's reach, any matter
+      // whose own column stands CLEAR beneath it down to the lane is an overhang tip, and
+      // it is struck - whatever role it wears. A wall's upper rows keep their wall below
+      // and stand.
+      for (let d = -5; d < 9; d += 1) {
         const x = px + side * d;
-        for (let y = top - 8; y < top; y += 1) {
+        if (x < 0 || x >= c.width) continue;
+        const outside = d < 0;   // the approach strip beyond the facade
+        let clearBelow = true;
+        for (let y = top; y < g && clearBelow; y += 1) {
+          const i = y * c.width + x;
+          if (c.mat[i] && c.role[i] !== ROLE.STAIR && !(outside && c.role[i] === ROLE.ORNAMENT)) clearBelow = false;
+        }
+        if (!clearBelow) continue;
+        // inside: only the eight rows over the band (the eaves); outside the facade the
+        // WHOLE height clears - the ornament kit hangs its under-eave brackets a few
+        // cells proud of the wall, and they stopped the tall hulls at every asian portal
+        // (PS's stopCell: 'wood/o5' at left-3 and right+3)
+        for (let y = top - 8; y < (outside ? g : top); y += 1) {
           const i = y * c.width + x;
           if (i < 0 || i >= c.mat.length || !c.mat[i]) continue;
-          const role = c.role[i];
-          if (role !== ROLE.ROOF && role !== ROLE.ORNAMENT) continue;
+          if (c.role[i] === ROLE.SLAB || c.role[i] === ROLE.CORE || c.role[i] === ROLE.GRATE) continue;
+          if (outside && (c.role[i] === ROLE.WALL || c.role[i] === ROLE.FRAME)) continue;
           c.mat[i] = 0; c.paint[i] = 0; c.role[i] = ROLE.NONE; c.deco[i] = 0;
         }
       }

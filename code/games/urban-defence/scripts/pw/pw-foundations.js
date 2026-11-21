@@ -734,6 +734,48 @@
     return { x: ox, y: oy, width, height, canvas };
   }
 
+  // N3 vehicle rule, the PAD RIM: the apron's outward face is a foundation ramp a tank
+  // climbs - never a cliff nor an undercut lip. The drives stopped 'too steep' right at
+  // the rim, and tower 5's floor edge hung over a dropping street with air beneath it
+  // (PS's stopCell diagnostics). Where the land falls away from the pad, a god-metal
+  // wedge steps down and out at a tank's grade until it meets the ground.
+  function apronRamp(world, p, owner, works, skipSide) {
+    const reach = [0, 0];
+    for (const side of [-1, 1]) {
+      if (side === skipSide) continue;   // (a hangar's runway side carries its own designed ramp)
+      const edge = side < 0 ? works[0] : works[1];
+      // only a ramp that MEETS the land gets laid - a wedge ending in mid-air over a deep
+      // fall leaves a worse cliff than the stage piers it replaced (the slopes suite's
+      // 43-cell drop at the stage's foot)
+      let meets = false;
+      for (let d = 1; d <= 26 && !meets; d += 1) {
+        const x = edge + side * d;
+        if (x < 2 || x >= world.width - 2) break;
+        if (p.G + (d >> 1) >= ground(world, x) + 1) meets = true;
+      }
+      if (!meets) continue;
+      for (let d = 1; d <= 26; d += 1) {
+        const x = edge + side * d;
+        if (x < 2 || x >= world.width - 2) break;
+        const lineY = p.G + (d >> 1);              // about 26 degrees, down and out
+        const g = ground(world, x);
+        if (lineY >= g + 1) break;                 // met the land: the ramp is home
+        const go = PW.getOwner(world, x, g);
+        if (go && go !== owner) break;             // a neighbour's works: theirs to keep
+        for (let y = lineY; y <= Math.min(world.height - 2, g + 2); y += 1) {
+          const id = PW.get(world, x, y) & ID_MASK;
+          if (PW.mat.structural[id] || id === M.ORE || id === M.BEDROCK) continue;
+          const o = PW.getOwner(world, x, y);
+          if (o && o !== owner) continue;
+          put(world, x, y, M.FOUNDATION, mix([108, 106, 100], [98, 90, 74], Math.min(1, d / 22)), owner);
+        }
+        reach[side < 0 ? 0 : 1] = d;
+        PW.refreshGroundTop(world, x);
+      }
+    }
+    return reach;
+  }
+
   function place(world, canvas, worldX, options = {}) {
     const style = options.style || (canvas.meta && canvas.meta.style) || 'modern';
     const extent = measure(world, canvas, worldX, style);
@@ -754,6 +796,10 @@
     const walls = p.uphill.map((side) => retainingWall(world, p, side, owner)).filter(Boolean);
     const under = underStructure(world, p, owner);
     giftSkirt(world, p, owner);
+    // N3 vehicle rule: the rim ramps - and its reach is part of the WORKS, so the suite's
+    // extent relations, re-seat erasure and the apron sigs all see the same span.
+    const runwaySide = canvas.runway ? Math.sign(canvas.runway.direction || (canvas.meta && canvas.meta.facing) || 0) : 0;
+    const rampReach = apronRamp(world, p, owner, [extent.left, extent.right], runwaySide);
     // (the cores' vaults hang under the floor with it, in the ground or among the stage's piers)
     // N73 (options.grow): cores first - only the gift is stamped; the body stays blueprint.
     const stamp = options.grow ? stampGift(world, canvas, worldX, G, owner)
@@ -766,7 +812,8 @@
       coreRoots(world, worldX + k.x, G + k.vault.bottom - canvas.ground + 12, owner);
     }
     const cores = canvas.cores.map((c) => ({ x: worldX + c.x, y: G + c.y - canvas.ground }));
-    return { stamp, plan: p, walls, under, cores, works: [extent.left, extent.right], grown: !!options.grow };
+    return { stamp, plan: p, walls, under, cores,
+      works: [extent.left - (rampReach ? rampReach[0] : 0), extent.right + (rampReach ? rampReach[1] : 0)], grown: !!options.grow };
   }
 
   PW.foundations = { plan, measure, place, lie, allows, rockTerrace, coreRoots, bedUnderbody, STEEP, STYLE, CUT_MAX, CUT_MAX_HANGAR };
