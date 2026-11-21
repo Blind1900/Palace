@@ -1,5 +1,12 @@
 [
  {
+  "title": "Fable: pipe bends swept + flow never blocks, three core tiers, cores clear the rubble by 50, no core cut off (N81/N35/N86/N79/N80; d616a10)",
+  "author": "Fable",
+  "time": "2026-11-21",
+  "note": "A large batch, all on Opus's 2f8ac9f, 24/24 on seeds 7 and 11 (seed 3 is the known debris-recycle variance flake):\n- N81 PIPE BENDS: the user's screenshot showed a pipe turning vertical and stopping the flow. The cause: the pipe-layer ignored 2-cell steps, leaving bare little cliffs whose casing juts into a cargo lane. Now EVERY level change is a swept mitred bend (the pipe's own rows carried smoothly across the joint) or, for the tall ones, a proper well-shaft the cargo climbs - never a sharp step. A new regression suite checks that every bend and level change on seeds 7/3/11 is swept and that no lane ever deadlocks while it holds cargo.\n- N35 CORE TIERS: three distinct designs at three sizes - the MAIN core largest, the DESCENDANT smaller, the SUB smallest - and the sizes hold in order wherever they are placed: a capital's seat centres the main, a ring tower a descendant, the flanking cores are subs, a base's service cores are subs. Also fixed a real bug this surfaced: undercroft towers (the drive-through ground storey) had their core severed from the building by a too-short pillar search - the cores are joined now.\n- N86: a core rising out of the rubble now clears it by at least 50 cells (the user's 50 pixels, one cell per pixel at the default zoom) before it floats, and travels back DOWN at the same speed it rose.\n- N79: the mountain outpost blockhouse that spawned hanging over its gallery is underpinned to solid ground.\n- N80: a seed dropped on ground too poor to grow now UNPLANTS - the bare core is taken back out instead of being left stranded and wired to the pipeline forever.\n- Deferred, coordinated with Opus: the 43-degree tank aprons land together with Opus's 43-degree climb limit (they shift one seed's terrain, so we re-baseline together).",
+  "shots": []
+ },
+ {
   "title": "Fable: pumps tap the trunk, bends roll smooth, the pipeline goes cyberpunk - and the vehicle rule is a suite (N38/N34 checks + N3; d9c88f9, 566e5a0)",
   "author": "Fable",
   "time": "2026-11-21",
@@ -2509,6 +2516,13 @@
       "name": "Growth and economy",
       "items": [
        {
+        "id": "N83",
+        "owner": "F",
+        "step": "E",
+        "pct": 0,
+        "text": "Pipe lanes stay continuous (user, 2026-11-21, live-world screenshot): the resource lines inside each pipe (water, SM, HM) must be unbroken from end to end, not only the outer casing. Generation must not cut a lane at a bend, level change, junction or building crossing. Add a check that every lane stays unbroken on seeds 7, 3 and 11. Extends N81 and N38."
+       },
+       {
         "id": "N37",
         "owner": "F",
         "step": "E, H",
@@ -2521,7 +2535,7 @@
         "owner": "F",
         "step": "H, A2",
         "pct": 0,
-        "text": "Terraria-style world gen and environment (user, 2026-11-21): keep Urban Defence's style and use Terraria's world generation as the guide for how buildings are placed on the environment, and how units use it. Use Powder Toy for material and structure behaviour, and Game of Life for how structures and plants regrow. Units should behave against the environment (ground, water, blasts, falling debris). Study for behaviour only; our own code. WGM and PS each send a plan before building."
+        "text": "Terraria-style world gen and environment (user, 2026-11-21): keep Urban Defence's style and use Terraria's world generation as the guide for how buildings are placed on the environment, and how units use it. Use Powder Toy for material and structure behaviour, and Game of Life for how structures and plants regrow. Units should behave against the environment (ground, water, blasts, falling debris). Study for behaviour only; our own code. WGM and PS each send a plan before building. Reference added (user, 2026-11-21): Terraria 1.2 source at DownloadsTerraria-Source-Code-master.zip, for study of world gen and physics foundations only. No code copied."
        },
        {
         "id": "N81",
@@ -2654,6 +2668,27 @@
      {
       "name": "Physics",
       "items": [
+       {
+        "id": "N87",
+        "owner": "F",
+        "step": "F, F2",
+        "pct": 0,
+        "text": "Core beds follow the surface (user, 2026-11-21): a floating core replaces its foundational bed so the bed always sits at the top surface layer, even on rubble or blasted terrain. The building is rebuilt to suit the new terrain, including the core's foundational bed."
+       },
+       {
+        "id": "N86",
+        "owner": "F",
+        "step": "F",
+        "pct": 0,
+        "text": "Core rise height and speed (user, 2026-11-21, live-game screenshot): a core rising out of rubble must go at least 50 pixels above the rubble over it. It then travels back down at the same speed it went up."
+       },
+       {
+        "id": "N85",
+        "owner": "O",
+        "step": "A2",
+        "pct": 0,
+        "text": "Tree rubble piles too high (user, 2026-11-21, live-game screenshot): the pile of felled tree debris stands taller than it should. Check the heap against the angle of repose and the wood and leaf weights for tree debris."
+       },
        {
         "text": "REOPENED 2026-11-20 (user): the core rises out of a ruined building's rubble, floats above the rubble for 2 seconds before it can re-enter, and keeps repairing while it floats. Then it sinks home into the rebuilt bed (grating closing over it). The core is an actual Game of Life pixel simulation, using the Game of Life code, physics and look, matched to the context of the core. Earlier note: Cores rise out of a ruined building's rubble, stand in the open on it, and sink home again into a rebuilt bed (grating closing over them)",
         "step": "F",
