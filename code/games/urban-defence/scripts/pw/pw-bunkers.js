@@ -146,7 +146,13 @@
       if (coverAbove(nx, topY) <= 2) break;   // the skin: the mouth opens here
     }
     if (d >= max) return null;
-    const splay = (t) => halfH + (t > d * 0.68 ? 1 : 0);
+    // N32 refine: the mouth flares continuously - walls easing open a cell every couple
+    // of steps, to four at most, timed to ARRIVE at the face - so a rifle at the sill
+    // traverses wide of the axis (a real embrasure's splay) while the throat stays
+    // trooper-sized the whole way in: never wider than the flare needs, the pipe's own
+    // rule. The old +1 at one fixed step was the sharp cut-off the user called out.
+    const flareFrom = Math.max(2, d - 11);
+    const splay = (t) => halfH + Math.min(4, Math.max(0, Math.round((t - flareFrom) * 0.45)));
     for (let t = 0; t <= d; t += 1) {
       const cx = x + dx * t, cy = y + dy * t;
       const hh = splay(t);
@@ -182,6 +188,44 @@
       if (!solidRock(world, sxx, sy)) break;
       PW.set(world, sxx, sy, M.AIR, { quiet: true });
       PW.setLayer(world, 'deco', sxx, sy, 0);
+    }
+    // N32 refine: no sharp cut-off at either end - the corners smooth out and MERGE.
+    // At the mouth, the lip's top and bottom corners ease a cell at a time into the
+    // bare mountainside (and stay unlined there, so the opening runs out INTO terrain);
+    // at the fighting end, the top corner eases into the gallery the same way.
+    const chamfer = (cx, cy) => {
+      if (cy <= world.groundTop[cx]) return;
+      const id = PW.get(world, cx, cy) & ID_MASK;
+      // rock OR the pass's own collar cell: the corner ends bare, run out into terrain
+      if (id === M.AIR || (!PW.mat.terrain[id] && id !== M.REINFORCED)) return;
+      PW.set(world, cx, cy, M.AIR, { quiet: true });
+      if (id === M.REINFORCED) PW.setOwner(world, cx, cy, 0);
+      PW.setLayer(world, 'deco', cx, cy, 0);
+      PW.setFlag(world, cx, cy, FLAG.TUNNEL | FLAG.CARVED);
+    };
+    for (const [t, grow] of [[d, 2], [d - 1, 1]]) {
+      if (t < 2) continue;
+      const cx = x + dx * t, cy = y + dy * t, hh = splay(t);
+      for (let g = 1; g <= grow; g += 1) { chamfer(cx, cy - hh - g); chamfer(cx, cy + hh + g); }
+    }
+    if (d >= 4) chamfer(x, y - halfH - 1);
+    // ...and no nub left to hang: a cell the corner cut isolated (one solid neighbour or
+    // none) goes with it, twice over, so a rockslide later finds nothing floating here.
+    for (let pass = 0; pass < 2; pass += 1) {
+      for (let t = Math.max(0, d - 3); t <= d; t += 1) {
+        const cx = x + dx * t, cy = y + dy * t, hh = splay(t);
+        for (let k = -(hh + 3); k <= hh + 3; k += 1) {
+          const yy = cy + k;
+          if (yy <= world.groundTop[cx]) continue;
+          const id = PW.get(world, cx, yy) & ID_MASK;
+          if (id === M.AIR || (!PW.mat.terrain[id] && id !== M.REINFORCED)) continue;
+          let n = 0;
+          for (const [ax, ay] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+            if ((PW.get(world, cx + ax, yy + ay) & ID_MASK) !== M.AIR) n += 1;
+          }
+          if (n <= 1) chamfer(cx, yy);
+        }
+      }
     }
     // The sill at the fighting end: two armour cells with a hazard tip, cover to shoot over.
     for (const t of [0, 1]) {
