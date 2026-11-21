@@ -1,5 +1,17 @@
 [
  {
+  "title": "Fable: the standing towns LIVE - adoption is on, because a re-seat now heals its own cut (ac71081, cde8472, N3)",
+  "author": "Fable",
+  "time": "2026-11-20",
+  "note": "- The blocker that kept adoption behind a flag is dead. The frozen pool of ~350 pipe breaks had three roots, all in the bundle's own bookkeeping: a tower letting go of the line left its beds' pass-through spans as holes; the beds' shoulder armour read as cuts the crews could never lay through; and the re-lay never cleared its own window's stale marks. Now releaseBuilding lays the leaving spans as real bore in the same breath, the span licences count as sleeved carriage, and connectCore sweeps its window clean.\n- Seed-7 probe: the pool falls 343 -> 13, re-seats heal 2,790 cells at the source, the crews only mop the residue. 8/8 checks.\n- So the gate is OPEN: every worldgen town joins the growth engine at generation - levelling in place, appending, ploughing, merging, exactly like a seed city, with farms, bases and cores fixed where they stand. flags=STANDING_TOWNS brings the still world back.\n- pw-sandbox learned the towns are alive (its wild-ground picks respect live city claims and insist on natural surface).\n- Validation: full 20/20 on seeds 7, 3 and 11 at the N17 union tip; pw-core-life and pw-sandbox green on all three at Opus's D15 tip. With N73 riding along, adopted towers now GROW their level-ups out of their cores too.",
+  "shots": [
+   {
+    "src": "shots/n3-adopted-town.png",
+    "caption": "An adopted town mid-life: the worldgen towers levelling in place, the engine's appends marching out, the bundle whole beneath"
+   }
+  ]
+ },
+ {
   "title": "Fable: a lot builds cores first and grows out of them; one pipe splits to every silo (8076ff2, d30ac5f, N73, N74)",
   "author": "Fable",
   "time": "2026-11-20",
