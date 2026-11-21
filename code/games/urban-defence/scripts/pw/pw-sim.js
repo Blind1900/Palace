@@ -63,6 +63,13 @@
     const isAir = (m) => OPEN[m & ID_MASK] === 1;
     const isWater = (m) => (m & ID_MASK) === M.WATER;
     const isEmpty = (m) => (m & ID_MASK) === M.AIR;
+    // A supply line's bore (N17: PW.boreAt) is shut to water and the powders as solid ground is,
+    // though it is open air - of what moves, only smoke and fire pass it (see passesAt); a cell
+    // already in it (water spilled at a cut, rubble of its own casing) may leave it, never move on
+    // along it. (The bore's bits: world.boreBits, read afresh each tick.)
+    let bore = null;
+    const shut = (j) => bore !== null && (bore[j >> 3] >> (j & 7) & 1) === 1;
+    const airAt = (j) => OPEN[mat[j] & ID_MASK] === 1 && !shut(j);
     // Grates water runs through: stairs and the openings over their flights (M.PLATFORM), and the
     // drain hatches in a roof over its stairwell - its concrete flagged FLAG.HATCH, a grate while it
     // stands (debris lying in a hatch blown open stops it up). (Cell j at (x, y).)
@@ -80,7 +87,7 @@
     function underGrate(j, x, y) {
       for (let n = 0; n < GRATE_DEPTH && y + n < H - 1; n += 1, j += W) {
         if (grate(j, x, y + n)) continue;
-        return n && OPEN[mat[j] & ID_MASK] === 1 ? j : -1;
+        return n && airAt(j) ? j : -1;
       }
       return -1;
     }
@@ -89,6 +96,7 @@
     // PW.mat.byteWeight)
     const BYTE_WEIGHT = PW.mat.byteWeight;
     const lighter = (m, w) => phase[m & ID_MASK] <= PHASE.LIQUID && weight[m & ID_MASK] < w;
+    const lighterAt = (j, w) => lighter(mat[j], w) && !shut(j);
     const isLiquid = (m) => phase[m & ID_MASK] === PHASE.LIQUID;
 
     // The water column standing on a cell that just fell `d` rows follows it in the same tick:
@@ -142,7 +150,7 @@
       while (h < HEAD_SCAN && cy >= 1) {
         const m = mat[cy * W + cx];
         if (isWater(m)) { h += 1; cy -= 1; continue; }
-        if (isAir(m) || hops >= CEILING_HOPS) break;
+        if (airAt(cy * W + cx) || hops >= CEILING_HOPS) break;
         const nx = opening(cx, cy + 1);
         if (nx < 0) break;
         cx = nx; hops += 1;
@@ -163,9 +171,9 @@
           let j = cy * W + cx;
           if (isWater(mat[j])) {
             while (cy > 0 && isWater(mat[j - W])) { cy -= 1; j -= W; }
-          } else if (isAir(mat[j])) {
+          } else if (airAt(j)) {
             let n = 0;
-            while (n < 8 && cy < H - 1 && isAir(mat[j])) { cy += 1; j += W; n += 1; }
+            while (n < 8 && cy < H - 1 && airAt(j)) { cy += 1; j += W; n += 1; }
             if (!isWater(mat[j])) break;
           } else break;   // the shore or a wall
           if (cy < bestY) { bestY = cy; best = j; }
@@ -176,7 +184,7 @@
     // Refill an opening at (x, y) that just discharged a cell, from the surface above it. The
     // air the outflow displaces from below rises back through the water as bubbles.
     function refill(i, x, y) {
-      if (!isAir(mat[i])) return;
+      if (!airAt(i)) return;
       if (lastHead >= HEAD_SCAN) shiftColumn(x, y, 1);
       else {
         const src = highestSurface(lastTopX, lastTopY);
@@ -302,9 +310,9 @@
         const nx = x + d * (go + 1);
         if (nx < 1 || nx >= W - 1) break;
         const ahead = i + d * (go + 1);
-        if (!isAir(mat[ahead])) break;
+        if (!airAt(ahead)) break;
         go += 1;
-        if (isAir(mat[ahead + W])) break;            // ran off an edge: fall from here next tick
+        if (airAt(ahead + W)) break;            // ran off an edge: fall from here next tick
       }
       if (go === 0) {
         // (running into a structure: it pushes on it - see pushOn - and runs into the gap next)
@@ -315,7 +323,7 @@
         let k = 1;
         while (k <= PUSH_REACH && isWater(mat[i + d * k])) k += 1;
         const end = i + d * k, ex = x + d * k;
-        if (k > 1 && k <= PUSH_REACH && ex > 0 && ex < W - 1 && isAir(mat[end]) && !isAir(mat[end + W])) {
+        if (k > 1 && k <= PUSH_REACH && ex > 0 && ex < W - 1 && airAt(end) && !airAt(end + W)) {
           sweep(ex - d, y, d, 1, RUN_SPEED);
           move(i, x, y, end, ex, y, 'surge');
           return true;
@@ -331,15 +339,15 @@
     function stepWater(i, x, y) {
       if (y + 1 >= H) return false;
       // Free fall through air, several cells per tick; the cell lands with sideways momentum.
-      if (isAir(mat[i + W])) {
+      if (airAt(i + W)) {
         // (a long way down: it goes as a drop in flight - see flyWater)
         if (world.particles && openBelow(i, y) >= FLY_WATER) {
           const m = mat[i];
-          flyWater(i, x, y, m & MOVING ? ((m & RIGHT) ? 1 : -1) * RUN_SPEED : isAir(mat[i + 1]) && !isAir(mat[i - 1]) ? LIP_SPEED : isAir(mat[i - 1]) && !isAir(mat[i + 1]) ? -LIP_SPEED : 0);
+          flyWater(i, x, y, m & MOVING ? ((m & RIGHT) ? 1 : -1) * RUN_SPEED : airAt(i + 1) && !airAt(i - 1) ? LIP_SPEED : airAt(i - 1) && !airAt(i + 1) ? -LIP_SPEED : 0);
           return true;
         }
         let j = i + W, ny = y + 1;
-        while (ny + 1 < H && ny - y < WATER_FALL && isAir(mat[j + W])) { j += W; ny += 1; }
+        while (ny + 1 < H && ny - y < WATER_FALL && airAt(j + W)) { j += W; ny += 1; }
         const m = mat[i];
         if (!(m & MOVING)) mat[i] = M.WATER | MOVING | (((x + y + world.tick) & 1) ? RIGHT : 0);
         move(i, x, y, j, x, ny, 'fall');
@@ -386,12 +394,12 @@
       // above it, so calm surfaces never move.
       // Under a ceiling the pressure comes from the water behind: a full section pushes its front.
       const above = y >= 1 ? mat[i - W] : M.BEDROCK;
-      const pressed = isWater(above), ceiling = !pressed && !isAir(above);
+      const pressed = isWater(above), ceiling = !pressed && !(y >= 1 && airAt(i - W));
       if (pressed || ceiling) {
         for (let k = 0; k < 2; k += 1) {
           const d = k ? -dir : dir;
           if (x + d < 1 || x + d >= W - 1) continue;
-          if (!isAir(mat[i + d])) {
+          if (!airAt(i + d)) {
             // (a structure beside it: the water standing over it - or, in a flooded room, the water
             // it is joined to - presses on it, and more, running at it - see pushOn)
             if (breakable(mat[i + d] & ID_MASK) && rnd(x + d, y) < GIVES * 4 && pushOn(i + d, x + d, y, d, headAt(x, y) + 1 + ((mat[i] & MOVING) ? SURGE_HEAD : 0))) return true;
@@ -403,16 +411,16 @@
           // the highest point of the surface above. Shallow water trickles out; a deep lake gushes.
           const bursts = outflow(x, y);
           for (let b = 0; b < bursts; b += 1) {
-            if (!isWater(mat[i]) || !isAir(mat[i + d])) break;
+            if (!isWater(mat[i]) || !airAt(i + d)) break;
             let go = 1;
-            while (go < DISPERSE && x + d * (go + 1) > 0 && x + d * (go + 1) < W - 1 && isAir(mat[i + d * (go + 1)])) go += 1;
+            while (go < DISPERSE && x + d * (go + 1) > 0 && x + d * (go + 1) < W - 1 && airAt(i + d * (go + 1))) go += 1;
             mat[i] = M.WATER | MOVING | (d > 0 ? RIGHT : 0);
             const jet = Math.sqrt(2 * WATER_G * Math.max(1, lastHead));
             sweep(x, y, d, go, jet);
             move(i, x, y, i + d * go, x + d * go, y, 'squirt');
             // (out over a drop, it shoots on as a jet - see flyWater)
             const j = i + d * go;
-            if (world.particles && isAir(mat[j + W]) && openBelow(j, y) >= FLY_WATER) flyWater(j, x + d * go, y, d * Math.min(JET_MAX, jet));
+            if (world.particles && airAt(j + W) && openBelow(j, y) >= FLY_WATER) flyWater(j, x + d * go, y, d * Math.min(JET_MAX, jet));
             if (lastHead > 0) refill(i, x, y);
           }
           return true;
@@ -423,7 +431,7 @@
       for (let k = 0; k < 2; k += 1) {
         const d = k ? -dir : dir, nx = x + d;
         if (nx < 0 || nx >= W) continue;
-        if (isAir(mat[i + d]) && isAir(mat[i + W + d])) { move(i, x, y, i + W + d, nx, y + 1, 'diag'); return true; }
+        if (airAt(i + d) && airAt(i + W + d)) { move(i, x, y, i + W + d, nx, y + 1, 'diag'); return true; }
       }
       // Sideways towards the nearest drop within reach (a grate it runs through is one; and it runs
       // on through a grate in its way - the foot of a flight of stairs - never stopping in it).
@@ -432,10 +440,10 @@
         for (let s = 1; s <= DROP_SEARCH; s += 1) {
           const nx = x + d * s;
           if (nx < 0 || nx >= W) break;
-          if (!isAir(mat[i + d * s])) { if (grate(i + d * s, nx, y)) continue; break; }
-          if (isAir(mat[i + d * s + W]) || (grate(i + d * s + W, nx, y + 1) && underGrate(i + d * s + W, nx, y + 1) >= 0)) {
+          if (!airAt(i + d * s)) { if (grate(i + d * s, nx, y)) continue; break; }
+          if (airAt(i + d * s + W) || (grate(i + d * s + W, nx, y + 1) && underGrate(i + d * s + W, nx, y + 1) >= 0)) {
             let go = Math.min(s, DROP_STEP);
-            while (go < s && !isAir(mat[i + d * go])) go += 1;
+            while (go < s && !airAt(i + d * go)) go += 1;
             sweep(x, y, d, go, RUN_SPEED);
             move(i, x, y, i + d * go, x + d * go, y, 'drop');
             return true;
@@ -448,13 +456,13 @@
       if (y >= 1) {
         for (let k = 0; k < 2; k += 1) {
           const d = k ? -dir : dir, nx = x + d;
-          if (nx < 1 || nx >= W - 1 || !isAir(mat[i + d])) continue;
+          if (nx < 1 || nx >= W - 1 || !airAt(i + d)) continue;
           // Push only away from a higher column behind, never towards a higher column ahead,
           // so a front can only advance and never oscillates.
           if (!isWater(mat[i - d - W]) || isWater(mat[i + d - W]) || isWater(mat[i + 2 * d - W])) continue;
           let go = 1;
           while (go < SPREAD && x + d * (go + 1) > 0 && x + d * (go + 1) < W - 1
-            && isAir(mat[i + d * (go + 1)]) && !isAir(mat[i + d * go + W])) go += 1;
+            && airAt(i + d * (go + 1)) && !airAt(i + d * go + W)) go += 1;
           sweep(x, y, d, go, RUN_SPEED);
           move(i, x, y, i + d * go, x + d * go, y, 'push');
           return true;
@@ -472,7 +480,7 @@
     const FLY_WATER = 12;          // open cells under it, at least, for a fall to fly
     const LIP_SPEED = 20;          // cells/s water trickling over a lip leaves it at
     const JET_MAX = 260;           // cells/s
-    const openBelow = (i, y) => { let n = 0; for (let j = i + W; n < FLY_WATER && y + n + 1 < H - 1 && isAir(mat[j]); j += W) n += 1; return n; };
+    const openBelow = (i, y) => { let n = 0; for (let j = i + W; n < FLY_WATER && y + n + 1 < H - 1 && airAt(j); j += W) n += 1; return n; };
     const FLY_COLUMN = 24;         // a column of water this tall at most, with nothing under it, falls whole
     function flyWater(i, x, y, vx) {
       const F = PW.PARTICLE;
@@ -480,7 +488,7 @@
       // thrown up - has nothing holding it, and all of it falls together)
       let top = y;
       while (top > 0 && y - top < FLY_COLUMN && isWater(mat[(top - 1) * W + x])) top -= 1;
-      if (y - top < FLY_COLUMN && top > 0 && isAir(mat[(top - 1) * W + x])) {
+      if (y - top < FLY_COLUMN && top > 0 && airAt((top - 1) * W + x)) {
         for (let cy = top; cy <= y; cy += 1) {
           PW.set(world, x, cy, M.AIR, { quiet: true });
           world.particles.spawn(x + 0.5, cy + 0.5, vx, 0, M.WATER, 0, F.WATER, 8);
@@ -513,7 +521,7 @@
     const LEVEL_REACH = 128, LEVEL_DROP = 8, LEVEL_BUDGET = 120000;   // columns looked along a tick, at most
     let levelBudget = 0;
     function level(i, x, y, dir) {
-      if (y < 1 || !isAir(mat[i - W])) return false;
+      if (y < 1 || !airAt(i - W)) return false;
       if (levelBudget <= 0) { PW.wakeCell(world, x, y); return false; }
       let best = y + 1, bx = -1, edge = false;
       for (let k = 0; k < 2 && !edge; k += 1) {
@@ -530,14 +538,14 @@
             while (cy > 0 && isWater(mat[j - W])) { cy -= 1; j -= W; }
             if (cy < y) break;                       // (standing higher than here)
             surf = cy;
-          } else if (isAir(mat[j])) {
+          } else if (airAt(j)) {
             let d = 0;
-            while (d < LEVEL_DROP && cy < H - 2 && isAir(mat[j + W])) { cy += 1; j += W; d += 1; }
+            while (d < LEVEL_DROP && cy < H - 2 && airAt(j + W)) { cy += 1; j += W; d += 1; }
             if (d >= LEVEL_DROP) {
               // (an edge it pours over: out beside the bottom of the water at the lip)
               let ly = cy - d, lj = ly * W + cx - s;
               while (ly < H - 2 && isWater(mat[lj + W])) { ly += 1; lj += W; }
-              if (isAir(mat[ly * W + cx])) { bx = cx; best = ly; edge = true; }
+              if (airAt(ly * W + cx)) { bx = cx; best = ly; edge = true; }
               break;
             }
             if (isWater(mat[j + W])) { cy += 1; surf = cy; } else surf = cy + 1;   // (a lower surface, or a dry floor)
@@ -549,7 +557,7 @@
       // (where it goes: the open cell on the low surface - or, at an edge, out at its own height)
       const ty = edge ? best : best - 1, j = ty * W + bx;
       if (!edge && ty < y + 1) return false;
-      if (!isAir(mat[j])) return false;
+      if (!airAt(j)) return false;
       move(i, x, y, j, bx, ty, 'level');
       return true;
     }
@@ -573,7 +581,7 @@
       const wind = windAt(x, y);
       if (!wind) return false;
       const d = wind > 0 ? 1 : -1;
-      if (x + d < 0 || x + d >= W || !isAir(mat[i + d]) || !isLiquid(mat[i + W + d])) return false;
+      if (x + d < 0 || x + d >= W || !airAt(i + d) || !isLiquid(mat[i + W + d])) return false;
       if (rnd(x, y) >= Math.abs(wind) * DRIFT) { PW.wakeCell(world, x, y); return false; }
       move(i, x, y, i + d, x + d, y, 'drift');
       return true;
@@ -581,9 +589,9 @@
     function stepPowder(i, x, y, id) {
       if (y + 1 >= H) return false;
       const below = mat[i + W];
-      if (isAir(below)) {
+      if (airAt(i + W)) {
         let j = i + W, ny = y + 1;
-        while (ny + 1 < H && ny - y < FLY_DROP && isAir(mat[j + W])) { j += W; ny += 1; }
+        while (ny + 1 < H && ny - y < FLY_DROP && airAt(j + W)) { j += W; ny += 1; }
         // A long way down: it flies, picking up speed, and lands back in the grid.
         if (ny - y >= FLY_DROP && fly(i, x, y)) return true;
         if (ny - y > POWDER_FALL) { ny = y + POWDER_FALL; j = i + POWDER_FALL * W; }
@@ -594,11 +602,12 @@
       // Heavier than the liquid under it: it sinks, and the liquid rises past it. Lighter than the
       // liquid over it (ash, wood in water): it floats up.
       const w = BYTE_WEIGHT[mat[i]];
-      if (isLiquid(below)) {
+      // (not down into water standing in a supply line's bore, nor up into it: see shut)
+      if (isLiquid(below) && !shut(i + W)) {
         if (weight[below & ID_MASK] < w) { move(i, x, y, i + W, x, y + 1, 'sink'); return true; }
         return drift(i, x, y);   // (floating)
       }
-      if (y >= 1 && isLiquid(mat[i - W]) && weight[mat[i - W] & ID_MASK] > w && rnd(x, y) < 0.5) {
+      if (y >= 1 && isLiquid(mat[i - W]) && !shut(i - W) && weight[mat[i - W] & ID_MASK] > w && rnd(x, y) < 0.5) {
         move(i, x, y, i - W, x, y - 1, 'float');
         return true;
       }
@@ -613,7 +622,7 @@
         const d = ((x * 7 + y + world.tick) & 1) ? 1 : -1;
         for (const s of [d, -d]) {
           if (x + s < 0 || x + s >= W) continue;
-          if (isAir(mat[i + s]) && isLiquid(mat[i + W + s]) && weight[mat[i + W + s] & ID_MASK] > w) { move(i, x, y, i + s, x + s, y); return true; }
+          if (airAt(i + s) && isLiquid(mat[i + W + s]) && weight[mat[i + W + s] & ID_MASK] > w) { move(i, x, y, i + s, x + s, y); return true; }
         }
       }
       // At rest it holds, even standing straight up, until it is stirred (see PW.stir): shaken,
@@ -623,11 +632,11 @@
       for (let k = 0; k < 2; k += 1) {
         const d = k ? -dir : dir, nx = x + d;
         if (nx < 0 || nx >= W) continue;
-        if (lighter(mat[i + d], w) && lighter(mat[i + W + d], w)) {
+        if (lighterAt(i + d, w) && lighterAt(i + W + d, w)) {
           if (slides) {
             // (over the edge of a slope steeper than it can lie on - nothing under where it slides
             // to - it runs on down with its own momentum: see run)
-            if (y + 2 < H && isAir(mat[i + 2 * W + d]) && run(i, x, y, d, id)) return true;
+            if (y + 2 < H && airAt(i + 2 * W + d) && run(i, x, y, d, id)) return true;
             move(i, x, y, i + W + d, nx, y + 1);
             PW.stir(world, nx, y + 1, nx, y + 1);
             return true;
@@ -645,8 +654,8 @@
           const d = k ? -dir : dir, nx = x + reach * d;
           if (nx < 0 || nx >= W) continue;
           let open = true;
-          for (let s = 1; s <= reach && open; s += 1) open = lighter(mat[i + s * d], w);
-          for (let s = 1; s <= rise && open; s += 1) open = lighter(mat[i + s * W + reach * d], w);
+          for (let s = 1; s <= reach && open; s += 1) open = lighterAt(i + s * d, w);
+          for (let s = 1; s <= rise && open; s += 1) open = lighterAt(i + s * W + reach * d, w);
           if (open) {
             if (slides) { move(i, x, y, i + d, x + d, y); PW.stir(world, x + d, y, x + d, y); return true; }
             PW.wakeCell(world, x, y);
@@ -706,15 +715,19 @@
     // (can the gas `id`, rising or sinking, move into the cell m?)
     const passes = (m, id, up) => isEmpty(m) || (phase[m & ID_MASK] <= PHASE.LIQUID && phase[m & ID_MASK] >= PHASE.GAS
       && (up ? weight[m & ID_MASK] > weight[id] : weight[m & ID_MASK] < weight[id]));
+    // (into cell j - and of the gases only smoke goes into a supply line's bore: steam would
+    // condense in it, dust is grit - see shut)
+    const passesAt = (j, id, up) => passes(mat[j], id, up) && (id === M.SMOKE || !shut(j));
+    const emptyAt = (j, id) => isEmpty(mat[j]) && (id === M.SMOKE || !shut(j));
     // (can the gas `id` at i - not on the world's edge - go nowhere this tick, by any of stepGas's
     // ways: on the way it rises or sinks, straight or slipping either side; sideways into empty
     // air; a thick cell pouring down; carried up or down by a blast's wind?)
     function stuck(i, id, density) {
       const up = RISE[id] > 0, v = up ? -W : W;
-      if (passes(mat[i + v], id, up) || passes(mat[i + v - 1], id, up) || passes(mat[i + v + 1], id, up)) return false;
-      if (isEmpty(mat[i - 1]) || isEmpty(mat[i + 1])) return false;
-      if (density === 3 && isEmpty(mat[i + W])) return false;
-      if (airBusy && (passes(mat[i - W], id, true) || passes(mat[i + W], id, false))) return false;
+      if (passesAt(i + v, id, up) || passesAt(i + v - 1, id, up) || passesAt(i + v + 1, id, up)) return false;
+      if (emptyAt(i - 1, id) || emptyAt(i + 1, id)) return false;
+      if (density === 3 && emptyAt(i + W, id)) return false;
+      if (airBusy && (passesAt(i - W, id, true) || passesAt(i + W, id, false))) return false;
       return true;
     }
     world.wind = world.wind || 0;
@@ -784,7 +797,7 @@
       // (a strong updraught or downdraught carries it straight up or down)
       if (Math.abs(lift) > 20 && (PW.hash3(x, y, world.tick + 7) & 1023) / 1023 < Math.min(0.9, Math.abs(lift) / 120)) {
         const j = lift > 0 ? i - W : i + W;
-        if (y > 1 && y < H - 2 && passes(mat[j], id, lift > 0)) { moveGas(i, x, y, j, x, lift > 0 ? y - 1 : y + 1); return true; }
+        if (y > 1 && y < H - 2 && passesAt(j, id, lift > 0)) { moveGas(i, x, y, j, x, lift > 0 ? y - 1 : y + 1); return true; }
       }
       const r2 = (h >>> 10 & 1023) / 1023;
       const r3 = (h >>> 20 & 1023) / 1023;
@@ -815,24 +828,23 @@
       // Concentrated clumps pour like rain: in a scattering of columns (changing every second) the
       // thickest gas falls through clear air in streaks hanging under the cloud, until it has
       // thinned enough to rise again.
-      if (density === 3 && y < H - 2 && r2 < 0.45 && (PW.hash2(x, world.tick >> 6) & 7) === 0 && isEmpty(mat[i + W])) {
+      if (density === 3 && y < H - 2 && r2 < 0.45 && (PW.hash2(x, world.tick >> 6) & 7) === 0 && emptyAt(i + W, id)) {
         moveGas(i, x, y, i + W, x, y + 1);
         return true;
       }
       const vert = rise > 0 ? -W : W;
       // Up (or down for dust), through air, water or a heavier gas (a lighter one, sinking).
       if (r2 < Math.abs(rise) && y > 0 && y < H - 1) {
-        const above = mat[i + vert];
-        if (passes(above, id, rise > 0)) { moveGas(i, x, y, i + vert, x, y + (rise > 0 ? -1 : 1)); return true; }
+        if (passesAt(i + vert, id, rise > 0)) { moveGas(i, x, y, i + vert, x, y + (rise > 0 ? -1 : 1)); return true; }
         // Blocked: slip diagonally.
         const diag = i + vert + side;
-        if (x + side > 0 && x + side < W - 1 && passes(mat[diag], id, rise > 0)) { moveGas(i, x, y, diag, x + side, y + (rise > 0 ? -1 : 1)); return true; }
+        if (x + side > 0 && x + side < W - 1 && passesAt(diag, id, rise > 0)) { moveGas(i, x, y, diag, x + side, y + (rise > 0 ? -1 : 1)); return true; }
       }
       // Sideways: drift with the wind, or spread.
-      if (x + side > 0 && x + side < W - 1 && isEmpty(mat[i + side]) && (wind !== 0 || eddy || r2 > 0.6)) {
+      if (x + side > 0 && x + side < W - 1 && emptyAt(i + side, id) && (wind !== 0 || eddy || r2 > 0.6)) {
         // Thick smoke spreads into the cell it leaves behind as it drifts.
         moveGas(i, x, y, i + side, x + side, y);
-        if (id !== M.STEAM && density >= 2 && r < 0.25 && isEmpty(mat[i])) {
+        if (id !== M.STEAM && density >= 2 && r < 0.25 && emptyAt(i, id)) {
           mat[i + side] = id | (density - 1) << 6;
           PW.set(world, x, y, id | (density - 2) << 6, { quiet: true });
         }
@@ -900,6 +912,7 @@
       stamp = (stamp % 255) + 1;
       bubbleBudget = 60;
       levelBudget = LEVEL_BUDGET;
+      bore = world.boreBits || null;
       // Wind: a slow swing of up to 14 cells/s (1 m/s) either way, with gusts on top.
       const t = world.tick / 60;
       world.wind = 14 * windNoise(t / 45) + 6 * gustNoise(t / 4);

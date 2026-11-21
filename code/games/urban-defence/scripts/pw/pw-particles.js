@@ -310,7 +310,7 @@
     // see PW.mat)? A step of two beside it is steeper than any; and more than `rise` down within
     // `run` cells out. Then it runs on down it.
     function steeper(gx, gy, d, id, fl) {
-      const free = (x, y) => x >= 1 && x < W - 1 && y >= 0 && y < H - 1 && open(mat[y * W + x] & ID_MASK, fl);
+      const free = (x, y) => x >= 1 && x < W - 1 && y >= 0 && y < H - 1 && open(mat[y * W + x] & ID_MASK, fl) && !shut(y * W + x);
       if (free(gx + d, gy) && free(gx + d, gy + 1)) return true;
       const rise = REPOSE_RISE[id], run = REPOSE_RUN[id];
       if (run < 2) return false;
@@ -427,7 +427,7 @@
     // wall), at the anchor.
     function cellOf(c, q, ax, ay) {
       const base = c * CHUNK_CELLS, gx = ax + chunkDx[base + q], gy = ay + chunkDy[base + q];
-      if (gx < 1 || gy < 1 || gx >= W - 1 || gy >= H - 1 || !OPEN[mat[gy * W + gx] & ID_MASK]) return [ax, ay];
+      if (gx < 1 || gy < 1 || gx >= W - 1 || gy >= H - 1 || !OPEN[mat[gy * W + gx] & ID_MASK] || shut(gy * W + gx)) return [ax, ay];
       return [gx, gy];
     }
     // Particle i comes to rest at (x, y) in the grid (a chunk, all its cells).
@@ -444,7 +444,7 @@
         for (let d = -r; d <= r; d += 1) {
           for (const [ox, oy] of [[d, -r], [d, r], [-r, d], [r, d]]) {
             const nx = cx + ox, ny = cy + oy;
-            if (nx < 1 || ny < 1 || nx >= W - 1 || ny >= H - 1 || !OPEN[mat[ny * W + nx] & ID_MASK]) continue;
+            if (nx < 1 || ny < 1 || nx >= W - 1 || ny >= H - 1 || !OPEN[mat[ny * W + nx] & ID_MASK] || shut(ny * W + nx)) continue;
             return deposit(nx + 0.5, ny + 0.5, byte, fl, paint, heat);
           }
         }
@@ -457,7 +457,7 @@
     function displace(cx, cy) {
       let top = cy;
       while (top > 0 && phase[mat[(top - 1) * W + cx] & ID_MASK] === PW.PHASE.LIQUID && cy - top < 512) top -= 1;
-      if (top === 0 || !OPEN[mat[(top - 1) * W + cx] & ID_MASK]) return false;
+      if (top === 0 || !OPEN[mat[(top - 1) * W + cx] & ID_MASK] || shut((top - 1) * W + cx)) return false;
       clearGas(cx, top - 1);
       PW.set(world, cx, top - 1, mat[cy * W + cx]);
       return true;
@@ -468,9 +468,11 @@
     function clearGas(cx, cy) {
       const there = mat[cy * W + cx];
       if (phase[there & ID_MASK] !== PW.PHASE.GAS) return;
-      for (let up = cy - 1; up > 0 && cy - up <= 200; up -= 1) if ((mat[up * W + cx] & ID_MASK) === M.AIR) { PW.set(world, cx, up, there, { quiet: true }); return; }
+      // (smoke may go into a supply line's bore; steam and dust not - see shut)
+      const may = (j) => (mat[j] & ID_MASK) === M.AIR && ((there & ID_MASK) === M.SMOKE || !shut(j));
+      for (let up = cy - 1; up > 0 && cy - up <= 200; up -= 1) if (may(up * W + cx)) { PW.set(world, cx, up, there, { quiet: true }); return; }
       for (let k = 1; k <= 160; k += 1) for (const sx of [cx - k, cx + k]) {
-        if (sx > 0 && sx < W - 1 && (mat[cy * W + sx] & ID_MASK) === M.AIR) { PW.set(world, sx, cy, there, { quiet: true }); return; }
+        if (sx > 0 && sx < W - 1 && may(cy * W + sx)) { PW.set(world, sx, cy, there, { quiet: true }); return; }
       }
       if ((there & ID_MASK) === M.STEAM) { spawn(cx + 0.5, cy + 0.5, 0, -20, M.WATER, 0, F.WATER, 6); return; }
       stats.gasLost = (stats.gasLost || 0) + 1;
@@ -483,14 +485,14 @@
       for (let k = 0; k < 400 && cy >= 0; k += 1, cy -= 1) {
         const id = mat[cy * W + cx] & ID_MASK;
         const sinks = (fl & F.WATER) === 0 && phase[id] === PW.PHASE.LIQUID && weight[id] < BYTE_WEIGHT[byte];
-        if (OPEN[id] || (sinks && displace(cx, cy))) {
+        if ((OPEN[id] && !shut(cy * W + cx)) || (sinks && displace(cx, cy))) {
           // Rubble and earth landing on a heap roll off it, down its slope, so falling debris builds
           // a heap spreading out wide rather than a column - to the slope a heap of it stands at
           // (its angle of repose: see PW.mat): rolling on off a step of two beside it, or a slope
           // falling away more than `rise` within `run` cells out.
           if (!(fl & F.WATER) && OPEN[id] && phase[byte & ID_MASK] !== PW.PHASE.GAS) {
             const first = (cx + cy) & 1 ? 1 : -1, rise = REPOSE_RISE[byte & ID_MASK], run = REPOSE_RUN[byte & ID_MASK];
-            const free = (x, y) => x >= 1 && x < W - 1 && y < H - 1 && OPEN[mat[y * W + x] & ID_MASK];
+            const free = (x, y) => x >= 1 && x < W - 1 && y < H - 1 && OPEN[mat[y * W + x] & ID_MASK] && !shut(y * W + x);
             const far = (d) => {
               if (run < 2) return false;
               for (let s = 1; s <= run; s += 1) if (!free(cx + s * d, cy)) return false;
@@ -525,6 +527,10 @@
       return false;
     }
     const OPEN = PW.mat.open;
+    // (a supply line's bore - PW.boreAt, N17 - is shut to every pixel but smoke and flame, as solid
+    // ground is: a drop, a grain or a lump flying at it strikes it, and nothing comes to rest in
+    // it; one already inside - set there - may move on out of it)
+    const shut = (j) => { const b = world.boreBits; return b !== undefined && b !== null && (b[j >> 3] >> (j & 7) & 1) === 1; };
     // (and a drop of water falls through a grate - stairs, the opening over a flight: M.PLATFORM -
     // as water in the grid runs through it: see pw-sim's underGrate)
     const open = (id, fl) => OPEN[id] === 1 || (id === M.WATER && (fl & F.WATER) === 0) || (id === M.PLATFORM && (fl & F.WATER) !== 0);
@@ -741,18 +747,20 @@
           }
           if (cy < 0) { x = tx; y = ty; continue; }          // above the grid: open sky
           if (cy >= H) { kill(i); removed = true; break; }
-          const id = mat[cy * W + cx] & ID_MASK;
+          const j = cy * W + cx, id = mat[j] & ID_MASK;
+          // (a supply line's bore: shut to it from outside - see shut)
+          const intoBore = shut(j) && !shut(Math.floor(y) * W + Math.floor(x));
           // (a leaf coming down onto water lies on it; one come up through it rides it: FLOAT)
-          if (leafy && ((phase[id] === PW.PHASE.LIQUID && !inLiquid) || (buoyant && OPEN[id]))) {
+          if (leafy && !intoBore && ((phase[id] === PW.PHASE.LIQUID && !inLiquid) || (buoyant && OPEN[id]))) {
             px[i] = tx;
             if (floatAt(i, cx, buoyant ? Math.floor(y) : cy)) { floated = true; break; }
           }
           // (floating up, it stops at the surface and rests there)
-          if (buoyant && OPEN[id]) {
+          if (buoyant && OPEN[id] && !intoBore) {
             if (land(i, x, y)) { kill(i); removed = true; break; }
           }
           const hatch = (fl & F.WATER) !== 0 && HATCH !== 0 && structural[id] === 1 && (PW.getFlags(world, cx, cy) & HATCH) !== 0;
-          if (open(id, fl) || hatch) {
+          if ((open(id, fl) || hatch) && !intoBore) {
             // (a drop going through a grate - stairs, the opening over a flight, a roof's drain
             // hatch - drips straight down out of it: the grating breaks its run - see pw-sim's grate)
             if (id === M.PLATFORM || hatch) vx[i] = 0;
@@ -779,7 +787,7 @@
             impacts.set(key, (impacts.get(key) || 0) + speed * speed * (PW.mat.weight[cell[i] & ID_MASK] / 80) / 40);
           }
           if ((fl & F.DAMAGE) && speed > 90 && structural[id] && id !== M.CORE) chip(cx, cy, id, speed, i);   // (cores break only to blasts)
-          const blockedX = Math.floor(x + sx) !== Math.floor(x) && !open(mat[Math.floor(y) * W + cx] & ID_MASK, fl);
+          const blockedX = Math.floor(x + sx) !== Math.floor(x) && !(open(mat[Math.floor(y) * W + cx] & ID_MASK, fl) && !shut(Math.floor(y) * W + cx));
           // A chunk striking something gently enough for its stuff comes to rest whole, a lump;
           // harder, it cracks into smaller chunks that bounce on; a small one shatters, its grains
           // going on from where they were, tumbling on along what it struck (and running and
@@ -803,7 +811,7 @@
           // spreads to a stop at the foot, throwing up dust as it goes.
           let downhill = 0, braking = false;
           if (!blockedX && (fl & F.LAND) && vy[i] > 0) {
-            const row = cy * W, l = open(mat[row + cx - 1] & ID_MASK, fl), r = open(mat[row + cx + 1] & ID_MASK, fl);
+            const row = cy * W, l = open(mat[row + cx - 1] & ID_MASK, fl) && !shut(row + cx - 1), r = open(mat[row + cx + 1] & ID_MASK, fl) && !shut(row + cx + 1);
             downhill = l && r ? (Math.sign(vx[i]) || (i & 1 ? 1 : -1)) : l ? -1 : r ? 1 : 0;
             // (on a slope no steeper than the heap of its stuff stands at - see steeper - it brakes
             // as it would hopping along the flat, and stops where it strikes once it is slow)
@@ -822,7 +830,7 @@
             const run = braking ? Math.abs(vx[i]) * FLAT_KEEP : Math.max(Math.abs(vx[i]) * SLIDE_KEEP, RUN_FROM + Math.min(RUN_FROM, Math.abs(vy[i]) * 0.1));
             vx[i] = downhill * run; vy[i] = 12;
             x = cx + 0.5 + downhill; y = cy - 0.5;
-            if (run > 110 && (PW.hash3(cx, cy, age[i] * 60 | 0) & 7) === 0 && open(mat[(cy - 3) * W + cx] & ID_MASK, fl) && (mat[(cy - 3) * W + cx] & ID_MASK) === M.AIR) {
+            if (run > 110 && (PW.hash3(cx, cy, age[i] * 60 | 0) & 7) === 0 && open(mat[(cy - 3) * W + cx] & ID_MASK, fl) && (mat[(cy - 3) * W + cx] & ID_MASK) === M.AIR && !shut((cy - 3) * W + cx)) {
               PW.set(world, cx, cy - 3, M.DUST | 2 << 6, { quiet: true });
             }
             break;
@@ -841,7 +849,7 @@
           // the air, nor goes before it lands)
           if ((fl & F.LEAF) && age[i] < 30) {
             const cx = Math.floor(x), cy = Math.floor(y) + 1;
-            if (cy < H && cx > 0 && cx < W - 1 && OPEN[mat[cy * W + cx] & ID_MASK]) { life[i] = 0.5; continue; }
+            if (cy < H && cx > 0 && cx < W - 1 && OPEN[mat[cy * W + cx] & ID_MASK] && !shut(cy * W + cx)) { life[i] = 0.5; continue; }
           }
           // (a drop of water shut in where it ends - buried by a heap, closed in by what was built
           // over it - comes out into the nearest open cell round it; with none, it waits and

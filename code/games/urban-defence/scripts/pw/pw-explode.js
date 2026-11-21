@@ -656,6 +656,27 @@
     }
   }
 
+  // Debris caught in a supply line's bore (N17), pushed along by the cargo until it reaches a core
+  // (see pw-pipes), comes apart there and catches from the core's energy: the cell at (x, y) goes,
+  // in a flash of flame pixels and heat, and its smoke - smoke and flame pass the bore - drifts on
+  // along it and out. False if there was nothing there to burn (open air, gas, the casing).
+  function boreBurn(world, x, y) {
+    const id = PW.get(world, x, y) & PW.ID_MASK;
+    if (PW.mat.phase[id] <= PW.PHASE.GAS || id === PW.M.PIPE || id === PW.M.CORE) return false;
+    PW.set(world, x, y, PW.M.SMOKE | 2 << 6);
+    PW.addHeat(world, x, y, 600);
+    const particles = world.particles;
+    if (particles) {
+      const h = PW.hash3(x, y, world.tick || 0);
+      for (let k = 0; k < 5; k += 1) {
+        const a = ((h >> (k * 3)) & 7) * (Math.PI / 4);
+        const t = SOOT_TONES[k % 3];
+        particles.spawn(x + 0.5, y + 0.5, Math.cos(a) * 30, Math.sin(a) * 30 - 10, 0, PW.abgr(t[0], t[1], t[2], 190), PW.PARTICLE.FIRE, 0.35 + (k & 1) * 0.2);
+      }
+    }
+    return true;
+  }
+  PW.boreBurn = boreBurn;
   PW.explode = explode;
   PW.drawEffects = drawEffects;
   PW.addSmoulder = addSmoulder;

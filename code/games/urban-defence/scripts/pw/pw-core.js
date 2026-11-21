@@ -566,6 +566,17 @@
     else markDirty(world, x, y, DIRTY_BASE, phase[before] <= PHASE.GAS && phase[after] <= PHASE.GAS);
     if (!options || !options.quiet) wake(world, x, y);
     else if (before !== after && phase[after] >= PHASE.GAS && phase[after] <= PHASE.POWDER) wake(world, x, y);
+    // (a supply line's casing or divider broken - blown, dug, melted: the bore there is no longer
+    // shut in, and is open ground's air like any other - see setBore. Not the line's own laying,
+    // { lay: true }: a bend or a well carved through its casing is bore still)
+    if (before === M.PIPE && after !== M.PIPE && world.boreBits && !(options && options.lay)) {
+      const W = world.width;
+      setBore(world, index, false);
+      if (x > 0) setBore(world, index - 1, false);
+      if (x < W - 1) setBore(world, index + 1, false);
+      if (y > 0) setBore(world, index - W, false);
+      if (y < world.height - 1) setBore(world, index + W, false);
+    }
   }
   // Sink column x by one cell between rows yTop and yBottom: everything in rows yTop..yBottom-1
   // moves down a row - its material, colours, back wall, pipe, owner, fittings and flags - into
@@ -594,6 +605,11 @@
     mat[yTop * W + x] = M.AIR;
     for (const name of SINKS) if (world[name][c]) world[name][c][l] = 0;
     if (!plantAt(c, l)) { if (world.deco[c]) world.deco[c][l] = 0; if (world.flags[c]) world.flags[c][l] = 0; }
+    // (a bore sunk with its ground: its bits go down with it, a row)
+    if (world.boreBits) {
+      for (let y = yBottom; y > yTop; y -= 1) setBore(world, y * W + x, boreAt(world, (y - 1) * W + x));
+      setBore(world, yTop * W + x, false);
+    }
     const top = world.groundTop[x];
     if (top >= yTop && top <= yBottom) { refreshGroundTop(world, x, top); if (world.groundTop[x] !== top) groundTopMoved(world, x, top, world.groundTop[x]); }
     for (let y0 = yTop; y0 <= yBottom;) {
@@ -771,6 +787,24 @@
     if (!chunk) { if (!on) return; chunk = world.flags[c] = new Uint32Array(CHUNK_CELLS); }
     const i = (y & CHUNK_MASK) << CHUNK_SHIFT | x & CHUNK_MASK;
     chunk[i] = on ? chunk[i] | bit : chunk[i] & ~bit;
+    if (bit & FLAG.HOLLOW) setBore(world, y * world.width + x, on);
+  }
+  // A supply line's bore (FLAG.HOLLOW, N17) is space only smoke and fire pass: water, the powders
+  // and every other pixel keep out of it, as out of solid ground, though it is open air (a gas wall,
+  // in The Powder Toy's terms - our own code). The physics asks it of a cell many times a tick, so
+  // the bore is also kept as one bit a cell (world.boreBits, made with the first bore laid), and
+  // PW.boreAt reads that. The bits are the bore shut in: where its casing or a divider is broken
+  // (see set) the cells by the break lose their bit - their flag, the line's own bookkeeping, stays
+  // till the line lays them again - so a shaft cut through a line, or a crater, is open ground
+  // there, while the bore either side of it stays shut.
+  function setBore(world, k, on) {
+    let bits = world.boreBits;
+    if (!bits) { if (!on) return; bits = world.boreBits = new Uint8Array((world.width * world.height + 7) >> 3); }
+    if (on) bits[k >> 3] |= 1 << (k & 7); else bits[k >> 3] &= ~(1 << (k & 7));
+  }
+  function boreAt(world, k) {
+    const bits = world.boreBits;
+    return bits !== null && bits !== undefined && (bits[k >> 3] >> (k & 7) & 1) === 1;
   }
 
   // ---- Sparse colour layers -------------------------------------------------------------------
@@ -874,7 +908,7 @@
     createWorld, chunkIndex, inside, markDirty, markWaterDirty, wake, wakeCell, wakeArea, clearSimRect, stir, stirred,
     get, id, set, swapCells, sinkColumn, touchGroundTop, refreshGroundTop, rebuildGroundTop, shapeChanged,
     getLayer, setLayer, layerCell, clearPaintAt, isSolid, isOpen, groundBelow, supportBelow, traceShot,
-    getOwner, setOwner, growing, isGrowing, getFlags, setFlag, AMBIENT, heatAt, setHeat, addHeat, heatChunk, clearHeatBox,
+    getOwner, setOwner, growing, isGrowing, getFlags, setFlag, boreAt, AMBIENT, heatAt, setHeat, addHeat, heatChunk, clearHeatBox,
     GLOW_FROM, GLOW_FULL, glowAt, glowing,
   });
 })();

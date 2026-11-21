@@ -2398,11 +2398,11 @@
           const dx = x + 0.5 - cx, dy = y + 0.5 - cy;
           if (burst) particles.spawn(x + 0.5, y - 0.5, Math.sign(dx || random() - 0.5) * (60 + random() * 180) * burst * SPILL + vx * 0.3, -(10 + random() * 45 * burst) * LOFT, byte, data.color[k] || 0, F.LAND | F.DAMAGE, 6);
           else particles.spawn(x + 0.5, y - 0.5, vx * 0.5 - omega * dy * 0.5 + (random() - 0.5) * 160 * SPILL, -Math.abs(vy) * 0.3 - random() * 120 * LOFT + omega * dx * 0.2, byte, 0, F.LAND | F.DAMAGE, 6);
-        } else if (x > 0 && y > 0 && x < W - 1 && y < H - 1 && !blocking(x, y) && support.get(x) - y <= HEAP) {
+        } else if (x > 0 && y > 0 && x < W - 1 && y < H - 1 && !blocking(x, y) && !PW.boreAt(world, y * W + x) && support.get(x) - y <= HEAP) {
           put(x, y, byte);
           if (data.color[k] && (byte & ID_MASK) === M.DEBRIS) PW.setLayer(world, 'paint', x, y, rubbleTone(data.color[k], x, y));
           stats.debris += 1;
-        } else if (x > 0 && y > 0 && x < W - 1 && y < H - 1 && !blocking(x, y)) {
+        } else if (x > 0 && y > 0 && x < W - 1 && y < H - 1 && !blocking(x, y) && !PW.boreAt(world, y * W + x)) {
           // (the higher it falls from, the wider it spreads)
           const spread = (70 + (support.get(x) - y) * 0.45) * SPILL;
           particles.spawn(x + 0.5, y + 0.5, vx * 0.2 + (random() - 0.5) * spread, 10 + random() * 40, byte, data.color[k] || 0, F.LAND, 6);
