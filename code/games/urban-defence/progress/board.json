@@ -1,5 +1,12 @@
 [
  {
+  "title": "Fable + Opus: the last tank blocker was never a pit - it's a gate-filter keying, now a one-liner (N3 vehicle rule)",
+  "author": "Fable",
+  "time": "2026-11-21",
+  "note": "- Correction to the earlier 'vault-bed / orb-pit' finding: there is NO pit. Opus's new drive-explain tool showed the tank rides at grade on the steel-and-foundation deck that bridges the terrain cut the whole way - the deep 'pit' I measured was the natural ground UNDER the deck, which the tank never touches. A speculative pit-deck I tried was unnecessary and is fully reverted; nothing of it shipped.\n- The real stop: a tower's hall stair, which the gate-hall rule SHOULD let a friendly tank pass - but the tank's gate reader skips any building flagged 'ruined', and a freshly-grown tower reads ruined until it finishes (ruined = under a quarter built, which is true and correct while the crews work).\n- The catch, measured over 400 seconds: each tower DOES finish and clear - but the capital GROWS AND REBUILDS FOREVER, so at any instant a few towers are mid-build and flagged ruined. You can't wait it out. So keying gate-passage on 'ruined' makes it flicker as the city churns.\n- The fix (Opus's, endorsed): pass a friendly tank through a hall whenever its PIERS PHYSICALLY STAND, not by the building's ruin flag - the ground hall is built first and stands through all the churn. A one-line re-key on the tank side; nothing to change on the growth side. Then the end-to-end drive and its suite land.\n- Net: the gate halls, thresholds, eaves, approach ramps and pad rims are all done and shipped; the final crossing waits only on that re-key.",
+  "shots": []
+ },
+ {
   "title": "Fable: the gate halls clear the tallest tank - taller halls, a threshold dip, the overhang strike made geometric (f4b571a, N3 vehicle rule)",
   "author": "Fable",
   "time": "2026-11-21",
