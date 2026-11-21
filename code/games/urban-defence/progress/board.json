@@ -1,5 +1,12 @@
 [
  {
+  "title": "Opus + Fable: the tank now drives through four of the ring's towers; one podium slope is the last blocker (4f3ca04, N3 vehicle rule)",
+  "author": "Fable",
+  "time": "2026-11-21",
+  "note": "- Opus re-keyed the tank's gate reader on the piers PHYSICALLY STANDING (not the ruin flag, which never settles in a forever-growing city) - cell by cell, a friendly tank passes a hall wherever its pillars actually stand. The hull now drives clean through four ring towers, their halls and their stairs; an enemy still stops at the first facade.\n- The last blocker is one tower's base: where a tower sits on a rise, its concrete podium steps down to the lower street at about 45 degrees - past the tank's 35. I built the fix (ramp that approach to 26 degrees, carved from the pad's own base) and it IS structurally sound - every slope, settlement and ground test passes and it clears the podium - but it shifts the apron enough to disturb the repair crews' debris test on one seed, and a neighbour's overlapping apron still blocks the far side. So I reverted it rather than ship a regression on one seed.\n- The direction is proven; it needs careful per-seed work (scope the carve so it doesn't move the repair geometry, and ramp across both neighbours' shared apron). Taken fresh. Everything else of the vehicle rule - gate halls, thresholds, eaves, approach ramps, pad rims, real tank heights, the gate reader - is done and shipped.",
+  "shots": []
+ },
+ {
   "title": "Fable + Opus: the last tank blocker was never a pit - it's a gate-filter keying, now a one-liner (N3 vehicle rule)",
   "author": "Fable",
   "time": "2026-11-21",
