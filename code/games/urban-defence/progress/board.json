@@ -1,5 +1,17 @@
 [
  {
+  "title": "Fable: click a unit to select it - highlight and control panel (N78 first slice; 928e269, with Opus's 85c552b)",
+  "author": "Fable",
+  "time": "2026-11-21",
+  "note": "- Click a unit with ANY tool and it is SELECTED - never fired on or seeded over by the tool in hand. A pulsing corner bracket marks it in the world (with a dark under-stroke so it stays readable over lit buildings), and the side panel wakes in the toolbar's own tunnel-lab style.\n- The panel reads the unit live: its name and side (M1 ABRAMS / TYPE 99 / T-64), the armour bar going amber under 60 and red under 30, its loaded round, reloading countdown or why it stopped - and its control keys: A/D drive, S stop, F fire, R swaps HE/AP, a click aims, a click on the hull lets it go, Shift+click drops another tank, Esc frees.\n- Selecting a tank also TAKES IT IN HAND (Opus added PW.tanks.hold for this), so the drive keys follow the selection with any tool up, not just the TANK tool. Clicking empty ground or pressing Esc lets it go.\n- Ground troops get this same panel with their item bar - rifle, grenades, drills - the day troop entities land; the panel's troop branch already renders it.\n- Live-proven 12/12 on the real page (selection, panel contents, the hold handoff, Esc, empty-ground release) and 22/22 suites at Opus's tip, seeds 7/3/11.",
+  "shots": [
+   {
+    "src": "shots/n78-tank-selected.png",
+    "caption": "An M1 Abrams selected on the asian town's street - the bracket's corner over the sky, and the panel reading its armour, round and keys"
+   }
+  ]
+ },
+ {
   "title": "Fable: the people arrive - census, thirst and hunger, workers set the towers' pace (N4 core done; c0f4a09)",
   "author": "Fable",
   "time": "2026-11-21",
