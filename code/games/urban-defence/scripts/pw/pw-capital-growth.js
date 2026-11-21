@@ -818,6 +818,10 @@
         if (lot.placed && nearBlast(lot.placed.worksL, lot.placed.worksR)) continue;   // N60: never into a live collapse
         const target = Math.min(MAX_LEVEL, city.level, 1 + Math.floor(lot.age / AGE_PER_LEVEL));
         if (target <= lot.level) continue;
+        // N4: a tower coming of age is a level-up - it is paid for. An unfunded town stops
+        // aging (so its re-seats stop churning its bundle: the mend then drains the cuts
+        // instead of racing free age-ups for ever - the adoption era's bundle-break fix).
+        if (!pay(city, 'level')) continue;
         lot.level += 1;
         lot.canvas = canvasFor(city, lot);
         seatChain(city, lot.side, lot.ring);
