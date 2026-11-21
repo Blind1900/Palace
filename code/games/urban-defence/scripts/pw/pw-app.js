@@ -222,6 +222,7 @@
   }
   // Space pauses and resumes, as the PAUSE button does (not while typing into a field).
   window.addEventListener('keydown', (event) => {
+    if (tool === 'tank' && PW.tanks && PW.tanks.key && PW.tanks.key(event)) { event.preventDefault(); return; }   // (N10 drive keys)
     if (event.code !== 'Space' || event.repeat || event.target.closest?.('input, textarea, select')) return;
     event.preventDefault();
     paused = !paused;
@@ -277,6 +278,7 @@
       const spec = tools[tool];
       const p = toWorld(event);
       if (tool === 'digL' || tool === 'digR') dig(tool === 'digL' ? 'left' : 'right', Math.round(p.x - 30), Math.round(p.y - 18), Math.round(p.x + 30), Math.round(p.y + 18));
+      else if (tool === 'tank' && PW.tanks) PW.tanks.tool(world, p.x, p.y, event.shiftKey);   // (N10: once per click, like a seed)
       else if (tool === 'seedC' || tool === 'seedF' || tool === 'seedM') dropSeed(tool, p);
       else if (spec && typeof spec === 'object') explode(p.x, p.y, spec.radius, spec.power);
       else useTool(event);
@@ -353,6 +355,7 @@
     if (PW.mining) PW.mining.draw(renderer, world, now / 1000);
     if (PW.drawUnitsHook) PW.drawUnitsHook(renderer);
     renderer.drawDeco();
+    if (renderer.drawLeaves) renderer.drawLeaves(now / 1000);   // N9: the crowns sway
     heat.draw(renderer, now / 1000);
     drawPreview(now / 1000);
     particles.draw(renderer);

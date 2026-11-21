@@ -592,12 +592,31 @@
     // Deco never covers terrain: plants and props buried by a debris heap or a sand slide are
     // hidden where the ground now is, and show again if it is dug away.
     const terrainIds = PW.mat.terrain;
+    // N9 (the renderer's half of the sway): while the wind is up, lod-0 deco rasters STRIP
+    // the leaves that can move (the plant half says which: PW.flora.leafSway) into a per-
+    // chunk list, and drawLeaves() paints them each frame at the offsets the sway table
+    // gives. Calm air strips nothing - the rasters stay exactly as baked, zero overhead -
+    // and the flip between the two drops the deco cache (debounced, so gusts at the
+    // threshold cannot thrash it).
+    let swaying = false, swayFlipAt = -1e9, lastDecoLeaves = null;
+    function swayState() {
+      if (!PW.flora || !PW.flora.leafSway || !PW.flora.swayCalm) return false;
+      const now = frame;
+      const want = !PW.flora.swayCalm(world);
+      if (want !== swaying && now - swayFlipAt > 120) {
+        swaying = want; swayFlipAt = now;
+        for (const key of [...cache.keys()]) if (key & 1) cache.delete(key);   // deco entries re-raster
+      }
+      return swaying;
+    }
     function rasterDeco(c, lod) {
       const decoChunk = world.deco[c];
       if (!decoChunk) return null;
       const size = CHUNK >> lod, step = 1 << lod, half = step >> 1;
       const { image, pixels } = scratchImage(size);
       const x0 = (c % world.chunksX) << CHUNK_SHIFT, y0 = ((c / world.chunksX) | 0) << CHUNK_SHIFT;
+      const strip = lod === 0 && swaying;
+      const leaves = strip ? new Map() : null;
       let any = false, i = 0;
       for (let ty = 0; ty < size; ty += 1) {
         const ly = ty * step + half, row = ly << CHUNK_SHIFT, worldRow = (y0 + ly) * W + x0;
@@ -605,11 +624,24 @@
           const lx = tx * step + half;
           let color = decoChunk[row | lx];
           if (color && terrainIds[mat[worldRow + lx] & ID_MASK]) color = 0;
+          if (color && strip) {
+            const key = PW.flora.leafSway(world, x0 + lx, y0 + ly);
+            if (key) {
+              let b = leaves.get(color);
+              if (!b) leaves.set(color, b = []);
+              b.push(x0 + lx, y0 + ly, key);
+              color = 0;
+            }
+          }
           pixels[i++] = color;
           if (color) any = true;
         }
       }
-      return any ? image : null;
+      // (bucketed by colour, the css built once: the per-frame pass sets fillStyle a handful
+      // of times per chunk, not once per leaf)
+      lastDecoLeaves = leaves && leaves.size
+        ? [...leaves.entries()].map(([col, pts]) => [`rgb(${col & 255},${(col >> 8) & 255},${(col >> 16) & 255})`, pts]) : null;
+      return any || lastDecoLeaves ? image : null;
     }
 
     function chunkRaster(c, lod, layer, allowNew) {
@@ -648,6 +680,7 @@
       entry.version = version;
       if (world.chunkHardVersion) entry.hardVersion = world.chunkHardVersion[c];
       entry.used = frame;
+      if (layer === 'deco') entry.leaves = lod === 0 ? lastDecoLeaves : null;   // (N9: the stripped leaves ride the entry)
       if (!image) { entry.canvas = null; entry.empty = true; return entry; }
       entry.empty = false;
       if (!entry.canvas || entry.canvas.width !== image.width) entry.canvas = makeCanvas(image.width, image.height);
@@ -855,6 +888,7 @@
     function beginFrame() {
       frame += 1;
       rastersThisFrame = 0;
+      swayState();   // (N9: one wind judgement a frame; a flip re-rasters the deco, debounced)
       relight();
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.imageSmoothingEnabled = false;
@@ -864,6 +898,31 @@
     }
     function drawBase() { drawLayer('base'); }
     function drawDeco() { drawLayer('deco'); }
+    // N9: the leaves themselves, painted each frame at the sway table's offsets. Only at
+    // lod 0 (a distant crown doesn't visibly sway at coarser scales - those rasters keep
+    // their leaves baked) and only while the wind is up (calm air baked them like always).
+    function drawLeaves(time) {
+      if (!swaying || !PW.flora || !PW.flora.swayTable || lodForZoom() !== 0) return;
+      const table = PW.flora.swayTable(world, time);
+      const z = camera.zoom, size = Math.max(1, Math.round(z));
+      const range = visibleChunkRange();
+      for (let cy = range.y0; cy <= range.y1; cy += 1) {
+        for (let cx = range.x0; cx <= range.x1; cx += 1) {
+          const c = cy * world.chunksX + cx;
+          if (!world.deco[c]) continue;
+          const entry = cache.get((c * 8) * 2 + 1);
+          if (!entry || !entry.leaves) continue;
+          for (const [css, pts] of entry.leaves) {
+            ctx.fillStyle = css;
+            for (let i = 0; i < pts.length; i += 3) {
+              const v = table[pts[i + 2]];
+              const x = pts[i] + ((v & 3) - 1), y = pts[i + 1] + (((v >> 2) & 3) - 1);
+              ctx.fillRect(Math.round((x - camera.x) * z), Math.round((y - camera.y) * z), size, size);
+            }
+          }
+        }
+      }
+    }
     // Draw a cell-art canvas with its top-left at world cell (x, y), scaled `scale` cells per art pixel.
     function drawCells(image, x, y, sw, sh, flip) {
       const left = Math.round((Math.round(x) - camera.x) * camera.zoom);
@@ -911,7 +970,9 @@
       ctx, camera, view, ZOOM_STEPS,
       resize, setZoomIndex, focus, panByDevice, clampCamera, minZoomIndex,
       screenToWorld, screenToWorldDevice, worldToScreen, worldToDevice,
-      beginFrame, drawSky, drawBase, drawDeco, drawCells, fillCell, refreshOverview, invalidateAll, colorAt,
+      beginFrame, drawSky, drawBase, drawDeco, drawLeaves, drawCells, fillCell, refreshOverview, invalidateAll, colorAt,
+      leafEntry: (c) => { const e = cache.get((c * 8) * 2 + 1); return e ? e.leaves : null; },   // (N9 probes)
+      swayDebug: () => ({ swaying, flipAt: swayFlipAt, frame }),   // (N9 probes)
       stats: () => ({ cached: cache.size, frame, zoom: camera.zoom, lod: lodForZoom() }),
       get frame() { return frame; },
     };

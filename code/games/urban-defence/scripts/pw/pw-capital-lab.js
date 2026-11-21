@@ -225,6 +225,7 @@
     renderer.drawBase();
     if (fragments) fragments.draw(renderer);
     renderer.drawDeco();
+    if (renderer.drawLeaves) renderer.drawLeaves(now / 1000);   // N9: the crowns sway
     heat.draw(renderer, now / 1000);
     particles.draw(renderer);
     if (cores && cores.draw) cores.draw(renderer, now);
