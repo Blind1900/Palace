@@ -55,6 +55,8 @@
   const FRAME_WEIGHT = 0.35;    // a frame cell weighs about a third of a cell of water (for the same depth)
   const SWEEP_TIME = 0.5;       // s: about how long the push lasts on what gives way
   const SWEEP_MAX = 120;        // cells/s
+  const RAM_FOR = 30;           // ticks a tank's ram goes on pushing on a building after it last struck it
+  const RAM_GRIP = 0.2;         // what a ram must overcome per frame cell over the row it shoves (its weight's friction)
 
   function createStructure(world, fragments) {
     const { mat, width: W, height: H } = world;
@@ -386,8 +388,10 @@
       const rows = bp.load.length, rowLoad = new Float32Array(rows), rowSup = new Int32Array(rows);
       const cx0 = Math.max(S.fx0, b.body.left - 2), cx1 = Math.min(S.fx1, b.body.right + 2);
       let load = 0, loadX = 0, fail = null, pushed = 0;
-      // (only a building water has pressed on lately - see pw-sim's pushOn)
+      // (only a building water has pressed on lately - see pw-sim's pushOn - or a tank has rammed:
+      // its push, the way it drives, on the storeys it struck - see PW.tanks' ram)
       const wet = (world.tick || 0) - (b.waterAt ?? -1e9) < WET_FOR;
+      const ram = b.ram && (world.tick || 0) - b.ram.at < RAM_FOR ? b.ram : null;
       colRow.clear(); colTop.clear();
       for (let y = S.fy0; y <= Math.min(S.fy1, b.ground - 1); y += 1) {
         const r = y - b.oy;
@@ -429,17 +433,22 @@
           }
           // (keep going down: the lowest failing row brings the most down)
         }
-        // Swept: the water against it above here pushes more than this row of its frame takes.
-        if (wet && xl >= 0) {
-          pushed += waterOn(S, state, y, xl, xr, rowN);
+        // Swept: the water against it - or a tank ramming it - above here pushes more than this row
+        // of its frame takes.
+        if ((wet || ram) && xl >= 0) {
+          if (wet) pushed += waterOn(S, state, y, xl, xr, rowN);
+          if (ram && y >= ram.y0 && y <= ram.y1) pushed += ram.dir * ram.push / (ram.y1 - ram.y0 + 1);
           if (pushed) {
             let holds = 0;
             for (let x = xl, k = at(xl, y), i = y * W + xl; x <= xr; x += 1, k += 1, i += 1) {
               if (state[k]) holds += SHEAR * (cls[k] & SOLID ? hardness[mat[i] & ID_MASK] : BACK_HARD);
             }
+            // (a tank shoving it must also slide all the weight over the row along it: a tower
+            // stands its ram where a barn goes over - see RAM_GRIP)
+            if (ram) holds += load * RAM_GRIP;
             if (Math.abs(pushed) > holds) fail = { y, dir: Math.sign(pushed), reason: 'swept', load, support: carried, push: Math.abs(pushed), holds };
             // (the row nearest giving way, for the tests)
-            if (!report.water || Math.abs(pushed) / holds > report.water.share) report.water = { y, push: Math.round(pushed), holds: Math.round(holds), share: Math.abs(pushed) / holds };
+            if (!report.water || Math.abs(pushed) / holds > report.water.share) report.water = { y, push: Math.round(pushed), holds: Math.round(holds), share: Math.abs(pushed) / holds, load };
           }
         }
         load += rowN; loadX += rowX;
@@ -447,7 +456,7 @@
       if (fail) {
         report.failed = fail;
         (b.failed || (b.failed = [])).push({ reason: fail.reason, y: fail.y, support: fail.support, built: fail.builtSupport, shift: fail.shift && +fail.shift.toFixed(3), row: fail.row,
-          push: fail.push && Math.round(fail.push), holds: fail.holds && Math.round(fail.holds) });
+          push: fail.push && Math.round(fail.push), holds: fail.holds && Math.round(fail.holds), load: fail.load && Math.round(fail.load) });
         collapse(b, fail, S, state);
       }
       report.orphans = clearFittings(b, S, state);

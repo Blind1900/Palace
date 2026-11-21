@@ -19,12 +19,13 @@
 // to STEP cells (a real one's vertical step, about a metre). It will not go into a wall, a tunnel
 // (it has no room there), deep water or over a drop; and where the ground is blown away from under
 // it, it tips over the edge and falls.
-// It drives through its own side's buildings (N3, the vehicle rule): every tower, military mass and
-// spine stands on a gate hall at grade, its piers marked (the building record's gates); a tank of the
-// building's own side passes the piers as water passes a roof's hatch - every check of its hull
-// reads them as open - while to anything else, an enemy tank too, they stay the solid walls they
-// are (an enemy stops nose to the facade). Only what stands of the building itself passes so: a
-// building still going up passes as far as its hall stands, and a fallen pier's rubble blocks.
+// It drives right through its own side's buildings (N3, N72): all of them over their grade - walls,
+// floors, stairs, piers - are nothing to it; it meets only the roads, the ground and a building's
+// floor at grade, which bears it. An enemy's buildings, and ruins, it rams (N72, N77): what its hull
+// meets is crushed and thrown on ahead, trees and street furniture knocked down, and it grinds on
+// through, slowed by what it crushes; the building takes the push and, pushed over more than its
+// storeys hold, goes over the way the tank drives (see pw-structure). Loose debris it drives over
+// is flattened under its tracks into a hard layer of rubble.
 // Each side's tanks are a real army's of its region (as its troopers are - see pw-unit-art):
 //   modern - a US M1 Abrams: sand tan, an angular turret with a long bustle, side skirts, 7 wheels;
 //   asian  - a PLA Type 99: olive green with digital camouflage, a long wedge turret, 6 wheels;
@@ -160,13 +161,11 @@
   // ---- A tank on the ground ----------------------------------------------------------------------------
   // (what bears a tank: the ground, rubble and what is built - not water, smoke or cover, which it
   // passes like a trooper does, at another depth)
-  const { phase, passable } = PW.mat, POWDER = PW.PHASE.POWDER;
+  const { phase, passable, hardness } = PW.mat, POWDER = PW.PHASE.POWDER;
   const isSupport = (m) => { const id = m & ID_MASK; return phase[id] >= POWDER && !passable[id]; };
   // A building's gate piers (N3): kept by column, x -> [y0, y1, side, kind, building, ...], made
-  // again when the buildings change (and every second). A building's side: its faction. Whole or
-  // not - a city is always building somewhere, and its gate hall goes up first and stands through
-  // it all - for what a tank passes is the building's own standing structure, cell by cell (see
-  // passes): where a pier has fallen, its rubble is in the way as any rubble is.
+  // again when the buildings change (and every second). A building's side: its faction. (For the
+  // vehicle lanes' probes: a tank passes all of its own side's buildings now - see meets.)
   let gateCache = { list: null, n: -1, at: -1e9, map: new Map() };
   function gatesOf(world) {
     const list = world.buildings || [], now = world.tick || 0;
@@ -187,27 +186,42 @@
     return map;
   }
   const PIER = 0, HALL = 1;
-  // (does a tank of `side` pass cell (x, y) - of stuff id - of a column whose gate spans are
-  // `spans`? A pier of a building of its own side, or a flight of stairs in its hall: that
-  // building's own, standing there now)
-  function passes(world, spans, side, x, y, id) {
-    for (let k = 0; k < spans.length; k += 5) {
-      if (y < spans[k] || y > spans[k + 1] || spans[k + 2] !== side || (spans[k + 3] !== PIER && id !== M.PLATFORM)) continue;
-      if (PW.getOwner(world, x, y) === spans[k + 4]) return true;
-    }
-    return false;
+  // What a tank meets, cell by cell (N3, N72). Its own side's buildings it drives through as if they
+  // were not there - all of them over their grade (b.ground): walls, floors, stairs, piers - meeting
+  // only the roads and the ground, and a building's floor at grade, which bears it. An enemy's
+  // building over its grade, and a ruin, it rams (see ram): no support for it, nor in its way - they
+  // are crushed as its hull meets them - unless harder than RAM_HARD (a reinforced lining, a core:
+  // they stop it). What a building is set into the ground with, beside its body - the retaining wall
+  // of a cut into a hill, the steps up out of its forecourt (pw-foundations) - is ground to every
+  // tank: it climbs those steps as it would the hill they hold back. Loose debris it flattens (see
+  // flatten): no support either - its tracks press down through it to the ground.
+  const RAM_HARD = 0.65;
+  const CRUSHED = new Uint8Array(64);
+  for (const id of [M.DEBRIS, M.LOOSE_SOIL, M.LOOSE_STONE, M.ASH]) CRUSHED[id] = 1;
+  const PLAIN = 0, GHOST = 1, RAMS = 2, FLAT = 3;
+  // (what cell (x, y), of stuff m, is to tank t: PLAIN - an ordinary cell; GHOST - its own side's
+  // building; RAMS - to be crushed; FLAT - loose debris to press down)
+  function meets(world, t, x, y, m) {
+    const id = m & ID_MASK;
+    if (CRUSHED[id]) return FLAT;
+    if (id === M.RUIN) return RAMS;
+    const o = PW.getOwner(world, x, y);
+    if (o <= 0 || o >= 50000) return PLAIN;
+    const b = world.buildings && world.buildings[o - 1];
+    if (!b || !(y < b.ground) || !b.body || x < b.body.left || x > b.body.right) return PLAIN;
+    if (t && t.side && (b.faction || b.side) === t.side) return GHOST;
+    return id !== M.CORE && hardness[id] <= RAM_HARD ? RAMS : PLAIN;
   }
-  const spansFor = (world, t, x) => (t && t.side ? gatesOf(world).get(x) : undefined);
+  // (does cell (x, y) bear tank t, or stand in its way?)
+  const solidFor = (world, t, x, y, m) => isSupport(m) && (!t || meets(world, t, x, y, m) === PLAIN);
   // (the top of what can bear a tank in column x, from `from`: the top of the ground `from` is in -
   // looked for up as far as it climbs and a little more, a wall higher than that given as that
   // height - or, `from` in the open, the ground under it, down as far as it might go; -1 if nothing)
-  // (for tank t: its own side's gate piers are no support, nor in its way - see passes)
   function surface(world, x, from, t) {
     const { mat, width: W, height: H } = world;
     if (x < 1 || x >= W - 1) return -1;
     const f = Math.max(1, Math.min(H - 1, Math.round(from))), y0 = Math.max(1, f - STEP - 4), y1 = Math.min(H - 1, f + 120);
-    const spans = spansFor(world, t, x), side = t && t.side;
-    const bears = spans ? (y) => isSupport(mat[y * W + x]) && !passes(world, spans, side, x, y, mat[y * W + x] & ID_MASK) : (y) => isSupport(mat[y * W + x]);
+    const bears = (y) => solidFor(world, t, x, y, mat[y * W + x]);
     if (bears(f)) {
       let y = f;
       while (y > y0 && bears(y - 1)) y -= 1;
@@ -331,10 +345,10 @@
       HS[k] = h; kNow = k;
       if (h < 0 || h - prev > DROP) return stop(k - 1, 'drop');
       for (let s = 1; s <= Math.min(k, SPAN); s += 1) if (HS[k - s] - h > Math.max(STEP, s * tanMax)) return stop(k - s, 'too steep');
-      // (room for its height over its tracks: no tunnel, no overhang - its own side's gates aside)
-      const spans = spansFor(world, t, x);
+      // (room for its height over its tracks: no tunnel, no overhang - its own side's buildings, and
+      // what it rams or flattens, aside: see meets)
       for (let up = 1; up <= t.art.height && h - up >= 0; up += 1) {
-        if (isSupport(mat[(h - up) * W + x]) && !(spans && passes(world, spans, t.side, x, h - up, mat[(h - up) * W + x] & ID_MASK))) { t.stopCell = [x, h - up]; return stop(k, 'no room'); }
+        if (solidFor(world, t, x, h - up, mat[(h - up) * W + x])) { t.stopCell = [x, h - up]; return stop(k, 'no room'); }
         if (up <= 4 && (PW.getFlags(world, x, h - up) & PW.FLAG.TUNNEL)) return stop(k, 'tunnel');
       }
       let water = 0;
@@ -363,6 +377,76 @@
     lines.push(`ahead: '${why}'${t.stopAt ? ` at column ${t.stopAt[0]} (ground there ${t.stopAt[1]})` : ''}${t.stopCell ? `, in its way ${name(t.stopCell[0], t.stopCell[1])}` : ''}, room ${t.room}`);
     lines.push(`ground ahead, every 4th column from its lead wheel: ${seen.join(' ')}`);
     return lines;
+  }
+  // Ramming (N72, N77): as it drives, what of an enemy's building or a ruin its hull's leading edge
+  // meets - from its tracks to its roof - is crushed, thrown on ahead of it as debris (pw-fragments'
+  // crush), and the trees and street furniture there are knocked down (its sweep). Each cell crushed
+  // costs it speed by the cell's hardness, so it grinds through a wall and drives on in the room
+  // beyond; and the building feels the push - the tank's weight driving on, the way it goes - on
+  // the storeys it strikes, as it feels a flood's: pushed harder than they hold, they give and what
+  // is over them goes over that way (see pw-structure).
+  const RAM_COST = 0.9;         // cells/s of its speed a cell crushed costs it, by the cell's hardness
+  const RAM_PUSH = 9000;        // the push on a building it drives into (as pw-structure weighs a flood's): a
+                                // farm's storeys hold some 6000-7800 against it, a tower's 11000-16000 - the
+                                // one goes over the way it drives, the other stands, its ground floor smashed
+  const RAM_SWEEPS = 24;        // trees' and furniture's cells it knocks down a tick, at most
+  function ram(world, t) {
+    const fr = world.fragments, dir = Math.sign(t.v);
+    if (!fr || !fr.crush || !dir) return;
+    const { mat, width: W, height: H } = world, v0 = Math.abs(t.v), hit = new Map();
+    let sweeps = 0;
+    for (let u = dir * 56; Math.abs(u) <= 62; u += dir) for (let v = -t.art.height; v <= 6; v += 1) {
+      const [wx, wy] = toWorld(t, u, v), x = Math.floor(wx), y = Math.floor(wy);
+      if (x < 1 || y < 1 || x >= W - 1 || y >= H - 1) continue;
+      const m = mat[y * W + x];
+      // (a tree, a lamp, a railing - not its own side's)
+      if (sweeps < RAM_SWEEPS && fr.sweep && PW.getLayer(world, 'deco', x, y) && meets(world, t, x, y, m) !== GHOST && !(PW.getFlags(world, x, y) & PW.FLAG.FIXTURE)) { fr.sweep(x, y, 8); sweeps += 1; }
+      if (!isSupport(m) || meets(world, t, x, y, m) !== RAMS) continue;
+      const o = PW.getOwner(world, x, y);
+      fr.crush(x, y, o, x - dir * 60);
+      t.v -= dir * hardness[m & ID_MASK] * RAM_COST;
+      t.rammed = (t.rammed || 0) + 1;
+      if (o > 0 && o < 50000) { const r = hit.get(o); if (r) { r.y0 = Math.min(r.y0, y); r.y1 = Math.max(r.y1, y); } else hit.set(o, { y0: y, y1: y }); }
+    }
+    if (Math.sign(t.v) !== dir) t.v = 0;
+    // (driving into it, it pushes with all its tracks' grip, however slowly it grinds on; rolling
+    // on into it, with what its speed carries)
+    const push = t.drive === dir ? RAM_PUSH : RAM_PUSH * v0 / VMAX;
+    for (const [o, r] of hit) {
+      const b = world.buildings[o - 1];
+      if (b) b.ram = { at: world.tick || 0, dir, push, y0: r.y0, y1: r.y1 };
+    }
+  }
+  // Loose debris under it - a heap of rubble, spoil, ash in its way - is pressed down under its
+  // tracks as it drives over it: what lies in its hull's way and under it down to the ground is
+  // gone, and what was there is left on the ground a third as deep, packed hard as rubble in its
+  // own colours; the way it has come is flat. (Each column once: what is left is no longer loose.)
+  const PRESS_DEEP = 40;        // cells under its tracks it presses loose debris down through, at most
+  function flatten(world, t) {
+    const { mat, width: W, height: H } = world, c = Math.cos(t.angle), s = Math.sin(t.angle);
+    let pressed = 0;
+    for (let u = -56; u <= 56; u += 1) {
+      const x = Math.round(t.x + u * c), yl = Math.round(t.y + u * s);
+      if (x < 1 || x >= W - 1) continue;
+      let n = 0, paint = 0, y = Math.max(1, yl - t.art.height);
+      for (const end = Math.min(H - 2, yl + PRESS_DEEP); y <= end; y += 1) {
+        const m = mat[y * W + x];
+        if (CRUSHED[m & ID_MASK]) {
+          if (!paint) paint = PW.getLayer(world, 'paint', x, y);
+          PW.set(world, x, y, M.AIR);
+          n += 1;
+        } else if (y >= yl && isSupport(m)) break;   // (the ground its tracks are on)
+      }
+      if (!n) continue;
+      pressed += n;
+      // (packed down onto that ground)
+      for (let k = 1, m = Math.ceil(n / 3); k <= m && y - k > 1; k += 1) {
+        if (isSupport(mat[(y - k) * W + x])) break;
+        PW.set(world, x, y - k, M.RUBBLE | (PW.hash2(x, y - k) & 3) << 6);
+        if (paint) PW.setLayer(world, 'paint', x, y - k, paint);
+      }
+    }
+    if (pressed) t.flattened = (t.flattened || 0) + pressed;
   }
   function step(world, dt) {
     // (the rounds in flight - until the world's loop steps them itself - and the tanks among what
@@ -415,6 +499,8 @@
       t.x += t.v * dt * Math.cos(t.angle);
       t.travel += t.v * dt;
       settle(world, t, dt);
+      // (driving: what it rams is crushed, what it drives over flattened)
+      if (Math.abs(t.v) > 0.5) { ram(world, t); flatten(world, t); }
     }
     aim(t, dt);
     if (t.hp < SMOKES) fume(world, t, dt);
@@ -1021,7 +1107,7 @@
     // (on the ground, a road or a bridge - not on a building's roof)
     const id = mat[gy * W + gx] & ID_MASK;
     if (!(PW.mat.terrain[id] || id === M.ASPHALT || id === M.ROADBED || id === M.BRIDGE) || PW.getOwner(world, gx, gy)) return null;
-    // (of the side of the buildings nearest it: it passes their gates)
+    // (of the side of the buildings nearest it: it drives through them, and rams the other side's)
     let side = null, best = Infinity;
     for (const b of world.buildings || []) {
       const s = b.faction || b.side, bx = b.body ? (b.body.left + b.body.right) / 2 : b.x;

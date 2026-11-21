@@ -2558,7 +2558,8 @@
       }
     }
 
-    return { spawn, step, draw, blast, drawHitboxes, list, stats, puff };
+    // (crush and sweep for whatever else drives through things: a tank ramming - see PW.tanks)
+    return { spawn, step, draw, blast, drawHitboxes, list, stats, puff, crush, sweep };
   }
 
   PW.createFragments = createFragments;

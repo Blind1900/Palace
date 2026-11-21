@@ -1,5 +1,5 @@
 // The vehicle rule, end to end (N3): a friendly tank crosses a grown city's inner core -
-// streets, ramps, gate halls and all - while an enemy tank stops at the first facade.
+// streets, ramps, gate halls and all - while an enemy tank rams its way in and is held.
 // Runs on the capital lab (the first suite that does): det, a capital grown at speed,
 // settled at real pace, the world ALIVE during the drive (crews clear what settling
 // sheds; a frozen clock once left a wreckage clump hanging over a lane for ever).
@@ -39,31 +39,35 @@ const from = main.placed.worksR + 30, to = ringR[ringR.length - 1].placed.worksR
 // 1. the friendly crossing: the tallest hull, the city's own side
 const friend = PW.tanks.create(world, { x: from, style: 'modern', side: 'lab' });
 PW.tanks.drive(friend, 1);
-let lastX = friend.x, still = 0, ticks = 0;
-for (; ticks < 60 * 120 && still < 5 && friend.x < to; ticks += 1) {
+// (a site the city is raising in its way - a fresh infill, crews mid-way up its blueprint - is the
+// crews' until the build stands: the hull waits for it, up to 90 s, and drives on - the lane opens
+// when the build does; the clock is the longer by the wait)
+const WAIT_MAX = 60 * 90;
+let lastX = friend.x, still = 0, ticks = 0, waited = 0;
+for (; ticks < 60 * 120 + waited && still < 5 && friend.x < to; ticks += 1) {
   pwLab.stepWorld(1);
   if ((ticks % 60) === 59) { if (Math.abs(friend.x - lastX) < 2) still += 1; else still = 0; lastX = friend.x; }
+  if (friend.blocked && still >= 1 && waited < WAIT_MAX) {
+    const site = world.buildings.find((b) => b && b.underConstruction && !b.ruined && b.body && b.body.right >= friend.x && b.body.left <= friend.x + 58 + 60);
+    if (site) {
+      let k = 0;
+      for (; k < WAIT_MAX - waited && site.underConstruction && !site.ruined; k += 1) pwLab.stepWorld(1);
+      waited += k; ticks += k; still = 0; lastX = friend.x;
+      PW.tanks.drive(friend, 1);
+    }
+  }
 }
 const sc = friend.stopCell ? ` stopCell ${friend.stopCell[0]},${friend.stopCell[1]}` : '';
-check(friend.x >= to, `the friendly hull crosses the inner city (${Math.round(friend.x)} of ${to}, ${(ticks / 60).toFixed(0)}s, blocked='${friend.blocked || ''}'${sc})`);
+check(friend.x >= to, `the friendly hull crosses the inner city (${Math.round(friend.x)} of ${to}, ${(ticks / 60).toFixed(0)}s${waited ? `, ${(waited / 60).toFixed(0)}s of it waiting on a site being built` : ''}, blocked='${friend.blocked || ''}'${sc})`);
 pwLab.focus(Math.round(friend.x), world.groundTop[Math.round(friend.x)] - 10, 4);
 for (let w = 0; w < 4; w += 1) await sleep(80);
 shots.push(await shot('vh-crossed'));
 
-// 2. the enemy stops at the first facade it meets
-const foe = PW.tanks.create(world, { x: from, style: 'modern', side: 'foe' });
-PW.tanks.drive(foe, 1);
-lastX = foe.x; still = 0;
-for (let i = 0; i < 60 * 40 && still < 4; i += 1) {
-  pwLab.stepWorld(1);
-  if ((i % 60) === 59) { if (Math.abs(foe.x - lastX) < 2) still += 1; else still = 0; lastX = foe.x; }
-}
-check(foe.x < to - 300, `the enemy hull is stopped inside the city's defences (${Math.round(foe.x)}, blocked='${foe.blocked || ''}')`);
-
-// 3. the drives harmed nothing: every inner tower keeps its mass. A tower the city is
-// RAISING right now (a fresh infill or re-seat, crews mid-way up the blueprint) is a
+// 2. the friendly drive harmed nothing: every inner tower keeps its mass. A tower the city
+// is RAISING right now (a fresh infill or re-seat, crews mid-way up the blueprint) is a
 // whole construction site, not a casualty - the N73 staged order at work; only a
-// RUINED tower, or a finished one stripped of its mass, counts as harm.
+// RUINED tower, or a finished one stripped of its mass, counts as harm. (Audited before
+// the enemy drives: what it rams is meant to be smashed.)
 let whole = 0, lots = 0;
 for (const lot of [...city.rings.left, ...city.rings.right, main]) {
   if (!lot || !lot.placed || lot.type === 'farm') continue;
@@ -78,5 +82,24 @@ for (const lot of [...city.rings.left, ...city.rings.right, main]) {
   }
   if (!rec.ruined && above * 4 >= (rec.body.right - rec.body.left) * Math.max(1, rec.ground - rec.body.top) * 0.3) whole += 1;
 }
-check(lots > 0 && whole === lots, `the inner towers stand after the drives (${whole} of ${lots})`);
+check(lots > 0 && whole === lots, `the inner towers stand after the friendly drive (${whole} of ${lots})`);
+
+// 3. the enemy never crosses the city the way a friend does: it rams its way in - the
+// first facade's cells crushed, grinding through at a crawl - and is held inside the
+// city (N72: an enemy's building it rams; a core, foundations, reinforced lining stop it)
+const foe = PW.tanks.create(world, { x: from, style: 'modern', side: 'foe' });
+PW.tanks.drive(foe, 1);
+lastX = foe.x; still = 0;
+let crawl = Infinity, firstRam = -1;
+for (let i = 0; i < ticks && still < 4; i += 1) {
+  pwLab.stepWorld(1);
+  if (foe.rammed && firstRam < 0) firstRam = i;
+  if (firstRam >= 0 && i - firstRam < 60) crawl = Math.min(crawl, Math.abs(foe.v));
+  if ((i % 60) === 59) { if (Math.abs(foe.x - lastX) < 2) still += 1; else still = 0; lastX = foe.x; }
+}
+pwLab.focus(Math.round(foe.x), world.groundTop[Math.round(foe.x)] - 10, 4);
+for (let w = 0; w < 4; w += 1) await sleep(80);
+shots.push(await shot('vh-foe-rams'));
+check(foe.rammed > 0 && crawl < PW.tanks.VMAX * 0.5 && foe.x < to - 300,
+  `the enemy hull rams its way in and is held inside the city (${foe.rammed || 0} cells crushed, ${crawl.toFixed(0)} cells/s at its slowest in the first facade; in the friend's ${(ticks / 60).toFixed(0)}s it got to ${Math.round(foe.x)} of ${to}, blocked='${foe.blocked || ''}')`);
 return { checks, shots: shots.length };

@@ -4,7 +4,9 @@
 // reach of the hull - and driven: to its top speed in 1.5 s, over bumps, up a slope it can climb,
 // stopped by one it can't, by a wall, a roof over it and a drop; going the other way (only the
 // turret turns); its gun on targets ahead, high, low and behind; tipping into a hole blown under
-// it. The courses are laid on stone in the wilds, cleared above; only the tanks are stepped.
+// it; driving through its own side's buildings, ramming an enemy's (in the world's towns too) and
+// flattening loose debris. The courses are laid on stone in the wilds, cleared above; only the
+// tanks are stepped (but for the towns', where the world is).
 const { world, layout } = pwApp;
 const { M } = PW;
 const checks = [];
@@ -272,48 +274,77 @@ else {
   }
 }
 
-// 5. Through its own side's gate hall (N3, the vehicle rule): a hall 36 cells clear under a slab, its
-// piers marked as a building's gates (a record of the test's own, of the left side). A tank of the
-// left drives through the piers and on out the far side; a tank of the right stops nose to them.
+// 5. Its own side's buildings it drives right through; an enemy's it rams (N3, N72). A hall of a
+// record of the test's own (the left side's: a slab over piers, a flight of stairs, a solid wall in
+// it): a tank of the left drives right through all of it - piers, stairs, wall - and none of it is
+// touched; with a pier's cells rubble (no longer the building's), even it stops at that. A tank of
+// the right rams through it all, crushing what its hull meets.
 {
   const G = site(700);
-  if (!G) check(false, 'a stretch of the wilds for the gate hall');
+  if (!G) check(false, 'a stretch of the wilds for the hall');
   else {
     const { x0, g } = G, hx = x0 + 330, piers = [hx - 40, hx - 39, hx - 38, hx + 38, hx + 39, hx + 40, hx, hx + 1];
-    // (a record of its own, at its own place in the list, owning its piers and stairs: what a tank
-    // passes is the building's own standing structure)
-    const rec = { id: world.buildings.length + 1, type: 'test-hall', faction: 'left', side: 'left', body: { left: hx - 60, right: hx + 60, top: g - 40, bottom: g - 1 }, gates: piers.map((x) => ({ x, y0: g - 36, y1: g - 1 })) };
+    const rec = { id: world.buildings.length + 1, type: 'test-hall', faction: 'left', side: 'left', ground: g, body: { left: hx - 60, right: hx + 60, top: g - 40, bottom: g - 1 }, gates: piers.map((x) => ({ x, y0: g - 36, y1: g - 1 })) };
     world.buildings.push(rec);
     const own = (x, y, m) => { PW.set(world, x, y, m, { quiet: true }); PW.setOwner(world, x, y, rec.id); };
     for (let x = hx - 60; x <= hx + 60; x += 1) for (let y = g - 40; y <= g - 37; y += 1) own(x, y, M.CONCRETE);   // (the slab over it)
     for (const x of piers) for (let y = g - 36; y <= g - 1; y += 1) own(x, y, M.STEEL);
-    // (and the troops' flight of stairs up from it, standing in the hall)
-    for (let d = 0; d < 24; d += 1) own(hx + 8 + d, g - 1 - d, M.PLATFORM);
+    for (let d = 0; d < 24; d += 1) own(hx + 8 + d, g - 1 - d, M.PLATFORM);   // (a flight of stairs in it)
+    for (let x = hx - 20; x <= hx - 14; x += 1) for (let y = g - 36; y <= g - 1; y += 1) own(x, y, M.CONCRETE);   // (a solid wall across it)
+    const owned = () => { let n = 0; for (let y = g - 40; y < g; y += 1) for (let x = hx - 60; x <= hx + 60; x += 1) if (PW.getOwner(world, x, y) === rec.id && PW.mat.phase[PW.get(world, x, y) & 63] >= PW.PHASE.POWDER) n += 1; return n; };
+    // (what it crushes tells the building - kept from the structure here: the record is the test's)
+    const damage0 = world.onDamage; let told = 0;
+    world.onDamage = () => { told += 1; };
+    const n0 = owned();
     const friend = T.create(world, { style: 'modern', side: 'left', x: x0 + 120, y: g, facing: 1 });
     T.drive(friend, 1);
-    run(friend, 8);
-    const through = friend.x > hx + 120 && !friend.falling;
+    run(friend, 9);
+    const through = friend.x > hx + 120 && !friend.falling, n1 = owned();
     world.tanks.length = 0;
-    const foe = T.create(world, { style: 'gothic', side: 'right', x: x0 + 120, y: g, facing: 1 });
-    T.drive(foe, 1);
-    run(foe, 8);
-    const nose = (hx - 40) - (foe.x + 58);
-    await view('tank-gate', hx - 20, g - 30, 6);
-    check(through && foe.v === 0 && foe.blocked && nose >= 0 && nose < 12,
-      `through its own side's gate hall: a tank of the building's side drives under its slab, through its gate piers and past the flight of stairs in it (${through ? `out the far side, ${(friend.x - hx).toFixed(0)} cells past its middle` : `stopped at ${(friend.x - hx).toFixed(0)}: ${friend.blocked}`}); a tank of the other side stops nose to the piers (${foe.blocked || 'not stopped'}, ${nose.toFixed(0)} cells off)`);
-    world.tanks.length = 0;
-    // (the far pier fallen: what stands there now is rubble, no longer the building's - even its
-    // own side's tank stops at it)
+    // (a pier fallen - its cells rubble, no longer the building's: even its own side stops at it)
     for (let x = hx + 38; x <= hx + 40; x += 1) for (let y = g - 36; y <= g - 1; y += 1) PW.setOwner(world, x, y, 0);
     const again = T.create(world, { style: 'modern', side: 'left', x: x0 + 120, y: g, facing: 1 });
     T.drive(again, 1);
-    run(again, 8);
+    run(again, 9);
     const short = (hx + 38) - (again.x + 58), at = again.stopAt ? again.stopAt[0] - hx : null;
-    check(again.v === 0 && again.blocked && short >= 0 && short < 12 && at === 38,
-      `a fallen pier blocks even its own side: with the far pier's cells rubble, not the building's own, the friendly tank passes the near pier, the hall and its stairs, and stops nose to the fallen one (${again.blocked || 'not stopped'} at ${at ?? '-'} past the middle, ${short.toFixed(0)} cells off)`);
     world.tanks.length = 0;
+    for (let x = hx + 38; x <= hx + 40; x += 1) for (let y = g - 36; y <= g - 1; y += 1) PW.setOwner(world, x, y, rec.id);
+    const n2 = owned();
+    const foe = T.create(world, { style: 'gothic', side: 'right', x: x0 + 120, y: g, facing: 1 });
+    T.drive(foe, 1);
+    let slowest = Infinity;
+    run(foe, 14, () => { if (foe.x > hx - 50 && foe.x < hx + 40) slowest = Math.min(slowest, Math.abs(foe.v)); });
+    await view('tank-rams-hall', hx, g - 30, 6);
+    const crushed = n2 - owned();
+    check(through && n1 === n0 && again.v === 0 && short >= 0 && short < 12 && at === 38 && crushed > 150 && foe.rammed > 150 && told > 0 && slowest < T.VMAX * 0.5 && foe.x > hx + 60,
+      `its own side's building it drives right through - slab, piers, stairs, a solid wall in its way - touching none of it (${through ? `out the far side, ${(friend.x - hx).toFixed(0)} past its middle` : `stopped at ${(friend.x - hx).toFixed(0)}: ${friend.blocked}`}; ${n0 - n1} cells of it gone); a pier fallen to rubble stops even it (${again.blocked || 'not stopped'}, ${short.toFixed(0)} cells off); an enemy's it rams, crushing what its hull meets - ${crushed} cells of piers, stairs and wall - grinding through at ${slowest.toFixed(0)} cells/s at the slowest and on out the far side (${(foe.x - hx).toFixed(0)} past its middle)`);
+    world.tanks.length = 0;
+    world.onDamage = damage0;
     for (let x = hx - 60; x <= hx + 60; x += 1) for (let y = g - 40; y <= g - 1; y += 1) PW.setOwner(world, x, y, 0);
     world.buildings.splice(world.buildings.indexOf(rec), 1);
+  }
+}
+
+// 5b. Loose debris it drives over is flattened under its tracks: a heap of rubble 20 cells high in
+// its way is pressed into a thin hard layer of rubble, and it drives on.
+{
+  const D = site(500);
+  if (!D) check(false, 'a stretch of the wilds for the heap');
+  else {
+    const { x0, g } = D, hx = x0 + 260;
+    for (let x = hx - 40; x <= hx + 40; x += 1) for (let y = g - 20 + Math.round(Math.abs(x - hx) / 2); y < g; y += 1) PW.set(world, x, y, M.DEBRIS, { quiet: true });
+    const t = T.create(world, { style: 'asian', x: x0 + 110, y: g, facing: 1 });
+    T.drive(t, 1);
+    run(t, 8);
+    let debris = 0, rubble = 0, top = g;
+    for (let x = hx - 40; x <= hx + 40; x += 1) for (let y = g - 25; y < g; y += 1) {
+      const id = PW.get(world, x, y) & 63;
+      if (id === M.DEBRIS) debris += 1;
+      if (id === M.RUBBLE) { rubble += 1; top = Math.min(top, y); }
+    }
+    check(t.x > hx + 120 && debris === 0 && rubble > 50 && g - top <= 8 && t.flattened > 300,
+      `loose debris it drives over is flattened: a heap 20 cells high in its way pressed into a layer of rubble ${g - top} cells thick (${rubble} cells of it, ${debris} of the heap left loose; ${t.flattened} cells pressed), and it drives on (${(t.x - hx).toFixed(0)} past it)`);
+    world.tanks.length = 0;
   }
 }
 
@@ -360,6 +391,76 @@ else {
     }
     check(stepMs < 0.15 && ms[2] < 1.5, `a tank costs little: ${stepMs.toFixed(3)} ms a tick, ${ms[1].toFixed(2)} / ${ms[2].toFixed(2)} / ${ms[4].toFixed(2)} ms to draw at 1x / 2x / 4x`);
     world.tanks.length = 0;
+  }
+}
+// 6. In the world's own towns (N72): a tank of a building's side drives through it, untouched; an
+// enemy's tank rams a farm and shoves it over the way it drives; one ramming a tower smashes its
+// ground floor and the tower stands. (Each from a causeway laid level at the building's grade, from
+// whichever side of it no other building stands on.)
+{
+  const RUN = 140;
+  // (which way it can be come at: the stretch beside it with no other's body in it)
+  const approach = (b) => {
+    for (const dir of [1, -1]) {
+      const a = dir > 0 ? b.body.left - RUN : b.body.right + 1, z = a + RUN - 1;
+      if (!world.buildings.some((o) => o && o !== b && o.body && o.body.right >= a && o.body.left <= z)) return { dir, a, z };
+    }
+    return null;
+  };
+  // (the hill and the works set into it there - a cut's retaining wall, its steps, a neighbour's
+  // berm - cleared down to its grade: ground to a tank, they would stand in its way as the hill would)
+  const causeway = (b, { a, z }) => {
+    const gr = b.ground;
+    for (let x = a; x <= z; x += 1) {
+      for (let y = gr - 60; y < gr; y += 1) { PW.set(world, x, y, M.AIR, { quiet: true }); PW.setOwner(world, x, y, 0); PW.setLayer(world, 'deco', x, y, 0); }
+      for (let y = gr; y <= gr + 6; y += 1) { PW.set(world, x, y, M.STONE, { quiet: true }); PW.setOwner(world, x, y, 0); }
+    }
+  };
+  const frame = (b) => { let n = 0; for (let y = b.body.top; y < b.ground; y += 2) for (let x = b.body.left; x <= b.body.right; x += 2) if (PW.getOwner(world, x, y) === b.id) n += 1; return n; };
+  const sideOf = (b) => b.faction || b.side;
+  const whole = (b) => b && b.body && !b.ruined && !b.underConstruction && sideOf(b) && b.ground && approach(b);
+  // (the tallest last: a house a tank may shove over as it does a farm - a tower it can't)
+  const towers = world.buildings.filter((b) => whole(b) && b.type === 'population').sort((a, b) => (a.ground - a.body.top) - (b.ground - b.body.top));
+  const farm = world.buildings.find((b) => whole(b) && b.type === 'farm');
+  // (driving at b from its open side until its nose is out through the far wall, or for secs)
+  const through = (b, t) => (t.facing > 0 ? t.x + 58 > b.body.right : t.x - 58 < b.body.left);
+  const drive = (b, side, secs, each) => {
+    world.tanks.length = 0;
+    const ap = approach(b);
+    causeway(b, ap);
+    const t = T.create(world, { style: 'modern', side, x: ap.dir > 0 ? ap.a + 60 : ap.z - 60, y: b.ground, facing: ap.dir });
+    T.drive(t, ap.dir);
+    for (let k = 0; k < secs * 60 && !through(b, t); k += 1) { pwApp.stepWorld(1); if (each) each(t); }
+    return t;
+  };
+  if (towers.length < 2 || !farm) check(false, `towers and a farm to drive at (${towers.length} towers, ${farm ? 1 : 0} farm)`);
+  else {
+    // (through its own side's tower)
+    const own = towers[0], f0 = frame(own);
+    const friend = drive(own, sideOf(own), 12);
+    const passed = through(own, friend), f1 = frame(own);
+    // (ramming an enemy's farm: shoved over the way it drives - its pieces let go a moment after it
+    // fails, at their speed the tank's way)
+    const fails0 = (farm.failures || []).length;
+    let shoved = null, dir = 0;
+    const watch = (t) => {
+      dir = t.facing;
+      if (!shoved && (farm.failures || []).length > fails0) shoved = { reason: farm.failures[fails0], vx: 0, back: 0 };
+      if (shoved) for (const p of (world.fragments ? world.fragments.list : [])) if (p.owner === farm.id) { shoved.vx = Math.max(shoved.vx, p.vx * dir); shoved.back = Math.min(shoved.back, p.vx * dir); }
+    };
+    const raider = drive(farm, 'raiders', 10, watch);
+    for (let k = 0; k < 60 * 3; k += 1) { pwApp.stepWorld(1); watch(raider); }
+    await view('tank-shoves-farm', (farm.body.left + farm.body.right) / 2, farm.ground - 60, 5);
+    // (ramming an enemy's tower: its ground floor smashed, the tower standing)
+    const tower = towers[towers.length - 1], tf0 = (tower.failures || []).length;
+    const rammer = drive(tower, 'raiders', 14);
+    pwApp.stepWorld(60 * 2);
+    const towerFell = (tower.failures || []).slice(tf0).includes('swept');
+    const how = towerFell ? (tower.failed || []).filter((f) => f.reason === 'swept').pop() : null;
+    world.tanks.length = 0;
+    // (none of the tower's cells crushed by it - though the town may build on while it drives)
+    check(passed && !friend.rammed && f1 >= f0 && shoved && shoved.reason === 'swept' && shoved.vx > 10 && shoved.vx > -shoved.back && rammer.rammed > 100 && !towerFell,
+      `in the world's towns: a tank of a tower's side drives right through it (${passed ? 'its nose out through the far wall' : `stopped short: ${friend.blocked}`}, ${friend.rammed || 0} of its cells crushed); an enemy's rams a farm and shoves it over the way it drives (${shoved ? `${shoved.reason}, its pieces going up to ${shoved.vx.toFixed(0)} cells/s the tank's way, ${(-shoved.back).toFixed(0)} back` : 'it stood'}); one ramming a tower (${tower.ground - tower.body.top} cells tall) smashes ${rammer.rammed || 0} cells of its ground floor and the tower stands (${towerFell ? `it went over: pushed ${how && how.push} against ${how && how.holds}, ${how && tower.ground - how.y} up, ${how && how.load} over it` : 'standing'})`);
   }
 }
 pwApp.setPaused(false);
