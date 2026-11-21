@@ -238,12 +238,15 @@ else {
   if (!G) check(false, 'a stretch of the wilds for the gate hall');
   else {
     const { x0, g } = G, hx = x0 + 330, piers = [hx - 40, hx - 39, hx - 38, hx + 38, hx + 39, hx + 40, hx, hx + 1];
-    for (let x = hx - 60; x <= hx + 60; x += 1) for (let y = g - 40; y <= g - 37; y += 1) PW.set(world, x, y, M.CONCRETE, { quiet: true });   // (the slab over it)
-    for (const x of piers) for (let y = g - 36; y <= g - 1; y += 1) PW.set(world, x, y, M.STEEL, { quiet: true });
-    // (and the troops' flight of stairs up from it, standing in the hall)
-    for (let d = 0; d < 24; d += 1) PW.set(world, hx + 8 + d, g - 1 - d, M.PLATFORM, { quiet: true });
-    const rec = { id: 990001, type: 'test-hall', faction: 'left', side: 'left', body: { left: hx - 60, right: hx + 60, top: g - 40, bottom: g - 1 }, gates: piers.map((x) => ({ x, y0: g - 36, y1: g - 1 })) };
+    // (a record of its own, at its own place in the list, owning its piers and stairs: what a tank
+    // passes is the building's own standing structure)
+    const rec = { id: world.buildings.length + 1, type: 'test-hall', faction: 'left', side: 'left', body: { left: hx - 60, right: hx + 60, top: g - 40, bottom: g - 1 }, gates: piers.map((x) => ({ x, y0: g - 36, y1: g - 1 })) };
     world.buildings.push(rec);
+    const own = (x, y, m) => { PW.set(world, x, y, m, { quiet: true }); PW.setOwner(world, x, y, rec.id); };
+    for (let x = hx - 60; x <= hx + 60; x += 1) for (let y = g - 40; y <= g - 37; y += 1) own(x, y, M.CONCRETE);   // (the slab over it)
+    for (const x of piers) for (let y = g - 36; y <= g - 1; y += 1) own(x, y, M.STEEL);
+    // (and the troops' flight of stairs up from it, standing in the hall)
+    for (let d = 0; d < 24; d += 1) own(hx + 8 + d, g - 1 - d, M.PLATFORM);
     const friend = T.create(world, { style: 'modern', side: 'left', x: x0 + 120, y: g, facing: 1 });
     T.drive(friend, 1);
     run(friend, 8);
@@ -257,6 +260,17 @@ else {
     check(through && foe.v === 0 && foe.blocked && nose >= 0 && nose < 12,
       `through its own side's gate hall: a tank of the building's side drives under its slab, through its gate piers and past the flight of stairs in it (${through ? `out the far side, ${(friend.x - hx).toFixed(0)} cells past its middle` : `stopped at ${(friend.x - hx).toFixed(0)}: ${friend.blocked}`}); a tank of the other side stops nose to the piers (${foe.blocked || 'not stopped'}, ${nose.toFixed(0)} cells off)`);
     world.tanks.length = 0;
+    // (the far pier fallen: what stands there now is rubble, no longer the building's - even its
+    // own side's tank stops at it)
+    for (let x = hx + 38; x <= hx + 40; x += 1) for (let y = g - 36; y <= g - 1; y += 1) PW.setOwner(world, x, y, 0);
+    const again = T.create(world, { style: 'modern', side: 'left', x: x0 + 120, y: g, facing: 1 });
+    T.drive(again, 1);
+    run(again, 8);
+    const short = (hx + 38) - (again.x + 58), at = again.stopAt ? again.stopAt[0] - hx : null;
+    check(again.v === 0 && again.blocked && short >= 0 && short < 12 && at === 38,
+      `a fallen pier blocks even its own side: with the far pier's cells rubble, not the building's own, the friendly tank passes the near pier, the hall and its stairs, and stops nose to the fallen one (${again.blocked || 'not stopped'} at ${at ?? '-'} past the middle, ${short.toFixed(0)} cells off)`);
+    world.tanks.length = 0;
+    for (let x = hx - 60; x <= hx + 60; x += 1) for (let y = g - 40; y <= g - 1; y += 1) PW.setOwner(world, x, y, 0);
     world.buildings.splice(world.buildings.indexOf(rec), 1);
   }
 }

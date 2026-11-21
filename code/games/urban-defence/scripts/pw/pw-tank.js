@@ -22,7 +22,8 @@
 // spine stands on a gate hall at grade, its piers marked (the building record's gates); a tank of the
 // building's own side passes the piers as water passes a roof's hatch - every check of its hull
 // reads them as open - while to anything else, an enemy tank too, they stay the solid walls they
-// are (an enemy stops nose to the facade).
+// are (an enemy stops nose to the facade). Only what stands of the building itself passes so: a
+// building still going up passes as far as its hall stands, and a fallen pier's rubble blocks.
 // Each side's tanks are a real army's of its region (as its troopers are - see pw-unit-art):
 //   modern - a US M1 Abrams: sand tan, an angular turret with a long bustle, side skirts, 7 wheels;
 //   asian  - a PLA Type 99: olive green with digital camouflage, a long wedge turret, 6 wheels;
@@ -149,32 +150,39 @@
   // passes like a trooper does, at another depth)
   const { phase, passable } = PW.mat, POWDER = PW.PHASE.POWDER;
   const isSupport = (m) => { const id = m & ID_MASK; return phase[id] >= POWDER && !passable[id]; };
-  // A building's gate piers (N3): kept by column, x -> [y0, y1, side, ...], made again when the
-  // buildings change (and now and then, a ruin's gone). A building's side: its faction.
+  // A building's gate piers (N3): kept by column, x -> [y0, y1, side, kind, building, ...], made
+  // again when the buildings change (and every second). A building's side: its faction. Whole or
+  // not - a city is always building somewhere, and its gate hall goes up first and stands through
+  // it all - for what a tank passes is the building's own standing structure, cell by cell (see
+  // passes): where a pier has fallen, its rubble is in the way as any rubble is.
   let gateCache = { list: null, n: -1, at: -1e9, map: new Map() };
   function gatesOf(world) {
     const list = world.buildings || [], now = world.tick || 0;
     if (gateCache.list === list && gateCache.n === list.length && now - gateCache.at < 60) return gateCache.map;
-    // (each column's spans: y0, y1, side, and what passes there - PIER, every cell of a pier;
-    // HALL, the stairs standing in the hall between its piers, up to the storey over it - the
-    // troops' way up, a flight at the back of the hall, the lane at its front)
-    const map = new Map(), add = (x, y0, y1, side, kind) => { let a = map.get(x); if (!a) map.set(x, a = []); a.push(y0, y1, side, kind); };
+    // (each column's spans: y0, y1, side, what passes there - PIER, every cell of a pier; HALL,
+    // the stairs standing in the hall between its piers, up to the storey over it: the troops'
+    // way up, a flight at the back of the hall, the lane at its front - and whose they are)
+    const map = new Map(), add = (x, y0, y1, side, kind, id) => { let a = map.get(x); if (!a) map.set(x, a = []); a.push(y0, y1, side, kind, id); };
     for (const b of list) {
-      const side = b.faction || b.side;
-      if (!b.gates || !b.gates.length || !side || b.ruined) continue;
+      const side = b && (b.faction || b.side);
+      if (!side || !b.gates || !b.gates.length) continue;
       let gx0 = Infinity, gx1 = -Infinity;
-      for (const g of b.gates) { add(g.x, g.y0, g.y1, side, PIER); gx0 = Math.min(gx0, g.x); gx1 = Math.max(gx1, g.x); }
+      for (const g of b.gates) { add(g.x, g.y0, g.y1, side, PIER, b.id); gx0 = Math.min(gx0, g.x); gx1 = Math.max(gx1, g.x); }
       const { y0, y1 } = b.gates[0];
-      for (let x = gx0 + 1; x < gx1; x += 1) add(x, y0, y1, side, HALL);
+      for (let x = gx0 + 1; x < gx1; x += 1) add(x, y0, y1, side, HALL, b.id);
     }
     gateCache = { list, n: list.length, at: now, map };
     return map;
   }
   const PIER = 0, HALL = 1;
-  // (does a tank of `side` pass cell y (of stuff id) of a column whose gate spans are `spans`? A
-  // pier of a building of its own side, or a flight of stairs in its hall)
-  function passes(spans, side, y, id) {
-    for (let k = 0; k < spans.length; k += 4) if (y >= spans[k] && y <= spans[k + 1] && spans[k + 2] === side && (spans[k + 3] === PIER || id === M.PLATFORM)) return true;
+  // (does a tank of `side` pass cell (x, y) - of stuff id - of a column whose gate spans are
+  // `spans`? A pier of a building of its own side, or a flight of stairs in its hall: that
+  // building's own, standing there now)
+  function passes(world, spans, side, x, y, id) {
+    for (let k = 0; k < spans.length; k += 5) {
+      if (y < spans[k] || y > spans[k + 1] || spans[k + 2] !== side || (spans[k + 3] !== PIER && id !== M.PLATFORM)) continue;
+      if (PW.getOwner(world, x, y) === spans[k + 4]) return true;
+    }
     return false;
   }
   const spansFor = (world, t, x) => (t && t.side ? gatesOf(world).get(x) : undefined);
@@ -187,7 +195,7 @@
     if (x < 1 || x >= W - 1) return -1;
     const f = Math.max(1, Math.min(H - 1, Math.round(from))), y0 = Math.max(1, f - STEP - 4), y1 = Math.min(H - 1, f + 120);
     const spans = spansFor(world, t, x), side = t && t.side;
-    const bears = spans ? (y) => isSupport(mat[y * W + x]) && !passes(spans, side, y, mat[y * W + x] & ID_MASK) : (y) => isSupport(mat[y * W + x]);
+    const bears = spans ? (y) => isSupport(mat[y * W + x]) && !passes(world, spans, side, x, y, mat[y * W + x] & ID_MASK) : (y) => isSupport(mat[y * W + x]);
     if (bears(f)) {
       let y = f;
       while (y > y0 && bears(y - 1)) y -= 1;
@@ -289,27 +297,31 @@
   // What stops it going on `dir` (-1 / +1) from here, looking LOOK cells on from its leading wheel:
   // ground rising straighter than STEP or, over SPAN cells, steeper than MAX_SLOPE; a drop; too
   // little room over it (a tunnel, an overhang); deep water. ('' if nothing; t.room is then how far
-  // it can still go, its nose short of it.)
+  // it can still go, its nose short of it.) For the probes, each look leaves on the tank where it
+  // stopped it: t.stopAt [column, ground there, why] and, for 'no room', t.stopCell - the cell
+  // over that ground in its way (see explain).
   const HS = new Float64Array(LOOK + 1);
   function ahead(world, t, dir) {
     const { mat, width: W } = world;
     const { wheels } = t.art, lead = dir > 0 ? wheels.length - 1 : 0;
     const [lx, ly] = toWorld(t, wheels[lead], t.springs[lead]);
     let x = Math.round(lx), prev = surface(world, x, ly, t);
+    t.stopCell = null; t.stopAt = null; t.looked = 0;
     if (prev < 0) return '';
     const tanMax = Math.tan(MAX_SLOPE * deg);
     HS[0] = prev;
-    const stop = (k, why) => { t.room = k - t.art.nose; return why; };
+    let kNow = 0;
+    const stop = (k, why) => { t.room = k - t.art.nose; t.stopAt = [x, HS[kNow], why]; t.looked = kNow; return why; };
     for (let k = 1; k <= LOOK; k += 1) {
       x += dir;
       const h = surface(world, x, prev, t);
-      HS[k] = h;
+      HS[k] = h; kNow = k;
       if (h < 0 || h - prev > DROP) return stop(k - 1, 'drop');
       for (let s = 1; s <= Math.min(k, SPAN); s += 1) if (HS[k - s] - h > Math.max(STEP, s * tanMax)) return stop(k - s, 'too steep');
       // (room for its height over its tracks: no tunnel, no overhang - its own side's gates aside)
       const spans = spansFor(world, t, x);
       for (let up = 1; up <= t.art.height && h - up >= 0; up += 1) {
-        if (isSupport(mat[(h - up) * W + x]) && !(spans && passes(spans, t.side, h - up, mat[(h - up) * W + x] & ID_MASK))) { t.stopCell = [x, h - up]; return stop(k, 'no room'); }
+        if (isSupport(mat[(h - up) * W + x]) && !(spans && passes(world, spans, t.side, x, h - up, mat[(h - up) * W + x] & ID_MASK))) { t.stopCell = [x, h - up]; return stop(k, 'no room'); }
         if (up <= 4 && (PW.getFlags(world, x, h - up) & PW.FLAG.TUNNEL)) return stop(k, 'tunnel');
       }
       let water = 0;
@@ -317,7 +329,27 @@
       if (water > DEEP) return stop(k, 'deep water');
       prev = h;
     }
+    t.looked = LOOK;
     return '';
+  }
+  // (for the probes: where tank t is, what each of its wheels rests on - the ground cell its
+  // wheel finds, as it finds it - and what stops it going on `dir`, with the ground it looked
+  // over: one line each)
+  function explain(world, t, dir = t.drive || 1) {
+    const name = (x, y) => {
+      const id = PW.get(world, x, y) & ID_MASK, o = PW.getOwner(world, x, y), b = o ? (world.buildings || [])[o - 1] : null;
+      return `(${x},${y}) ${(PW.mat.names && PW.mat.names[id]) || id} owner ${o}${b ? ` ${b.type || 'building'} g${b.ground}` : ''}`;
+    };
+    const lines = [`hull at (${t.x.toFixed(1)}, ${t.y.toFixed(1)}) angle ${(t.angle / deg).toFixed(1)}${t.falling ? ' FALLING' : ''}${t.tipping ? ' TIPPING' : ''}, side ${t.side || '-'}, blocked '${t.blocked || ''}'`];
+    t.art.wheels.forEach((u, i) => {
+      const [wx, wy] = toWorld(t, u, 0), x = Math.round(wx), y = surface(world, x, wy, t);
+      lines.push(`wheel ${i} at (${x}, ${wy.toFixed(1)}): ${y < 0 ? 'no ground under it' : 'over ' + name(x, y)}`);
+    });
+    const why = ahead(world, t, Math.sign(dir) || 1), seen = [];
+    for (let k = 0; k <= t.looked; k += 4) seen.push(HS[k]);
+    lines.push(`ahead: '${why}'${t.stopAt ? ` at column ${t.stopAt[0]} (ground there ${t.stopAt[1]})` : ''}${t.stopCell ? `, in its way ${name(t.stopCell[0], t.stopCell[1])}` : ''}, room ${t.room}`);
+    lines.push(`ground ahead, every 4th column from its lead wheel: ${seen.join(' ')}`);
+    return lines;
   }
   function step(world, dt) {
     const list = world.tanks;
@@ -592,6 +624,6 @@
     return true;
   }
 
-  PW.tanks = { create, step, draw, drive, aimAt, muzzle, settle, ahead, tool, key, held: () => held, reach, gatesOf, STYLES: Object.keys(STYLES),
+  PW.tanks = { create, step, draw, drive, aimAt, muzzle, settle, ahead, explain, tool, key, held: () => held, reach, gatesOf, STYLES: Object.keys(STYLES),
     VMAX, ACCEL, GUN_UP, GUN_DOWN, MAX_SLOPE, STEP, SPRING_UP, SPRING_DOWN, TURN };
 })();
