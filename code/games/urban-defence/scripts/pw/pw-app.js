@@ -97,7 +97,10 @@
   // towns' aging re-seats out-churn the bundle mend on their long worldgen lines - until a
   // re-seat heals its own cut (rather than leaving it for the slow crews), adoption stays
   // behind the flag. The groundwork, the crash guards and the richer mend draught ship on.
-  if (capital && PW.ADOPT_TOWNS) capital.adoptSettlements();
+  // N3: ON by default since the adoption-era pipe freeze fell (a re-seat heals its own cut -
+  // releaseBuilding lays the leaving bed's span, connectCore clears its window; the frozen
+  // pool of ~350 breaks drained to ~13 on the seed-7 probe). flags=STANDING_TOWNS turns it off.
+  if (capital && PW.ADOPT_TOWNS !== false && !PW.STANDING_TOWNS) capital.adoptSettlements();
   // Ground that loses its footing breaks loose: cave-ins, landslides and avalanches.
   const stability = world.stability = PW.createStability ? PW.createStability(world, particles) : null;
   // Air pressure and wind, worked only where a blast has stirred it.

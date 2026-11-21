@@ -72,8 +72,12 @@ let flatX = null, bestSpread = Infinity;
 // bundle - a crater through its casing would terrace the walls being measured)
 const built = (x) => (world.settlements || []).some((s) => (s.footprints || []).some(([a, b]) => x > a - 150 && x < b + 150));
 const piped = (x) => world.pipes && world.pipes.lines.some((l) => x > l.x0 - 80 && x < l.x1 + 80);
+// (N3: the adopted towns are LIVE cities now - they pave and plough outward while the test
+// runs, so wild ground must stand clear of their claims with a march margin, not just the
+// worldgen footprints)
+const citied = (x) => world.capitalGrowth && (world.capitalGrowth.cities || []).some((c) => c.edge && x > c.edge.left - 400 && x < c.edge.right + 400);
 for (let x = 600; x < world.width - 600; x += 37) {
-  if (layout.sites.some((s) => x > s.x0 - 300 && x < s.x1 + 300) || built(x) || piped(x)) continue;
+  if (layout.sites.some((s) => x > s.x0 - 300 && x < s.x1 + 300) || built(x) || piped(x) || citied(x)) continue;
   if (layout.lakes.some((l) => Math.abs(x - l.x) < l.half + 300)) continue;
   let lo = Infinity, hi = -Infinity;
   for (let d = -120; d <= 120; d += 10) { lo = Math.min(lo, world.groundTop[x + d]); hi = Math.max(hi, world.groundTop[x + d]); }
@@ -90,8 +94,25 @@ const tower = world.buildings.find((b) => b.type === 'population');
 const roofY = tower.body.top - 1;
 const roofX = Math.round((tower.body.left + tower.body.right) / 2) - 40;
 pwApp.paint(roofX, roofY - 8, 5, M.DEBRIS);
-// (on the level pad, where it can come to rest)
-const groundX = flatX !== null ? flatX + 80 : tower.body.right + 300;
+// (on the level pad where there is one; otherwise on genuinely natural, unclaimed surface -
+// under adoption the towns pave and claim outward while the test runs, and debris on a
+// street or a city's works is not the "open ground" this check is about)
+const natural = (x) => {
+  const g = world.groundTop[x];
+  if (PW.getOwner(world, x, g) || PW.getOwner(world, x, g - 1)) return false;
+  const id = PW.get(world, x, g) & 63;
+  return id === M.GRASS || id === M.TOPSOIL || id === M.SOIL || id === M.STONE || id === M.SAND;
+};
+let groundX = flatX !== null ? flatX + 80 : null;
+if (groundX === null || !natural(groundX)) {
+  groundX = null;
+  for (let x = 600; x < world.width - 600 && groundX === null; x += 23) {
+    if (built(x) || citied(x)) continue;
+    if (layout.lakes.some((l) => Math.abs(x - l.x) < l.half + 200)) continue;
+    if (natural(x) && natural(x - 4) && natural(x + 4)) groundX = x;
+  }
+  if (groundX === null) groundX = tower.body.right + 300;   // (last resort, the old spot)
+}
 const groundY = world.groundTop[groundX] - 10;
 pwApp.paint(groundX, groundY, 6, M.DEBRIS);
 run(60 * 13);
