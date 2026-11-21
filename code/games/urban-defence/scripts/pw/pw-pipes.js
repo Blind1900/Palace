@@ -94,13 +94,34 @@
         }
       }
     };
+    // N3: a re-seat heals its own cut. When a building lets go of the bundle, the pass-through
+    // spans its beds carried are laid as REAL bore at the next step (the bed is still being
+    // wiped during this call) instead of being left for the crews - on an adopted town's long
+    // line the churn outran the starved crews and the breaks froze (the adoption-era pool).
+    let pendingHeals = [];
     function releaseBuilding(side, building) {
       const line = lines.find((l) => l.side === side) || null;
       removeSpans(building);
       if (!line) return;
       const before = line.cores.length;
+      for (const c of line.cores) {
+        if (c.building === building) pendingHeals.push({ line, x0: c.x - HOP - 4, x1: c.x + HOP + 4 });
+      }
       line.cores = line.cores.filter((c) => c.building !== building);
       stats.cores -= before - line.cores.length;
+    }
+    function runHeals() {
+      if (!pendingHeals.length) return;
+      for (const h of pendingHeals) {
+        const line = h.line;
+        const k0 = Math.max(0, h.x0 - line.x0), k1 = Math.min(line.ys.length - 1, h.x1 - line.x0);
+        if (k1 < k0) continue;
+        for (let k = k0; k <= k1; k += 1) layColumn(line, line.x0 + k);
+        layWells(line, k0, k1);
+        checkSpan(line, k0, k1);
+        stats.healed = (stats.healed || 0) + (k1 - k0 + 1);
+      }
+      pendingHeals = [];
     }
     const spanAt = (x, y) => {
       const list = spanMap.get(x);
@@ -336,13 +357,13 @@
       // N38 part 4: with the cavity on, a lane row in the ground is REAL space - the tube is
       // terrain, not deco. The lane's ribbed colour becomes the back wall behind the channel.
       if (PW.PIPE_CAVITY && !solid && inside && (row & 1)) {
-        PW.set(world, x, y, M.AIR, { quiet: true });
+        PW.set(world, x, y, M.AIR, { quiet: true, lay: true });   // (N17: laying never unseals the bore)
         PW.setLayer(world, 'back', x, y, rgb(color));
         PW.setLayer(world, 'paint', x, y, 0);
         PW.setOwner(world, x, y, line.owner);
         return true;
       }
-      PW.set(world, x, y, M.PIPE, { quiet: true });
+      PW.set(world, x, y, M.PIPE, { quiet: true, lay: true });
       PW.setLayer(world, 'paint', x, y, rgb(color));
       PW.setOwner(world, x, y, line.owner);
       return true;
@@ -352,7 +373,7 @@
       if (x < 1 || y < 1 || x >= W - 1 || y >= H - 1) return;
       const id = mat[y * W + x] & ID_MASK;
       if (!terrain[id] || id === M.ORE || id === M.BEDROCK || PW.getOwner(world, x, y) || isTunnel(x, y)) return;
-      PW.set(world, x, y, M.FILL, { quiet: true });
+      PW.set(world, x, y, M.FILL, { quiet: true, lay: true });
       PW.setLayer(world, 'paint', x, y, rgb(color));
     }
     // Is (x, y) the line's own work? Its casing and dividers are its M.PIPE cells; with the bore
@@ -377,7 +398,7 @@
         }
         PW.setLayer(world, 'back', x, y, 0);
       }
-      PW.set(world, x, y, M.FILL, { quiet: true });
+      PW.set(world, x, y, M.FILL, { quiet: true, lay: true });
       PW.setFlag(world, x, y, FLAG.HOLLOW, false);
       PW.setLayer(world, 'paint', x, y, rgb(tone(SAND, (PW.hash2(x, y) & 3) === 0 ? 0.88 : 1)));
       PW.setOwner(world, x, y, 0);
@@ -695,6 +716,9 @@
         if (id === M.PIPE) return true;
         if (PW.getLayer(world, 'pipe', x, y + r)) return true;
         if ((structural[id] || id === M.REINFORCED || id === M.LINING) && (PW.getFlags(world, x, y + r) & FLAG.FIXTURE)) return true;   // in a sleeve
+        // N3: within a building's licenced span the carriage is sleeved through its works -
+        // the bed's shoulder armour is NOT a cut (the watch froze against it for ever).
+        if (spanAt(x, y + r)) return true;
       }
       return false;
     };
@@ -964,6 +988,9 @@
       }
       for (let k = a; k <= bk; k += 1) layColumn(line, line.x0 + k);
       layWells(line, a, bk);
+      // N3: the re-lay closes its own window now - stale marks clear here, not when the
+      // starved crews get round to them.
+      for (let k = a; k <= bk; k += 1) if (line.broken[k] && intactAt(line, line.x0 + k)) clearBroken(line, k);
       return core;
     }
     // Is the line carrying from (x) to the core? (no break between them)
@@ -1137,7 +1164,7 @@
               const id2 = mat[ty * W + tx] & ID_MASK;
               if (id2 === M.DEBRIS || id2 === M.RUBBLE || id2 === M.SAND || id2 === M.ASH
                 || id2 === M.LOOSE_SOIL || id2 === M.LOOSE_STONE) {
-                PW.set(world, tx, ty, M.AIR, { quiet: true });
+                PW.set(world, tx, ty, M.AIR, { quiet: true, lay: true });
                 cleared += 1;
               }
             }
@@ -1212,6 +1239,7 @@
 
     function step(dt = 1 / 60) {
       tick += 1;
+      runHeals();   // (N3: released beds' spans close before the watch looks)
       if (dirtyPending || tick % 30 === 0) check();
       if (stats.broken) regrow();
       for (const line of lines) {
