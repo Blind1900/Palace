@@ -105,6 +105,10 @@
   const sim = PW.createSim(world);
   const particles = PW.createParticles(world);
   const heat = world.heatSystem = PW.createHeat(world);
+  // D15: the cores' white IS the world's own Game of Life now (PS's half in pw-life) -
+  // the lab runs the real module, so the discs, the repair's white foam and any future
+  // LIFE play all share one simulation (coreLife's cores-only fallback steps aside).
+  const life = PW.createLife ? PW.createLife(world) : null;
   world.particles = particles;
   const fragments = PW.createFragments ? PW.createFragments(world, particles) : null;
   const structure = fragments && PW.createStructure ? PW.createStructure(world, fragments) : null;
@@ -223,6 +227,7 @@
       // N68: the lab steps the flora too - without this, a tree stranded by the growth's
       // earthworks (a regrade, a runway pad) never noticed its footing was gone and hung
       // in the air; the live world always stepped it.
+      if (life) life.step();
       if (PW.flora && PW.flora.step) PW.flora.step(world, particles);
       growth.step(DT * speed);
     }
@@ -247,6 +252,7 @@
     heat.draw(renderer, now / 1000);
     particles.draw(renderer);
     if (cores && cores.draw) cores.draw(renderer, now);
+    if (life && life.draw) life.draw(renderer);   // (D15: the discs' white is the world Life)
     if (pipes) pipes.draw(renderer, now / 1000);   // (N75: the cargo moves in the lab too)
     growth.draw(renderer, now / 1000);
     if (PW.debugHitboxes && fragments && fragments.drawHitboxes) fragments.drawHitboxes(renderer);
