@@ -1,5 +1,12 @@
 [
  {
+  "title": "Fable: the worldgen towns can adopt the growth engine - groundwork in, behind a flag (1777aeb, 6e66dd0, N3)",
+  "author": "Fable",
+  "time": "2026-11-20 (continuing N3)",
+  "note": "The next N3 pillar: the towns that generate WITH the world joining the capital-growth engine as living cities. adoptSettlements() turns a standing town into an engine city - its population towers become ring lots, aged so their current levels stand; its farm, base and core building hold their ground as FIXED members the re-seat chains never move (seatChain stops at a fixed lot, a fixed main is never re-stamped); and from then the engine runs its level-ups, infill, joints and appends like any seed city, paid from the faction stock (N4). The visible behaviours all pass on seed 7: five towns joined, their towers come of age in place, the fixed buildings never shift, the towns grow (33 to 62 records), every lot stands. Also landed, good regardless and suite-clean: an append that would walk off the map edge is stopped (it was threading cores at negative x into the bundle - a crash), and a tower coming of age now PAYS like any level-up (N4: unfunded towns stop aging instead of levelling for free), which also bounds the churn a growing town makes on its pipes. HELD BEHIND A FLAG (PW.ADOPT_TOWNS, default off) for one specific reason: an adopted town has a long pre-existing supply bundle, and the heavy re-threading as its towers all re-seat leaves a pool of pipe breaks that stay BOUNDED (the mend keeps pace with new cuts) but do not fully heal - the eraseLot/re-thread path needs to close its own cut rather than leave it for the slow crews. That pipe-engine fix is the one piece between here and adoption shipping on. Matrix 19/19 on seeds 7, 3 and 11.",
+  "shots": []
+ },
+ {
   "title": "Opus: a big blast's garbage down another quarter; the sway and the tanks done; a blast storm measured in real time (f678789, P2, N9, N10)",
   "author": "Opus",
   "time": "2026-11-20",
@@ -2166,7 +2173,7 @@
         "owner": "F"
        },
        {
-        "text": "City growth: capital, roads and pipe spreading, level-ups, tunnels through mountains, bridges; miners digging tunnel networks out to ore through caves; cities detecting each other and linking. STATUS: slices 1+2 live (752b2e2, c4b35f5) - the whole lab engine grows seed cities in the real world, and their lots thread onto the faction's supply bundle as they place (connect on place, release on re-seat; the line heals its own cuts through the newcomers' connectors). Anywhere is seedable now. Next: worldgen towns adopting the engine, miners-to-ore, city detect-and-link (N58 joints in the world), N4 economy gates.",
+        "text": "City growth: capital, roads and pipe spreading, level-ups, tunnels through mountains, bridges; miners digging tunnel networks out to ore through caves; cities detecting each other and linking. STATUS: slices 1+2 live (752b2e2, c4b35f5) - the lab engine grows seed cities in the real world, their lots thread onto the faction bundle. N4 economy gates in (lots, level-ups and aging all paid from the faction stock; unfunded growth stalls). Worldgen-town ADOPTION built (1777aeb) behind PW.ADOPT_TOWNS, default off: towns join, towers level in place, fixed buildings hold - but the heavy re-threading leaves a bounded pool of pipe breaks that do not fully heal, so held until the eraseLot/re-thread path closes its own cut. Still to come: miners-to-ore, city detect-and-link (N58 joints in the world).",
         "step": "H",
         "id": "N3",
         "owner": "F"
