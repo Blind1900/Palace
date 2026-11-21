@@ -38,6 +38,9 @@ await view('ph-mountain-before', fx, fy - 60, 4);
 const brokenBefore = stability.stats.broken;
 for (const [dx, dy] of [[0, 0], [30, -10], [-25, 15], [10, -30], [45, 10]]) { pwApp.explode(fx + dx, fy + dy, 60, 1.35); pwApp.stepWorld(20); }
 pwApp.stepWorld(60 * 14);
+// (and on until the ground there has settled - the looks the slide set off all done: a big slide's
+// last ones come seconds after it; 30 s more at most)
+for (let t = 0; t < 60 * 30 && stability.settling(fx - 120, fy - 400, fx + 160, fy + 120); t += 30) pwApp.stepWorld(30);
 const slid = stability.stats.broken - brokenBefore;
 // Nothing is left hanging: no ground over a void deeper than the rock's reach, in the area.
 let hanging = 0;

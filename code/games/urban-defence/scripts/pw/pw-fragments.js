@@ -852,10 +852,12 @@
         const k = ks[q], g = cellOf(p, data.x[k], data.y[k]);
         if (g >= 0 && p.grid[g] === k + 1) p.grid[g] = 0;
       }
-      // (room for cell k at (X, Y): nothing there, or - for wood - its own limb's leaf)
+      // (room for cell k at (X, Y): nothing there, or - for wood - a leaf, crushed under it: a bent
+      // limb's wood is never left out of the plant where it swings into the crown, or it would hang
+      // in two parts there)
       const room = (k, X, Y) => {
         const g = cellOf(p, X, Y), there = g < 0 ? -1 : p.grid[g] - 1;
-        return there < 0 || (data.solid[k] && !data.solid[there] && p.limbOf[there] === l.id);
+        return there < 0 || (data.solid[k] && !data.solid[there]);
       };
       for (let q = 0; q < n; q += 1) {
         const k = ks[q];

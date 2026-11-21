@@ -967,7 +967,17 @@
       }
       return false;
     }
-    return { step, disturb, shock, panels, loose, looseLater, stats, busy:() => pending.length > 0 || sags.length > 0 || toppling.length > 0 || stillFalling() };
+    // (is the ground in the box still settling - a look at it waiting or under way, a sag there,
+    // a column going over? A big slide's last looks come seconds after it: what is left standing
+    // is judged once it is not)
+    function settling(x0, y0, x1, y1) {
+      for (const r of pending) {
+        const top = r.atSurface ? Math.min(r.y0, r.y1 - MAX_TALL) : r.y0;
+        if (r.x0 <= x1 && r.x1 >= x0 && top <= y1 && r.y1 >= y0) return true;
+      }
+      return sags.some((s) => s.x0 <= x1 && s.x1 >= x0) || toppling.length > 0;
+    }
+    return { step, disturb, shock, panels, loose, looseLater, stats, settling, busy:() => pending.length > 0 || sags.length > 0 || toppling.length > 0 || stillFalling() };
   }
 
   PW.createStability = createStability;
