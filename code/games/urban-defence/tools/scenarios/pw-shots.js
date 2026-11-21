@@ -230,8 +230,19 @@ let duel = null;
     pwApp.explode(near.x + 64, near.y - 10, 14, 1.25);
     let top = near.y;
     for (let k = 0; k < 40; k += 1) { run(DT); top = Math.min(top, near.y); }
-    check(hn === 100 && hf === 100 && near.hp < 100 && !near.dead && y0 - top > 3,
-      `a blast hurts a tank by how near and hard it is (a blast 130 cells off: ${100 - hn} and ${100 - hf}); a heavy one close by hurts it (${(100 - near.hp).toFixed(0)}) and throws it (${(y0 - top).toFixed(0)} cells up)`);
+    // (a blast as near, with a wall of rock between - one it cannot break: its cover takes it)
+    const nearHurt = 100 - near.hp;
+    world.tanks.length = 0;
+    const C2 = site(320);
+    let walled = null;
+    if (C2) {
+      const w = T.create(world, { style: 'modern', side: 'left', x: C2.x0 + 120, y: C2.g, facing: 1 });
+      fill(C2.x0 + 181, C2.g - 50, C2.x0 + 184, C2.g - 1, M.BEDROCK);
+      pwApp.explode(w.x + 70, w.y - 10, 14, 1.25);
+      walled = 100 - w.hp;
+    }
+    check(hn === 100 && hf === 100 && near.hp < 100 && !near.dead && y0 - top > 3 && walled !== null && walled < nearHurt * 0.5,
+      `a blast hurts a tank by how near and hard it is (a blast 130 cells off: ${100 - hn} and ${100 - hf}); a heavy one close by hurts it (${nearHurt.toFixed(0)}) and throws it (${(y0 - top).toFixed(0)} cells up); behind a wall of rock the like of it hurts it ${walled === null ? '- (no site)' : walled.toFixed(0)}`);
     world.tanks.length = 0;
   }
 }

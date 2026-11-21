@@ -274,6 +274,74 @@ else {
   }
 }
 
+// 4c. In water (N82): wading, it drives slower and grips the ground the less - its weight borne
+// off its tracks by the water; still water only slows it, a current pushes it: a flood up to its
+// hull's waist it stands against, one over its turret carries it off. (Each in a basin of its own:
+// still water 24 deep, a flood 10 deep, a flood 50 deep - its water on the move to the right.)
+{
+  const basin = (depth, moving) => {
+    const S = site(420);
+    if (!S) return null;
+    const { x0, g } = S, a = x0 + 80, b = x0 + 380;
+    fill(a - 8, g - 60, a - 1, g + depth + 6, M.STONE);
+    fill(b + 1, g - 60, b + 8, g + depth + 6, M.STONE);
+    fill(a, g + depth, b, g + depth + 6, M.STONE);
+    fill(a, g - 60, b, g + depth - 1, M.AIR);
+    for (let y = g; y < g + depth; y += 1) for (let x = a; x <= b; x += 1) PW.set(world, x, y, M.WATER | (moving ? 0xc0 : 0), { quiet: true });
+    return { x: (a + b) / 2, floor: g + depth };
+  };
+  const still = basin(24, false), shallow = basin(10, true), deep = basin(50, true);
+  if (!still || !shallow || !deep) check(false, 'stretches of the wilds for the basins');
+  else {
+    world.tanks.length = 0;
+    const s = T.create(world, { style: 'modern', x: still.x - 60, y: still.floor, facing: 1 });
+    const h = T.create(world, { style: 'asian', x: shallow.x, y: shallow.floor, facing: 1 });
+    const d = T.create(world, { style: 'gothic', x: deep.x - 60, y: deep.floor, facing: 1 });
+    T.drive(s, 1);
+    const h0 = h.x, d0 = d.x;
+    let top = 0;
+    run(s, 2, () => { top = Math.max(top, s.v); });
+    check(s.wet > 0.4 && top < T.VMAX * 0.7 && top > T.VMAX * 0.35 && Math.abs(h.x - h0) < 1 && h.wet > 0.1 && h.wet < 0.5 && d.wet > 0.9 && d.x - d0 > 25 && !d.falling,
+      `in water: wading in still water ${(s.wet * 100).toFixed(0)}% under, it drives at ${top.toFixed(0)} cells/s of its ${T.VMAX}; in a flood to its hull's waist (${(h.wet * 100).toFixed(0)}% under) it stands (${(h.x - h0).toFixed(1)} cells moved); in one over its turret (${(d.wet * 100).toFixed(0)}% under) it is carried off ${(d.x - d0).toFixed(0)} cells in 2 s`);
+    world.tanks.length = 0;
+  }
+}
+
+// 4d. Struck by what falls on it (N82): a slab of concrete 30 by 20 dropped on it from 160 cells up
+// dents its armour and bites its plate; a lump of 8 by 6 only knocks on it; each glances off it and
+// comes to rest beside it, not on it nor in it. (The world run: the pieces are pw-fragments'.)
+{
+  const S = site(500);
+  if (!S) check(false, 'a stretch of the wilds for the falling slab');
+  else {
+    const { x0, g } = S;
+    world.tanks.length = 0;
+    const a = T.create(world, { style: 'modern', x: x0 + 150, y: g, facing: 1 });
+    const b = T.create(world, { style: 'asian', x: x0 + 350, y: g, facing: 1 });
+    const block = (cx, top, w, h) => {
+      const xs = [], ys = [];
+      for (let y = top; y < top + h; y += 1) for (let x = cx - (w >> 1); x < cx - (w >> 1) + w; x += 1) { xs.push(x); ys.push(y); }
+      const n = xs.length;
+      return { x: Int32Array.from(xs), y: Int32Array.from(ys), color: new Uint32Array(n).fill(PW.abgr(150, 148, 140)), byte: new Uint8Array(n).fill(M.CONCRETE), solid: new Uint8Array(n).fill(1) };
+    };
+    world.fragments.spawn({ data: block(Math.round(a.x) + 10, g - 160, 30, 20), vx: 0, vy: 0 });
+    world.fragments.spawn({ data: block(Math.round(b.x), g - 160, 8, 6), vx: 0, vy: 0 });
+    pwApp.stepWorld(60 * 6);
+    await view('tank-struck', a.x + 40, g - 30, 6);
+    // (what lies over its deck, inside its hull's box, come to rest)
+    const over = (t) => { let n = 0; for (let y = Math.round(t.y) - 30; y < t.y - 2; y += 1) for (let x = Math.round(t.x) - 55; x <= t.x + 55; x += 1) if (PW.mat.phase[PW.get(world, x, y) & 63] >= PW.PHASE.POWDER) n += 1; return n; };
+    // (and no piece still lying on it)
+    const onIt = (t) => world.fragments.list.filter((p) => {
+      const c = Math.cos(p.angle), s = Math.sin(p.angle), cx = p.px + p.gx * c - p.gy * s, cy = p.py + p.gx * s + p.gy * c;
+      return Math.abs(cx - t.x) < 60 && cy > t.y - 50 && cy < t.y;
+    }).length;
+    const oa = over(a) + onIt(a) * 100, ob = over(b) + onIt(b) * 100;
+    check(a.hp < 100 && a.hp > 40 && a.chipped > 0 && b.hp === 100 && !a.falling && oa < 30 && ob < 10,
+      `struck by what falls on it: a slab of concrete 30 by 20 off 160 cells up dents its armour (${(100 - a.hp).toFixed(0)} of it) and chips it; a lump of 8 by 6 only knocks (${(100 - b.hp).toFixed(0)}); both glance off it and come to rest off it (${onIt(a) + onIt(b)} pieces still on them, ${over(a)} and ${over(b)} cells left lying in their hulls' boxes)`);
+    world.tanks.length = 0;
+  }
+}
+
 // 5. Its own side's buildings it drives right through; an enemy's it rams (N3, N72). A hall of a
 // record of the test's own (the left side's: a slab over piers, a flight of stairs, a solid wall in
 // it): a tank of the left drives right through all of it - piers, stairs, wall - and none of it is

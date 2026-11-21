@@ -1083,6 +1083,48 @@
     const toWorld = (p, c, s, u, v) => [p.px + u * c - v * s, p.py + u * s + v * c];
     // The piece's centre of mass in the world.
     const centre = (p) => { const [c, s] = cosSin(p); return toWorld(p, c, s, p.gx, p.gy); };
+    // A tank in a falling piece's way (N82) - drawn over the grid, not in it - is struck by it
+    // (PW.tanks.struck: a heavy or fast one dents it) and the piece glances off its plate: thrown
+    // back off it as off a sloped face, losing most of its speed; come to rest on it, it slides off
+    // its end, as it would off a car's roof. (Its outline, a point in every few, against each tank
+    // near it.)
+    const GLANCE_KEEP = 0.25;     // of its speed into the plate a piece keeps, thrown back off it
+    const SLIDE_OFF = 50;         // cells/s a piece too slow to bounce slides off a tank's back or nose at
+    function glance(p, h) {
+      const T = PW.tanks, pts = p.points;
+      if (!T || !T.touches || !pts.length) return false;
+      const [c, s] = cosSin(p), [cx, cy] = centre(p), reach = Math.hypot(p.gw, p.gh) / 2 + 4;
+      const stride = Math.max(2, (pts.length >> 6) << 1);
+      for (const t of world.tanks) {
+        if (t.dead || Math.abs(t.x - cx) > 64 + reach || cy < t.y - 50 - reach || cy > t.y + 8 + reach) continue;
+        for (let k = 0; k < pts.length; k += stride) {
+          const [wx, wy] = toWorld(p, c, s, pts[k], pts[k + 1]);
+          const part = T.touches(t, wx, wy);
+          if (!part) continue;
+          // (its plate's face there: out from the middle of its hull)
+          let nx = wx - t.x, ny = wy - (t.y - 18);
+          const nl = Math.hypot(nx, ny) || 1;
+          nx /= nl; ny /= nl;
+          const [vx, vy] = velocityAt(p, wx, wy), vn = vx * nx + vy * ny;
+          if (vn < 0) {
+            // (the blow is what it drives into the plate - a plant's wood weighs a quarter of
+            // masonry, cell for cell - and it is thrown back off it, most of that speed lost)
+            if (vn < -20) T.struck(world, t, wx, wy, part, p.mass * (p.flora ? 0.25 : 1), vn * nx, vn * ny);
+            p.vx -= (1 + GLANCE_KEEP) * vn * nx; p.vy -= (1 + GLANCE_KEEP) * vn * ny;
+            p.omega *= 0.6;
+          }
+          // (out of its plate, a cell at a time; what it slides along it it keeps, a little rubbed off)
+          p.px += nx; p.py += ny;
+          p.vx *= 0.95; p.omega *= 0.95;
+          // (come to rest on top of it, it slides off its nearer end)
+          if (ny < -0.5 && Math.abs(p.vx) < SLIDE_OFF) p.vx = Math.sign(cx - t.x || 1) * SLIDE_OFF;
+          p.touched = p.age;
+          stats.glanced = (stats.glanced || 0) + 1;
+          return true;
+        }
+      }
+      return false;
+    }
     function velocityAt(p, wx, wy) {
       if (pinned(p)) return [-p.omega * (wy - p.hy), p.omega * (wx - p.hx)];
       const [cx, cy] = centre(p);
@@ -1178,6 +1220,7 @@
             p.px = cx - (p.gx * c - p.gy * sn); p.py = cy - (p.gx * sn + p.gy * c);
           }
           done = contact(p, h);
+          if (!done && p.mode === 'fly' && world.tanks && world.tanks.length) glance(p, h);
         }
         if (p.mode === 'flex') {
           // (rung down - or ringing on too long - it is put back as it grew)

@@ -46,6 +46,13 @@
   const NOSE = 60;              // cells from its middle its nose and lower plate reach, and a little
   const SPAN = 16;              // cells a slope is measured over (a kerb within it is a step, not a slope)
   const DEEP = 26;              // cells of water it fords at most
+  // In water (N82; see wade): what of its hull is under the surface bears its weight off its tracks
+  // and drags on it.
+  const BUOY = 0.8;             // of its weight a hull wholly under water has borne off its tracks
+  const WATER_DRAG = 2;         // /s: how hard water running past its hull drags it along, wholly under
+  const WADE_SLOW = 0.55;       // of its top speed it loses wholly under water
+  const GRIP = 84;              // cells/s^2 its tracks hold against a push, on dry ground (0.6 g)
+  const FLOW = 60;              // cells/s a body of water on the move runs at (pw-sim's surge)
   const SPRING_UP = 5, SPRING_DOWN = 4;   // cells of travel each road wheel has, up and down
   const WHEEL = 6;              // cells a road wheel's radius (about 0.85 m across)
   const MAX_TILT = 85;          // degrees the hull lies over at most, on its wheels
@@ -252,7 +259,7 @@
       springs: new Float32Array(art.wheels.length), contact: new Uint8Array(art.wheels.length),
       target: null, elevation: 0, turning: 0,
       hp: ARMOUR, ammo: spec.ammo || 'he', reload: 0, recoil: 0, rear: -facing, scars: [], fumes: 0, hurtBy: '',
-      holes: null, chipped: 0, seed: ++tankN };
+      holes: null, chipped: 0, seed: ++tankN, wet: 0, flow: 0, swept: 0 };
     (world.tanks || (world.tanks = [])).push(t);
     current = world;
     settle(world, t, 0);
@@ -330,7 +337,8 @@
   // stopped it: t.stopAt [column, ground there, why] and, for 'no room', t.stopCell - the cell
   // over that ground in its way (see explain).
   const HS = new Float64Array(LOOK + 1);
-  function ahead(world, t, dir) {
+  // (carried: borne along by a current, deep water ahead does not stop it - it is in it)
+  function ahead(world, t, dir, carried = false) {
     const { mat, width: W } = world;
     const { wheels } = t.art, lead = dir > 0 ? wheels.length - 1 : 0;
     const [lx, ly] = toWorld(t, wheels[lead], t.springs[lead]);
@@ -355,7 +363,7 @@
       }
       let water = 0;
       while (water <= DEEP && h - water - 1 >= 0 && (mat[(h - water - 1) * W + x] & ID_MASK) === M.WATER) water += 1;
-      if (water > DEEP) return stop(k, 'deep water');
+      if (water > DEEP && !carried) return stop(k, 'deep water');
       prev = h;
     }
     t.looked = LOOK;
@@ -453,6 +461,36 @@
     }
     if (pressed) t.flattened = (t.flattened || 0) + pressed;
   }
+  // How deep it wades: the share of its hull's box under water (t.wet), and the way and speed the
+  // water there runs (t.flow, cells/s: pw-sim's moving water, left or right - still water none).
+  // Wading, it grips the ground the less, drives slower, and a current pushes it along once the
+  // water drags harder than its tracks hold: a tank fords a flood up to its hull's waist, and one
+  // caught deep in it is carried off (see stepOne).
+  const WATER_MOVING = 0x80, WATER_RIGHT = 0x40;   // (pw-sim's flags on a water cell)
+  function wade(world, t) {
+    const { mat, width: W, height: H } = world, c = Math.cos(t.angle), sn = Math.sin(t.angle);
+    // (dry under its belly, and dry before: no water about it - water reaches it from below)
+    if (!t.wet) {
+      let any = false;
+      for (let u = -56; u <= 56 && !any; u += 28) {
+        const x = (t.x + u * c + 2 * sn) | 0, y = (t.y + u * sn - 2 * c) | 0;
+        any = x > 0 && y > 0 && x < W && y < H && (mat[y * W + x] & ID_MASK) === M.WATER;
+      }
+      if (!any) { t.flow = 0; return; }
+    }
+    let n = 0, wet = 0, flow = 0;
+    for (let u = -56; u <= 56; u += 8) for (let v = -t.art.height + 2; v <= -2; v += 4) {
+      const x = (t.x + u * c - v * sn) | 0, y = (t.y + u * sn + v * c) | 0;
+      if (x < 1 || y < 1 || x >= W - 1 || y >= H - 1) continue;
+      n += 1;
+      const m = mat[y * W + x];
+      if ((m & ID_MASK) !== M.WATER) continue;
+      wet += 1;
+      if (m & WATER_MOVING) flow += m & WATER_RIGHT ? FLOW : -FLOW;
+    }
+    t.wet = n ? wet / n : 0;
+    t.flow = wet ? flow / wet : 0;
+  }
   function step(world, dt) {
     // (the rounds in flight - until the world's loop steps them itself - and the tanks among what
     // they can strike)
@@ -471,27 +509,41 @@
     if (t.reload > 0) t.reload = Math.max(0, t.reload - dt);
     if (t.recoil > 0) t.recoil = Math.max(0, t.recoil - dt);
     if (t.drive) t.rear = -t.drive;
+    wade(world, t);
+    const grip = 1 - BUOY * t.wet;
     // (its tracks off the ground, or all but one wheel: it does not drive)
     if (t.falling || t.tipping) { t.v = 0; t.blocked = ''; } else {
       // Driving: on to its top speed either way (less, uphill, and less as it is hurt - its engine
-      // smoking, burning), braking to a stop before it goes the other way; and braking in time for
-      // what stops it ahead, its nose short of it.
+      // smoking, burning - and as it wades), braking to a stop before it goes the other way; and
+      // braking in time for what stops it ahead, its nose short of it.
       const lame = t.hp < BURNS ? 0.45 : t.hp < SMOKES ? 0.8 : 1;
-      const want = t.drive * VMAX * lame * (1 - CLIMB * Math.max(0, -t.drive * Math.sin(t.angle)));
+      const want = t.drive * VMAX * lame * (1 - CLIMB * Math.max(0, -t.drive * Math.sin(t.angle))) * (1 - WADE_SLOW * t.wet);
       t.blocked = want ? ahead(world, t, Math.sign(want)) : '';
       let goal = want;
       if (t.blocked) {
-        const room = Math.max(0, t.room), safe = Math.sqrt(2 * BRAKE * room);
+        const room = Math.max(0, t.room), safe = Math.sqrt(2 * BRAKE * grip * room);
         if (Math.abs(goal) > safe) goal = room < 1 ? 0 : Math.sign(want) * safe;
       }
       if (t.v !== goal) {
         const braking = t.v !== 0 && (Math.sign(goal) !== Math.sign(t.v) || Math.abs(goal) < Math.abs(t.v));
-        const a = (braking ? BRAKE : ACCEL) * dt;
+        const a = (braking ? BRAKE : ACCEL) * grip * dt;   // (its tracks drive and brake by what they grip)
         let v = goal > t.v ? Math.min(goal, t.v + a) : Math.max(goal, t.v - a);
         if (braking && Math.sign(v) === -Math.sign(t.v)) v = 0;       // (it stops before it goes the other way)
         t.v = v;
       }
+      // (a current pushes it along its tracks, once it pushes harder than they grip)
+      if (t.flow && t.wet > 0) {
+        const push = WATER_DRAG * t.wet * (t.flow * Math.cos(t.angle) - t.v), hold = GRIP * grip;
+        if (Math.abs(push) > hold) {
+          t.v += (push - Math.sign(push) * hold) * dt;
+          t.swept = (t.swept || 0) + dt;
+          // (carried the way it is not driving, it still meets what is in its way there)
+          if (t.v && Math.sign(t.v) !== Math.sign(want) && ahead(world, t, Math.sign(t.v), true)) t.v = Math.sign(t.v) * Math.min(Math.abs(t.v), Math.sqrt(2 * BRAKE * grip * Math.max(0, t.room)));
+        }
+      }
     }
+    // (falling through water, borne up and slowed by it)
+    if (t.falling && t.wet > 0) t.vy -= (G * BUOY + WATER_DRAG * Math.max(0, t.vy)) * t.wet * dt;
     if (t.falling) {
       t.vy += G * dt;
       t.y += t.vy * dt;
@@ -1054,8 +1106,47 @@
     if (t.hp <= 0) destroy(world, t, cause);
     else wear(world, t);
   }
-  // A blast (PW.explode) hurts the tanks in its reach - the nearer its hull and the harder, the more
-  // - and a heavy one close by throws one.
+  // Struck by falling debris (N82; see pw-fragments): a piece of a building, a tree, a wreck coming
+  // down on it. Only a heavy or a fast one dents its armour - by its momentum against the tank's,
+  // over what its plate shrugs off - and bites its plate where it struck; a heavy one shoves it a
+  // little along its tracks. What struck it glances off it (pw-fragments' side).
+  const SHRUG = 60000;          // momentum (cells of mass x cells/s) its plate takes without a dent: a
+                                // tree coming down on it, a lump of a wall off a roof
+  const DENT = 5000;            // momentum to each of its armour's points a harder blow takes (a slab of
+                                // 600 cells off a storey up takes some 20; one of 2000, 60)
+  const TANK_MASS = 6000;       // its mass, in the pieces' cells (a 60 t tank against a cell's 10 kg)
+  // (the part of a live tank at world point (x, y), or 0)
+  function touches(t, x, y) {
+    if (t.dead) return 0;
+    pixel(t, poseOf(t), x, y);
+    return PART;
+  }
+  function struck(world, t, x, y, part, mass, vx, vy) {
+    const c = Math.cos(t.angle), s = Math.sin(t.angle);
+    const rx = vx - t.v * c, ry = vy - t.v * s, blow = mass * Math.hypot(rx, ry);
+    t.v += (rx * c + ry * s) * mass / TANK_MASS * 0.5;
+    const dmg = Math.min(60, Math.max(0, (blow - SHRUG) / DENT));
+    if (dmg <= 0) return 0;
+    scar(t, x, y, part, Math.min(6, 2 + dmg * 0.1));
+    if (part === HULL || part === TURRET) chipAt(world, t, x, y, part, 1 + Math.sqrt(dmg) * 0.5, rx * 0.1, ry * 0.1);
+    hurt(world, t, dmg, 'debris');
+    stats.struck = (stats.struck || 0) + 1;
+    return dmg;
+  }
+  // (the blast strength lost between (x0, y0) and (x1, y1): what it passes through, by how much
+  // each cell of it takes - PW.mat.blastResist, as pw-explode's own shield)
+  function cover(world, x0, y0, x1, y1) {
+    const { mat, width: W, height: H } = world, n = Math.ceil(Math.hypot(x1 - x0, y1 - y0));
+    let lost = 0;
+    for (let q = 1; q < n; q += 1) {
+      const x = Math.floor(x0 + (x1 - x0) * q / n), y = Math.floor(y0 + (y1 - y0) * q / n);
+      if (x < 0 || y < 0 || x >= W || y >= H) continue;
+      lost += PW.mat.blastResist[mat[y * W + x] & ID_MASK];
+    }
+    return lost;
+  }
+  // A blast (PW.explode) hurts the tanks in its reach - the nearer its hull and the harder, the more,
+  // and the less for what cover stands between - and a heavy one close by throws one.
   function blast(world, cx, cy, r, power = 1) {
     const list = world.tanks;
     if (!list || !list.length) return;
@@ -1067,15 +1158,18 @@
       const du = Math.max(0, Math.abs(u) - 60), dv = Math.max(0, v - 2, -t.art.height - v);
       const d = Math.hypot(du, dv), reach = r * 1.6 + 6;
       if (d >= reach) continue;
-      const k = power * (1 - d / reach);
+      // (the nearest of its hull to the blast - and what stands between, still standing after it:
+      // a wall, a bank, a berm takes the blast's strength as it passes, as in the blast itself)
+      const cu = Math.max(-58, Math.min(58, u)), cv = Math.max(-t.art.height + 12, Math.min(-2, v));
+      const sx = t.x + cu * c - cv * s, sy = t.y + cu * s + cv * c;
+      const k = power * (1 - d / reach) - cover(world, cx, cy, sx, sy);
+      if (k <= 0) continue;
       if (k > 0.9 && !t.falling) {
         t.falling = true; t.tipping = false;
         t.vy = -Math.min(300, 220 * (k - 0.7));
         t.v += Math.sign(t.x - cx || 1) * 80 * (k - 0.7);
       }
-      const cu = Math.max(-58, Math.min(58, u)), cv = Math.max(-t.art.height + 12, Math.min(-2, v));
       if (k > 0.3) {
-        const sx = t.x + cu * c - cv * s, sy = t.y + cu * s + cv * c;
         scar(t, sx, sy, HULL, Math.min(9, 2 + r * 0.35));
         chipAt(world, t, sx, sy, HULL, Math.min(6, 1 + r * 0.25) * k, (sx - cx) * 2, (sy - cy) * 2);
       }
@@ -1258,7 +1352,7 @@
   }
 
   PW.tanks = { create, step, draw, drive, aimAt, muzzle, settle, ahead, explain, tool, key, hold, held: () => held, reach, gatesOf, STYLES: Object.keys(STYLES),
-    fire, hurt, blast, target, stats, poseOf, pixel, part: () => PART, PARTS: { GUN, TURRET, HULL, RUNNING },
+    fire, hurt, blast, target, stats, poseOf, pixel, part: () => PART, PARTS: { GUN, TURRET, HULL, RUNNING }, touches, struck,
     turretFrame: (style, f) => turnFrame(artOf(style), f), TURN_FRAMES,
     VMAX, ACCEL, GUN_UP, GUN_DOWN, MAX_SLOPE, STEP, SPRING_UP, SPRING_DOWN, TURN, RELOAD, ARMOUR };
 })();
