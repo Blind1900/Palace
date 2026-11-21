@@ -994,6 +994,13 @@
     held = create(world, { style: Object.keys(STYLES)[nextStyle++ % 3], side, x: gx, y: gy, facing: gx < W / 2 ? 1 : -1 });
     return held;
   }
+  // (a selection takes a tank in hand - the one the keys drive and a click aims - or, null, lets
+  // the one in hand go, its gun back to level ahead)
+  function hold(t) {
+    if (held && held !== t) aimAt(held, null);
+    held = t && !t.dead ? t : null;
+    return held;
+  }
   function key(event) {
     if (!held || held.dead || event.repeat) return false;
     const k = event.code;
@@ -1006,7 +1013,7 @@
     return true;
   }
 
-  PW.tanks = { create, step, draw, drive, aimAt, muzzle, settle, ahead, explain, tool, key, held: () => held, reach, gatesOf, STYLES: Object.keys(STYLES),
+  PW.tanks = { create, step, draw, drive, aimAt, muzzle, settle, ahead, explain, tool, key, hold, held: () => held, reach, gatesOf, STYLES: Object.keys(STYLES),
     fire, hurt, blast, target, stats, poseOf, pixel, part: () => PART, PARTS: { GUN, TURRET, HULL, RUNNING },
     VMAX, ACCEL, GUN_UP, GUN_DOWN, MAX_SLOPE, STEP, SPRING_UP, SPRING_DOWN, TURN, RELOAD, ARMOUR };
 })();

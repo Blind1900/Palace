@@ -304,6 +304,14 @@ else {
     const laid = placed && h.target && h.elevation > 15 * deg;
     T.key({ code: 'KeyS' });
     check(house && !onRoof && placed && drove && laid, `by hand: a click on a roof drops nothing (${!house ? 'no building' : onRoof ? 'a tank on the roof' : 'nothing'}), a click drops a tank on the ground under it (${placed ? 'on it' : 'not placed'}), D drives it off (${drove ? `${(h.x - hx).toFixed(0)} cells in 2.5 s` : 'did not'}), a click lays its gun on the spot (${laid ? `${(h.elevation / deg).toFixed(0)} deg up` : 'not laid'})`);
+    // (selected some other way - N78's selection - a tank is the one in hand: the keys drive it;
+    // let go, the one in hand's gun goes back to level ahead and the keys drive none)
+    const other = T.create(world, { style: 'asian', x: h.x + 260, y: world.groundTop[Math.round(h.x + 260)], facing: -1 });
+    const took = T.hold(other) === other && T.held() === other && h.target === null;
+    const keyed = T.key({ code: 'KeyA' }) && other.drive === -1 && h.drive === 0;
+    T.aimAt(other, other.x - 300, other.y - 100);
+    const let_go = T.hold(null) === null && T.held() === null && other.target === null && T.key({ code: 'KeyD' }) === false;
+    check(took && keyed && let_go, `a tank selected by another hand (PW.tanks.hold) is the one in hand - the one before it let go, its gun level (${took}), the keys drive it (${keyed}) - and let go, its gun goes level and the keys drive none (${let_go})`);
     world.tanks.length = 0;
     const t = T.create(world, { style: 'modern', x: D[0] + 120, y: world.groundTop[D[0] + 120], facing: 1 });
     T.drive(t, 1);
