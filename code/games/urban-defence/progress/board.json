@@ -1,5 +1,12 @@
 [
  {
+  "title": "Fable: the crowns sway in the wind - the renderer half of N9 - and the TANK button is live (8c490a4)",
+  "author": "Fable",
+  "time": "2026-11-20 (late night)",
+  "note": "The physics chat supplied the plant half (which leaf can move, how far, on what phase - 3e9b440); this is the drawing half. While the wind is up, the close-zoom deco rasters strip every swayable leaf into per-chunk lists and a per-frame pass paints them at the sway table offsets - trunks and stout wood stay still, crown tips swing furthest, gusts ride through the whole canopy. Calm air costs NOTHING: the leaves bake into the rasters exactly as before, and the switch between the two is debounced so gusts at the threshold cannot thrash the cache. Distant views keep baked leaves - a far crown does not visibly sway at that scale. Also in: the TANK button on the toolbar (the physics chat landed the tank itself as f712380 - drop with a click, A/D drive, S stop, R reverse, click to aim), and the two boards are ONE again - the live board you watch and the repo copy forked around N64; every done-flag earned on either side now stands on both, the physics cards and shots are mirrored into the repo, and from here the live board is the editing surface with the repo mirroring each landing. Matrix 19/19 on seeds 7, 3 and 11.",
+  "shots": []
+ },
+ {
   "title": "Opus: tanks - tracks that lie on the ground wheel by wheel, a turret and gun that stay steady (f712380, N10)",
   "author": "Opus",
   "time": "2026-11-20",
@@ -2229,6 +2236,12 @@
         "text": "Tanks in two sprites: the tracks are one sprite that always adjusts to the terrain under it, the turret with its long-range gun barrel is another that stays stabilised, aiming forward or at its target",
         "pct": 90,
         "left": "a TANK button on the toolbar (Fable's; the hand tool is ready: PW.tanks.tool / key)"
+       },
+       {
+        "id": "N71",
+        "owner": "O",
+        "step": "M5",
+        "text": "Tank clipping and turret (user, 2026-11-20, screenshot of the tank ramp): the tank must not clip into its body when facing up or down. The turret head moves with the body. Only the gun barrel moves up and down, and its elevation range follows the body of the tank."
        }
       ]
      }
