@@ -272,10 +272,14 @@
       const d = Math.abs((s.streetLeft + s.streetRight) / 2 - p.x);
       if (!near || d < near.d) near = { s, d };
     }
+    // N2: a seed goes anywhere IN VISION - the side must see the ground it casts onto
+    // (its cities, buildings, planted cores, and tanks driven forward all carry sight).
+    const side = near ? near.s.side : null;
+    if (PW.vision && side && !PW.vision.sees(world, side, p.x)) { lastDig = 'seed: beyond the side\'s vision'; return; }
     // The nearest town lends the seed its style AND its faction side: the growing city
     // threads its cores onto that side's bundle lot by lot (connect on place, release on
     // re-seat), which also heals any cut the foundation work makes landing over the line.
-    const r = capital.drop(Math.round(p.x), kind, near ? near.s.style : 'modern', near ? near.s.side : null);
+    const r = capital.drop(Math.round(p.x), kind, near ? near.s.style : 'modern', side);
     lastDig = r.ok ? `seed: ${kind} ${r.city ? r.city.id : ''} planted` : `seed: ${r.note}`;
   }
   canvas.addEventListener('contextmenu', (event) => event.preventDefault());
@@ -400,6 +404,7 @@
 
   window.pwApp = { world, layout, renderer, sim, particles, seed, timings, ready: true,
     explode, dig, planDig, preview, pipes, setDevelopSpeed: (k) => { devSpeed = k; }, heat, life, structure, fragments, cores, stability, air,
+    dropSeed: (which, x) => { dropSeed(which, { x }); return lastDig; },   // N2: the hand's seed path (vision-gated)
     setBrush: (b) => { brush = b; },
     paint: (x, y, radius, material) => paint(x, y, radius, () => material),
     stepWorld, countWater: () => sim.countWater(), simTimes,

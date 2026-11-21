@@ -399,7 +399,10 @@
       // N33: the FIRST capital of a side is the grandest - each later seat caps a level
       // lower (never under 4), so the founding city keeps its crown as the side spreads.
       if (kind === 'capital') city.levelCap = capitalCap(faction);
-      const main = { type: kind === 'capital' ? 'population' : kind, level: 2, ring: -1, side: 'right',
+      // N2: the seed grows a core with a LEVEL-1 building - the seat is born modest
+      // (core and gift first, the body raised by the crews) and re-seats grander with
+      // every level-up, to its rank's cap (N33).
+      const main = { type: kind === 'capital' ? 'population' : kind, level: 1, ring: -1, side: 'right',
         bornLevel: 1, variant: kind === 'capital' ? 'offset' : kind === 'farm' ? 'homestead' : 'compound',
         seedN: seedN += 17, owner: allotOwner(), x };
       if (!placeLot(city, main, x)) {
@@ -1926,8 +1929,10 @@
       }).join(' | ');
     }
 
-    return { cities, barriers, drop, adoptSettlements, step, draw, describe, dbg, regrades: () => regradeCount,
+    const api = { cities, barriers, drop, adoptSettlements, step, draw, describe, dbg, regrades: () => regradeCount,
       _adapt: adaptNeighbours };   // (test hook: the N57 neighbour re-seat, called by the harness)
+    world.capitalGrowth = api;     // N2: vision reads the engine's cities off the world
+    return api;
   }
 
   PW.createCapitalGrowth = createCapitalGrowth;
