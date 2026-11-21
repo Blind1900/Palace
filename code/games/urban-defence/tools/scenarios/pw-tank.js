@@ -1,9 +1,10 @@
-// Tanks (N10; run with --page=pixel-world.html --params=det=1&seed=N): a tank in two parts - its
-// tracks lying on the ground under them wheel by wheel, the hull tilted along them; its turret
-// level and its gun laid in the world's frame - and driven: to its top speed in 1.5 s, over bumps,
-// up a slope it can climb, stopped by one it can't, by a wall, a roof over it and a drop; turning
-// round and backing up; its gun on targets ahead, high, low and behind; tipping into a hole blown
-// under it. The courses are laid on stone in the wilds, cleared above; only the tanks are stepped.
+// Tanks (N10, N71, N72; run with --page=pixel-world.html --params=det=1&seed=N): a tank in two
+// parts - its tracks lying on the ground under them wheel by wheel, the hull tilted along them and
+// the same both ways round; its turret on the hull, tilting with it, and its gun laid within its
+// reach of the hull - and driven: to its top speed in 1.5 s, over bumps, up a slope it can climb,
+// stopped by one it can't, by a wall, a roof over it and a drop; going the other way (only the
+// turret turns); its gun on targets ahead, high, low and behind; tipping into a hole blown under
+// it. The courses are laid on stone in the wilds, cleared above; only the tanks are stepped.
 const { world, layout } = pwApp;
 const { M } = PW;
 const checks = [];
@@ -42,7 +43,7 @@ const groundAt = (x, y) => { for (let yy = Math.round(y) - 30; yy < world.height
 // its hull is clear of the ground; the worst miss in cells)
 function seated(t) {
   let worst = 0;
-  const R = t.art.R, n = t.art.wheels.length, fx = t.facing * Math.cos(t.angle), fy = t.facing * Math.sin(t.angle), nx = -Math.sin(t.angle), ny = Math.cos(t.angle);
+  const R = t.art.R, n = t.art.wheels.length, fx = Math.cos(t.angle), fy = Math.sin(t.angle), nx = -Math.sin(t.angle), ny = Math.cos(t.angle);
   for (let i = 0; i < n; i += 1) {
     if (!t.contact[i]) continue;
     const u = t.art.wheels[i], v = t.springs[i], wx = t.x + u * fx + v * nx, wy = t.y + u * fy + v * ny;
@@ -96,6 +97,9 @@ else {
   const flat = T.STYLES.map((s) => looks[s].tank);
   check(flat.every((t) => Math.abs(t.angle) < 0.01 && t.contact.every((c) => c === 1) && t.springs.every((s) => Math.abs(s) < 0.6) && seated(t) <= 1.5),
     `on flat ground every wheel is on it and the hull lies level (${flat.map((t) => `${t.style}: ${t.contact.reduce((a, b) => a + b, 0)}/${t.contact.length} wheels down, ${(t.angle / deg).toFixed(1)} deg`).join('; ')})`);
+  // (the hull the same both ways round: each cell of it and its mirror both there or both not)
+  const unlike = flat.map((t) => { const h = t.art.hull; let n = 0; for (let v = h.y0; v <= h.y1; v += 1) for (let u = h.x0; u <= h.x1; u += 1) if (!!h.px[(v - h.y0) * h.w + (u - h.x0)] !== !!(-u - 1 >= h.x0 && h.px[(v - h.y0) * h.w + (-u - 1 - h.x0)])) n += 1; return n; });
+  check(unlike.every((n) => n === 0), `the hull is the same at both ends, so only the turret turns when it goes the other way (${unlike.join(' / ')} cells unlike their mirror)`);
   // (the gun: level ahead, then on a target high, low and behind)
   const t = looks.gothic.tank;
   const laid = (x, y, secs) => { T.aimAt(t, x, y); run(t, secs); return T.muzzle(t); };
@@ -104,17 +108,26 @@ else {
   const mid = laid(t.x + 400, t.y - 100, 2), m0 = T.muzzle(t), want = Math.atan2(m0.y - (t.y - 100), (t.x + 400) - m0.x) / deg;
   const midDeg = Math.atan2(-mid.dy, mid.dx) / deg;
   await view('tank-styles', A.x0 + 320, A.g - 40, 5);
-  const back = laid(t.x - 500, t.y - 150, 2.5), backDeg = Math.atan2(-back.dy, -back.dx) / deg;
-  check(Math.abs(upDeg - T.GUN_UP) < 1 && Math.abs(lowDeg + T.GUN_DOWN) < 1 && Math.abs(midDeg - want) < 2 && t.aimFacing === -1 && t.facing === 1 && back.dx < 0 && backDeg > 5,
-    `the gun is laid on its target - up to ${T.GUN_UP} deg and down to ${T.GUN_DOWN} below the horizontal (a target nearly overhead: ${upDeg.toFixed(1)} deg, one below: ${lowDeg.toFixed(1)}, one in reach: ${midDeg.toFixed(1)} for ${want.toFixed(1)}); a target behind, the turret turns round to it and the hull stays as it was (turret facing ${t.aimFacing}, hull ${t.facing}, gun at ${backDeg.toFixed(1)} deg)`);
+  // (a target behind: the turret turns round to it - seen half way round - and the hull stays put)
+  const x00 = t.x, a00 = t.angle;
+  T.aimAt(t, t.x - 500, t.y - 150);
+  let ticks = 0;
+  while (t.turning < T.TURN / 2 && ticks < 120) { T.step(world, DT); ticks += 1; }
+  const halfWay = t.turning >= T.TURN / 2 * 0.9;
+  await view('tank-turret-turning', t.x, t.y - 30, 7);
+  run(t, 2.2);
+  const back = T.muzzle(t), backDeg = Math.atan2(-back.dy, -back.dx) / deg;
+  check(Math.abs(upDeg - T.GUN_UP) < 1 && Math.abs(lowDeg + T.GUN_DOWN) < 1 && Math.abs(midDeg - want) < 2 && halfWay && t.facing === -1 && t.x === x00 && t.angle === a00 && back.dx < 0 && backDeg > 5,
+    `the gun is laid on its target - up to ${T.GUN_UP} deg and down to ${T.GUN_DOWN} below the hull's line (a target nearly overhead: ${upDeg.toFixed(1)} deg, one below: ${lowDeg.toFixed(1)}, one in reach: ${midDeg.toFixed(1)} for ${want.toFixed(1)}); a target behind, the turret turns round to it (${halfWay ? `half way at ${(ticks * DT).toFixed(2)} s` : 'never seen turning'}) and the hull stays as it was (turret facing ${t.facing < 0 ? 'left' : 'right'}, hull ${t.x === x00 && t.angle === a00 ? 'unmoved' : 'moved'}, gun at ${backDeg.toFixed(1)} deg)`);
   await view('tank-turret-behind', t.x - 40, t.y - 60, 7);
   T.aimAt(t, null);
   world.tanks.length = 0;
 }
 
 // 2. Driving: from rest to its top speed in 1.5 s; over bumps, every wheel finding the ground on its
-// spring; up a slope it climbs (the hull along it, the turret level, the gun kept off its deck);
-// stopped by a wall, a slope too steep, a roof over it (a tunnel), a drop; turning round; backing up.
+// spring; up a slope it climbs (the hull along it, the turret tilting with it, the gun within its
+// reach of the hull); stopped by a wall, a slope too steep, a roof over it (a tunnel), a drop; going
+// the other way - only the turret turns - and down the slope nose-down.
 const B = site(1100);
 if (!B) check(false, 'a second stretch of the wilds for the driving course');
 else {
@@ -137,12 +150,15 @@ else {
   check(Math.abs(v075 - T.VMAX / 2) < T.VMAX * 0.05 && Math.abs(v15 - T.VMAX) < 0.01,
     `it gathers speed to its top speed in 1.5 s (${v075.toFixed(1)} cells/s at 0.75 s, ${v15.toFixed(1)} at 1.5 s, of ${T.VMAX}: about 14 km/h)`);
   const travel0 = t.travel;
-  let along = 0, px = t.x, py = t.y, ticks = 0;
+  // (the gun's elevation over the hull's line, the way the turret faces: never outside its reach)
+  let along = 0, px = t.x, py = t.y, ticks = 0, relLo = Infinity, relHi = -Infinity;
+  const rel = () => { const r = (t.elevation + t.facing * t.angle) / deg; relLo = Math.min(relLo, r); relHi = Math.max(relHi, r); };
   const go = () => {
     T.step(world, DT); ticks += 1;
     worst = Math.max(worst, seated(t));
     along += Math.hypot(t.x - px, t.y - py); px = t.x; py = t.y;
     if (t.x > x0 + 300 - 60 && t.x < x0 + 374 + 60) bumpSprings = Math.max(bumpSprings, Math.max(...t.springs) - Math.min(...t.springs));
+    rel();
   };
   while (ticks < 14 * 60 && t.x < x0 + 309) go();
   await view('tank-bump', t.x, t.y - 20, 7);
@@ -152,19 +168,25 @@ else {
   while (ticks < 14 * 60) go();
   check(Math.abs(t.travel - travel0 - along) < along * 0.05 && bumpSprings > 2.5 && worst <= 2,
     `over the bumps each road wheel rides up on its spring and the track wraps them as they lie (the wheels ${bumpSprings.toFixed(1)} cells apart at most), every wheel on the ground the whole way (the worst ${worst.toFixed(1)} cells off it), the links moving with the ground covered (${(t.travel - travel0).toFixed(0)} cells run, ${along.toFixed(0)} driven)`);
-  check(onRamp && Math.abs(onRamp.angle + 20) < 2.5 && Math.abs(onRamp.elevation - Math.max(0, -onRamp.angle - 10)) < 1.5 && onRamp.v < T.VMAX * 0.85 && onRamp.v > T.VMAX * 0.7,
-    `up a 20-degree slope it slows (${onRamp ? onRamp.v.toFixed(0) : '-'} cells/s), the hull lies along it (${onRamp ? onRamp.angle.toFixed(1) : '-'} deg), the turret level and the gun laid level ahead but kept 10 deg off its own deck (${onRamp ? onRamp.elevation.toFixed(1) : '-'} deg above the horizontal)`);
+  check(onRamp && Math.abs(onRamp.angle + 20) < 2.5 && Math.abs(onRamp.elevation - Math.max(0, -onRamp.angle - T.GUN_DOWN)) < 1.5 && onRamp.v < T.VMAX * 0.85 && onRamp.v > T.VMAX * 0.7,
+    `up a 20-degree slope it slows (${onRamp ? onRamp.v.toFixed(0) : '-'} cells/s), the hull lies along it (${onRamp ? onRamp.angle.toFixed(1) : '-'} deg) with the turret on it, and the gun, laid level ahead, is held within its reach of the hull: ${T.GUN_DOWN} deg below its line (${onRamp ? onRamp.elevation.toFixed(1) : '-'} deg above the horizontal)`);
   check(t.v === 0 && t.blocked === 'too steep' && t.x + 58 < wallAt && t.x + 58 > wallAt - 30 && Math.abs(t.y - (g - rise)) < 2,
     `a wall stops it short of its nose (stopped ${(wallAt - t.x - 58).toFixed(0)} cells from it: ${t.blocked || 'not stopped'})`);
-  // (turning round, then backing up)
+  // (the other way: straight off, the hull as it was, the turret turning to face the way it goes;
+  // then down the slope, nose-down)
+  const a0 = t.angle;
   T.drive(t, -1);
-  let pivoted = -1;
-  run(t, 3, (k) => { if (pivoted < 0 && t.facing === -1) pivoted = k; });
-  const goingLeft = t.v < 0 && t.facing === -1;
-  T.drive(t, 1, true);
-  run(t, 2.5);
-  check(goingLeft && pivoted > 30 && t.facing === -1 && t.v > 0 && Math.abs(t.v - T.VMAX * 0.6) < 0.5,
-    `to go the other way it stops, turns round on its tracks (${(pivoted * DT).toFixed(2)} s) and drives off; told to back up it backs up, slower (${t.v.toFixed(1)} cells/s, still facing ${t.facing < 0 ? 'left' : 'right'})`);
+  let moved = -1, turned = -1, k = 0;
+  while (k < 4 * 60 && t.x > rampAt + run20 + 70) { T.step(world, DT); rel(); if (moved < 0 && t.v < 0) moved = k; if (turned < 0 && t.facing === -1) turned = k; k += 1; }
+  const plateau = { v: t.v, angle: t.angle };
+  check(moved >= 0 && moved <= 2 && turned > 0 && Math.abs(turned * DT - T.TURN) < 0.05 && Math.abs(plateau.v + T.VMAX) < 0.5 && Math.abs(plateau.angle - a0) < 1e-6,
+    `to go the other way it just drives off the other way (moving at once, ${Math.abs(plateau.v).toFixed(0)} cells/s soon after), its hull the same both ways and never turned round, while its turret turns to face the way it goes (${(turned * DT).toFixed(2)} s)`);
+  k = 0;
+  while (k < 8 * 60 && t.x > rampAt + run20 / 2) { T.step(world, DT); rel(); k += 1; }
+  const down = { angle: t.angle / deg, elevation: t.elevation / deg, v: t.v };
+  await view('tank-downhill', t.x, t.y - 30, 6);
+  check(Math.abs(down.angle + 20) < 2.5 && t.facing === -1 && Math.abs(down.elevation) < 1 && Math.abs(down.v + T.VMAX) < 1 && relLo >= -T.GUN_DOWN - 0.01 && relHi <= T.GUN_UP + 0.01,
+    `down the slope nose-down at full speed (${Math.abs(down.v).toFixed(0)} cells/s), the turret on the hull, the gun laid level ahead within its reach (${down.elevation.toFixed(1)} deg); the gun never once outside its reach of the hull on the whole course (${relLo.toFixed(1)} to ${relHi.toFixed(1)} deg over its line), so it never dips into the hull nor the turret off it`);
   T.drive(t, 0);
   run(t, 1);
   world.tanks.length = 0;
@@ -198,7 +220,7 @@ else {
     fill(Math.round(c.x) - 10, cg + 41, c0 + 900, cg + 44, M.STONE);
     let tipped = 0;
     run(c, 4, () => { tipped = Math.max(tipped, c.angle); });
-    const n = c.art.wheels.length, u = c.art.wheels[n - 1], frontY = c.y + u * c.facing * Math.sin(c.angle) + c.springs[n - 1] * Math.cos(c.angle);
+    const n = c.art.wheels.length, u = c.art.wheels[n - 1], frontY = c.y + u * Math.sin(c.angle) + c.springs[n - 1] * Math.cos(c.angle);
     await view('tank-tipped', c.x, cg + 10, 6);
     check(tipped > 15 * deg && !c.falling && Math.abs(frontY - (cg + 41)) < 3 && seated(c) <= 2,
       `with the ground blown away from under its front it tips over the edge nose down (to ${(tipped / deg).toFixed(0)} deg) and comes to rest across it, its front wheels on the floor of the hole 40 cells down (${(frontY - cg).toFixed(0)} down; ${c.falling ? 'still falling' : 'resting'})`);
