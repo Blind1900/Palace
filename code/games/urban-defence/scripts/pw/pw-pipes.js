@@ -1065,8 +1065,16 @@
         mergeTouching(line);
         return core;
       }
-      // Mid-run: the stretch around it is taken up and re-laid through its connectors.
-      const a = Math.max(0, x - (SPAN * 2 + RAMP + 6) - line.x0), bk = Math.min(line.ys.length - 1, x + SPAN * 2 + RAMP + 6 - line.x0);
+      // Mid-run: the stretch around it is taken up and re-laid through its connectors. The
+      // window reaches the NEIGHBOURING cores when they stand close, so the N37 shelf
+      // between beds is actually rewritten - a window narrower than the shelf left the old
+      // V-dive standing beside every new cabinet (the user's reopened bend screenshots).
+      let aX = x - (SPAN * 2 + RAMP + 6), bX = x + SPAN * 2 + RAMP + 6;
+      for (const c of line.cores) {
+        if (c.x < x && x - c.x <= 150) aX = Math.min(aX, c.x - SPAN - 2);
+        if (c.x > x && c.x - x <= 150) bX = Math.max(bX, c.x + SPAN + 2);
+      }
+      const a = Math.max(0, aX - line.x0), bk = Math.min(line.ys.length - 1, bX - line.x0);
       const fresh = contour(line.x0 + a, line.x0 + bk, depthAt);
       snapToCores(fresh, line.x0 + a, line.cores.filter((c) => c.x >= line.x0 + a - SPAN && c.x <= line.x0 + bk + SPAN));
       const ease = (t) => t * t * (3 - 2 * t);
@@ -1080,6 +1088,18 @@
           const yy = old + r, xx = line.x0 + k;
           takeUp(line, xx, yy);
           if (r >= 0 && r < BORE) PW.setLayer(world, 'pipe', xx, yy, 0);
+        }
+        // N34 reopen: where the path moves whole storeys, the abandoned corridor's pale
+        // trench bed FADES back to turned earth - the old re-lays' bright loops read as a
+        // second overlapping tube at the user's close look.
+        if (Math.abs(ny - old) > 6) {
+          const xx = line.x0 + k;
+          for (let yy = old - BED - 2; yy <= old + BORE + BED + 2; yy += 1) {
+            if (yy >= ny - 1 && yy <= ny + BORE) continue;
+            if ((mat[yy * W + xx] & ID_MASK) === M.FILL && !PW.getOwner(world, xx, yy)) {
+              PW.setLayer(world, 'paint', xx, yy, rgb(tone([108, 88, 60], (PW.hash2(xx, yy) & 3) === 0 ? 0.88 : 1)));
+            }
+          }
         }
         line.ys[k] = ny;
       }

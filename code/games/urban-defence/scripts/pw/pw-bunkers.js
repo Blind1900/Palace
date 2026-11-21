@@ -130,19 +130,34 @@
   // nothing back) if the rock runs on past `max` steps. Returns the columns it cut, so the wild
   // can be kept off the opening's mouth.
   function cutOpening(world, x, y, dx, dy, halfH, max, owner) {
+    // N32 reopen: the run ends the moment the cover over it thins to a skin - a port at
+    // the face's own angle used to run on UNDER the skin to the ridge, a long dark stroke
+    // that read as a slab jutting from the mountainside. Short and practical, as asked.
+    const coverAbove = (cx, topY) => {
+      let n = 0;
+      for (let u = 1; u <= 4; u += 1) { if (solidRock(world, cx, topY - u)) n += 1; else break; }
+      return n;
+    };
     let d = 0;
-    while (d < max && solidRock(world, x + dx * d, y + dy * d - halfH)) d += 1;
+    while (d < max) {
+      const nx = x + dx * (d + 1), topY = y + dy * (d + 1) - halfH;
+      if (!solidRock(world, nx, topY)) break;
+      d += 1;
+      if (coverAbove(nx, topY) <= 2) break;   // the skin: the mouth opens here
+    }
     if (d >= max) return null;
     const splay = (t) => halfH + (t > d * 0.68 ? 1 : 0);
     for (let t = 0; t <= d; t += 1) {
       const cx = x + dx * t, cy = y + dy * t;
       const hh = splay(t);
       for (let k = -hh; k <= hh; k += 1) {
+        // N32 reopen: the hole FOLLOWS THE WALL - a cell at or above its own column's
+        // surface line is the open mountainside, and nothing is ever painted there. The
+        // old bare-air test let the channel ride out over the face wherever the rock
+        // backdrop carried a back layer, and the mouth jutted at its top end and corner
+        // (the user's screenshots, twice over).
+        if (cy + k <= world.groundTop[cx]) continue;
         const id = PW.get(world, cx, cy + k) & ID_MASK;
-        // N38: the opening stops at the hill it is cut in - where the sloped face falls away
-        // early, nothing is painted into the open air beyond it, so no dark slab ever juts
-        // out of the mountainside at the mouth's top end or corner.
-        if (id === M.AIR && !PW.getLayer(world, 'back', cx, cy + k) && !(PW.getFlags(world, cx, cy + k) & FLAG.CARVED)) continue;
         if (id !== M.AIR) PW.set(world, cx, cy + k, M.AIR, { quiet: true });
         PW.setLayer(world, 'deco', cx, cy + k, 0);
         const rib = (t % 6) === 1;
@@ -153,10 +168,20 @@
       }
       const collar = t >= d - 2;
       for (const k of [-hh - 1, hh + 1]) {
-        if (!solidRock(world, cx, cy + k)) continue;
+        if (cy + k <= world.groundTop[cx]) continue;   // the lining never rises past the face
+        const beside = PW.get(world, cx, cy + k) & ID_MASK;
+        if (beside === M.AIR || !PW.mat.terrain[beside]) continue;
         const tread = k > 0 && (t & 3) === 0 && !collar;
         put(world, cx, cy + k, M.REINFORCED, collar ? REINF_DARK : tread ? REINF_LIT : REINF_C, owner);
       }
+    }
+    // The mouth notch: the thin skin left over the outer end is opened flush with the face,
+    // unlined, so the port ENDS at the terrain with a clean slot - never a lip past it.
+    for (let u = 1; u <= 3; u += 1) {
+      const sxx = x + dx * d, sy = y + dy * d - splay(d) - u;
+      if (!solidRock(world, sxx, sy)) break;
+      PW.set(world, sxx, sy, M.AIR, { quiet: true });
+      PW.setLayer(world, 'deco', sxx, sy, 0);
     }
     // The sill at the fighting end: two armour cells with a hazard tip, cover to shoot over.
     for (const t of [0, 1]) {
@@ -210,7 +235,8 @@
           reinforce(world, canvasX, roofTop - 2, canvasX + BW - 1, ground + K.VAULT_DEPTH + 2, id);
           const cuts = [];
           // The embrasure runs on through the rock to daylight...
-          cuts.push(cutOpening(world, xF + facing, slitY, facing, 0, 3, EMBRASURE_MAX, id));
+          // (halfH 4: a window a trooper can shoot through AND crawl out of - the reopen's rule)
+          cuts.push(cutOpening(world, xF + facing, slitY, facing, 0, 4, EMBRASURE_MAX, id));
           // ...and two ports climb from under the gallery ceiling to openings higher on the
           // mountainside.
           for (const back of [Math.round(BW * 0.18), Math.round(BW * 0.42)]) {

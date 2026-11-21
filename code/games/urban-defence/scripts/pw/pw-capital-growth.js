@@ -201,7 +201,9 @@
       // earthmoving is noticed by this signature changing, and the lot re-seats.
       lot.groundSig = apronSig(lot.placed);
       world.buildings[lot.owner - 1] = PW.buildingRecord(world, res.stamp,
-        { id: lot.owner, side: 'left', type: lot.type, style: city.style, level: lot.level, kind: city.kind });
+        // (side is layout here; faction is the real allegiance - the tanks' gate rule keys
+        // off b.faction ?? b.side, PS's half)
+        { id: lot.owner, side: 'left', faction: city.faction || null, type: lot.type, style: city.style, level: lot.level, kind: city.kind });
       // The newcomer threads its vault cores onto its faction's bundle (the worldgen rule,
       // step E): the line grows out to it or the stretch is taken up and re-laid through
       // its connectors - which also heals any cut the foundation work just made. A re-seat
@@ -1577,7 +1579,7 @@
           const growJ = !!(world.repair && !PW.INSTANT_BUILDS);
           const res = PW.foundations.place(world, canvas, x0, { style: city.style, owner, grow: growJ });
           if (!res) { world.buildings.pop(); continue; }
-          const rec = PW.buildingRecord(world, res.stamp, { id: owner, side: 'left', type: 'joint', style: city.style, level: 1, kind: city.kind });
+          const rec = PW.buildingRecord(world, res.stamp, { id: owner, side: 'left', faction: city.faction || null, type: 'joint', style: city.style, level: 1, kind: city.kind });
           for (const k of rec.cores) k.kind = 'main';
           rec.primal = true;
           world.buildings[owner - 1] = rec;
