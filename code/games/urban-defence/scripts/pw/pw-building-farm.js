@@ -259,19 +259,32 @@
         art.deco(u, walkV + 6, [128, 132, 136]);
         if ((u - legX) % 6 === 0) for (let v = walkV + 1; v < walkV + 6; v += 1) art.deco(u, v, [110, 114, 118]);
       }
-      // N50: the bins discharge down through the core beneath them. The core sits under the
-      // middle of the bank; each bin has a hopper taper at its foot and an enclosed auger run
-      // along the floor to the core's grating, grain gold in the throat and the slots.
+      // N50: the bins discharge down through the core beneath them - the core under the middle
+      // of the bank, a hopper taper at each bin's foot, grain gold in the throat and the slots.
+      // N74: the core connects to EVERY silo by a resource pipe (the user's sketch): a riser
+      // out of the core's top, a manifold running above the core along the bank, and a branch
+      // dropping from the split onto each bin, a collar and a grain glint at every tap.
       coreLx = shedWidth + 10 + (((count - 1) * 46 + 36) >> 1);
       const coreCx = X(coreLx), g0x = coreCx - 11, g1x = coreCx + 11;
       for (const b of bins) {
         const bx = X(b.lx0 + b.d / 2);
         for (const [dx, dy] of [[-2, 3], [-1, 2], [0, 1], [1, 2], [2, 3]]) K.deco(c, bx + dx, ground - dy, [96, 100, 106]);
-        for (let x = Math.min(bx, coreCx); x <= Math.max(bx, coreCx); x += 1) {
-          if (x < g0x || x > g1x) K.deco(c, x, ground - 1, (x & 3) === 0 ? tone(GRAIN, 0.95) : [74, 78, 84]);
-        }
       }
       for (let x = g0x + 1; x < g1x; x += 2) K.deco(c, x, ground - 1, tone(GRAIN, 1.1));
+      const MH = 30;   // the manifold's height over the floor line
+      const pipe = (x, y, edge) => K.deco(c, x, y, edge ? [58, 60, 64] : (PW.hash2(x, y) & 7) === 0 ? tone(GRAIN, 1.05) : [124, 128, 134]);
+      for (let v = 1; v <= MH; v += 1) { pipe(coreCx - 1, ground - v, true); pipe(coreCx, ground - v, false); pipe(coreCx + 1, ground - v, true); }
+      const centres = bins.map((b) => X(b.lx0 + b.d / 2));
+      const mx0 = Math.min(...centres), mx1 = Math.max(...centres);
+      for (let x = mx0; x <= mx1; x += 1) {
+        pipe(x, ground - MH - 1, true); pipe(x, ground - MH, false); pipe(x, ground - MH + 1, true);
+        if ((x - mx0) % 12 === 6) { pipe(x, ground - MH - 2, true); pipe(x, ground - MH + 2, true); }   // flange rings
+      }
+      for (const bx of centres) {
+        for (let v = MH - 8; v < MH; v += 1) { pipe(bx - 1, ground - v, true); pipe(bx, ground - v, false); pipe(bx + 1, ground - v, true); }
+        for (const dx of [-2, 2]) { pipe(bx + dx, ground - (MH - 8), true); pipe(bx + dx, ground - (MH - 7), true); }   // the collar at the tap
+        K.deco(c, bx, ground - (MH - 9), tone(GRAIN, 1.2));   // grain in the throat where the pipe taps the bin
+      }
     } else if (variant === 'barn') {
       const w = 180, wallH = 72;
       coreLx = 90;                       // under the hay loft (N50)
