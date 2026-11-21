@@ -398,6 +398,7 @@
     const extraCores = level >= 4 ? 3 : 2;
     for (let i = 0; i < extraCores; i += 1) K.core(c, X(30 + i * Math.round((bodyWidth - 80) / Math.max(1, extraCores - 1))), ground);
     K.corePillars(c, style);
+    if (!PW.NO_UNDERCROFT) K.undercroft(c, style, margin, margin + bodyWidth - 1);   // N3 vehicle rule: armour rolls through the base
     K.bakeLights(c, style);
     c.body = { left: margin, right: margin + bodyWidth - 1, top: hangar ? Math.min(floorRow(rearStoreys), wallTop - HANGAR.vaultRise) : floorRow(rearStoreys) - 34, bottom: ground - 1 };
     if (hangar) c.runway = { from: X(hangarRight) + facing, direction: facing, length: 380, y: ground };
@@ -955,6 +956,10 @@
     }
     c.body.left -= annexSide <= 0 ? ANNEX_W + 4 : pad - 1;
     c.body.right += annexSide >= 0 ? ANNEX_W + 4 : pad - 1;
+    // N3 vehicle rule, re-cut last: the armour skin and the wings rolled over the tower's
+    // undercroft - the drive-through opens again through the whole armoured mass, the
+    // belts above the portals standing as the fortified lintel.
+    if (!PW.NO_UNDERCROFT) K.undercroft(c, style);
     return c;
   }
   const KIT_P = (style) => STYLES[style] || STYLES.modern;

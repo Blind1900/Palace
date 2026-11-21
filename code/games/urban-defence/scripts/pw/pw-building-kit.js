@@ -331,6 +331,61 @@
     },
   };
 
+  // N3 vehicle rule: the ground storey reads and works as a GATE HALL. Everything loose -
+  // furniture, glass fronts, trim - is struck from the first storey, an asphalt lane runs
+  // flush through, and every load-bearing wall and pillar crossing the band is kept but
+  // MARKED as a gate pier (c.gates), wearing gate livery. The piers must stand - in a 2D
+  // world they are the only thing carrying the tower (a full clear dropped whole cities:
+  // the drive audit's amputated stumps) - so the PASS-THROUGH itself is the physics half:
+  // a friendly hull drives through marked gate cells as water passes a HATCH (with PS).
+  function undercroft(c, style, boundL, boundR) {
+    const g = c.ground;
+    const top = g - (S.FLOOR - S.SLAB);            // the band under storey 1's ceiling slab
+    const L = boundL ?? c.body.left, R = boundR ?? c.body.right;
+    const GATE = [172, 150, 58], GATE_DK = [60, 56, 40];
+    c.gates = c.gates || [];
+    const pierCol = new Uint8Array(c.width);
+    for (let x = L; x <= R; x += 1) {
+      let pier = false;
+      for (let y = top; y < g; y += 1) {
+        const i = y * c.width + x;
+        const role = c.role[i];
+        if (!c.mat[i]) continue;
+        if (role === ROLE.WALL || role === ROLE.FRAME || role === ROLE.GLASS) {
+          pier = true;
+          // gate livery: the pier keeps every cell of its matter (in a 2D world it carries
+          // the tower - a cleared band dropped whole cities), banded so the passage reads meant
+          if (role !== ROLE.GLASS && ((g - y) & 7) < 2) c.paint[i] = pack(((g - y) & 15) < 2 ? GATE : GATE_DK);
+        }
+      }
+      if (pier) { pierCol[x] = 1; c.gates.push({ x, y0: top, y1: g - 1 }); }
+    }
+    // the lane: an asphalt wear course over the floor line, only where nothing stands on it
+    // (a road row under a wall's foot severed every tower from its bed - the collapse)
+    for (let x = L; x <= R; x += 1) {
+      if (pierCol[x]) continue;
+      for (let r = 0; r < 2; r += 1) {
+        const i = (g + r) * c.width + x;
+        const role = c.role[i];
+        if (role !== ROLE.NONE && role !== ROLE.ORNAMENT) continue;
+        if (!c.mat[i]) continue;
+        c.mat[i] = M.ASPHALT;
+        c.paint[i] = pack(tone([74, 76, 80], (x & 3) === 0 ? 1.08 : r ? 0.9 : 1));
+      }
+    }
+    // portal dressing: hazard chevrons on the jamb stubs and thresholds, lamps down the lane
+    for (const [px, side] of [[L, 1], [R, -1]]) {
+      for (let d = 0; d < 6; d += 1) {
+        const x = px + side * d;
+        deco(c, x, g - 1, (d & 1) ? [188, 158, 48] : [30, 30, 32]);
+        if (d < 3) deco(c, x, top - 1, (d & 1) ? [188, 158, 48] : [30, 30, 32]);
+      }
+    }
+    for (let x = L + 20; x <= R - 20; x += 44) ceilingLamp(c, style, x, top + 1);
+    c.meta.undercroft = { top, height: g - top };
+    return c;
+  }
+
   // Ceiling light: the fixture plus a soft cone of light on the back wall below it.
   function ceilingLamp(c, style, x, ceilingRow) {
     const P = STYLES[style];
@@ -568,7 +623,7 @@
     S, STYLES, ROLE, CORE_COLOR, CORE_SHADE, BEACON, SCREEN, GLASS_DARK, GLASS_SIDE, SHINE,
     tone, mix, pack, grain, clamp255,
     createCanvas, inside, solid, solidIfEmpty, clear, back, backIfEmpty, deco, isSolid, rect, bitmap,
-    wallColor, slabColor, backWallColor, backWindow, FURNITURE, ceilingLamp, bakeLights, core, coreColumn, coreUnit, corePillars,
+    wallColor, slabColor, backWallColor, backWindow, FURNITURE, ceilingLamp, bakeLights, undercroft, core, coreColumn, coreUnit, corePillars,
     VAULT, VAULT_DEPTH, CORE_HOT,
   };
 })();

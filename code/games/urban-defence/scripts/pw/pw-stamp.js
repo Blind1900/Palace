@@ -69,6 +69,9 @@
       cores: canvas.cores.map((c) => ({ ...pt(c), vault: c.vault && { x0: c.vault.x0 + ox, x1: c.vault.x1 + ox, top: c.vault.top + oy, bottom: c.vault.bottom + oy, lid: c.vault.lid + oy } })),
       devices: canvas.devices.map(pt), windows: canvas.windows.map(pt), storage: (canvas.storage || []).map(pt),
       hatches: (canvas.hatches || []).map((h) => ({ x0: h.x0 + ox, x1: h.x1 + ox, y0: h.y0 + oy, y1: h.y1 + oy })),
+      // N3 vehicle rule: the gate piers at grade (kept structure a friendly hull may pass;
+      // the pass-through physics is the tanks' half, keyed off these spans)
+      gates: (canvas.gates || []).map((q) => ({ x: q.x + ox, y0: q.y0 + oy, y1: q.y1 + oy })),
       hangar: canvas.hangar && { ...box(canvas.hangar), door: { x: canvas.hangar.door.x + ox, top: canvas.hangar.door.top + oy, bottom: canvas.hangar.door.bottom + oy },
         spawn: pt(canvas.hangar.spawn) },
       runway: canvas.runway && { ...canvas.runway, from: canvas.runway.from + ox, y: canvas.runway.y + oy },

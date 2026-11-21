@@ -281,6 +281,7 @@
       K.core(c, mx(cx), ground);
     }
     K.corePillars(c, style);
+    if (!PW.NO_UNDERCROFT) K.undercroft(c, style, margin, margin + bodyWidth - 1);   // N3 vehicle rule: the ground storey is a drive-through
     K.bakeLights(c, style);
     c.floors = spans.map((span) => ({ storey: span.k, y: floorRow(span.k), left: span.left + span.wall, right: span.right - span.wall }));
     c.body = { left: margin, right: margin + bodyWidth - 1, top: floorRow(storeys), bottom: ground - 1 };

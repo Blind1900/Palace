@@ -12,6 +12,13 @@
   const status = document.getElementById('world-status');
   const toolbar = document.getElementById('world-tools');
   const seed = Number(params.get('seed')) || 7;
+  // Engine switches from the URL, as in the live app: flags=NAME turns PW.NAME on,
+  // flags=NAME:0 off, before anything is generated (probes A/B the lab with these).
+  for (const f of (params.get('flags') || '').split(',')) {
+    if (!f) continue;
+    const [name, v] = f.split(':');
+    PW[name] = v === undefined ? true : v !== '0';
+  }
 
   const world = PW.createWorld(12288, 2304);
   world.random = PW.createRandom(seed + 99);
@@ -114,7 +121,7 @@
   const air = world.air = PW.createAir ? PW.createAir(world, particles) : null;
   // N75: the lab runs the one pipeline too. No settlements here, so build() lays nothing -
   // the FIRST seed founds the line, and every later seed threads the same bundle.
-  const pipes = PW.createPipes ? PW.createPipes(world) : null;
+  const pipes = PW.createPipes && !PW.NO_LAB_PIPES ? PW.createPipes(world) : null;
   if (pipes) pipes.build();
 
   const growth = PW.createCapitalGrowth(world, { seed });
@@ -208,6 +215,7 @@
       // (repair and the pipeline ride the lab's speed, in step with the growth clock)
       if (repair) repair.step(DT * speed);
       if (pipes) pipes.step(DT * speed);
+      if (PW.tanks) PW.tanks.step(world, DT);   // (N3 vehicle rule: tanks test the lab's streets)
       if (stability) stability.step();
       if (air) air.step();
       if (PW.stepSmokeBursts) PW.stepSmokeBursts(world, DT);

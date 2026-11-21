@@ -587,6 +587,67 @@
       if (changed) { clearSimAround(x0, lo - 4, x1, hi + 6); regradeCount += 1; }
       return changed;
     }
+    // N3 vehicle rule: the street strip between two works is graded to armour's limits - a
+    // straight ramp no steeper than ~30 degrees, cut and filled with the farms' machinery,
+    // frozen where buildings, laid roads, water or fields stand. Too steep to ramp at all
+    // (a cliff between pads tighter than the grade allows) is left honest and unpaved.
+    function gradeLane(xa, xb) {
+      const x0 = Math.max(8, Math.round(Math.min(xa, xb))), x1 = Math.min(world.width - 9, Math.round(Math.max(xa, xb)));
+      const n = x1 - x0 + 1;
+      if (n < 4) return false;
+      const g = new Int32Array(n), t = new Int32Array(n), frozen = new Uint8Array(n);
+      const soilish = (id) => id === M.GRASS || id === M.TOPSOIL || id === M.SOIL || id === M.LOOSE_SOIL || id === M.SAND;
+      for (let k = 0; k < n; k += 1) g[k] = world.groundTop[x0 + k];
+      const dh = g[n - 1] - g[0];
+      if (Math.abs(dh) > Math.floor(n * 0.58)) return false;   // steeper than armour climbs: no ramp fits
+      for (let k = 0; k < n; k += 1) t[k] = g[0] + Math.round(dh * k / Math.max(1, n - 1));
+      frozen[0] = 1; frozen[n - 1] = 1; t[0] = g[0]; t[n - 1] = g[n - 1];
+      for (let k = 0; k < n; k += 1) {
+        const x = x0 + k, gk = g[k];
+        let ok = (PW.get(world, x, gk) & 63) !== M.WATER
+          && !(PW.getFlags(world, x, gk) & FLAG.FIELD)
+          && !PW.getOwner(world, x, gk) && !PW.getOwner(world, x, gk - 1);
+        for (let y = Math.min(gk, t[k]); ok && y < Math.max(gk, t[k]); y += 1) {
+          if (y >= gk && !soilish(PW.get(world, x, y) & 63) && (PW.get(world, x, y) & 63) !== M.ASPHALT) ok = false;
+          if (PW.getOwner(world, x, y)) ok = false;
+        }
+        if (!ok) { t[k] = gk; frozen[k] = 1; }
+      }
+      for (let pass = 0; pass < 3; pass += 1) {
+        for (let k = 1; k < n; k += 1) if (!frozen[k]) t[k] = Math.max(t[k - 1] - 2, Math.min(t[k - 1] + 2, t[k]));
+        for (let k = n - 2; k >= 0; k -= 1) if (!frozen[k]) t[k] = Math.max(t[k + 1] - 2, Math.min(t[k + 1] + 2, t[k]));
+      }
+      let changed = false, lo = 1e9, hi = -1e9;
+      for (let k = 0; k < n; k += 1) {
+        if (t[k] === g[k]) continue;
+        const x = x0 + k, gk = g[k], tk = t[k];
+        if (gk < tk) {
+          for (let y = gk; y < tk; y += 1) PW.set(world, x, y, M.AIR, Q);
+          PW.setLayer(world, 'deco', x, gk - 1, 0);
+        } else {
+          for (let y = tk; y < gk; y += 1) {
+            const d = y - tk;
+            PW.set(world, x, y, (d < 3 ? M.GRASS : d < 16 ? M.TOPSOIL : M.SOIL) | (PW.hash2(x >> 3, y >> 3) & 3) << 6, Q);
+          }
+        }
+        for (let y = tk - 30; y < tk; y += 1) PW.setLayer(world, 'deco', x, y, 0);
+        world.surface0[x] = tk;
+        PW.refreshGroundTop(world, x);
+        changed = true;
+        lo = Math.min(lo, Math.min(gk, tk)); hi = Math.max(hi, Math.max(gk, tk));
+      }
+      if (changed) { clearSimAround(x0, lo - 4, x1, hi + 6); regradeCount += 1; }
+      return changed;
+    }
+    // (grading beside a standing lot changes the apron the N57 watcher reads - the sig is
+    // refreshed so a LANE's own earthworks never read as a neighbour's and churn a re-seat)
+    function refreshSigs(city, x0, x1) {
+      for (const lot of [...city.rings.left, ...city.rings.right, city.main]) {
+        if (!lot || !lot.placed) continue;
+        if (lot.placed.worksR + 18 < x0 || lot.placed.worksL - 18 > x1) continue;
+        lot.groundSig = apronSig(lot.placed);
+      }
+    }
     // A long span grades in strides: a polyline of straight slopes along the original shape,
     // each stride cut and filled on its own (a refused stride stays as it was).
     function regradeRun(xa, xb, grade) {
@@ -647,7 +708,9 @@
             linkLines(city, other);   // N75: met - one pipeline now
             const oside = other.x > city.x ? 'left' : 'right';
             other.blocked[oside] = 'merged';
+            if (!PW.NO_LANE_GRADING) gradeLane(city.edge[side], dir > 0 ? other.edge.left : other.edge.right);   // N3 vehicle rule
             paveSegment(city, city.edge[side], dir > 0 ? other.edge.left : other.edge.right);
+            refreshSigs(city, Math.min(city.edge[side], other.edge.left), Math.max(city.edge[side], other.edge.right));
             note(city, `merged with ${other.kind} ${other.id}`); note(other, `merged with ${city.kind} ${city.id}`);
           }
           return false;
@@ -691,7 +754,10 @@
       city.rings[side].push(lot);
       const prevEdge = city.edge[side];
       city.edge[side] = dir > 0 ? Math.max(prevEdge, lot.placed.worksR + 2) : Math.min(prevEdge, lot.placed.worksL - 2);
+      // N3 vehicle rule: the new strip is graded to armour's limits before it is paved
+      if (!PW.NO_LANE_GRADING) gradeLane(prevEdge, dir > 0 ? lot.placed.worksL : lot.placed.worksR);
       paveSegment(city, prevEdge, dir > 0 ? lot.placed.worksL : lot.placed.worksR);
+      refreshSigs(city, Math.min(prevEdge, lot.placed.worksL), Math.max(prevEdge, lot.placed.worksR));
       city.blocked[side] = null;
       return true;
     }
@@ -1327,7 +1393,9 @@
       if (!placeLot(city, lot, cursor + dir * (w / 2 + 2))) { world.buildings.pop(); return false; }
       city.rings[side].push(lot);
       city.edge[side] = dir > 0 ? lot.placed.worksR + 2 : lot.placed.worksL - 2;
+      if (!PW.NO_LANE_GRADING) gradeLane(city.capEdge[side], dir > 0 ? lot.placed.worksL : lot.placed.worksR);   // N3 vehicle rule
       paveSegment(city, city.capEdge[side], dir > 0 ? lot.placed.worksL : lot.placed.worksR);
+      refreshSigs(city, Math.min(city.capEdge[side], lot.placed.worksL), Math.max(city.capEdge[side], lot.placed.worksR));
       return true;
     }
 
@@ -1447,6 +1515,7 @@
       if (w >= 26) jointDecor(c, decorKind, w >> 1, ground, P);   // (a narrow slot has no room for the piece)
       R.core(c, w >> 1, ground);
       R.corePillars(c, style);
+      if (!PW.NO_UNDERCROFT) R.undercroft(c, style, 0, w - 1);   // N3 vehicle rule: the spine arches over the lane at grade
       R.bakeLights(c, style);
       c.body = { left: 0, right: w - 1, top: 0, bottom: ground - 1 };
       return c;
