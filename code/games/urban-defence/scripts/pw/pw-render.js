@@ -12,6 +12,10 @@
   const MAX_LOD = 3;            // chunk rasters exist for 1, 1/2, 1/4 and 1/8 scale
   const OVERVIEW_LOD = 3;       // whole-map overview is stored at 1/8 scale
   const RASTER_BUDGET = 28;     // new chunk rasters per frame (the rest show a coarser placeholder)
+  const RASTER_MS = 9;          // wall-clock cap on a frame's raster work (a buildLight-heavy
+  // chunk costs far more than a bare one, so a count alone let a storm's re-rasters overrun;
+  // past this the rest hold their stale raster a frame or two - invisible, and the frame holds)
+  const OVERVIEW_MS = 3;        // the background overview refresh yields to a busy frame at this
   const CACHE_LIMIT = 1400;     // cached chunk canvases before least-recently-used eviction
 
   const SKY_TOP = [8, 13, 22];
@@ -30,7 +34,7 @@
     const view = { width: 1, height: 1, dpr: 1 };
     const cache = new Map();   // key -> { canvas, version, used }
     let frame = 0;
-    let rastersThisFrame = 0;
+    let rastersThisFrame = 0, rasterT0 = 0;
 
     // ---- Cell colour (tunnel network lab shading) --------------------------------------------
     const { mat, width: W } = world;
@@ -657,7 +661,10 @@
       if (entry && entry.canvas && hardV && entry.hardVersion === hardV[c]) {
         if (layer === 'deco' || (frame + c) % 3 !== 0) { entry.used = frame; return entry; }
       }
-      if (!allowNew || rastersThisFrame >= RASTER_BUDGET) return entry && entry.canvas ? entry : null;
+      // Out of budget - by count, or by the frame's raster time already spent (a storm of
+      // buildLight-heavy chunks): the chunk holds its stale raster this frame.
+      if (!allowNew || rastersThisFrame >= RASTER_BUDGET
+        || (rastersThisFrame > 2 && performance.now() - rasterT0 > RASTER_MS)) return entry && entry.canvas ? entry : null;
       const rect = world.dirtyRect, o = c * 4;
       if (layer === 'base' && lod === 0 && entry && entry.canvas && rect[o] >= 0) {
         // Only part of the chunk changed: redraw that rectangle (snapped to 16-cell tiles so the
@@ -702,8 +709,13 @@
     function refreshOverview(limit) {
       let done = 0;
       const size = CHUNK >> OVERVIEW_LOD;
+      const t0 = performance.now();
       for (let c = 0; c < world.chunkCount && done < limit; c += 1) {
         if (overviewVersion[c] === world.chunkVersion[c]) continue;
+        // The overview is background work: it keeps a little progress every frame but yields
+        // the rest to a busy one (a storm dirties it faster than it can be rebuilt, and the
+        // coarse tiles only show zoomed right out, where a frame or two of lag is invisible).
+        if (done >= 4 && performance.now() - t0 > OVERVIEW_MS) break;
         overviewVersion[c] = world.chunkVersion[c];
         const image = rasterBase(c, OVERVIEW_LOD);
         const deco = world.deco[c] ? rasterDeco(c, OVERVIEW_LOD) : null;
@@ -888,11 +900,12 @@
     function beginFrame() {
       frame += 1;
       rastersThisFrame = 0;
+      rasterT0 = performance.now();   // the frame's raster wall-clock starts here (RASTER_MS)
       swayState();   // (N9: one wind judgement a frame; a flip re-rasters the deco, debounced)
       relight();
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.imageSmoothingEnabled = false;
-      // Keep the overview current in the background (a few chunks per frame).
+      // Keep the overview current in the background (time-budgeted: it yields to a busy frame).
       refreshOverview(camera.zoom < 1 / 4 ? 48 : 12);
       if (frame % 120 === 0) evict();
     }
