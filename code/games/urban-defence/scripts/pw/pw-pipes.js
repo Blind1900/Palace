@@ -26,9 +26,11 @@
   const ORE_BITS = [[240, 210, 255], [192, 107, 252], [155, 86, 203], [127, 71, 167]];
   // The three lanes, top to bottom inside the casing. `row` is the lane's row within the bore.
   const LANES = [
-    { resource: 'hm', row: 1, channel: [38, 28, 46], cargo: ORE_BITS, speed: 15, every: 0 },
-    { resource: 'sm', row: 3, channel: [24, 46, 24], cargo: [[127, 214, 91], [190, 206, 96], [96, 170, 70]], speed: 26, every: 0.3 },
-    { resource: 'water', row: 5, channel: [18, 40, 54], cargo: [[140, 210, 226], [96, 170, 214], [200, 236, 246]], speed: 42, every: 0.1 },
+    // N34/N38 redesign: the lanes read as neon conduits in a dark shell - the cyberpunk
+    // sci-fi the user asked for - violet ore, acid-green soft materials, electric water.
+    { resource: 'hm', row: 1, channel: [84, 52, 148], cargo: ORE_BITS, speed: 15, every: 0 },
+    { resource: 'sm', row: 3, channel: [38, 136, 70], cargo: [[127, 214, 91], [190, 206, 96], [96, 170, 70]], speed: 26, every: 0.3 },
+    { resource: 'water', row: 5, channel: [30, 128, 168], cargo: [[140, 210, 226], [96, 170, 214], [200, 236, 246]], speed: 42, every: 0.1 },
   ];
   const LANE_OF = { hm: 0, sm: 1, water: 2 };
   const DEPTH = 16;                  // cover: about a metre of ground over the casing (urban)
@@ -46,7 +48,10 @@
   const REPAIR_DELAY = 6 * 60, REPAIR_HM_PER_CELL = 0.25;
   const TENDRIL_EVERY = 44, TENDRIL_W = 5;
 
-  const CASING = [70, 74, 78], CASING_LIT = [98, 102, 106], CASING_DARK = [48, 52, 56], DIVIDER = [36, 39, 42];
+  // N34/N38 redesign: near-black gunmetal shell with a teal sheen on the spine - vertical
+  // and horizontal are one design, one palette (the riser is the same pipe turned).
+  const CASING = [52, 58, 68], CASING_LIT = [64, 86, 98], CASING_DARK = [30, 34, 42], DIVIDER = [20, 23, 29];
+  const NEON_RING = [96, 212, 232], NEON_RING_DIM = [48, 110, 124];
   const SAND = [170, 156, 118], STEEL = [120, 128, 134], STEEL_DARK = [72, 78, 84];
   const INK = [10, 10, 12], WHITE_DIM = [152, 158, 164];
 
@@ -246,10 +251,15 @@
           const k = core.x + dx - x0;
           if (k >= 0 && k < ys.length) ys[k] = T;
         }
-        for (let d = 1; d <= RAMP + SPAN; d += 1) {
+        // N34: the approach bounds follow an S-curve, not the old |d| cone - zero slope
+        // leaving the plateau, so the line rolls off the connector shelf with no corner
+        // (the kink at every cabinet rim in the user's close looks).
+        const R2 = RAMP + SPAN;
+        for (let d = 1; d <= R2; d += 1) {
+          const t = d / R2, E = Math.max(1, Math.round(R2 * (3 * t * t - 2 * t * t * t)));
           for (const k of [core.x - SPAN - d - x0, core.x + SPAN + d - x0]) {
             if (k < 0 || k >= ys.length) continue;
-            ys[k] = Math.max(Math.min(ys[k], T + d), T - d);
+            ys[k] = Math.max(Math.min(ys[k], T + E), T - E);
           }
         }
       }
@@ -296,18 +306,18 @@
       const wisp = tendrilAt(along);
       if (row === 0 || row === BORE - 1) {
         if (wisp) return ((along + row) % 7 === 3) ? WHITE_DIM : INK;
-        // A bolted collar joins the casing segments (your pipeline refs): two bright columns
-        // every 36 cells, with lips into the bed rows (see layColumn).
-        if (collarAt(along)) return tone(row === 0 ? CASING_LIT : CASING_DARK, 1.3);
-        if (along % 14 === 0) return tone(row === 0 ? CASING_LIT : CASING_DARK, 1.2);   // a rivet band
+        // N34/N38 redesign: the collar is a NEON RING every 36 cells - a glowing coupler
+        // band in the dark shell (the cyberpunk read), the same ring on the risers.
+        if (collarAt(along)) return row === 0 ? NEON_RING : NEON_RING_DIM;
+        if (along % 14 === 0) return tone(row === 0 ? CASING_LIT : CASING_DARK, 1.25);   // a seam band
         return row === 0 ? CASING_LIT : CASING_DARK;
       }
       if (row === 2 || row === 4) return wisp ? INK : DIVIDER;
-      if (collarAt(along)) return tone(LANES[(row - 1) >> 1].channel, 0.75);   // the lanes pass behind the collar
-      // The stream look the user liked on the regrowing span, carried through the whole
-      // pipeline: each lane reads as a run of fine tubes, ribbed every other cell.
+      if (collarAt(along)) return tone(LANES[(row - 1) >> 1].channel, 0.7);   // the lanes pass behind the ring
+      // Each lane reads as a run of fine neon tubes, ribbed every other cell - the conduit
+      // glow against the near-black shell.
       const ch = LANES[(row - 1) >> 1].channel;
-      return (along & 1) ? tone(ch, 1.35) : tone(ch, 0.78);
+      return (along & 1) ? tone(ch, 1.5) : tone(ch, 0.66);
     }
     const collarAt = (along) => !tendrilAt(along) && ((along % 36) + 36) % 36 < 2;
     // Lay one bundle cell: in the ground a PIPE cell; across open space underground it is fixed to
@@ -410,9 +420,26 @@
     // A column of a core's own bed is not laid: the bundle enters one connector and leaves by the
     // other, carried through inside.
     const throughAt = (line, x) => line.cores.some((c) => Math.abs(x - c.x) <= HOP - 1);
+    // Inside a pump's intake stretch the bundle is painted as the pump's own conduit:
+    // the same dark shell, every lane blacked out but the one glowing water run (N38 -
+    // the trunk is the town's; the lake reach reads as the pump's slim tap, not a
+    // second pipeline cutting the main one).
+    const inIntake = (line, x) => {
+      const z = line.intake;
+      return !!(z && ((z.left && x >= z.left[0] && x <= z.left[1]) || (z.right && x >= z.right[0] && x <= z.right[1])));
+    };
+    function intakeColor(row, along) {
+      if (row === 0 || row === BORE - 1) {
+        if (collarAt(along)) return row === 0 ? NEON_RING_DIM : tone(NEON_RING_DIM, 0.7);
+        return row === 0 ? tone(CASING_DARK, 1.15) : CASING_DARK;
+      }
+      if (row === 5) { const ch = LANES[2].channel; return (along & 1) ? tone(ch, 1.4) : tone(ch, 0.62); }
+      return INK;
+    }
     function layColumn(line, x) {
       if (throughAt(line, x)) return;
       const y = line.ys[x - line.x0];
+      const slim = inIntake(line, x);
       const wisp = tendrilAt(x);
       const collar = collarAt(x);
       for (let b = 1; b <= BED; b += 1) {
@@ -424,7 +451,7 @@
         bedCell(x, y - b, b === 1 && collar ? tone(CASING, 1.2) : sand(-b));
         bedCell(x, y + BORE - 1 + b, b === 1 && collar ? tone(CASING, 0.78) : sand(b));
       }
-      for (let r = 0; r < BORE; r += 1) layCell(line, x, y + r, pipeColor(r, x), r);
+      for (let r = 0; r < BORE; r += 1) layCell(line, x, y + r, slim ? intakeColor(r, x) : pipeColor(r, x), r);
     }
     // A riser between the line and an anchor at (x, y): for the few taps that are not cores (the
     // lake pump, a mining hopper, the main core's pedestal). It is the SAME pipe, turned (the
@@ -669,13 +696,34 @@
         if (cores.length + anchors.length < 2) continue;
         const xs = [...cores.map((c) => c.x), ...anchors.map((a) => a.x)];
         const x0 = Math.min(...xs) - SPAN - 4, x1 = Math.max(...xs) + SPAN + 4;
+        // N38 refine (the user's pump rule): the TRUNK is the town's - the pump connects
+        // the way a building does, and the stretch out to its lake intake is the pump's
+        // own slim conduit (same shell, one glowing water lane), tee'd off the trunk at
+        // the town edge instead of dragging the whole three-lane bundle to the shore.
+        const lakeXs = [...cores.filter((c) => c.core && c.core.kind === 'pump').map((c) => c.x),
+          ...anchors.filter((a) => a.kind === 'pump').map((a) => a.x)];
+        const townOnly = xs.filter((v) => !lakeXs.includes(v));
+        let intake = null;
+        if (lakeXs.length && townOnly.length) {
+          const tx0 = Math.min(...townOnly) - SPAN - 4, tx1 = Math.max(...townOnly) + SPAN + 4;
+          intake = { left: x0 < tx0 - 8 ? [x0, tx0] : null, right: x1 > tx1 + 8 ? [tx1, x1] : null };
+          if (!intake.left && !intake.right) intake = null;
+        }
         const coreX = mainCore ? Math.round((mainCore.body.left + mainCore.body.right) / 2) : Math.round((x0 + x1) / 2);
         const line = newLine(settlement.side, settlement, x0, x1, cores.sort((p, q) => p.x - q.x), coreX);
+        line.intake = intake;
         line.ys = contour(x0, x1, depthAt);
         snapToCores(line.ys, x0, line.cores);
         for (let x = x0; x <= x1; x += 1) layColumn(line, x);
         layWells(line);
         for (const a of anchors) line.risers.push(layRiser(line, a));
+        // the tee where the pump's conduit leaves the trunk: flanged above and below
+        for (const z of [intake && intake.left && intake.left[1], intake && intake.right && intake.right[0]]) {
+          if (!z) continue;
+          const ly = line.ys[Math.max(0, Math.min(line.ys.length - 1, z - x0))];
+          layFlange(line, z, ly - 1);
+          layFlange(line, z, ly + BORE);
+        }
         capEnd(line, -1); capEnd(line, 1);
         stats.cells += x1 - x0 + 1;
         stats.cores += cores.length;
