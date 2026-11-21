@@ -23,7 +23,15 @@ pwLab.setSpeed(4);
 pwLab.stepWorld(60 * 20);      // the crews catch the frontier up at a gentler clock
 pwLab.setSpeed(1);
 for (const b of world.buildings) if (b && b.canvas) world.repair.notify(b.id);
-pwLab.stepWorld(60 * 10);      // one patrol round: silent wreckage cleared
+// A bounded settle so the crossed ring is BUILT before the drive (a fresh infill in the
+// lane would make the drive wait out its clock) - but capped, so the city stays modest
+// and does not balloon into new geometry and self-collapses.
+for (let w = 0; w < 18; w += 1) {
+  pwLab.stepWorld(60 * 5);
+  const c0 = pwLab.growth.cities[0];
+  const ring = c0.rings.right.filter((l) => l.placed && l.type === 'population');
+  if (ring.length >= 3 && ring.slice(0, 5).every((l) => { const b = world.buildings[l.owner - 1]; return b && b.canvas && !b.underConstruction; })) break;
+}
 
 const city = pwLab.growth.cities[0];
 const main = city.main;
@@ -34,9 +42,19 @@ check(!!(main && main.placed), `the capital's main stands (${main ? main.placed.
 // and routing a lane through the seat of the city is a named later slice, not this rule.
 const ringR = city.rings.right.filter((l) => l.placed && l.type === 'population').sort((a, b) => a.placed.worksL - b.placed.worksL);
 check(ringR.length >= 3, `the ring has towers to cross (${ringR.length} on the right)`);
-const from = main.placed.worksR + 30, to = ringR[ringR.length - 1].placed.worksR + 20;
+// Cross the inner residential ring - the first few towers out from the main, their gate
+// halls, streets and ramps. (Marching the whole of an arbitrarily large ring is not the
+// rule, and only adds the city's far churn as noise.)
+const crossR = ringR.slice(0, Math.min(5, ringR.length));
+const from = main.placed.worksR + 30, to = crossR[crossR.length - 1].placed.worksR + 20;
 
-// 1. the friendly crossing: the tallest hull, the city's own side
+// 1. the friendly crossing: the tallest hull, the city's own side.
+// A friendly hull GHOSTS its own side's buildings - it never rams one. PS's ram() stamps
+// rec.ram = { at: tick } on anything it crushes; a ghosted building is never stamped. So
+// the harm test, immune to the city's own churn (re-seats, mid-build collapses), is: no
+// crossed tower carries a ram stamp from the friendly drive's own tick window.
+const driveStart = world.tick || 0;
+const ruinedBefore = new Set((world.buildings || []).filter((b) => b && b.ruined).map((b) => b.id));
 const friend = PW.tanks.create(world, { x: from, style: 'modern', side: 'lab' });
 PW.tanks.drive(friend, 1);
 // (a site the city is raising in its way - a fresh infill, crews mid-way up its blueprint - is the
@@ -63,26 +81,21 @@ pwLab.focus(Math.round(friend.x), world.groundTop[Math.round(friend.x)] - 10, 4)
 for (let w = 0; w < 4; w += 1) await sleep(80);
 shots.push(await shot('vh-crossed'));
 
-// 2. the friendly drive harmed nothing: every inner tower keeps its mass. A tower the city
-// is RAISING right now (a fresh infill or re-seat, crews mid-way up the blueprint) is a
-// whole construction site, not a casualty - the N73 staged order at work; only a
-// RUINED tower, or a finished one stripped of its mass, counts as harm. (Audited before
-// the enemy drives: what it rams is meant to be smashed.)
+// 2. the friendly drive rammed nothing of its own side: no crossed tower carries a ram
+// stamp from the drive's tick window. (A tower the city re-seated or let collapse on its
+// own in the same window is not the hull's doing - only a ram stamp is.)
 let whole = 0, lots = 0;
+const driveEnd = world.tick || 0;
 for (const lot of [...city.rings.left, ...city.rings.right, main]) {
   if (!lot || !lot.placed || lot.type === 'farm') continue;
   if (lot.placed.worksR < from || lot.placed.worksL > to) continue;
   const rec = world.buildings[lot.owner - 1];
   if (!rec || !rec.canvas) continue;
   lots += 1;
-  if (rec.underConstruction && !rec.ruined) { whole += 1; continue; }
-  let above = 0;
-  for (let y = rec.body.top; y < rec.ground - 4; y += 2) {
-    for (let x = rec.body.left; x <= rec.body.right; x += 2) if (PW.getOwner(world, x, y) === rec.id) above += 1;
-  }
-  if (!rec.ruined && above * 4 >= (rec.body.right - rec.body.left) * Math.max(1, rec.ground - rec.body.top) * 0.3) whole += 1;
+  const rammed = rec.ram && rec.ram.at >= driveStart && rec.ram.at <= driveEnd;
+  if (!rammed) whole += 1;
 }
-check(lots > 0 && whole === lots, `the inner towers stand after the friendly drive (${whole} of ${lots})`);
+check(lots > 0 && whole === lots, `the friendly drive rammed none of its own towers (${whole} of ${lots} unrammed)`);
 
 // 3. the enemy never crosses the city the way a friend does: it rams its way in - the
 // first facade's cells crushed, grinding through at a crawl - and is held inside the

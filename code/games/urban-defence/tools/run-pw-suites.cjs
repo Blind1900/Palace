@@ -17,6 +17,8 @@ const SUITES = [
   { name: 'pw-grounding', params: 'det=1' }, { name: 'pw-settlements' }, { name: 'pw-tunnels' }, { name: 'pw-mining', params: 'det=1' },
   { name: 'pw-pipes' }, { name: 'pw-made-ground' }, { name: 'pw-physics', params: 'det=1' }, { name: 'pw-ore' }, { name: 'pw-fields' }, { name: 'pw-styles' }, { name: 'pw-sandbox' }, { name: 'pw-views' }, { name: 'pw-repair' },
   { name: 'pw-slopes', params: 'gallery=slopes' }, { name: 'pw-mirror', params: 'gallery=mirror' }, { name: 'pw-pipe-cavity', params: 'det=1' }, { name: 'pw-tank', params: 'det=1' }, { name: 'pw-bore', params: 'det=1' }, { name: 'pw-core-life', params: 'det=1' }, { name: 'pw-shots', params: 'det=1' },
+  // pw-core-attached (N80) joins once the underbody-ownership slice closes its six catalogued cuts
+  { name: 'pw-pipe-flow', params: 'det=1' },       // N81: bends swept, no level change blocks the flow
   { name: 'pw-fire', alone: true, params: 'det=1' }, { name: 'pw-collapse', alone: true, params: 'det=1' },
   // the first capital-lab suite: the vehicle rule end to end (N3) - heavy, so it runs alone
   { name: 'pw-vehicle', alone: true, page: 'capital-lab.html', ready: 'window.pwLab && pwLab.ready', params: 'det=1' },
