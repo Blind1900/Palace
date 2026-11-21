@@ -1,5 +1,29 @@
 [
  {
+  "title": "Opus: the tank's turret rides on its hull, its gun's reach follows the hull, and the hull is the same both ways round (0b2eefa, N71, N72)",
+  "author": "Opus",
+  "time": "2026-11-20",
+  "note": "Your tank feedback. N71: the turret now sits on the hull and tilts with it, so nothing clips into the hull nose-up or nose-down. Only the gun moves up and down. It still aims at its target, or level ahead, but only within its reach of the hull: from 6 degrees below the hull's line to 60 degrees above. Climbing a 20-degree slope the gun rides 14 degrees up; going down it, the gun lies level. Over the whole test course it never once leaves that reach. N72: the hull is the same at both ends (front and back plates, sprocket and idler, skirts, and the T-64's reactive armour on both). It never turns round: to go the other way it just drives off the other way at full speed, and only the turret turns, swinging round in 0.9 s to face the way it goes, or its target. Seen from the side, its length and the gun shorten as it swings through. The R (reverse) key is gone; Fable changed the TANK button's hint to match. P2: the physics side after a blast storm is measured. In the live world the frames after the storm run at about 100 fps. In the capital lab's much bigger storm, the hot rubble of 23 buildings keeps the heat working about 3 ms a tick (half a million warm cells over 100 map sections, cooling over a minute or so). That is within budget, so I left it alone: the 20 fps there comes from redrawing the map, Fable's next item. Suites 19/19 on seeds 7, 3 and 11; the tank suite now has 15 checks.",
+  "shots": [
+   {
+    "src": "shots/n71-tank-ramp.png",
+    "caption": "Up a 20-degree slope: the turret tilts with the hull, the gun rides 14 degrees up, within its reach of the hull"
+   },
+   {
+    "src": "shots/n71-tank-downhill.png",
+    "caption": "Going the other way, down the slope: the hull has not turned round; only the turret has, its gun laid level"
+   },
+   {
+    "src": "shots/n71-tank-turret-turning.png",
+    "caption": "Half way round: the turret swinging to a target behind, its gun seen end-on, the hull still"
+   },
+   {
+    "src": "shots/n71-tank-styles.png",
+    "caption": "The three sides' tanks, their hulls the same at both ends"
+   }
+  ]
+ },
+ {
   "title": "Fable: the worldgen towns can adopt the growth engine - groundwork in, behind a flag (1777aeb, 6e66dd0, N3)",
   "author": "Fable",
   "time": "2026-11-20 (continuing N3)",
@@ -1919,6 +1943,24 @@
         "pct": 100,
         "left": "",
         "done": true
+       },
+       {
+        "id": "N71",
+        "owner": "O",
+        "step": "0b2eefa",
+        "text": "Tank clipping and turret (user, 2026-11-20, screenshot of the tank ramp): the tank must not clip into its body when facing up or down. The turret head moves with the body. Only the gun barrel moves up and down, and its elevation range follows the body of the tank.",
+        "pct": 100,
+        "done": true,
+        "left": ""
+       },
+       {
+        "id": "N72",
+        "owner": "O",
+        "step": "0b2eefa",
+        "text": "Tank body symmetry (user, 2026-11-20): the bottom tank body is symmetrical, so only the tank head rotates when the tank switches direction.",
+        "pct": 100,
+        "done": true,
+        "left": ""
        }
       ]
      }
@@ -1934,7 +1976,7 @@
        {
         "text": "Performance pass: bundle routing 3x faster; no memory growth in a 9-minute real-time repair session; the blast-moment hitch fixed (gas-only redraws every third frame, particles as one image, a frame budget for catch-up ticks: 50 long frames after a BLAST L down to 2-4) DONE frame budget + gas throttle (448ddea, ee33930).",
         "step": "f678789",
-        "left": "blast storms: 24 big blasts in 12 s hold 42 fps, but the 6 s after drop to ~20 fps - ~45 chunk redraws a frame as the rubble settles (a per-frame redraw budget proposed for Fable's renderer) and ~8 ms ticks (heat, air, settling, particles: Opus, next)",
+        "left": "blast storms in the capital lab: 42 fps through 24 blasts, ~20 fps for the 6 s after - the map redrawn ~45 chunks a frame as the rubble settles: a per-frame redraw budget, Fable's renderer (next on their list). The physics after it is measured and within budget (heat ~3 ms a tick from the hot rubble of 23 buildings; the live world holds ~100 fps after a storm)",
         "id": "P2",
         "owner": "O",
         "pct": 95,
@@ -2033,7 +2075,7 @@
         "id": "N35",
         "owner": "F",
         "step": "D, F2",
-        "text": "Cores come first, buildings grow from them: the pixels that make up the cores must not be cut off from the buildings and their generation (user screenshot, 2026-11-19). Design order is cores, then the buildings that hang off them, so a core is never left separated from its building. DONE 7b11f77.",
+        "text": "Cores come first, buildings grow from them: the pixels that make up the cores must not be cut off from the buildings and their generation (user screenshot, 2026-11-19). Design order is cores, then the buildings that hang off them, so a core is never left separated from its building. DONE 7b11f77. Build order (user, 2026-11-20): cores first, then growth extends outward from the core; the pipes come out from the sides and the pillars go up the top side.",
         "done": true
        },
        {
@@ -2163,7 +2205,7 @@
         "id": "N50",
         "owner": "F",
         "step": "J, F2",
-        "text": "Farm and pump design (user, 2026-11-19): a farm has a core under its silo storage; the silo's stored SM is transferred down through the core into the pipeline below. Water pumps each have their own small core that regenerates them. DONE 429a9cd.",
+        "text": "Farm and pump design (user, 2026-11-19): a farm has a core under its silo storage; the silo's stored SM is transferred down through the core into the pipeline below. Water pumps each have their own small core that regenerates them. DONE 429a9cd. Farm storage (user, 2026-11-20): the farm core connects to each storage silo by a resource pipe that runs above the farm core and splits to reach every silo.",
         "done": true
        },
        {
@@ -2257,18 +2299,6 @@
         "text": "The new world becomes the main game page (staged loading, performance budgets)",
         "step": "M9",
         "id": "N8"
-       },
-       {
-        "id": "N71",
-        "owner": "O",
-        "step": "M5",
-        "text": "Tank clipping and turret (user, 2026-11-20, screenshot of the tank ramp): the tank must not clip into its body when facing up or down. The turret head moves with the body. Only the gun barrel moves up and down, and its elevation range follows the body of the tank."
-       },
-       {
-        "id": "N72",
-        "owner": "O",
-        "step": "M5",
-        "text": "Tank body symmetry (user, 2026-11-20): the bottom tank body is symmetrical, so only the tank head rotates when the tank switches direction."
        }
       ]
      }
