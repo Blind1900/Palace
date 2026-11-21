@@ -312,6 +312,7 @@
       heat.step(1);
       if (structure) structure.step(1.5);
       if (fragments) fragments.step(DT);
+      if (PW.tanks) PW.tanks.step(world, DT);
       if (PW.streetProps) PW.streetProps.step(world, particles);
       if (PW.flora && PW.flora.step) PW.flora.step(world, particles);
       if (cores) cores.step();
