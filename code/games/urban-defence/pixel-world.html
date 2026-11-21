@@ -14,6 +14,21 @@
       #world-tools button { font: inherit; color: #9fc28a; background: #0b140f; border: 1px solid #2c4030; padding: 2px 7px; cursor: pointer; }
       #world-tools button.on { background: #2c4a30; color: #e4f0c8; }
       #world-tools label { display: flex; align-items: center; gap: 4px; padding: 0 4px; }
+      /* N78: the selected unit's panel - its name, its state, its control keys */
+      #unit-panel { position: fixed; right: 8px; top: 8px; width: 216px; font: 12px Consolas, monospace;
+        background: #05080acc; border: 1px solid #2c4030; color: #9fc28a; padding: 8px; display: none; }
+      #unit-panel.on { display: block; }
+      #unit-panel h3 { margin: 0 0 6px; font: 13px Consolas, monospace; color: #e4f0c8; letter-spacing: 1px; }
+      #unit-panel .bar { height: 8px; background: #0b140f; border: 1px solid #2c4030; margin: 3px 0 8px; }
+      #unit-panel .bar i { display: block; height: 100%; background: #6fae58; }
+      #unit-panel .bar i.hurt { background: #b8923e; }
+      #unit-panel .bar i.grave { background: #a4502e; }
+      #unit-panel .keys div { display: flex; gap: 6px; margin: 2px 0; align-items: baseline; }
+      #unit-panel kbd { background: #0b140f; border: 1px solid #2c4030; padding: 0 5px; color: #e4f0c8; min-width: 14px; text-align: center; }
+      #unit-panel .items { display: flex; gap: 4px; margin-top: 6px; }
+      #unit-panel .slot { width: 44px; height: 44px; border: 1px solid #2c4030; background: #0b140f;
+        display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 10px; }
+      #unit-panel .slot b { color: #e4f0c8; font-size: 11px; }
       @font-face { font-family: 'Ithaca'; src: url('assets/Ithaca-LVB75.ttf') format('truetype'); }
       /* Notes next to the cursor (pixel font, square pixel border). */
       #cursor-note { position: fixed; pointer-events: none; display: none; font: 16px 'Ithaca', Consolas, monospace;
@@ -52,6 +67,8 @@
       <button data-action="hitbox" title="Show buildings' and falling pieces' hitboxes, green to red by how hard they are struck">HITBOX</button>
     </div>
     <div id="world-status">generating…</div>
+    <aside id="unit-panel"></aside>   <!-- N78: the selected unit's panel -->
+
     <div id="cursor-note"></div>
     <script src="assets/unit-reference.js"></script>
     <script src="scripts/pw/pw-core.js"></script>

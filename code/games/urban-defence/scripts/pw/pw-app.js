@@ -231,7 +231,11 @@
   }
   // Space pauses and resumes, as the PAUSE button does (not while typing into a field).
   window.addEventListener('keydown', (event) => {
-    if (tool === 'tank' && PW.tanks && PW.tanks.key && PW.tanks.key(event)) { event.preventDefault(); return; }   // (N10 drive keys)
+    if (event.code === 'Escape' && selected) { select(null); return; }   // N78
+    // N78: the drive keys follow the SELECTED tank too, not only the tank tool - key()
+    // drives the held one, and selecting holds (PS's hold()).
+    if ((tool === 'tank' || (selected && selected.kind === 'tank'))
+      && PW.tanks && PW.tanks.key && PW.tanks.key(event)) { event.preventDefault(); return; }   // (N10 drive keys)
     if (event.code !== 'Space' || event.repeat || event.target.closest?.('input, textarea, select')) return;
     event.preventDefault();
     paused = !paused;
@@ -240,6 +244,73 @@
   });
   // (and a toolbar button that has the focus is not pressed by it as well)
   window.addEventListener('keyup', (event) => { if (event.code === 'Space' && !event.target.closest?.('input, textarea, select')) event.preventDefault(); });
+
+  // ---- N78: unit selection --------------------------------------------------------------------
+  // Click a unit to select it: a pulsing bracket marks it in the world, and the side panel
+  // shows what it is, how it stands, and its control keys. Tanks are the units standing
+  // today; ground troops join the same panel - with their item bar - when their entities
+  // land (M5/M6). Selecting a tank also takes it in hand (PS's PW.tanks.hold), so the
+  // drive keys follow the selection.
+  const unitPanel = document.getElementById('unit-panel');
+  const TANK_NAMES = { modern: 'M1 ABRAMS', asian: 'TYPE 99', gothic: 'T-64' };
+  let selected = null;   // { kind: 'tank', t }
+  const unitAt = (x, y) => {
+    for (const t of world.tanks || []) {
+      if (!t.dead && Math.abs(x - t.x) < 62 && y > t.y - 48 && y < t.y + 6) return { kind: 'tank', t };
+    }
+    return null;
+  };
+  function renderUnitPanel() {
+    if (!unitPanel) return;
+    if (!selected) { unitPanel.classList.remove('on'); unitPanel.innerHTML = ''; return; }
+    unitPanel.classList.add('on');
+    if (selected.kind === 'tank') {
+      const t = selected.t;
+      const hp = Math.max(0, Math.round(t.hp ?? 100));
+      const tone = hp < 30 ? 'grave' : hp < 60 ? 'hurt' : '';
+      const state = t.blocked ? `stopped: ${t.blocked}` : (t.reload || 0) > 0.05 ? `reloading ${t.reload.toFixed(1)}s` : 'ready';
+      unitPanel.innerHTML = `<h3>${TANK_NAMES[t.style] || (t.style || 'tank').toUpperCase()} — ${(t.side || '').toUpperCase()}</h3>` +
+        `<div>armour ${hp}/100</div><div class="bar"><i class="${tone}" style="width:${hp}%"></i></div>` +
+        `<div>round <kbd>${(t.ammo || 'he').toUpperCase()}</kbd> · ${state}</div>` +
+        `<div class="keys">` +
+        `<div><kbd>A</kbd><kbd>D</kbd> drive · <kbd>S</kbd> stop</div>` +
+        `<div><kbd>F</kbd> fire · <kbd>R</kbd> HE/AP</div>` +
+        `<div>click aims · hull-click lets go</div>` +
+        `<div>Shift+click new · <kbd>Esc</kbd> free</div>` +
+        `</div>`;
+    } else if (selected.kind === 'troop') {
+      // The trooper's item bar: the loadout the user designed (rifle, grenades, drills),
+      // read off the entity when troops land.
+      const u = selected.t, items = u.items || [{ n: 'RIFLE' }, { n: 'GRND', count: 3 }, { n: 'DRILL' }];
+      unitPanel.innerHTML = `<h3>TROOPER — ${(u.side || '').toUpperCase()}</h3>` +
+        `<div class="items">${items.map((it) => `<div class="slot"><b>${it.n}</b>${it.count ? `×${it.count}` : ''}</div>`).join('')}</div>`;
+    }
+  }
+  function select(next) {
+    selected = next;
+    if (PW.tanks && PW.tanks.hold) PW.tanks.hold(next && next.kind === 'tank' ? next.t : null);
+    renderUnitPanel();
+  }
+  function drawSelection(renderer2) {
+    if (!selected) return;
+    const t = selected.t;
+    if (!t || t.dead || !(world.tanks || []).includes(t)) { select(null); return; }
+    const { ctx, camera } = renderer2, z = camera.zoom;
+    const x0 = (t.x - 64 - camera.x) * z, x1 = (t.x + 64 - camera.x) * z;
+    const y0 = (t.y - 50 - camera.y) * z, y1 = (t.y + 8 - camera.y) * z;
+    const arm = Math.max(5, 9 * z), pulse = 0.68 + 0.27 * Math.sin(performance.now() / 280);
+    ctx.beginPath();
+    for (const [cx, cy, dx, dy] of [[x0, y0, 1, 1], [x1, y0, -1, 1], [x0, y1, 1, -1], [x1, y1, -1, -1]]) {
+      ctx.moveTo(cx + dx * arm, cy); ctx.lineTo(cx, cy); ctx.lineTo(cx, cy + dy * arm);
+    }
+    // a dark under-stroke keeps the bracket readable over lit facades
+    ctx.strokeStyle = 'rgba(5, 8, 10, 0.75)';
+    ctx.lineWidth = Math.max(3, Math.round(z) + 2);
+    ctx.stroke();
+    ctx.strokeStyle = `rgba(228, 240, 200, ${pulse.toFixed(3)})`;
+    ctx.lineWidth = Math.max(1, Math.round(z));
+    ctx.stroke();
+  }
 
   // ---- Input ------------------------------------------------------------------------------------
   const drag = { active: false, pan: false, x: 0, y: 0 };
@@ -290,11 +361,26 @@
     if (!drag.pan) {
       const spec = tools[tool];
       const p = toWorld(event);
+      if (tool === 'tank' && PW.tanks) {
+        // tool() holds, aims, lets go or drops - selection mirrors whatever it returns (N78)
+        const h = PW.tanks.tool(world, p.x, p.y, event.shiftKey);   // (N10: once per click, like a seed)
+        select(h ? { kind: 'tank', t: h } : null);
+        return;
+      }
+      // N78: a click on a unit SELECTS it, whatever tool is up - the seed or charge in
+      // hand is not spent on a friend's hull
+      const hit = unitAt(p.x, p.y);
+      if (hit) { select(hit); return; }
       if (tool === 'digL' || tool === 'digR') dig(tool === 'digL' ? 'left' : 'right', Math.round(p.x - 30), Math.round(p.y - 18), Math.round(p.x + 30), Math.round(p.y + 18));
-      else if (tool === 'tank' && PW.tanks) PW.tanks.tool(world, p.x, p.y, event.shiftKey);   // (N10: once per click, like a seed)
       else if (tool === 'seedC' || tool === 'seedF' || tool === 'seedM') dropSeed(tool, p);
       else if (spec && typeof spec === 'object') explode(p.x, p.y, spec.radius, spec.power);
       else useTool(event);
+    } else if (event.button === 0) {
+      // N78: panning hand - a click on a unit still selects it; empty ground lets it go
+      const p = toWorld(event);
+      const hit = unitAt(p.x, p.y);
+      if (hit) select(hit);
+      else if (selected) select(null);
     }
   });
   canvas.addEventListener('pointermove', (event) => {
@@ -369,6 +455,8 @@
     if (fragments) fragments.draw(renderer);
     if (PW.mining) PW.mining.draw(renderer, world, now / 1000);
     if (PW.drawUnitsHook) PW.drawUnitsHook(renderer);
+    drawSelection(renderer);   // N78: the selected unit's bracket
+    if (selected && (frames & 7) === 0) renderUnitPanel();   // and its live readout
     renderer.drawDeco();
     if (renderer.drawLeaves) renderer.drawLeaves(now / 1000);   // N9: the crowns sway
     heat.draw(renderer, now / 1000);
@@ -407,6 +495,8 @@
   window.pwApp = { world, layout, renderer, sim, particles, seed, timings, ready: true,
     explode, dig, planDig, preview, pipes, setDevelopSpeed: (k) => { devSpeed = k; }, heat, life, structure, fragments, cores, stability, air,
     dropSeed: (which, x) => { dropSeed(which, { x }); return lastDig; },   // N2: the hand's seed path (vision-gated)
+    selectAt: (x, y) => { const hit = unitAt(x, y); select(hit); return hit; },   // N78
+    selected: () => selected, clearSelection: () => select(null),
     setBrush: (b) => { brush = b; },
     paint: (x, y, radius, material) => paint(x, y, radius, () => material),
     stepWorld, countWater: () => sim.countWater(), simTimes,
