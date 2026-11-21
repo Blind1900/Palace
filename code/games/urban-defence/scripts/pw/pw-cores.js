@@ -14,6 +14,7 @@
   // (a ruin - a piece of the building come to rest whole - it shoulders aside too)
   for (const id of [M.DEBRIS, M.RUBBLE, M.LOOSE_SOIL, M.LOOSE_STONE, M.SAND, M.ASH, M.RUIN]) LOOSE[id] = 1;
   const SETTLE = 60;        // ticks after the gratings blow before the cores start to rise (1 s)
+  const FLOAT_HOLD = 120;   // D15: a risen ball floats this long before it will descend (2 s)
   const RISE_EVERY = 1;     // ticks per row risen (60 rows a second: up through a tower's heap in seconds)
   const SWEEP_EVERY = 6;    // ticks between sweeps once a core stands in the open
   const PER_SWEEP = 80;     // cells a core throws off per sweep (a heap can rain down on it)
@@ -304,6 +305,17 @@
         if (s.building) continue;
         if (s.checkSupport || tick % 15 === 7) { s.checkSupport = 0; for (let n = 0; n < 3 && fall(s); n += 1); }
       }
+      // D15: the ball's white energy is a real Game of Life (PS's half in pw-life) - every
+      // drawn ball steps its disc each tick: agitated out of its vault, at rest at home.
+      if (PW.coreLife) {
+        for (const s of world.seedCores || []) if (!s.building && !s.dead) PW.coreLife.step(world, s, 1);
+        for (const b of world.buildings || []) {
+          for (const core of b.cores || []) {
+            if (core.standing || core.dead) continue;
+            PW.coreLife.step(world, core, !core.settled && b.coresOpen ? 2 : 1);
+          }
+        }
+      }
       for (const b of world.buildings || []) {
         if (!b.cores || !b.cores.length) continue;
         // (a building still going up for the first time is no ruin to expose - its cores are
@@ -364,6 +376,10 @@
         if (b.coresOpen && tick % 2 === 0) {
           for (const core of b.cores) {
             if (core.orb || !core.free) continue;
+            // D15: risen clear of the wreck, the ball FLOATS two seconds - its Life burning
+            // bright - before it will descend towards a ready vault. (A ball that fell past
+            // its home still settles at once: hovering over a void is the old glitch.)
+            if (core.y < core.homeY && tick - (core.freeAt || 0) < FLOAT_HOLD) continue;
             // (at or below home - a sink arrived, or a fall carried it past (N18O): it settles
             // whenever there is a bed to sit on - a wreck-filled vault is still home, as it
             // always was - but never onto NOTHING: settling over a void stamped the floating
@@ -391,6 +407,7 @@
           if (!core.free && tick % RISE_EVERY === 0) {
             if (exposed(core) || !rise(b, core)) {
               core.free = true;
+              core.freeAt = tick;   // (D15: the two-second float starts here)
               // (what the gratings and the core held up is looked at again, and comes down)
               if (world.onDamage) world.onDamage(b.id);
             }
@@ -451,16 +468,20 @@
           }
         }
       };
+      // D15: with the Life half standing, the white IS the simulation - the old light
+      // equation only serves where pw-life is absent (the gallery pages).
       for (const b of world.buildings || []) {
         for (const core of b.cores || []) {
           if (core.standing || core.dead) continue;
           if (core.x < vx0 || core.x > vx1 || core.y < vy0 || core.y > vy1) continue;
-          each(core.x, core.y, (core.x * 7 + core.y) & 1023);
+          if (PW.coreLife) PW.coreLife.draw(renderer, core);
+          else each(core.x, core.y, (core.x * 7 + core.y) & 1023);
         }
       }
       for (const s of world.seedCores || []) {
         if (s.building || s.dead || s.x < vx0 || s.x > vx1 || s.y < vy0 || s.y > vy1) continue;
-        each(s.x, s.y, (s.x * 7 + s.y) & 1023);
+        if (PW.coreLife) PW.coreLife.draw(renderer, s);
+        else each(s.x, s.y, (s.x * 7 + s.y) & 1023);
       }
     }
     const api = { step, expose, exposed, supportLost, stats, draw };

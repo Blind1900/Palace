@@ -420,7 +420,9 @@
     }
     // The ENERGY BALL (the user's design): a white heart in a black nucleus and lightning
     // streaks pointing in every direction - exponentially more at the poles - black and white,
-    // nothing else. (pw-cores animates it like an atom and detonates it when it dies.)
+    // nothing else. (pw-cores animates it; D15 made the white a LIVING Game of Life in
+    // pw-life, so the painted streaks go dark ink - the Life is all the white there is,
+    // playing over the dark filaments. Only the 2x2 heart stays painted white.)
     const ray = (a, len) => {
       for (let t = 2; t <= len; t += 1) {
         const j = ((grain(Math.round(a * 57) + cx, t) & 3) - 1.5) * 0.45;
@@ -429,7 +431,7 @@
         // (the ball keeps inside the plate's shelter: streak tips past 6 would trade armour
         // for filament and die in every collapse)
         if (Math.abs(px - cx) > 6 || Math.abs(py - oy) > 6) break;
-        solid(c, px, py, M.CORE, t >= len - 1 ? WHITE_DIM : (t & 1) ? WHITE_CORE : WHITE_DIM, ROLE.CORE);
+        solid(c, px, py, M.CORE, t >= len - 1 ? INK : INK_DEEP, ROLE.CORE);
       }
     };
     for (let dy = -2; dy <= 2; dy += 1) for (let dx = -2; dx <= 2; dx += 1) {
