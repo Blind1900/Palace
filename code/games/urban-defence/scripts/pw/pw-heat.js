@@ -267,12 +267,22 @@
     // tiles it lies in are worked, not all the chunk between)
     const TS = 3, TN = CHUNK >> TS, TILES = TN * TN;
     const work = new Uint8Array(TILES), spans = new Int32Array(TILES * 2), spanAt = new Int32Array(TN + 1);
+    // (and the heat keeps to HEAT_BUDGET ms a tick, as the cell sim keeps to its own: a chunk whose
+    // turn comes when the tick's heat work is spent is put off to the next tick - first in line
+    // there - so on a loaded tick, the hot rubble of a whole town blown down at once, the heat runs
+    // a little behind rather than the frame. Never in a deterministic run: see PW.DETERMINISTIC)
+    const HEAT_BUDGET = 1.5;
+    const late = new Uint8Array(world.chunkCount);
     function heatTick(turn) {
       const list = world.heatList;
-      const keep = [];
+      const keep = [], putOff = [], started = performance.now();
+      let worked = 0;
+      stats.late = 0;
       for (let n = 0; n < list.length; n += 1) {
         const c = list[n];
-        if (turnOf(c) !== turn) { keep.push(c); continue; }
+        if (turnOf(c) !== turn && !late[c]) { keep.push(c); continue; }
+        if (!PW.DETERMINISTIC && worked > 0 && performance.now() - started > HEAT_BUDGET) { late[c] = 1; putOff.push(c); stats.late += 1; continue; }
+        late[c] = 0; worked += 1;
         const T = world.heat[c];
         if (!T) { world.heatActive[c] = 0; rects.delete(c); PW.clearHeatBox(world, c); continue; }
         const cx = (c % chunksX) << CHUNK_SHIFT, cy = ((c / chunksX) | 0) << CHUNK_SHIFT;
@@ -415,8 +425,8 @@
       }
       // Chunks that gained heat during the pass were appended to the live list.
       for (let n = list.length; n < world.heatList.length; n += 1) keep.push(world.heatList[n]);
-      world.heatList = keep;
-      stats.chunks = keep.length;
+      world.heatList = putOff.length ? putOff.concat(keep) : keep;
+      stats.chunks = world.heatList.length;
     }
     // What a hot cell does: water boils, ground scorches, fuel catches.
     function effects(i, x, y, id, t) {

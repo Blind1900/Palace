@@ -830,34 +830,61 @@
     }
     // A bit of a ruin left touching nothing that bears - the heap it lay on run off from under it,
     // what it leaned on gone - breaks up and comes down as rubble. (Clumps of ruin in the box.)
+    // (the cells of ruin already looked at, kept for all the boxes one loose() looks over: a clump
+    // looked at once was settled then - come down, or held, and what came down beside it only holds
+    // it the more - so it is not filled again for each ruin box it lies in. Stamped in a grid over
+    // the boxes, any cell of a clump reaching out beyond them in a set)
+    const SEEN = { grid: new Uint32Array(0), stamp: 0, x0: 0, y0: 0, w: 0, h: 0, far: new Set(), clump: new Int32Array(1024) };
+    function seenOver(x0, y0, x1, y1) {
+      const w = Math.max(1, x1 - x0 + 1), h = Math.max(1, y1 - y0 + 1);
+      if (SEEN.grid.length < w * h) SEEN.grid = new Uint32Array(Math.ceil(w * h * 1.25));
+      SEEN.stamp += 1;
+      if (SEEN.stamp >= 0xffffffff) { SEEN.grid.fill(0); SEEN.stamp = 1; }
+      SEEN.x0 = x0; SEEN.y0 = y0; SEEN.w = w; SEEN.h = h; SEEN.far.clear();
+    }
+    // (marks cell i seen; false if it was already)
+    function see(i) {
+      const x = i % W - SEEN.x0, y = ((i / W) | 0) - SEEN.y0;
+      if (x >= 0 && y >= 0 && x < SEEN.w && y < SEEN.h) {
+        const k = y * SEEN.w + x;
+        if (SEEN.grid[k] === SEEN.stamp) return false;
+        SEEN.grid[k] = SEEN.stamp; return true;
+      }
+      if (SEEN.far.has(i)) return false;
+      SEEN.far.add(i); return true;
+    }
     function looseRuins(x0, y0, x1, y1) {
       x0 = Math.max(1, x0); y0 = Math.max(1, y0); x1 = Math.min(W - 2, x1); y1 = Math.min(H - 2, y1);
-      const seen = new Set();
-      const isRuin = (i) => (mat[i] & ID_MASK) === M.RUIN;
+      const RUIN = M.RUIN, SOLID = PW.PHASE.SOLID, POWDER = PW.PHASE.POWDER;
       // (what holds it: solid beside it, or anything heaped under it - a heap beside or on it holds
       // nothing up)
-      const solidBy = (i) => !isRuin(i) && phase[mat[i] & ID_MASK] === PW.PHASE.SOLID;
-      const under = (i) => !isRuin(i) && phase[mat[i] & ID_MASK] >= PW.PHASE.POWDER;
+      const solidBy = (i) => { const id = mat[i] & ID_MASK; return id !== RUIN && phase[id] === SOLID; };
+      const under = (i) => { const id = mat[i] & ID_MASK; return id !== RUIN && phase[id] >= POWDER; };
+      const add = (j) => {
+        if ((mat[j] & ID_MASK) !== RUIN || !see(j)) return;
+        if (SEEN.n === SEEN.clump.length) { const c = new Int32Array(SEEN.n * 2); c.set(SEEN.clump); SEEN.clump = c; }
+        SEEN.clump[SEEN.n++] = j;
+      };
       let n = 0;
       for (let y = y0; y <= y1; y += 1) {
         for (let x = x0; x <= x1; x += 1) {
           const i0 = y * W + x;
-          if (!isRuin(i0) || seen.has(i0)) continue;
-          const clump = [i0];
-          seen.add(i0);
+          if ((mat[i0] & ID_MASK) !== RUIN || !see(i0)) continue;
+          SEEN.clump[0] = i0; SEEN.n = 1;
           let held = false;
-          for (let q = 0; q < clump.length && clump.length < 20000; q += 1) {
-            const i = clump[q];
+          for (let q = 0; q < SEEN.n && SEEN.n < 20000; q += 1) {
+            const i = SEEN.clump[q];
             if (!held && (under(i + W) || solidBy(i - 1) || solidBy(i + 1) || solidBy(i - W))) held = true;
-            for (const j of [i - W - 1, i - W, i - W + 1, i - 1, i + 1, i + W - 1, i + W, i + W + 1]) if (!seen.has(j) && isRuin(j)) { seen.add(j); clump.push(j); }
+            add(i - W - 1); add(i - W); add(i - W + 1); add(i - 1); add(i + 1); add(i + W - 1); add(i + W); add(i + W + 1);
           }
           if (held) continue;
-          for (const i of clump) {
-            const keep = mat[i] & 0xc0, cx = i % W, cy = (i / W) | 0;
+          const clump = SEEN.clump;
+          for (let q = 0; q < SEEN.n; q += 1) {
+            const i = clump[q], keep = mat[i] & 0xc0, cx = i % W, cy = (i / W) | 0;
             PW.set(world, cx, cy, (breaksTo[M.RUIN] || M.DEBRIS) | keep, { keepPaint: true });
             PW.stir(world, cx, cy, cx, cy);
           }
-          n += clump.length;
+          n += SEEN.n;
         }
       }
       stats.ruinsLoosened = (stats.ruinsLoosened || 0) + n;
@@ -878,6 +905,7 @@
     // PANEL_SIDE from it)
     function loose(x0, y0, x1, y1) {
       let n = 0;
+      seenOver(Math.max(0, Math.floor(x0) - 1), Math.max(0, Math.floor(y0) - 1), Math.min(W - 1, Math.ceil(x1) + 1), Math.min(H - 1, Math.ceil(y1) + 1));
       for (const r of world.ruins || []) {
         const rx0 = Math.max(Math.floor(x0), r.x0 - PANEL_SIDE), ry0 = Math.max(Math.floor(y0), r.y0 - PANEL_SIDE);
         const rx1 = Math.min(Math.ceil(x1), r.x1 + PANEL_SIDE), ry1 = Math.min(Math.ceil(y1), r.y1 + PANEL_SIDE);
