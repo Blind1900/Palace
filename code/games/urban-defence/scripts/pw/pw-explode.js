@@ -259,8 +259,9 @@
     }
     // The blast wave: a burst of pressure in the air that spreads out as a wind.
     if (world.air) world.air.blast(cx, cy, r * 1.4, power);
-    // (and the cores' Life in its reach is shaken - see PW.coreLife)
+    // (and the cores' Life in its reach is shaken - see PW.coreLife - and the vehicles in it hurt)
     if (PW.coreLife) PW.coreLife.blast(world, cx, cy, r, power);
+    if (PW.tanks && PW.tanks.blast) PW.tanks.blast(world, cx, cy, r, power);
     if (world.stability) {
       world.stability.shock(cx, cy, Math.pow(r * power, 3));
     }
@@ -638,6 +639,8 @@
 
   // Short, bright light flashes drawn as cell-aligned dithered discs.
   function drawEffects(world, renderer, dt) {
+    // (the rounds in flight, over everything: see PW.shots)
+    if (PW.shots) PW.shots.draw(renderer, world);
     if (!world.effects || !world.effects.length) return;
     const { ctx, camera } = renderer;
     const z = camera.zoom, size = Math.max(1, Math.round(z));

@@ -52,6 +52,13 @@
   const GUN_UP = 60, GUN_DOWN = 6;   // degrees the gun lays above and below the hull's line
   const SLEW = 1.4;             // rad/s the gun is laid at
   const TURN = 0.9;             // s the turret takes to turn round (half a turn)
+  // Fighting (N77): its gun, its armour, and what is left of it.
+  const RELOAD = 3.2;           // s between its rounds (its loader's drill)
+  const RECOIL = 0.35;          // s its gun takes to run back and out again after a round
+  const KICK = 7;               // cells the gun runs back into its mantlet
+  const ARMOUR = 100;           // what its armour takes (see hurt): a dart through it does 60
+  const SMOKES = 60, BURNS = 30;   // its armour's worth left under which it smokes from its engine deck, and burns
+  const BURN_OUT = 14;          // s its wreck burns
   const G = PW.GRAVITY || 260;
   const deg = Math.PI / 180;
 
@@ -140,7 +147,8 @@
     // same, raised; small return rollers under the belt's top run)
     const wheels = Array.from({ length: st.wheels }, (_, k) => -st.span + (2 * st.span) * k / (st.wheels - 1));
     a = { style, st, hull, turret, wheels, R: WHEEL, sprocket: [-52, -9, 6], idler: [52, -9, 6], rollers: [-30, 0, 30].map((u) => [u, -13, 1.5]),
-      trunnion: [20, -6], barrel: st.barrel, ring: [0, -deck + 1], height: deck + 11, nose: NOSE - st.span };
+      trunnion: [20, -6], barrel: st.barrel, ring: [0, -deck + 1], height: deck + 11, nose: NOSE - st.span,
+      barrelC: rgb(st.base, 0.95), barrelD: rgb(st.dark, 0.85), barrelL: rgb(st.base, 1.18) };
     ART.set(style, a);
     return a;
   }
@@ -223,7 +231,8 @@
     const t = { art, style: art.style, side: spec.side || null, x, y, facing, angle: 0, spin: 0,
       v: 0, vy: 0, drive: 0, travel: 0, falling: false, tipping: false, blocked: '', dead: false,
       springs: new Float32Array(art.wheels.length), contact: new Uint8Array(art.wheels.length),
-      target: null, elevation: 0, turning: 0 };
+      target: null, elevation: 0, turning: 0,
+      hp: ARMOUR, ammo: spec.ammo || 'he', reload: 0, recoil: 0, rear: -facing, scars: [], fumes: 0, hurtBy: '' };
     (world.tanks || (world.tanks = [])).push(t);
     current = world;
     settle(world, t, 0);
@@ -352,16 +361,29 @@
     return lines;
   }
   function step(world, dt) {
+    // (the rounds in flight - until the world's loop steps them itself - and the tanks among what
+    // they can strike)
+    if (PW.shots) { PW.shots.addTarget(target); if (!PW.shots.looped) PW.shots.step(world, dt); }
+    if (world.wrecks && world.wrecks.length) stepWrecks(world, dt);
     const list = world.tanks;
     if (!list) return;
     for (const t of list) if (!t.dead) stepOne(world, t, dt);
+    // (the dead are let go: what is left of them is the world's now)
+    let w = 0;
+    for (let q = 0; q < list.length; q += 1) if (!list[q].dead) list[w++] = list[q];
+    list.length = w;
   }
   function stepOne(world, t, dt) {
+    if (t.reload > 0) t.reload = Math.max(0, t.reload - dt);
+    if (t.recoil > 0) t.recoil = Math.max(0, t.recoil - dt);
+    if (t.drive) t.rear = -t.drive;
     // (its tracks off the ground, or all but one wheel: it does not drive)
     if (t.falling || t.tipping) { t.v = 0; t.blocked = ''; } else {
-      // Driving: on to its top speed either way (less, uphill), braking to a stop before it goes
-      // the other way; and braking in time for what stops it ahead, its nose short of it.
-      const want = t.drive * VMAX * (1 - CLIMB * Math.max(0, -t.drive * Math.sin(t.angle)));
+      // Driving: on to its top speed either way (less, uphill, and less as it is hurt - its engine
+      // smoking, burning), braking to a stop before it goes the other way; and braking in time for
+      // what stops it ahead, its nose short of it.
+      const lame = t.hp < BURNS ? 0.45 : t.hp < SMOKES ? 0.8 : 1;
+      const want = t.drive * VMAX * lame * (1 - CLIMB * Math.max(0, -t.drive * Math.sin(t.angle)));
       t.blocked = want ? ahead(world, t, Math.sign(want)) : '';
       let goal = want;
       if (t.blocked) {
@@ -380,7 +402,8 @@
       t.vy += G * dt;
       t.y += t.vy * dt;
       t.x += t.v * dt;
-      settle(world, t, dt);
+      // (thrown up by a blast, it meets nothing under it until it comes down again)
+      if (t.vy >= 0) settle(world, t, dt);
       if (!t.falling && !t.tipping) t.vy = 0;          // (it came down on its tracks, the blow taken by its springs)
       if (t.y > world.height + 200) t.dead = true;
     } else {
@@ -389,10 +412,21 @@
       settle(world, t, dt);
     }
     aim(t, dt);
+    if (t.hp < SMOKES) fume(world, t, dt);
   }
   // (the gun's reach, in the world's frame, facing `side`: GUN_DOWN below the hull's line to
   // GUN_UP above it - the hull's line rising the way the turret faces by -side x its angle)
   const reach = (t, side) => [-side * t.angle - GUN_DOWN * deg, -side * t.angle + GUN_UP * deg];
+  // (its fire control: the gun's elevation that puts the round it has loaded on (x, y) from the
+  // muzzle's foot - a round falls as it flies, so a far mark is laid on above the line to it; the
+  // flatter of the two arcs that reach it, or the line itself where none does)
+  function lay(t, px, py, x, y) {
+    const dx = Math.abs(x - px), up = py - y, line = Math.atan2(up, dx);
+    const k = PW.shots && PW.shots.KINDS[t.ammo];
+    if (!k || dx < 1) return line;
+    const v = k.speed, g = G, v2 = v * v, root = v2 * v2 - g * (g * dx * dx + 2 * up * v2);
+    return root < 0 ? line : Math.atan((v2 - Math.sqrt(root)) / (g * dx));
+  }
   // The turret faces its target's side, or the way the tank goes, turning round to it over TURN;
   // the gun is laid on the target (or level ahead), held within its reach of the hull.
   function aim(t, dt) {
@@ -400,7 +434,7 @@
     if (t.target) {
       const [px, py] = muzzleBase(t);
       side = t.target.x >= px ? 1 : -1;
-      want = Math.atan2(py - t.target.y, Math.abs(t.target.x - px));
+      want = lay(t, px, py, t.target.x, t.target.y);
     } else if (t.drive) side = t.drive;
     if (side !== t.facing) {
       t.turning += dt;
@@ -501,6 +535,81 @@
     for (let i = 0; i < n; i += 1) disc(art.wheels[i], t.springs[i] - R, R, st.wheel, true);
     return px;
   }
+  // A tank's pose as it is drawn - its turret's frame turned as far round as it is, the gun's line,
+  // run back after a round - for its drawing, for what a round strikes of it, and for the wreck it
+  // leaves: one look, cell for cell, in all three.
+  function poseOf(t) {
+    const { art } = t;
+    // (turning round: its length seen shortened - never below 0.55 of it, a turret being nearly
+    // as wide as it is long - and the gun's by all of it)
+    const k = turnOf(t), kt = (k < 0 ? -1 : 1) * Math.max(0.55, Math.abs(k));
+    const [rx, ry] = ringAt(t), [tfx, tfy, tnx, tny] = turretFrame(t, kt), [bx, by] = muzzleBase(t, kt);
+    const L = art.barrel - (t.recoil > 0 ? KICK * t.recoil / RECOIL : 0), gdx = t.facing * k * Math.cos(t.elevation) * L, gdy = -Math.sin(t.elevation) * L;
+    const glen = Math.hypot(gdx, gdy);
+    // (the turret's frame turned back: a world offset from the ring to its t, s - det)
+    return { c: Math.cos(t.angle), s: Math.sin(t.angle), rx, ry, tfx, tfy, tnx, tny, det: tfx * tny - tfy * tnx, bx, by, L, gdx, gdy, glen,
+      gux: glen > 1e-6 ? gdx / glen : 0, guy: glen > 1e-6 ? gdy / glen : 0, gear: null };
+  }
+  // (the box it takes up in the world: its hull and running gear, turret and gun)
+  function boxOf(t, P) {
+    let x0 = Math.min(P.bx, P.bx + P.gdx), x1 = Math.max(P.bx, P.bx + P.gdx), y0 = Math.min(P.by, P.by + P.gdy), y1 = Math.max(P.by, P.by + P.gdy);
+    for (const [u, v] of [[-61, -31], [61, -31], [-61, 9], [61, 9]]) {
+      const [wx, wy] = toWorld(t, u, v);
+      x0 = Math.min(x0, wx); x1 = Math.max(x1, wx); y0 = Math.min(y0, wy); y1 = Math.max(y1, wy);
+    }
+    for (const [u, v] of [[-37, -18], [31, -18], [-37, 1], [31, 1]]) {
+      const wx = P.rx + u * P.tfx + v * P.tnx, wy = P.ry + u * P.tfy + v * P.tny;
+      x0 = Math.min(x0, wx); x1 = Math.max(x1, wx); y0 = Math.min(y0, wy); y1 = Math.max(y1, wy);
+    }
+    return [x0, y0, x1, y1];
+  }
+  // The colour of tank t at world point (wx, wy) in pose P (0: none of it there), its part left in
+  // PART: the gun, the turret, the hull, the running gear. Where a round struck it, it is scarred.
+  const GUN = 1, TURRET = 2, HULL = 3, RUNNING = 4;
+  let PART = 0;
+  function pixel(t, P, wx, wy) {
+    const { art } = t;
+    // The gun: a tube from the trunnion, thicker at its fume extractor and its muzzle (seen end-on
+    // while the turret turns, its muzzle's ring).
+    const gx = wx - P.bx, gy = wy - P.by, L = P.L, glen = P.glen;
+    const along = gx * P.gux + gy * P.guy, across = gx * P.guy - gy * P.gux;
+    const f = glen > 1e-6 ? along / glen * L : 0;
+    if (along >= -2 && along <= glen) {
+      const half = f > L * 0.4 && f < L * 0.4 + 9 ? 2.5 : f > L - 3 ? 2 : 1.6;
+      if (across >= -half && across <= half) { PART = GUN; return across < -half + 1 ? art.barrelL : across > half - 1 ? art.barrelD : art.barrelC; }
+    }
+    if (glen < 6 && gx * gx + gy * gy <= 6.25) { PART = GUN; return gx * gx + gy * gy <= 1.5 ? art.barrelD : art.barrelC; }
+    // The turret, on its ring, facing its way.
+    const rdx = wx - P.rx, rdy = wy - P.ry;
+    const tt = Math.floor((rdx * P.tny - rdy * P.tnx) / P.det), ts = Math.floor((rdy * P.tfx - rdx * P.tfy) / P.det);
+    let col = at(art.turret, tt, ts);
+    if (col) { PART = TURRET; return t.scars.length ? scarred(t, col, TURRET, tt, ts) : col; }
+    // The hull and its running gear, along the ground under it.
+    const dx = wx - t.x, dy = wy - t.y;
+    const u = Math.floor(dx * P.c + dy * P.s), v = Math.floor(dy * P.c - dx * P.s);
+    col = at(art.hull, u, v);
+    if (col) { PART = HULL; return t.scars.length ? scarred(t, col, HULL, u, v) : col; }
+    const gu = u - GEAR.u0, gv = v - GEAR.v0;
+    if (gu >= 0 && gv >= 0 && gu < GEAR.w && gv < GEAR.h) {
+      if (!P.gear) P.gear = gearOf(t);
+      col = P.gear[gv * GEAR.w + gu];
+      if (col) { PART = RUNNING; return col; }
+    }
+    PART = 0;
+    return 0;
+  }
+  // (a scar where a round struck: the paint burnt off round it, black at its heart - kept in its
+  // own part's frame, so it moves and turns with it)
+  function scarred(t, col, part, a, b) {
+    for (const sc of t.scars) {
+      if (sc[0] !== part) continue;
+      const d2 = (a - sc[1]) * (a - sc[1]) + (b - sc[2]) * (b - sc[2]), r = sc[3];
+      if (d2 > r * r) continue;
+      const k = d2 < r * r * 0.3 ? 0.25 : 0.55 + 0.1 * (PW.hash2(a, b) & 3);
+      return PW.abgr((col & 255) * k, (col >>> 8 & 255) * k, (col >>> 16 & 255) * k);
+    }
+    return col;
+  }
   let canvas = null, ctx2 = null, image = null, px32 = null;
   function draw(renderer) {
     const world = renderer.world || (window.pwApp && window.pwApp.world) || current;
@@ -511,27 +620,11 @@
     const vx0 = camera.x, vy0 = camera.y, vx1 = vx0 + view.width / z, vy1 = vy0 + view.height / z;
     for (const t of list) {
       if (t.dead) continue;
-      const { art } = t, c = Math.cos(t.angle), s = Math.sin(t.angle);
-      // (turning round: its length seen shortened - never below 0.55 of it, a turret being nearly
-      // as wide as it is long - and the gun's by all of it)
-      const k = turnOf(t), kt = (k < 0 ? -1 : 1) * Math.max(0.55, Math.abs(k));
-      const [rx, ry] = ringAt(t), [tfx, tfy, tnx, tny] = turretFrame(t, kt), [bx, by] = muzzleBase(t, kt);
-      const L = art.barrel, gdx = t.facing * k * Math.cos(t.elevation) * L, gdy = -Math.sin(t.elevation) * L;
-      const glen = Math.hypot(gdx, gdy), gux = glen > 1e-6 ? gdx / glen : 0, guy = glen > 1e-6 ? gdy / glen : 0;
-      // (the box it takes up: its hull and running gear, turret and gun)
-      let x0 = Math.min(bx, bx + gdx), x1 = Math.max(bx, bx + gdx), y0 = Math.min(by, by + gdy), y1 = Math.max(by, by + gdy);
-      for (const [u, v] of [[-61, -31], [61, -31], [-61, 9], [61, 9]]) {
-        const [wx, wy] = toWorld(t, u, v);
-        x0 = Math.min(x0, wx); x1 = Math.max(x1, wx); y0 = Math.min(y0, wy); y1 = Math.max(y1, wy);
-      }
-      for (const [u, v] of [[-37, -18], [31, -18], [-37, 1], [31, 1]]) {
-        const wx = rx + u * tfx + v * tnx, wy = ry + u * tfy + v * tny;
-        x0 = Math.min(x0, wx); x1 = Math.max(x1, wx); y0 = Math.min(y0, wy); y1 = Math.max(y1, wy);
-      }
+      const P = poseOf(t);
+      let [x0, y0, x1, y1] = boxOf(t, P);
       x0 = Math.max(Math.floor(x0 - 4), Math.floor(vx0)); x1 = Math.min(Math.ceil(x1 + 4), Math.ceil(vx1));
       y0 = Math.max(Math.floor(y0 - 4), Math.floor(vy0)); y1 = Math.min(Math.ceil(y1 + 4), Math.ceil(vy1));
       if (x1 <= x0 || y1 <= y0) continue;
-      const gear = gearOf(t);
       const iw = Math.ceil((x1 - x0) / skip), ih = Math.ceil((y1 - y0) / skip);
       if (!canvas || canvas.width < iw || canvas.height < ih) {
         const cw = Math.ceil(Math.max(iw, canvas ? canvas.width : 0) / 128) * 128, ch = Math.ceil(Math.max(ih, canvas ? canvas.height : 0) / 128) * 128;
@@ -539,34 +632,12 @@
         canvas.width = cw; canvas.height = ch;
         ctx2 = canvas.getContext('2d'); image = ctx2.createImageData(cw, ch); px32 = new Uint32Array(image.data.buffer);
       }
-      const stride = canvas.width, barrelC = rgb(art.st.base, 0.95), barrelD = rgb(art.st.dark, 0.85), barrelL = rgb(art.st.base, 1.18);
-      // (the turret's frame turned back: a world offset from the ring to its t, s)
-      const det = tfx * tny - tfy * tnx;
+      const stride = canvas.width;
       for (let j = 0; j < ih; j += 1) {
         const wy = y0 + j * skip + 0.5, row = j * stride;
         px32.fill(0, row, row + iw);
         for (let i = 0; i < iw; i += 1) {
-          const wx = x0 + i * skip + 0.5;
-          // The gun: a tube from the trunnion, thicker at its fume extractor and its muzzle (seen
-          // end-on while the turret turns, its muzzle's ring).
-          const gx = wx - bx, gy = wy - by;
-          const along = gx * gux + gy * guy, across = gx * guy - gy * gux;
-          const f = glen > 1e-6 ? along / glen * L : 0;
-          if (along >= -2 && along <= glen) {
-            const half = f > L * 0.4 && f < L * 0.4 + 9 ? 2.5 : f > L - 3 ? 2 : 1.6;
-            if (across >= -half && across <= half) { px32[row + i] = across < -half + 1 ? barrelL : across > half - 1 ? barrelD : barrelC; continue; }
-          }
-          if (glen < 6 && gx * gx + gy * gy <= 6.25) { px32[row + i] = gx * gx + gy * gy <= 1.5 ? barrelD : barrelC; continue; }
-          // The turret, on its ring, facing its way.
-          const rdx = wx - rx, rdy = wy - ry;
-          const tt = Math.floor((rdx * tny - rdy * tnx) / det), ts = Math.floor((rdy * tfx - rdx * tfy) / det);
-          let col = at(art.turret, tt, ts);
-          if (col) { px32[row + i] = col; continue; }
-          // The hull and its running gear, along the ground under it.
-          const dx = wx - t.x, dy = wy - t.y;
-          const u = Math.floor(dx * c + dy * s), v = Math.floor(dy * c - dx * s);
-          col = at(art.hull, u, v);
-          if (!col) { const gu = u - GEAR.u0, gv = v - GEAR.v0; if (gu >= 0 && gv >= 0 && gu < GEAR.w && gv < GEAR.h) col = gear[gv * GEAR.w + gu]; }
+          const col = pixel(t, P, x0 + i * skip + 0.5, wy);
           if (col) px32[row + i] = col;
         }
       }
@@ -579,11 +650,193 @@
   const before = PW.drawUnitsHook;
   PW.drawUnitsHook = (renderer) => { if (before) before(renderer); draw(renderer); };
 
+  // ---- Fighting (N77) -------------------------------------------------------------------------------
+  // Its gun fires the round it has loaded (PW.shots: an armour-piercing dart, 'ap', or a
+  // high-explosive shell, 'he'), laid by its fire control (see lay); it reloads in RELOAD. What it
+  // takes - a round striking its own pixels, a blast in reach - comes off its armour: a dart that
+  // strikes it takes 60 of its 100 (less on its tracks, little on its gun), a high-explosive shell
+  // its hit and its burst, a missile nearly all; a rifle bullet only sparks off it. Hurt, it smokes
+  // from its engine deck and goes slower; badly hurt it burns. When its armour is gone it is
+  // destroyed: its ammunition goes up - its turret blown off its ring and thrown, if what killed
+  // it went in hard - and what is left of it, burnt black, falls as a wreck: rigid pieces (see
+  // pw-fragments) that come to rest as ruin - part of the ground, its shape and its burnt colours
+  // still its own, as a building's ruins are - burning a while, its smoke hanging over the place
+  // long after; the town's crews clear it in time, as any ruin.
+  function fire(world, t) {
+    if (!t || t.dead || t.reload > 0 || t.turning || t.falling || !PW.shots) return null;
+    const m = muzzle(t);
+    const shot = PW.shots.fire(world, { kind: t.ammo, x: m.x, y: m.y, dx: m.dx, dy: m.dy, side: t.side, from: t, spread: 0.002 });
+    t.reload = RELOAD; t.recoil = RECOIL;
+    // (its recoil: the round's momentum, the other way - the hull rocks back on its tracks)
+    if (!t.tipping) t.v -= t.facing * Math.cos(t.elevation) * 9;
+    PW.shots.report(world, m.x, m.y, m.dx, m.dy, 6);
+    return shot;
+  }
+  // (what a round meets of it: its own pixels as drawn - see pixel)
+  const target = {
+    hit(world, s, x0, y0, x1, y1) {
+      const list = world.tanks;
+      if (!list || !list.length) return null;
+      let best = null;
+      const sx = x1 - x0, sy = y1 - y0, len2 = sx * sx + sy * sy;
+      for (const t of list) {
+        if (t.dead || t === s.from) continue;
+        // (near it at all: within its reach - hull, turret and gun - of its middle)
+        const mx = t.x + Math.sin(t.angle) * 16, my = t.y - Math.cos(t.angle) * 16;
+        const f0 = len2 ? Math.max(0, Math.min(1, ((mx - x0) * sx + (my - y0) * sy) / len2)) : 0;
+        if (Math.hypot(x0 + sx * f0 - mx, y0 + sy * f0 - my) > 110) continue;
+        const P = poseOf(t), n = Math.max(1, Math.ceil(Math.sqrt(len2)));
+        for (let q = 0; q <= n; q += 1) {
+          const f = q / n;
+          if (best && f >= best.f) break;
+          if (pixel(t, P, x0 + sx * f, y0 + sy * f)) { best = { f, x: x0 + sx * f, y: y0 + sy * f, ref: t, part: PART }; break; }
+        }
+      }
+      return best;
+    },
+    strike(world, t, s, x, y, part) {
+      const share = part === GUN ? 0.25 : part === RUNNING ? 0.6 : 1, dmg = (s.k.damage || 0) * share;
+      if (dmg > 0) scar(t, x, y, part, s.k.blast ? 5 : 3);
+      else if (PW.shots && PW.shots.spark) PW.shots.spark(world, x, y, -s.vx * 0.05, -s.vy * 0.05, 3);
+      hurt(world, t, dmg, s.kind);
+      return true;
+    },
+  };
+  // (a scar where it was struck, kept in its part's own frame: see scarred)
+  function scar(t, x, y, part, r) {
+    let a, b;
+    if (part === TURRET || part === GUN) {
+      const P = poseOf(t), rdx = x - P.rx, rdy = y - P.ry;
+      a = (rdx * P.tny - rdy * P.tnx) / P.det; b = (rdy * P.tfx - rdx * P.tfy) / P.det;
+      part = TURRET;
+    } else {
+      const dx = x - t.x, dy = y - t.y, c = Math.cos(t.angle), s = Math.sin(t.angle);
+      a = dx * c + dy * s; b = dy * c - dx * s;
+      part = HULL;
+    }
+    t.scars.push([part, a, b, r]);
+    if (t.scars.length > 10) t.scars.shift();
+  }
+  function hurt(world, t, amount, cause) {
+    if (t.dead || !(amount > 0)) return;
+    t.hp -= amount;
+    t.hurtBy = cause;
+    if (t.hp <= 0) destroy(world, t, cause);
+  }
+  // A blast (PW.explode) hurts the tanks in its reach - the nearer its hull and the harder, the more
+  // - and a heavy one close by throws one.
+  function blast(world, cx, cy, r, power = 1) {
+    const list = world.tanks;
+    if (!list || !list.length) return;
+    for (const t of list) {
+      if (t.dead) continue;
+      // (how far from its hull: the blast in the hull's frame, to the nearest of its box)
+      const dx = cx - t.x, dy = cy - t.y, c = Math.cos(t.angle), s = Math.sin(t.angle);
+      const u = dx * c + dy * s, v = dy * c - dx * s;
+      const du = Math.max(0, Math.abs(u) - 60), dv = Math.max(0, v - 2, -t.art.height - v);
+      const d = Math.hypot(du, dv), reach = r * 1.6 + 6;
+      if (d >= reach) continue;
+      const k = power * (1 - d / reach);
+      if (k > 0.9 && !t.falling) {
+        t.falling = true; t.tipping = false;
+        t.vy = -Math.min(300, 220 * (k - 0.7));
+        t.v += Math.sign(t.x - cx || 1) * 80 * (k - 0.7);
+      }
+      const cu = Math.max(-58, Math.min(58, u)), cv = Math.max(-t.art.height + 12, Math.min(-2, v));
+      if (k > 0.3) scar(t, t.x + cu * c - cv * s, t.y + cu * s + cv * c, HULL, Math.min(9, 2 + r * 0.35));
+      hurt(world, t, 55 * k * k + (d < 1 ? 15 * power : 0), 'blast');
+    }
+  }
+  // Destroyed: its ammunition goes up, its turret thrown off or burnt out where it sits, and the
+  // rest falls as its wreck.
+  const burnt = (c, x, y) => {
+    const h = PW.hash2(x, y), k = 0.3 + ((h >>> 3) & 7) / 50;
+    // (now and then a fleck of rust and burnt-through paint)
+    if ((h & 15) < 3) return PW.abgr(70 + (h >>> 8 & 31), 40 + (h >>> 13 & 15), 26);
+    return PW.abgr(Math.min(255, (c & 255) * k + 16), Math.min(255, (c >>> 8 & 255) * k + 14), Math.min(255, (c >>> 16 & 255) * k + 12));
+  };
+  let wreckN = 0;
+  function destroy(world, t, cause) {
+    t.dead = true; t.hp = 0;
+    if (held === t) held = null;
+    const P = poseOf(t), [bx0, by0, bx1, by1] = boxOf(t, P);
+    const { mat, width: W, height: H } = world;
+    const hull = { x: [], y: [], c: [] }, top = { x: [], y: [], c: [] };
+    // (it went in hard - a dart, a missile, a heavy blast: its turret goes up off its ring)
+    const toss = cause === 'ap' || cause === 'missile' || (cause === 'blast' && (PW.hash2(t.x | 0, wreckN) & 1) === 0);
+    for (let y = Math.max(1, Math.floor(by0) - 2); y <= Math.min(H - 2, Math.ceil(by1) + 2); y += 1) {
+      for (let x = Math.max(1, Math.floor(bx0) - 2); x <= Math.min(W - 2, Math.ceil(bx1) + 2); x += 1) {
+        const col = pixel(t, P, x + 0.5, y + 0.5);
+        if (!col || !PW.mat.open[mat[y * W + x] & ID_MASK]) continue;
+        const into = toss && (PART === GUN || PART === TURRET) ? top : hull;
+        into.x.push(x); into.y.push(y); into.c.push(burnt(col, x, y));
+      }
+    }
+    // (the cook-off, at its turret ring)
+    if (PW.explode) PW.explode(world, world.particles, { x: P.rx, y: P.ry - 3, radius: 7, power: 0.6 });
+    const data = (l) => {
+      const n = l.x.length;
+      return { x: Int32Array.from(l.x), y: Int32Array.from(l.y), color: Uint32Array.from(l.c), byte: new Uint8Array(n).fill(M.STEEL), solid: new Uint8Array(n).fill(1) };
+    };
+    const fr = world.fragments, h = PW.hash3(t.x | 0, t.y | 0, ++wreckN), r1 = (h & 1023) / 1023, r2 = (h >>> 10 & 1023) / 1023;
+    if (fr) {
+      // (thrown up a few metres - and on by the cook-off's own blast - and off to one side, landing
+      // 10 to 20 m away, as a turret blown off its ring does)
+      const side = r1 < 0.5 ? -1 : 1;
+      if (top.x.length) fr.spawn({ data: data(top), vx: t.v * 0.4 + side * (60 + r2 * 60), vy: -(170 + r2 * 90), omega: side * (2 + r2 * 3), wreck: true });
+      if (hull.x.length) fr.spawn({ data: data(hull), vx: t.v * 0.5, vy: Math.min(-30, t.vy || 0), omega: 0, wreck: true });
+    }
+    // (burning a while, its smoke hanging over the place long after)
+    (world.wrecks || (world.wrecks = [])).push({ x: t.x, y: t.y, width: 70, left: BURN_OUT, acc: 0, n: 0 });
+    if (PW.addSmoulder) PW.addSmoulder(world, t.x, t.y - 2, 60, 44);
+    stats.destroyed += 1;
+  }
+  // (a wreck's fire: flames out of the top of it, dying down, each leaving a pixel of soot)
+  function stepWrecks(world, dt) {
+    const list = world.wrecks, particles = world.particles, F = PW.PARTICLE;
+    for (let q = list.length - 1; q >= 0; q -= 1) {
+      const w = list[q];
+      w.left -= dt;
+      if (w.left <= 0) { list.splice(q, 1); continue; }
+      if (!particles || !F) continue;
+      w.acc += dt * 70 * (w.left / BURN_OUT);
+      while (w.acc >= 1) {
+        w.acc -= 1; w.n += 1;
+        const h = PW.hash3(w.x | 0, w.n, 31), ox = ((h & 1023) / 1023 - 0.5) * w.width, r1 = ((h >>> 10) & 255) / 255;
+        const x = Math.round(w.x + ox);
+        let y = Math.round(w.y), up = 0;
+        while (up < 48 && y > 1 && !PW.mat.open[PW.get(world, x, y) & ID_MASK]) { y -= 1; up += 1; }
+        if (up >= 48) continue;
+        particles.spawn(x + 0.5, y + 0.5, ox * 0.3, -40 - r1 * 50, 0, PW.abgr(48, 45, 43, 210), F.FIRE, 0.35 + r1 * 0.6);
+      }
+    }
+  }
+  // (hurt: smoke from its engine deck, at its back - grey, then black with flames as it burns)
+  let fumeN = 0;
+  function fume(world, t, dt) {
+    const particles = world.particles, F = PW.PARTICLE;
+    if (!particles || !F) return;
+    const burning = t.hp < BURNS;
+    t.fumes += dt * (burning ? 40 : 4 + 14 * (1 - t.hp / SMOKES));
+    const [ex, ey] = toWorld(t, t.rear * 38, t.art.ring[1] - 2);
+    while (t.fumes >= 1) {
+      t.fumes -= 1;
+      const h = PW.hash3(t.x | 0, t.y | 0, ++fumeN), jx = ((h & 255) / 255 - 0.5) * 14, r1 = ((h >>> 8) & 255) / 255;
+      if (burning && (h >>> 16 & 3)) particles.spawn(ex + jx, ey - 1, jx * 2, -30 - r1 * 40, 0, PW.abgr(52, 49, 47, 200), F.FIRE, 0.35 + r1 * 0.5);
+      else {
+        const g = burning ? 58 + (h >>> 20 & 15) : 118 + (h >>> 20 & 31);
+        particles.spawn(ex + jx, ey - 2, jx, -14 - r1 * 16, 0, PW.abgr(g, g - 3, g - 6, 200), F.SMOKE | F.THIN, 3 + r1 * 4);
+      }
+    }
+  }
+  const stats = { destroyed: 0 };
+
   // ---- By hand (a toolbar's TANK tool) -------------------------------------------------------------------
   // A click drops a tank on the ground under it - open ground, a road or a bridge, not a roof -
   // each side's in turn, and takes it in hand; with a tank in hand a click lays its gun on that
   // spot, a click on the tank lets it go (its gun back to level ahead), and a shift-click drops
-  // another. A / D or the arrow keys drive it left or right, S or the down arrow stops it.
+  // another. A / D or the arrow keys drive it left or right, S or the down arrow stops it; F fires
+  // its gun, R loads the other round (high-explosive, armour-piercing).
   let held = null, nextStyle = 0;
   function tool(world, x, y, shift = false) {
     const list = world.tanks || [];
@@ -620,10 +873,13 @@
     if (k === 'KeyA' || k === 'ArrowLeft') drive(held, -1);
     else if (k === 'KeyD' || k === 'ArrowRight') drive(held, 1);
     else if (k === 'KeyS' || k === 'ArrowDown') drive(held, 0);
+    else if (k === 'KeyF') fire(current || (window.pwApp && window.pwApp.world), held);
+    else if (k === 'KeyR') { held.ammo = held.ammo === 'he' ? 'ap' : 'he'; held.reload = Math.max(held.reload, RELOAD / 2); }
     else return false;
     return true;
   }
 
   PW.tanks = { create, step, draw, drive, aimAt, muzzle, settle, ahead, explain, tool, key, held: () => held, reach, gatesOf, STYLES: Object.keys(STYLES),
-    VMAX, ACCEL, GUN_UP, GUN_DOWN, MAX_SLOPE, STEP, SPRING_UP, SPRING_DOWN, TURN };
+    fire, hurt, blast, target, stats, poseOf, pixel, part: () => PART, PARTS: { GUN, TURRET, HULL, RUNNING },
+    VMAX, ACCEL, GUN_UP, GUN_DOWN, MAX_SLOPE, STEP, SPRING_UP, SPRING_DOWN, TURN, RELOAD, ARMOUR };
 })();

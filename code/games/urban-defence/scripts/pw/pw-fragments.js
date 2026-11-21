@@ -259,7 +259,7 @@
       // cell then; (px, py) is where that anchor's corner is now.
       const piece = { data, n, mass, inertia, grid, gw, gh, u0, v0, points, faces, ptCell, owner: spec.owner || 0, from: spec.from || spec.owner || 0, generation: spec.generation || 0,
         ox0: ax, oy0: ay, px: ax, py: ay, gx: cx - ax, gy: cy - ay, angle: 0, omega: spec.omega || 0, vx: spec.vx || 0, vy: spec.vy || 0,
-        mode: spec.flex ? 'flex' : spec.pivot ? 'hinge' : spec.drop ? 'drop' : 'fly', dir: spec.dir || 1, age: 0, flora: !!spec.flora,
+        mode: spec.flex ? 'flex' : spec.pivot ? 'hinge' : spec.drop ? 'drop' : 'fly', dir: spec.dir || 1, age: 0, flora: !!spec.flora, wreck: !!spec.wreck,
         spring: spec.flex ? spec.flex.spring : 0, damp: spec.flex ? spec.flex.damp : 0,
         yf: spec.pivot ? spec.pivot.y : spec.floor || 0, crushedRows: 0, base: spec.base ?? H, h0: spec.h0 || gh, still: 0, touched: -1, sunk: spec.sunk || 0,
         hollow: heavy + thin ? thin / (heavy + thin) : 0, shapeMass: mass, partsDue: partsLater, frame: outline.frame || 0,
@@ -458,6 +458,8 @@
     const SHED_SHAKE = 8;         // ...at most this many times more
     const SHED_EVERY = 3;         // ticks between looks at a piece's edges (each for that long)
     function shed(p, dt) {
+      // (a vehicle's wreck is welded armour: nothing comes loose of it as it flies)
+      if (p.wreck) return;
       const { grid, gw, gh, data, ptCell } = p;
       const [c, s] = cosSin(p);
       const spin = Math.abs(p.omega) * Math.hypot(gw, gh) / 2;
@@ -1436,7 +1438,8 @@
         stats.restCracked = (stats.restCracked || 0) + 1;
         return;
       }
-      if (p.mass >= RUIN_MIN && (p.owner || p.from)) ruin(p, c, s);
+      // (a vehicle's wreck comes to rest as a building's piece does: see PW.tanks)
+      if (p.mass >= RUIN_MIN && (p.owner || p.from || p.wreck)) ruin(p, c, s);
       else settle(p.data, 0, 0, p);
     }
     // Test the piece's outline against the world. A hinging piece crushes the stump of its own
@@ -2068,6 +2071,8 @@
     // a hard enough blow cracks the rest right through, along jagged lines, into chunks. A long
     // piece that lands across something narrow snaps over it. (False when nothing came of it.)
     function breaks(p, wx, wy, vx, vy, nx, ny, felt, hard = 0.5, spread = 0) {
+      // (a vehicle's wreck is armour plate and steel castings: it lands whole, as it is)
+      if (p.wreck) return false;
       const [c, s] = cosSin(p);
       // (the point struck, in the piece's own cells)
       const dx = wx - p.px, dy = wy - p.py;
@@ -2306,18 +2311,19 @@
           particles.spawn(x + 0.5, y - 0.5, (random() - 0.5) * 40, -25 - random() * 35, loose, paint, F.LAND | F.LOOSE, 5);
           room = true;
         }
-        if ((byte & ID_MASK) === M.GLASS || !room || (edge && (PW.hash2(x, y) & 3) === 0)) {
+        // (a building's ruin is cracked at its edges; a wreck's armour is not)
+        if ((byte & ID_MASK) === M.GLASS || !room || (edge && !p.wreck && (PW.hash2(x, y) & 3) === 0)) {
           if (rubbleFrom(data.solid[j], x, y)) particles.spawn(x + 0.5, y - 0.5, (random() - 0.5) * 60 * SPILL, -(20 + random() * 40) * LOFT, debrisOf(byte), data.color[j] || 0, F.LAND, 6);
           else if ((q & 7) === 0) puff(x, y, 1);
           continue;
         }
-        put(x, y, M.RUIN | (PW.hash2(x, y) & 3) << 6);
+        put(x, y, (p.wreck ? M.WRECK : M.RUIN) | (PW.hash2(x, y) & 3) << 6);
         if (data.color[j]) PW.setLayer(world, 'paint', x, y, ruinTone(data.color[j], x, y));
         cells += 1;
         if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
       }
       if (!cells) return;
-      (world.ruins || (world.ruins = [])).push({ from: p.from || p.owner, x0, y0, x1, y1, cells });
+      (world.ruins || (world.ruins = [])).push({ from: p.from || p.owner, x0, y0, x1, y1, cells, wreck: p.wreck || undefined });
       stats.ruins = (stats.ruins || 0) + cells;
       if (world.stability) world.stability.disturb(x0, y0, x1, y1);
     }

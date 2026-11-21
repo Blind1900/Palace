@@ -36,6 +36,10 @@
     // A piece of a wrecked building that came to rest whole: part of the ground now (it can slide
     // and break loose), keeping the building's colours, until a town's builders clear it for HM.
     RUIN: 44,
+    // The burnt-out hulk of a vehicle (N77), come to rest where it fell: part of the ground as a
+    // building's ruin is, its own shape and burnt colours kept - but welded armour and steel, so it
+    // holds together as it lies; only a blast breaks it, into scrap.
+    WRECK: 45,
   });
   // Gases sit between air and liquids: anything heavier moves through them as through air.
   const PHASE = Object.freeze({ AIR: 0, GAS: 1, LIQUID: 2, POWDER: 3, SOLID: 4 });
@@ -182,6 +186,9 @@
   define(M.RUIN, 'ruin', { ground: true, hardness: 0.35, breaksTo: M.DEBRIS },
     [[128, 126, 120], [112, 110, 105], [140, 132, 122], [104, 98, 92], [120, 114, 106], [96, 92, 88], [134, 128, 118], [108, 104, 98]]);
   skyline[M.RUIN] = 1; terrain[M.RUIN] = 1;
+  define(M.WRECK, 'wreck', { ground: true, hardness: 0.7, breaksTo: debris(DEBRIS_KIND.METAL) },
+    [[62, 56, 50], [48, 44, 40], [74, 62, 52], [40, 37, 34], [88, 58, 38], [56, 50, 45], [66, 60, 54], [44, 40, 36]]);
+  skyline[M.WRECK] = 1; terrain[M.WRECK] = 1;
   for (const id of [M.SMOKE, M.STEAM, M.DUST]) passable[id] = 1;
   open[M.AIR] = 1; open[M.SMOKE] = 1; open[M.STEAM] = 1; open[M.DUST] = 1;
   // (daylight passes through what is open, and through water)
@@ -195,7 +202,7 @@
   } };
   thermal([M.AIR, M.SMOKE, M.STEAM, M.DUST], { conduct: 0.22 });
   thermal([M.WATER], { conduct: 0.14 });
-  thermal([M.STEEL, M.BRIDGE, M.PIPE, M.COVER_METAL, M.CORE], { conduct: 0.24 });
+  thermal([M.STEEL, M.BRIDGE, M.PIPE, M.COVER_METAL, M.CORE, M.WRECK], { conduct: 0.24 });
   thermal([M.CONCRETE, M.MASONRY, M.FOUNDATION, M.PILLAR, M.REINFORCED, M.LINING, M.BRICK, M.TILE, M.PLATFORM, M.GLASS], { conduct: 0.08 });
   thermal([M.GRASS], { conduct: 0.05, ignite: 260, burn: 3, to: M.TOPSOIL });
   thermal([M.WOOD], { conduct: 0.04, ignite: 380, burn: 40, to: M.ASH });
@@ -261,6 +268,8 @@
   // (a ruin is the frame of a wrecked building round its open rooms: its slabs still span a room
   // or so, cracked; wider ones sag in and fall)
   physics([M.RUIN], { resist: 0.025, cohesion: 14, shake: 0.12 });
+  // (a wreck is armour: it spans what it lies across and does not shake apart)
+  physics([M.WRECK], { resist: 0.07, cohesion: 60 });
   physics([M.STONE], { resist: 0.045, cohesion: 16 });
   physics([M.ORE], { resist: 0.05, cohesion: 20 });
   physics([M.BEDROCK], { resist: 1, cohesion: 255 });

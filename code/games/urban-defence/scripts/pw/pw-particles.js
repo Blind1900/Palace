@@ -125,6 +125,7 @@
       for (const id of [M.LOOSE_SOIL, M.SAND, M.ASH, M.SOIL, M.TOPSOIL, M.CLAY, M.GRASS]) kindTable[b(id)] = KIND.EARTH;
       for (const id of [M.LOOSE_STONE, M.GRAVEL, M.STONE, M.ORE]) kindTable[b(id)] = KIND.ROCK;
       for (const id of [M.RUBBLE, M.RUIN]) kindTable[b(id)] = KIND.MASONRY;
+      kindTable[b(M.WRECK)] = KIND.METAL;
     }
     kindTable[M.DEBRIS | PW.DEBRIS_KIND.CONCRETE << 6] = KIND.MASONRY;
     kindTable[M.DEBRIS | PW.DEBRIS_KIND.BRICK << 6] = KIND.MASONRY;
