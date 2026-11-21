@@ -102,9 +102,12 @@
   const fragments = PW.createFragments ? PW.createFragments(world, particles) : null;
   const structure = fragments && PW.createStructure ? PW.createStructure(world, fragments) : null;
   world.fragments = fragments;
+  // N73: the lab builds the way the game does - repair raises what the growth engine stages
+  // (cores first, the body out of the translator). With no stock here, the translators work free.
+  const repair = world.repair = PW.createRepair ? PW.createRepair(world, particles) : null;
   if (structure) {
-    world.onDamage = (id) => structure.notify(id);
-    particles.listeners.chip = (owner) => { if (owner) structure.notify(owner); };
+    world.onDamage = (id) => { structure.notify(id); if (repair) repair.notify(id); };
+    particles.listeners.chip = (owner) => { if (owner) { structure.notify(owner); if (repair) repair.notify(owner); } };
   }
   const cores = PW.createCores ? PW.createCores(world, particles) : null;
   const stability = world.stability = PW.createStability ? PW.createStability(world, particles) : null;
@@ -198,6 +201,8 @@
       if (structure) structure.step(1.5);
       if (fragments) fragments.step(DT);
       if (cores) cores.step();
+      // (repair rides the lab's speed, so a staged lot rises in step with the growth clock)
+      if (repair) repair.step(DT * speed);
       if (stability) stability.step();
       if (air) air.step();
       if (PW.stepSmokeBursts) PW.stepSmokeBursts(world, DT);

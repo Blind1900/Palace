@@ -171,11 +171,19 @@
       for (let x = p.worksR + 2; x <= Math.min(world.width - 3, p.worksR + 18); x += 1) sig += world.groundTop[x];
       return sig;
     };
+    // N73: a lot whose building is still rising from its core (its first build job working).
+    const stillBuilding = (lot) => {
+      const r = lot && lot.owner ? world.buildings[lot.owner - 1] : null;
+      return !!(r && r.underConstruction);
+    };
     function placeLot(city, lot, centerX) {
       const canvas = lot.canvas || (lot.canvas = canvasFor(city, lot));
       const w = bodyWidth(canvas);
       const worldX = Math.round(centerX - canvas.body.left - w / 2);
-      const res = PW.foundations.place(world, canvas, worldX, { style: city.style, owner: lot.owner });
+      // N73: cores first - with a repair system standing, only the gift and the hearts are
+      // stamped; the body above is blueprint, raised by the translators cell by cell.
+      const grow = !!(world.repair && !PW.INSTANT_BUILDS);
+      const res = PW.foundations.place(world, canvas, worldX, { style: city.style, owner: lot.owner, grow });
       if (!res) return false;
       lot.x = Math.round(centerX);
       lot.placed = { x0: res.stamp.x, y0: res.stamp.y, x1: res.stamp.x + res.stamp.width - 1,
@@ -199,6 +207,21 @@
           world.pipes.connectCore(core.x, core.y, city.faction, world.pipes.TAPS[lot.type], lot.owner);
         }
       }
+      // N73: the build order the user asked for - the cores stand first and the pipes already
+      // run out of their sides; now repair raises the body out of the translator (pillars up
+      // the core's top, floors branching outward, walls trailing - the F2 order), the lot a
+      // construction site until it stands whole. Its whole body is prepaid by the lot price.
+      if (res.grown) {
+        const rec = world.buildings[lot.owner - 1];
+        rec.underConstruction = true;
+        rec.buildFree = true;
+        rec.health = 0.02;
+        rec.siteWanted = true;
+        rec.growing = true;
+        rec.grewAt = world.tick || 0;
+        world.repair.jobs.delete(lot.owner);   // (a re-seat's old job holds stale coordinates)
+        world.repair.notify(lot.owner);
+      }
       clearSimAround(lot.placed.x0 - 8, lot.placed.y0 - 8, lot.placed.x1 + 8, lot.placed.y1 + 60);
       flashes.push({ box: { ...lot.placed }, age: 0 });
       return true;
@@ -211,6 +234,8 @@
       if (!p) return;
       // Let go of the bundle first: spans and threaded cores off, the pipe itself stays.
       if (lot.faction && world.pipes && world.pipes.releaseBuilding) world.pipes.releaseBuilding(lot.faction, lot.owner);
+      // N73: a build job still working this lot dies with it (its coordinates go stale).
+      if (world.repair && world.repair.jobs) world.repair.jobs.delete(lot.owner);
       // A wing's welds go with it (they live OUTSIDE the lot's own box).
       if (lot.weldL) clearWeld(lot, 'weldL');
       if (lot.weldR) clearWeld(lot, 'weldR');
@@ -816,6 +841,7 @@
         if (lot.type !== 'population' && !(lot.type === 'military' && lot.variant === 'tower')) continue;
         if (city.blocked[lot.side] === 'edge') continue;   // pinned at the map's edge: no room to grow
         if (lot.placed && nearBlast(lot.placed.worksL, lot.placed.worksR)) continue;   // N60: never into a live collapse
+        if (stillBuilding(lot)) continue;   // N73: a tower finishes rising before it ages
         const target = Math.min(MAX_LEVEL, city.level, 1 + Math.floor(lot.age / AGE_PER_LEVEL));
         if (target <= lot.level) continue;
         // N4: a tower coming of age is a level-up - it is paid for. An unfunded town stops
@@ -837,7 +863,7 @@
         // the next tower over, and the merged bases tie themselves together below grade.
         if ((lot.mil || lot.variant === 'tower') && lot.level % 2 === 0) {
           const lots = city.rings[lot.side];
-          const next = [lots[lot.ring - 1], lots[lot.ring + 1]].find((n) => n && n.placed && n.type === 'population' && !n.mil);
+          const next = [lots[lot.ring - 1], lots[lot.ring + 1]].find((n) => n && n.placed && n.type === 'population' && !n.mil && !stillBuilding(n));
           if (next) {
             next.mil = true; next.canvas = null;
             seatChain(city, lot.side, Math.min(lot.ring, next.ring));
@@ -1456,6 +1482,7 @@
           const A = lots[i], B = lots[i + 1];
           if (!A.placed || !B.placed || A.jointWith || B.jointWith) continue;
           if (A.level < 2 || B.level < 2) continue;
+          if (stillBuilding(A) || stillBuilding(B)) continue;   // N73: joints weld finished towers
           const [L2, R2] = A.placed.worksR < B.placed.worksR ? [A, B] : [B, A];
           const gap = R2.placed.worksL - L2.placed.worksR - 1;
           if (gap < JOINT_MIN || gap > JOINT_MAX) continue;
@@ -1468,7 +1495,9 @@
           const rise = riseFor(A.owner, B.owner);
           const canvas = buildJoint(city.style, w, decorKind, rise);
           const owner = allotOwner();
-          const res = PW.foundations.place(world, canvas, x0, { style: city.style, owner });
+          // N73: the joint too - its core lands first, and the spine climbs out of it.
+          const growJ = !!(world.repair && !PW.INSTANT_BUILDS);
+          const res = PW.foundations.place(world, canvas, x0, { style: city.style, owner, grow: growJ });
           if (!res) { world.buildings.pop(); continue; }
           const rec = PW.buildingRecord(world, res.stamp, { id: owner, side: 'left', type: 'joint', style: city.style, level: 1, kind: city.kind });
           for (const k of rec.cores) k.kind = 'main';
@@ -1511,6 +1540,12 @@
               if (k.orb || k.standing || !k.vault) continue;
               world.pipes.connectCore(k.x, k.y, city.faction, world.pipes.TAPS.population, owner);
             }
+          }
+          if (res.grown) {
+            rec.underConstruction = true; rec.buildFree = true; rec.health = 0.02;
+            rec.siteWanted = true; rec.growing = true; rec.grewAt = world.tick || 0;
+            world.repair.jobs.delete(owner);
+            world.repair.notify(owner);
           }
           clearSimAround(placed.x0 - 6, placed.y0 - 6, placed.x1 + 6, placed.y1 + 40);
           flashes.push({ box: placed, age: 0 });

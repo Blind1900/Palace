@@ -190,6 +190,9 @@
       };
       const pay = () => {
         if (job.pool >= 1 / CELLS_PER_HM) { job.pool -= 1 / CELLS_PER_HM; return true; }
+        // N73: a newborn's whole body is already paid for (the growth engine's lot price) -
+        // its first rise draws no stock. A world with no economy at all (the lab) builds free.
+        if (b.buildFree || !world.stock) { job.pool += 1 - 1 / CELLS_PER_HM; return true; }
         // The bundle's HM tops the pool up, one unit at a time.
         const stock = world.stock && world.stock[b.side];
         if (stock && stock.hm >= 1) { stock.hm -= 1; job.pool += 1 - 1 / CELLS_PER_HM; stats.hmFromStock += 1; return true; }
@@ -316,7 +319,8 @@
     function step(dt = 1 / 60) {
       for (const [id, job] of jobs) {
         const b = (world.buildings || [])[id - 1];
-        if (!b) { jobs.delete(id); continue; }
+        // (a re-seated lot leaves an empty record behind: no canvas, nothing to build)
+        if (!b || !b.canvas) { jobs.delete(id); continue; }
         // While this job works the building is a construction site (b.growing): the structure
         // system judges it by what stands, not against its blueprint, and it shrugs off light
         // blows. Cleared the moment the work is done or stops.
@@ -349,7 +353,12 @@
             // even seen until the cell clears) - look over the blueprint again. Only a pass that
             // changed nothing ends the work.
             if ((job.passProgress || 0) > 0) { job.passProgress = 0; job.scanCol = 0; job.printAt = 0; job.queue = []; job.dead = 0; job.rot = 0; }
-            else { jobs.delete(id); b.growing = false; }
+            else {
+              jobs.delete(id); b.growing = false;
+              // N73: the first build is over - the site opens, and later wounds pay their way.
+              if (b.buildFree) b.buildFree = false;
+              if (b.underConstruction) b.underConstruction = false;
+            }
           }
           continue;
         }

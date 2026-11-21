@@ -690,6 +690,50 @@
     }
   }
 
+  // N73: the first stamp lays only the gift - everything from two rows over the floor line
+  // down (beds, vaults, the gallery between them) plus every core and grate wherever it
+  // stands (repair never rebuilds hearts) - and leaves the body above as blueprint, for
+  // repair to raise out of the translator: pillars up the core's top, floors branching
+  // outward, walls trailing (the F2 order, the user's build rule).
+  function stampGift(world, canvas, worldX, groundY, owner) {
+    const ox = Math.round(worldX), oy = Math.round(groundY - canvas.ground);
+    const { width, height } = canvas;
+    const R = PW.buildingKit.ROLE;
+    const keep = (i, ly) => ly >= canvas.ground - 2 || canvas.role[i] === R.CORE || canvas.role[i] === R.GRATE;
+    for (let ly = 0; ly < height; ly += 1) {
+      const wy = oy + ly;
+      if (wy < 1 || wy >= world.height - 1) continue;
+      for (let lx = 0; lx < width; lx += 1) {
+        const wx = ox + lx;
+        if (wx < 1 || wx >= world.width - 1) continue;
+        const i = ly * width + lx;
+        if (!keep(i, ly) || (!canvas.mat[i] && !canvas.back[i])) continue;
+        if (canvas.mat[i]) {
+          PW.set(world, wx, wy, canvas.mat[i], { quiet: true, keepPaint: true });
+          PW.setLayer(world, 'paint', wx, wy, canvas.paint[i]);
+        } else {
+          const current = PW.get(world, wx, wy) & 63;
+          if (current !== M.AIR && current !== M.WATER) PW.set(world, wx, wy, M.AIR, { quiet: true });
+        }
+        if (canvas.back[i]) PW.setLayer(world, 'back', wx, wy, canvas.back[i]);
+        if (canvas.deco[i] || canvas.mat[i]) PW.setLayer(world, 'deco', wx, wy, canvas.deco[i]);
+        PW.setOwner(world, wx, wy, owner);
+      }
+    }
+    // The gift band's grated spans keep N64's drain flag (the body's get theirs from repair).
+    for (const h of canvas.hatches || []) {
+      for (let ly = Math.max(0, h.y0); ly <= Math.min(height - 1, h.y1); ly += 1) {
+        const wy = oy + ly;
+        if (wy < 1 || wy >= world.height - 1) continue;
+        for (let lx = h.x0; lx <= h.x1; lx += 1) {
+          const wx = ox + lx, i = ly * width + lx;
+          if (wx >= 1 && wx < world.width - 1 && canvas.mat[i] && keep(i, ly)) PW.setFlag(world, wx, wy, PW.FLAG.HATCH);
+        }
+      }
+    }
+    return { x: ox, y: oy, width, height, canvas };
+  }
+
   function place(world, canvas, worldX, options = {}) {
     const style = options.style || (canvas.meta && canvas.meta.style) || 'modern';
     const extent = measure(world, canvas, worldX, style);
@@ -711,7 +755,9 @@
     const under = underStructure(world, p, owner);
     giftSkirt(world, p, owner);
     // (the cores' vaults hang under the floor with it, in the ground or among the stage's piers)
-    const stamp = PW.stampBuilding(world, canvas, worldX, G, { owner });
+    // N73 (options.grow): cores first - only the gift is stamped; the body stays blueprint.
+    const stamp = options.grow ? stampGift(world, canvas, worldX, G, owner)
+      : PW.stampBuilding(world, canvas, worldX, G, { owner });
     const beds = canvas.cores.filter((k) => !k.standing && k.vault)
       .map((k) => ({ x0: worldX + k.vault.x0, x1: worldX + k.vault.x1, bottom: G + k.vault.bottom - canvas.ground + 11 })).sort((u, v) => u.x0 - v.x0);
     bedUnderbody(world, beds, G, p.natural, owner);
@@ -720,7 +766,7 @@
       coreRoots(world, worldX + k.x, G + k.vault.bottom - canvas.ground + 12, owner);
     }
     const cores = canvas.cores.map((c) => ({ x: worldX + c.x, y: G + c.y - canvas.ground }));
-    return { stamp, plan: p, walls, under, cores, works: [extent.left, extent.right] };
+    return { stamp, plan: p, walls, under, cores, works: [extent.left, extent.right], grown: !!options.grow };
   }
 
   PW.foundations = { plan, measure, place, lie, allows, rockTerrace, coreRoots, bedUnderbody, STEEP, STYLE, CUT_MAX, CUT_MAX_HANGAR };
