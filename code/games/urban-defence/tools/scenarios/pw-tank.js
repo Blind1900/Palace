@@ -208,7 +208,7 @@ else {
   else {
     const { x0: c0, g: cg } = C;
     const steepAt = c0 + 250;
-    for (let d = 0; d <= 60; d += 1) fill(steepAt + d, cg - Math.round(d * Math.tan(45 * deg)), steepAt + d, cg - 1, M.STONE);
+    for (let d = 0; d <= 60; d += 1) fill(steepAt + d, cg - Math.min(160, Math.round(d * Math.tan(70 * deg))), steepAt + d, cg - 1, M.STONE);
     const a = T.create(world, { style: 'asian', x: c0 + 120, y: cg, facing: 1 });
     // (a roof 26 cells over the ground: a tunnel's height for troopers, not for a tank)
     const roofAt = c0 + 520;
@@ -223,7 +223,7 @@ else {
     const short = (t2, at) => at - t2.x - 58;
     check(a.blocked === 'too steep' && b.blocked === 'no room' && c.blocked === 'drop' && [a, b, c].every((t2) => t2.v === 0 && !t2.falling)
       && [short(a, steepAt), short(b, roofAt), short(c, dropAt)].every((d) => d >= 0 && d < 12),
-      `it brakes and stops short of a slope steeper than it climbs (45 deg: ${a.blocked || 'went on'}, its nose ${short(a, steepAt).toFixed(0)} cells off), a roof 26 cells up - a tunnel's (${b.blocked || 'went on'}, ${short(b, roofAt).toFixed(0)} off) and a 40-cell drop (${c.blocked || 'went on'}, ${short(c, dropAt).toFixed(0)} off)`);
+      `it brakes and stops short of a slope steeper than it climbs (70 deg: ${a.blocked || 'went on'}, its nose ${short(a, steepAt).toFixed(0)} cells off), a roof 26 cells up - a tunnel's (${b.blocked || 'went on'}, ${short(b, roofAt).toFixed(0)} off) and a 40-cell drop (${c.blocked || 'went on'}, ${short(c, dropAt).toFixed(0)} off)`);
     // 3. The ground blown away from under its front half: it tips over the edge, nose down, and
     // comes to rest on the floor of the hole, its wheels on the ground.
     for (const t2 of [a, b]) T.drive(t2, 0);
@@ -236,6 +236,38 @@ else {
     await view('tank-tipped', c.x, cg + 10, 6);
     check(tipped > 15 * deg && !c.falling && Math.abs(frontY - (cg + 41)) < 3 && seated(c) <= 2,
       `with the ground blown away from under its front it tips over the edge nose down (to ${(tipped / deg).toFixed(0)} deg) and comes to rest across it, its front wheels on the floor of the hole 40 cells down (${(frontY - cg).toFixed(0)} down; ${c.falling ? 'still falling' : 'resting'})`);
+    world.tanks.length = 0;
+  }
+}
+
+// 4b. Steep ground (N72, the user's screenshots: a tank stopped "too steep" at a mountainside and
+// at a flight of stairs): it climbs a 55-degree mountainside, crawling, and a flight of stairs -
+// steps 6 cells high - each to the top, and drives on.
+{
+  const E = site(1100);
+  if (!E) check(false, 'a stretch of the wilds for the climbs');
+  else {
+    const { x0, g } = E;
+    // (a mountainside of 55 degrees up 90 cells, and a flight of 10 steps 6 high and 6 deep beyond it)
+    const hillAt = x0 + 220, hill = 90, run55 = Math.round(hill / Math.tan(55 * deg));
+    for (let d = 0; d <= run55; d += 1) fill(hillAt + d, g - Math.round(d * Math.tan(55 * deg)), hillAt + d, g - 1, M.STONE);
+    fill(hillAt + run55, g - hill, hillAt + run55 + 160, g - 1, M.STONE);
+    const stairsAt = hillAt + run55 + 160;
+    for (let k = 0; k < 10; k += 1) fill(stairsAt + k * 6, g - hill - (k + 1) * 6, x0 + 1100, g - hill - k * 6 - 1, M.CONCRETE);
+    const t = T.create(world, { style: 'modern', x: x0 + 100, y: g, facing: 1 });
+    T.drive(t, 1);
+    let slowest = Infinity, onHill = null, ticks = 0;
+    while (ticks < 20 * 60 && t.x < hillAt + run55 + 80) {
+      T.step(world, DT); ticks += 1;
+      if (t.x > hillAt + 20 && t.x < hillAt + run55 - 20) { slowest = Math.min(slowest, Math.abs(t.v)); if (!onHill && t.angle < -45 * deg) onHill = { angle: t.angle / deg, v: t.v }; }
+    }
+    const upHill = t.y < g - hill + 3 && !t.falling, hillSecs = ticks * DT;
+    if (onHill) await view('tank-mountainside', hillAt + run55 / 2, g - hill / 2, 6);
+    while (ticks < 40 * 60 && t.x < stairsAt + 60 + 80) { T.step(world, DT); ticks += 1; }
+    const upStairs = t.y < g - hill - 60 + 3 && !t.falling;
+    await view('tank-stairs', stairsAt + 30, g - hill - 40, 6);
+    check(upHill && upStairs && onHill && slowest < T.VMAX * 0.45,
+      `it climbs steep ground: a 55-degree mountainside, crawling up it (${onHill ? `the hull at ${onHill.angle.toFixed(0)} deg, ${slowest.toFixed(0)} cells/s at the slowest` : 'never on it'}; at the top: ${upHill ? `yes, in ${hillSecs.toFixed(1)} s` : `no - ${t.blocked}`}), and a flight of stairs 6 cells a step to the top (${upStairs ? 'yes' : `no - ${t.blocked}, at ${(t.y - (g - hill)).toFixed(0)}`})`);
     world.tanks.length = 0;
   }
 }

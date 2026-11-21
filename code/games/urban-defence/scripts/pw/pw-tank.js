@@ -14,10 +14,11 @@
 //   target (or level ahead) in the world's frame, but only within its own reach of the hull: from
 //   GUN_DOWN below the hull's line to GUN_UP above it, so it never dips into the hull nose-up nor
 //   points at the sky nose-down - its range follows the hull (N71).
-// A tank drives left or right only, reaching its top speed in 1.5 s, slower uphill. It climbs
-// slopes up to MAX_SLOPE and steps up to STEP cells. It will not go into a wall, a tunnel (it has
-// no room there), deep water or over a drop; and where the ground is blown away from under it, it
-// tips over the edge and falls.
+// A tank drives left or right only, reaching its top speed in 1.5 s, slower uphill - crawling up
+// the steepest. It climbs slopes up to MAX_SLOPE - a mountainside, a flight of stairs - and steps up
+// to STEP cells (a real one's vertical step, about a metre). It will not go into a wall, a tunnel
+// (it has no room there), deep water or over a drop; and where the ground is blown away from under
+// it, it tips over the edge and falls.
 // It drives through its own side's buildings (N3, the vehicle rule): every tower, military mass and
 // spine stands on a gate hall at grade, its piers marked (the building record's gates); a tank of the
 // building's own side passes the piers as water passes a roof's hatch - every check of its hull
@@ -36,9 +37,9 @@
   const VMAX = 54;              // cells/s top speed (about 14 km/h: slow, but faster than a trooper)
   const ACCEL = VMAX / 1.5;     // cells/s^2: from rest to top speed in 1.5 s
   const BRAKE = VMAX / 0.6;     // cells/s^2 to a stop
-  const CLIMB = 0.6;            // of its top speed it loses climbing, by the sine of the slope
-  const MAX_SLOPE = 35;         // degrees it climbs, at most
-  const STEP = 8;               // cells it climbs straight up at most (a kerb, a low heap)
+  const CLIMB = 0.75;           // of its top speed it loses climbing, by the sine of the slope
+  const MAX_SLOPE = 60;         // degrees it climbs, at most (a mountainside, a flight of stairs: the user's)
+  const STEP = 15;              // cells it climbs straight up at most (an Abrams' vertical step, 1.07 m)
   const DROP = 16;              // cells it goes down straight at most (it stops at a higher edge)
   const LOOK = 48;              // cells ahead of its leading wheel it looks at the ground (room to brake)
   const NOSE = 60;              // cells from its middle its nose and lower plate reach, and a little
@@ -134,19 +135,22 @@
     // with its commander's cupola and a machine gun beside it, low on its roof, and the mantlet the
     // gun pivots in.
     const shape = st.turret || Array.from({ length: 19 }, (_, k) => { const a = Math.PI * k / 18; return [26 * Math.cos(a), -11.5 * Math.sin(a)]; });
-    const turret = sprite(-36, -17, 30, 0, (t, s) => inPoly(shape, t, s) || (t >= -9 && t <= 0 && s >= -12 && s <= -10) || (t >= 1 && t <= 8 && s >= -12.5 && s <= -11.5)
-      || (t >= 15 && t <= 24 && s >= -9 && s <= -3), (t, s, light) => {
+    // (its side's paint at cell (t, s), lit by `light`: its camouflage, the machine gun, its army's
+    // marking, a T-64's reactive armour - the turret's look from every side: see turnFrame)
+    const turretColour = (t, s, light) => {
       let c = camoAt(st, t, s), k = light;
       if (t >= 1 && t <= 8 && s === -12) { c = [40, 40, 42]; k = 1; }          // (the machine gun)
       if (st.cross && t >= -16 && t <= -6 && s >= -8 && s <= -2 && (t === -11 || t === -12 || s === -5)) { c = [222, 222, 214]; k = 1; }
       if (st.star && t >= -14 && t <= -10 && s >= -7 && s <= -3 && Math.abs(t + 12) + Math.abs(s + 5) <= 2) { c = [196, 44, 36]; k = 1; }
       if (st.era && t >= 12 && s >= -10 && s <= -2) c = (t - 12) % 4 === 0 || (s + 10) % 3 === 0 ? st.dark : ERA;
       return rgb(c, k);
-    });
+    };
+    const turret = sprite(-36, -17, 30, 0, (t, s) => inPoly(shape, t, s) || (t >= -9 && t <= 0 && s >= -12 && s <= -10) || (t >= 1 && t <= 8 && s >= -12.5 && s <= -11.5)
+      || (t >= 15 && t <= 24 && s >= -9 && s <= -3), turretColour);
     // (road wheels evenly along the hull; a sprocket at one end and the idler at the other, the
     // same, raised; small return rollers under the belt's top run)
     const wheels = Array.from({ length: st.wheels }, (_, k) => -st.span + (2 * st.span) * k / (st.wheels - 1));
-    a = { style, st, hull, turret, shape: st.turret ? shape : null, wheels, R: WHEEL, sprocket: [-52, -9, 6], idler: [52, -9, 6], rollers: [-30, 0, 30].map((u) => [u, -13, 1.5]),
+    a = { style, st, hull, turret, turretColour, shape: st.turret ? shape : null, wheels, R: WHEEL, sprocket: [-52, -9, 6], idler: [52, -9, 6], rollers: [-30, 0, 30].map((u) => [u, -13, 1.5]),
       trunnion: [20, -6], barrel: st.barrel, ring: [0, -deck + 1], height: deck + 11, nose: NOSE - st.span,
       barrelC: rgb(st.base, 0.95), barrelD: rgb(st.dark, 0.85), barrelL: rgb(st.base, 1.18) };
     ART.set(style, a);
@@ -536,92 +540,115 @@
     for (let i = 0; i < n; i += 1) disc(art.wheels[i], t.springs[i] - R, R, st.wheel, true);
     return px;
   }
-  // ---- The turret turning round (N71, N72; the user's photos of tanks seen head-on) -------------------
-  // Turning to face the other way, the turret swings round through the eye, as a real one turns to
-  // lay its gun: half way it faces us - its gun pointing out of the picture, the muzzle's dark bore
-  // ringed, the mantlet in the middle of a turret near as wide as the hull, its front and a side in
-  // sight - while the hull and tracks under it stay just as they were. It is drawn as the solid it is,
-  // turned: its plan (its half-width along it - PLAN), its side's profile over that, chamfered or
-  // rounded across, and its mantlet, cupola and machine gun where they stand on it - seen from the
-  // side at each step of a half turn (TURN_FRAMES of them, made once for each army's turret as they
-  // are first needed), painted as its side sprite is: its camouflage, its markings on its side, its
-  // reactive armour on its front, lit from above.
+  // ---- The turret, and its turning round (N71, N72; the user's photos of tanks seen head-on) ---------
+  // The turret is one solid, drawn as it is seen from the side at every angle it is turned to - its
+  // side view the first of them, so what turns is the very turret you saw from the side (N72: the
+  // user's screenshots, a side sprite that did not look attached to the turning one). Turning to face
+  // the other way it swings round through the eye, as a real one turns to lay its gun: half way it
+  // faces us - its gun pointing out of the picture, the muzzle's dark bore ringed, the mantlet in the
+  // middle of a turret near as wide as the hull, its front and a side in sight - while the hull and
+  // tracks under it stay just as they were. The solid: its plan (its half-width along it - PLAN), its
+  // side's profile over that, chamfered or rounded across, and its mantlet, cupola and machine gun
+  // where they stand on it; seen at each step of a half turn (TURN_FRAMES of them, made once for each
+  // army's turret), painted as its side is (turretColour: its camouflage, its machine gun, its army's
+  // marking, a T-64's reactive armour), its faces lit as they face: its roof lightest, its side,
+  // its front darker, its back darker still.
   const TURN_FRAMES = 24;
-  const TURN_SIDE = 0.92;       // turned no further than this (cos), it is its side sprite, shortened
   const PLAN = {
     modern: (t) => (t <= 14 ? 24 : Math.max(0, 24 - (t - 14) * 0.45)),     // (the Abrams: slab sides, its front cut back)
     asian: (t) => (t <= 0 ? 23 : Math.max(0, 23 - t * 0.36)),               // (the Type 99: an arrowhead wedge)
     gothic: (t) => 21 * Math.sqrt(Math.max(0, 1 - (t / 26) ** 2)),          // (the T-64: a round dome)
   };
   const BORE = PW.abgr(14, 14, 16);
-  // (what of the turret is at (t along it, w across it - toward the eye at the start of the turn -
-  // s down): 0 nothing, 1 its body, 2 the mantlet, 3 the cupola, 4 the machine gun)
-  function turretSolid(art, top, t, w, s) {
-    if (s > 0) return 0;
-    if (t >= 15 && t <= 24 && Math.abs(w) <= 6 && s >= -9 && s <= -3) return 2;
-    if (t >= -9 && t <= 0 && w >= 4 && w <= 12 && s >= -12 && s <= -10) return 3;
-    if (t >= 1 && t <= 8 && w >= 6 && w <= 7.5 && s >= -12.5 && s <= -11.5) return 4;
-    if (!art.shape) return (t / 26) ** 2 + (w / 21) ** 2 + (s / 11.5) ** 2 <= 1 ? 1 : 0;
-    const hw = PLAN[art.style](t), ti = Math.floor(t) + 40;
-    if (ti < 0 || ti >= top.length || top[ti] > 0) return 0;
-    // (chamfered along its roof's edges: the top rows narrower)
-    const cut = Math.max(0, top[ti] + 3 - s) * 1.3;
-    return Math.abs(w) <= hw - cut && inPoly(art.shape, t, s) ? 1 : 0;
-  }
-  // (the turret as a solid, cell by cell - t, w, s - made once for each army's turret: what is
-  // where in it; see turretSolid)
+  // (the turret as a solid, cell by cell - t along it, w across it (toward the eye at the start of a
+  // turn), s down - 0 nothing, 1 its body, 2 the mantlet, 3 the cupola, 4 the machine gun: made once
+  // for each army's turret, a layer (s) at a time - `layers` at most this call: made ahead, a layer a
+  // tick)
   const G3 = { t0: -40, w0: -27, s0: -18, nt: 81, nw: 55, ns: 19 };
-  // (`layers`: made a layer (s) at a time, so many at most this call - made ahead, a layer a tick)
   function solidOf(art, layers = G3.ns) {
     if (art.solid3) return art.solid3;
     let b = art.solidBuild;
+    const { t0, w0, s0, nt, nw, ns } = G3;
     if (!b) {
-      const top = new Float32Array(80).fill(1);
-      if (art.shape) for (let ti = 0; ti < 80; ti += 1) for (let s = -17.5; s <= 0; s += 0.5) if (inPoly(art.shape, ti - 40 + 0.5, s)) { top[ti] = s; break; }
-      b = art.solidBuild = { top, grid: new Uint8Array(G3.nt * G3.nw * G3.ns), k: 0 };
+      // (its side's profile: which cells of each column are inside its outline, and its top)
+      const inside = new Uint8Array(nt * ns), top = new Float32Array(nt).fill(1);
+      if (art.shape) for (let i = 0; i < nt; i += 1) for (let k = 0; k < ns; k += 1) {
+        if (!inPoly(art.shape, t0 + i + 0.5, s0 + k + 0.5)) continue;
+        inside[k * nt + i] = 1;
+        if (top[i] > 0) top[i] = s0 + k + 0.5;
+      }
+      b = art.solidBuild = { inside, top, grid: new Uint8Array(nt * nw * ns), k: 0 };
     }
-    for (let n = 0; n < layers && b.k < G3.ns; n += 1, b.k += 1) {
-      const k = b.k;
-      for (let j = 0; j < G3.nw; j += 1) for (let i = 0; i < G3.nt; i += 1) {
-        b.grid[(k * G3.nw + j) * G3.nt + i] = turretSolid(art, b.top, G3.t0 + i + 0.5, G3.w0 + j + 0.5, G3.s0 + k + 0.5);
+    const plan = PLAN[art.style] || PLAN.modern;
+    for (let n = 0; n < layers && b.k < ns; n += 1, b.k += 1) {
+      const k = b.k, s = s0 + k + 0.5;
+      for (let j = 0; j < nw; j += 1) {
+        const w = w0 + j + 0.5;
+        for (let i = 0; i < nt; i += 1) {
+          const t = t0 + i + 0.5;
+          let v = 0;
+          if (t >= 15 && t <= 24 && Math.abs(w) <= 6 && s >= -9 && s <= -3) v = 2;
+          else if (t >= -9 && t <= 0 && w >= 4 && w <= 12 && s >= -12 && s <= -10) v = 3;
+          else if (t >= 1 && t <= 8 && w >= 6 && w <= 7.5 && s >= -12.5 && s <= -11.5) v = 4;
+          else if (!art.shape) v = (t / 26) ** 2 + (w / 21) ** 2 + (s / 11.5) ** 2 <= 1 ? 1 : 0;
+          // (chamfered along its roof's edges: its top rows narrower)
+          else if (b.inside[k * nt + i]) v = Math.abs(w) <= plan(t) - Math.max(0, b.top[i] + 3 - s) * 1.3 ? 1 : 0;
+          b.grid[(k * nw + j) * nt + i] = v;
+        }
       }
     }
-    if (b.k < G3.ns) return null;
+    if (b.k < ns) return null;
     art.solidBuild = null;
+    art.solidTop = b.top;
     return (art.solid3 = b.grid);
   }
+  // (the turret turned by th from the way it faced - 0 its side view - seen from the side: a sprite
+  // in the turret's own frame, t along the way it faced, s down)
   function makeTurnFrame(art, th) {
-    const { st } = art, c = Math.cos(th), sn = Math.sin(th), grid = solidOf(art);
+    const { st } = art, c = Math.cos(th), sn = Math.sin(th), grid = solidOf(art), plan = PLAN[art.style] || PLAN.modern;
     const solid = (t, w, s) => {
       const i = Math.floor(t) - G3.t0, j = Math.floor(w) - G3.w0, k = Math.floor(s) - G3.s0;
       return i < 0 || j < 0 || k < 0 || i >= G3.nt || j >= G3.nw || k >= G3.ns ? 0 : grid[(k * G3.nw + j) * G3.nt + i];
     };
     const x0 = -48, x1 = 48, y0 = -18, y1 = 0, w = x1 - x0 + 1, h = y1 - y0 + 1;
-    const px = new Uint32Array(w * h), kind = new Uint8Array(w * h);
+    // (and how near the eye each of its pixels is - D, out towards the eye - for its gun: see pixel)
+    const px = new Uint32Array(w * h), kind = new Uint8Array(w * h), depth = new Float32Array(w * h);
     for (let y = y0; y <= y1; y += 1) {
       const s = y + 0.5;
       for (let x = x0; x <= x1; x += 1) {
         const X = x + 0.5;
-        // (along the line of sight from the eye inwards: the first of it met)
+        // (along the line of sight from the eye inwards: the first of it met, and which of its faces
+        // that is - its roof, a side, its front or its back - by the solid's own shape there)
         for (let D = 42; D >= -42; D -= 0.5) {
           const t = X * c + D * sn, wv = -X * sn + D * c;
+          const ti = Math.floor(t), wi = Math.floor(wv);
           const k = solid(t, wv, s);
           if (!k) continue;
-          let col;
-          if (k === 2) col = rgb(st.base, 0.8);
-          else if (k === 3) col = rgb(camoAt(st, Math.floor(t), Math.floor(wv)), 1.08);
-          else if (k === 4) col = rgb([40, 40, 42]);
-          else if (!solid(t, wv, s - 1)) col = rgb(camoAt(st, Math.floor(t), Math.floor(wv)), 1.2);   // (its roof)
-          else {
-            const hw = art.shape ? PLAN[art.style](t) : 21 * Math.sqrt(Math.max(0, 1 - (t / 26) ** 2 - (s / 11.5) ** 2));
-            if (Math.abs(wv) >= hw - 1.6) col = at(art.turret, Math.floor(t), Math.floor(s)) || rgb(camoAt(st, Math.floor(t), Math.floor(s)), 0.95);   // (its side, as its sprite)
-            else if (t > 0) {
-              // (its front - the reactive armour's blocks on a T-64's, in rows across it)
-              const fw = Math.floor(wv) + 40, fs = Math.floor(s) + 30;
-              col = st.era && t >= 8 ? rgb(fw % 5 === 0 || fs % 3 === 0 ? st.dark : ERA, 0.92) : rgb(camoAt(st, Math.floor(wv), Math.floor(s)), 0.86);
-            } else col = rgb(camoAt(st, Math.floor(wv), Math.floor(s)), 0.76);   // (its back)
+          let face;
+          if (art.shape) {
+            const top = art.solidTop[Math.max(0, Math.min(G3.nt - 1, ti - G3.t0))];
+            const across = plan(t) - Math.max(0, top + 3 - s) * 1.3;
+            face = s <= top + 1 ? 'roof' : Math.abs(wv) >= across - 1.2 ? 'side' : t > 0 ? 'front' : 'back';
+          } else {
+            // (a dome: the way its surface faces there)
+            const nt = Math.abs(t) / 676, nw = Math.abs(wv) / 441, ns = Math.abs(s) / 132;
+            face = ns > nt && ns > nw && s < -7 ? 'roof' : nw >= nt ? 'side' : t > 0 ? 'front' : 'back';
           }
-          px[(y - y0) * w + x - x0] = col; kind[(y - y0) * w + x - x0] = 1;
+          let col;
+          if (k === 2) col = rgb(camoAt(st, wi, y), 0.8);                    // (the mantlet)
+          else if (k === 3) col = art.turretColour(ti, y, 1.06);              // (the cupola)
+          else if (k === 4) col = rgb([40, 40, 42]);                          // (the machine gun)
+          else if (face === 'roof') col = rgb(camoAt(st, ti, wi), 1.16);      // (its roof)
+          else {
+            // (its side, painted and lit as it always was)
+            if (face === 'side') col = art.turretColour(ti, y, 1 - (y + 17) / 18 * 0.18);
+            else if (face === 'front') {
+              // (its front - the reactive armour's blocks on a T-64's, in rows across it)
+              const fw = wi + 40, fs = y + 30;
+              col = st.era && t >= 8 ? rgb(fw % 5 === 0 || fs % 3 === 0 ? st.dark : ERA, 0.92) : rgb(camoAt(st, wi, y), 0.86);
+            } else col = rgb(camoAt(st, wi, y), 0.76);                         // (its back)
+          }
+          px[(y - y0) * w + x - x0] = col; kind[(y - y0) * w + x - x0] = 1; depth[(y - y0) * w + x - x0] = D;
           break;
         }
       }
@@ -636,7 +663,7 @@
       else if (y === h - 1 || !kind[q + w]) out[q] = dim(px[q], 0.68);
       else if (x === 0 || x === w - 1 || !kind[q - 1] || !kind[q + 1]) out[q] = dim(px[q], 0.82);
     }
-    return { x0, y0, x1, y1, w, h, px: out };
+    return { x0, y0, x1, y1, w, h, px: out, depth };
   }
   function turnFrame(art, f) {
     const q = Math.max(0, Math.min(TURN_FRAMES, Math.round(f * TURN_FRAMES)));
@@ -646,28 +673,27 @@
   // (made ahead, a frame a tick, once a tank of an army is out: ready before it first turns)
   function warmFrames(art) {
     if (art.warm) return;
-    if (!art.solid3 && !solidOf(art, 1)) return;
+    if (!art.solid3 && !solidOf(art, 4)) return;
     const frames = art.turnFrames || (art.turnFrames = []);
     for (let q = 0; q <= TURN_FRAMES; q += 1) if (!frames[q]) { frames[q] = makeTurnFrame(art, Math.PI * q / TURN_FRAMES); return; }
     art.warm = true;
   }
 
-  // A tank's pose as it is drawn - its turret's frame turned as far round as it is, the gun's line,
-  // run back after a round - for its drawing, for what a round strikes of it, and for the wreck it
-  // leaves: one look, cell for cell, in all three.
+  // A tank's pose as it is drawn - its turret turned as far round as it is (turnFrame), the gun's
+  // line, run back after a round - for its drawing, for what a round strikes of it, and for the wreck
+  // it leaves: one look, cell for cell, in all three.
   function poseOf(t) {
     const { art } = t;
-    // (turning round: a little way, its side shortened; further, the solid turret turned - see
-    // turnFrame - and the gun seen shortened by all of it, pointing out at us, its bore ringed)
-    const k = turnOf(t), round = t.turning > 0 && Math.abs(k) < TURN_SIDE;
-    const kt = round ? 1 : (k < 0 ? -1 : 1) * Math.max(0.55, Math.abs(k));
-    const [rx, ry] = ringAt(t), [tfx, tfy, tnx, tny] = turretFrame(t, kt), [bx, by] = muzzleBase(t, round ? k : kt);
+    // (the gun seen shortened as the turret turns, by all of it - half way, pointing out at us, its
+    // bore ringed, its muzzle end the nearer)
+    const k = turnOf(t);
+    const [rx, ry] = ringAt(t), [tfx, tfy, tnx, tny] = turretFrame(t, 1), [bx, by] = muzzleBase(t, k);
     const L = art.barrel - (t.recoil > 0 ? KICK * t.recoil / RECOIL : 0), gdx = t.facing * k * Math.cos(t.elevation) * L, gdy = -Math.sin(t.elevation) * L;
-    const glen = Math.hypot(gdx, gdy), toward = Math.sin(Math.PI * t.turning / TURN) * Math.cos(t.elevation);
+    const glen = Math.hypot(gdx, gdy), toward = t.turning > 0 ? Math.sin(Math.PI * t.turning / TURN) * Math.cos(t.elevation) : 0;
     // (the turret's frame turned back: a world offset from the ring to its t, s - det)
     return { c: Math.cos(t.angle), s: Math.sin(t.angle), rx, ry, tfx, tfy, tnx, tny, det: tfx * tny - tfy * tnx, bx, by, L, gdx, gdy, glen,
       gux: glen > 1e-6 ? gdx / glen : 0, guy: glen > 1e-6 ? gdy / glen : 0, gear: null,
-      turn: round ? turnFrame(art, t.turning / TURN) : null, ring: round && toward > 0.45, toward: round ? toward : 0 };
+      turn: turnFrame(art, t.turning / TURN), turned: t.turning > 0, ring: toward > 0.45, toward, sn: Math.sin(Math.PI * t.turning / TURN) };
   }
   // (the box it takes up in the world: its hull and running gear, turret and gun)
   function boxOf(t, P) {
@@ -676,8 +702,7 @@
       const [wx, wy] = toWorld(t, u, v);
       x0 = Math.min(x0, wx); x1 = Math.max(x1, wx); y0 = Math.min(y0, wy); y1 = Math.max(y1, wy);
     }
-    const a = P.turn ? 49 : 37, b = P.turn ? 49 : 31;
-    for (const [u, v] of [[-a, -18], [b, -18], [-a, 1], [b, 1]]) {
+    for (const [u, v] of [[-49, -18], [49, -18], [-49, 1], [49, 1]]) {
       const wx = P.rx + u * P.tfx + v * P.tnx, wy = P.ry + u * P.tfy + v * P.tny;
       x0 = Math.min(x0, wx); x1 = Math.max(x1, wx); y0 = Math.min(y0, wy); y1 = Math.max(y1, wy);
     }
@@ -687,30 +712,41 @@
   // PART: the gun, the turret, the hull, the running gear. Where a round struck it, it is scarred.
   const GUN = 1, TURRET = 2, HULL = 3, RUNNING = 4;
   let PART = 0;
-  function pixel(t, P, wx, wy) {
+  // (the gun at (wx, wy): a tube from the trunnion, thicker at its fume extractor and its muzzle -
+  // seen end-on while the turret turns, its muzzle's ring. GUN_D: how near the eye it is there, as
+  // the turret's frames measure it: the trunnion t along the turret, and on along the gun)
+  let GUN_D = 0;
+  function gunAt(t, P, wx, wy) {
     const { art } = t;
-    // The gun: a tube from the trunnion, thicker at its fume extractor and its muzzle (seen end-on
-    // while the turret turns, its muzzle's ring).
     const gx = wx - P.bx, gy = wy - P.by, L = P.L, glen = P.glen;
     // (pointing out at us as it turns: its muzzle's ring, the bore dark in it)
     if (P.ring) {
       const mx = gx - P.gdx, my = gy - P.gdy, m2 = mx * mx + my * my;
-      if (m2 <= 10.5) { PART = GUN; return m2 <= 3.2 ? BORE : my < 0 ? art.barrelL : art.barrelD; }
+      if (m2 <= 10.5) { GUN_D = (art.trunnion[0] + L * Math.cos(t.elevation)) * P.sn; return m2 <= 3.2 ? BORE : my < 0 ? art.barrelL : art.barrelD; }
     }
     const along = gx * P.gux + gy * P.guy, across = gx * P.guy - gy * P.gux;
     const f = glen > 1e-6 ? along / glen * L : 0;
+    GUN_D = (art.trunnion[0] + Math.max(0, f) * Math.cos(t.elevation)) * P.sn;
     if (along >= -2 && along <= glen) {
       // (and as it comes round towards us, its muzzle end the nearer, the bigger)
       const near = P.toward > 0 && glen > 1e-6 ? 1 + 0.55 * P.toward * Math.max(0, along / glen) : 1;
       const half = (f > L * 0.4 && f < L * 0.4 + 9 ? 2.5 : f > L - 3 ? 2 : 1.6) * near;
-      if (across >= -half && across <= half) { PART = GUN; return across < -half + 1 ? art.barrelL : across > half - 1 ? art.barrelD : art.barrelC; }
+      if (across >= -half && across <= half) return across < -half + 1 ? art.barrelL : across > half - 1 ? art.barrelD : art.barrelC;
     }
-    if (glen < 6 && gx * gx + gy * gy <= 6.25) { PART = GUN; return gx * gx + gy * gy <= 1.5 ? art.barrelD : art.barrelC; }
-    // The turret, on its ring, facing its way.
+    if (glen < 6 && gx * gx + gy * gy <= 6.25) return gx * gx + gy * gy <= 1.5 ? art.barrelD : art.barrelC;
+    return 0;
+  }
+  function pixel(t, P, wx, wy) {
+    const { art } = t;
+    // The turret, on its ring, facing its way, turned as far round as it is; and its gun, coming out
+    // of its mantlet - whichever is the nearer the eye there: the gun's root is inside the turret,
+    // out of sight, and the turret turned round towards us has the gun in front of it.
     const rdx = wx - P.rx, rdy = wy - P.ry;
     const tt = Math.floor((rdx * P.tny - rdy * P.tnx) / P.det), ts = Math.floor((rdy * P.tfx - rdx * P.tfy) / P.det);
-    let col = at(P.turn || art.turret, tt, ts);
-    if (col) { PART = TURRET; return t.scars.length && !P.turn ? scarred(t, col, TURRET, tt, ts) : col; }
+    let col = at(P.turn, tt, ts);
+    const gun = gunAt(t, P, wx, wy);
+    if (gun && (!col || GUN_D >= P.turn.depth[(ts - P.turn.y0) * P.turn.w + tt - P.turn.x0] - 0.5)) { PART = GUN; return gun; }
+    if (col) { PART = TURRET; return t.scars.length && !P.turned ? scarred(t, col, TURRET, tt, ts) : col; }
     // The hull and its running gear, along the ground under it.
     const dx = wx - t.x, dy = wy - t.y;
     const u = Math.floor(dx * P.c + dy * P.s), v = Math.floor(dy * P.c - dx * P.s);
@@ -1015,5 +1051,6 @@
 
   PW.tanks = { create, step, draw, drive, aimAt, muzzle, settle, ahead, explain, tool, key, hold, held: () => held, reach, gatesOf, STYLES: Object.keys(STYLES),
     fire, hurt, blast, target, stats, poseOf, pixel, part: () => PART, PARTS: { GUN, TURRET, HULL, RUNNING },
+    turretFrame: (style, f) => turnFrame(artOf(style), f), TURN_FRAMES,
     VMAX, ACCEL, GUN_UP, GUN_DOWN, MAX_SLOPE, STEP, SPRING_UP, SPRING_DOWN, TURN, RELOAD, ARMOUR };
 })();
