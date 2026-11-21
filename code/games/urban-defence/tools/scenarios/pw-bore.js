@@ -12,6 +12,10 @@ const check = (ok, text) => checks.push(`${ok ? 'PASS' : 'FAIL'} ${text}`);
 const shots = [];
 const view = async (name, x, y, zoomIndex) => { pwApp.focus(x, y, zoomIndex); for (let t = 0; t < 8; t += 1) await sleep(100); shots.push(await shot(name)); };
 pwApp.setPaused(true);
+// (the physics alone: the lines' own work - the cargo that pushes a lump along to a core, burns it
+// there, mends a cut - is held still while this runs; pw-pipes has its own scenario for that)
+const pipesStep = pipes.step;
+pipes.step = () => {};
 const W = world.width;
 const id = (x, y) => PW.get(world, x, y) & 63;
 const hollow = (x, y) => (PW.getFlags(world, x, y) & FLAG.HOLLOW) !== 0;
@@ -134,5 +138,6 @@ else {
   for (const xx of [c0 - 2, c0 - 3, c1 + 2, c1 + 3]) for (let yy = y + 1; yy < y + pipes.BORE - 1; yy += 1) if (id(xx, yy) === M.WATER) beside += 1;
   check(through > 15 && beside === 0, `a shaft cut down through a line is open ground there: water poured in runs down through the cut (${through} cells of it in the cut and under the line), the bore beside the cut stays shut to it (${beside} in it)`);
 }
+pipes.step = pipesStep;
 pwApp.setPaused(false);
 return { checks, shots: shots.length };
