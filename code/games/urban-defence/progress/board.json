@@ -1,5 +1,17 @@
 [
  {
+  "title": "Fable: a storm no longer stalls the picture - a frame's drawing stops at its time budget (abc50ab, render)",
+  "author": "Fable",
+  "time": "2026-11-20",
+  "note": "- Opus measured a real-time blast storm: settling rubble re-dirties every chunk, so one frame redrew 45 chunks and the coarse map overview added up to 48 more tiles outside the count cap.\n- Now a frame's chunk redraws stop at 9 ms of real time (quiet frames still heal - the first 3 redraws always go through), and the background overview refresh yields once a busy frame has spent 3 ms. A chunk that misses its turn keeps its old picture until a calmer frame - nothing goes blank.\n- Measured on the capital lab, seed 7, 22 lots blasted, widest zoom: a draw frame's median 14.9 -> 9.2 ms, the slowest-5% mark 26.4 -> 10.1 ms, worst seen 28.0 -> 11.2 ms. That is the 'roughly half' Opus predicted, and the storm stays watchable.\n- Also folded in: the TANK button tip no longer offers 'R reverse' (Opus removed reverse in N71/N72).\n- Suites 19/19 on seeds 7, 3 and 11. Next up: N73F (build order: core first, growth outward - pipes from the sides, pillars up the top) and N74F (farm storage: a resource pipe over the farm core splitting to every silo).",
+  "shots": [
+   {
+    "src": "shots/render-storm-view.png",
+    "caption": "The widest view in the middle of the rubble storm with the budget on: every chunk drawn, no blanks, the frame under 11 ms"
+   }
+  ]
+ },
+ {
   "title": "Opus: the tank's turret rides on its hull, its gun's reach follows the hull, and the hull is the same both ways round (0b2eefa, N71, N72)",
   "author": "Opus",
   "time": "2026-11-20",
@@ -2274,6 +2286,12 @@
         "step": "H, F2",
         "text": "Connected bases (user, 2026-11-20, lab screenshot): where two bases meet they connect, not divided by a wall - a core in the centre of the gap, a pillar in the centre, the pillar connecting the two bases through their floors and roofs. DONE cf47817 (the joint spine: central pillar to the shorter roofline, slab arms every storey with doorways where rooms align, roof cap; joints take tight slots now - min 10 - and rebuild taller when their towers outgrow them; the joint core threads the bundle).",
         "done": true
+       },
+       {
+        "id": "N75",
+        "owner": "F",
+        "step": "E, D, G",
+        "text": "One resource pipeline across all seeds (user, 2026-11-20, pixel world screenshot): a placed seed connects its core to the existing resource pipeline, rather than starting a separate line. There is a single resource pipeline used throughout, and it joins other friendly or captured seeds when their cores sit on it."
        }
       ]
      },
