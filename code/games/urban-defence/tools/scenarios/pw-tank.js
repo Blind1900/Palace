@@ -116,6 +116,16 @@ else {
   let ticks = 0;
   while (t.turning < T.TURN / 2 && ticks < 120) { T.step(world, DT); ticks += 1; }
   const halfWay = t.turning >= T.TURN / 2 * 0.9;
+  // (half way round it faces us, as the user's photos of tanks seen head-on: the turret from its
+  // front - as wide as it is, the same either side of its gun - the gun pointing out at us, its
+  // muzzle's bore a dark ring at its end; the hull under it as it was)
+  const P = T.poseOf(t), bore = T.pixel(t, P, P.bx + P.gdx, P.by + P.gdy);
+  const boreDark = !!bore && (bore & 255) < 40 && (bore >>> 8 & 255) < 40 && (bore >>> 16 & 255) < 40;
+  let left = Infinity, right = -Infinity;
+  for (let x = Math.floor(P.rx) - 70; x <= P.rx + 70; x += 1) if (T.pixel(t, P, x + 0.5, P.ry - 4) && T.part() === T.PARTS.TURRET) { left = Math.min(left, x); right = Math.max(right, x); }
+  const across = right - left + 1, offCentre = (left + right + 1) / 2 - P.rx;
+  check(halfWay && boreDark && across >= 34 && Math.abs(offCentre) <= 3,
+    `half way round, the turret faces us as in the photos of tanks head-on: its front ${across} cells across, centred on its ring (${offCentre.toFixed(1)} off), the gun pointing out at us with its bore a dark ring at its muzzle (${boreDark ? 'dark' : 'not there'}) - only the head turned, the hull as it was`);
   await view('tank-turret-turning', t.x, t.y - 30, 7);
   run(t, 2.2);
   const back = T.muzzle(t), backDeg = Math.atan2(-back.dy, -back.dx) / deg;
