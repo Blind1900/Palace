@@ -472,4 +472,128 @@
   }
 
   PW.createLife = createLife;
+
+  // ---- The core's energy (D15) ------------------------------------------------------------------------
+  // A core's white energy is a Game of Life of its own, the world's rule (B3/S23) on the core's own
+  // disc: the ring round its black nucleus out to the rim of its bed's recess (CORE_IN < r <=
+  // CORE_OUT cells from its centre), one generation every CORE_EVERY ticks - quicker than the
+  // world's, so the ball crackles. Its energy comes out of the white heart: now and then a spark of
+  // soup is struck at the nucleus's edge, most often at the poles (the lightning crowds the poles),
+  // and Life takes it from there - flaring, crawling out along the ring, breaking up, dying at the
+  // rim; a spark whenever the ring runs low, and more of them the more stirred the core is (vigor:
+  // 0 a dead core - its Life dies away and the ball goes dark - 1 at rest, 2 rising or floating).
+  // And it lives by the world's Life's physics, in the core's context: in the core's own body, its
+  // steel bed and the open air about it; where rubble, ground or water fill a cell of its disc, the
+  // Life there is smothered (a core buried in a heap goes dim). A blast near it shakes it: a share
+  // of its cells blown out, a burst of sparks thrown in (PW.coreLife.blast, from PW.explode).
+  // Kept on the core (core.lifeState), so it travels with the ball wherever it goes; drawn over the
+  // ball by the cores' own drawing (see pw-cores), live cells white, the cells just died glowing on
+  // dim for two generations - the vibration.
+  const CORE_IN = 2.4, CORE_OUT = 8.4, CORE_H = 9, CORE_S = 2 * CORE_H + 1, CORE_EVERY = 4;
+  const CORE_SPARK = 0.35, CORE_LOW = 10, CORE_POLES = 0.8, CORE_FADE = 0.25;
+  const CORE_RING = new Uint8Array(CORE_S * CORE_S);
+  for (let dy = -CORE_H; dy <= CORE_H; dy += 1) for (let dx = -CORE_H; dx <= CORE_H; dx += 1) {
+    const r = Math.hypot(dx, dy);
+    if (r > CORE_IN && r <= CORE_OUT) CORE_RING[(dy + CORE_H) * CORE_S + dx + CORE_H] = 1;
+  }
+  const CORE_WHITE = [238, 242, 246], CORE_SOFT = [206, 212, 218], CORE_DIM = [152, 158, 164];
+  function coreState(core) {
+    let st = core.lifeState;
+    if (!st) {
+      const n = CORE_S * CORE_S;
+      st = core.lifeState = { a: new Uint8Array(n), b: new Uint8Array(n), age: new Uint8Array(n), glow: new Uint8Array(n), home: new Uint8Array(n), t: 0, gen: 0, pop: 0, shock: 0, stirred: 0 };
+    }
+    return st;
+  }
+  // (its home: the core's body, steel, or open air - not rubble, ground, water or anything else)
+  function coreHome(world, x, y) {
+    if (x < 0 || y < 0 || x >= world.width || y >= world.height) return false;
+    const id = world.mat[y * world.width + x] & ID_MASK;
+    return id === M.CORE || id === M.STEEL || PW.mat.phase[id] <= PW.PHASE.GAS;
+  }
+  // A spark of soup at the nucleus's edge: a pole's mostly, or anywhere round it.
+  function coreSpark(st, h, anywhere) {
+    const u = (h & 1023) / 1023, w = (h >>> 10 & 1023) / 1023;
+    const a = !anywhere && u < CORE_POLES ? ((h >>> 20) & 1 ? -1 : 1) * Math.PI / 2 + (w - 0.5) * 0.7 : w * Math.PI * 2;
+    const sx = Math.round(Math.cos(a) * (CORE_IN + 1.2)), sy = Math.round(Math.sin(a) * (CORE_IN + 1.2));
+    for (let dy = -1; dy <= 1; dy += 1) for (let dx = -1; dx <= 1; dx += 1) {
+      const k = (sy + dy + CORE_H) * CORE_S + sx + dx + CORE_H;
+      if (!CORE_RING[k] || !st.home[k] || ((PW.hash3(h, dx, dy) & 1023) >= 560)) continue;
+      if (!st.a[k]) { st.a[k] = 1; st.age[k] = 0; st.glow[k] = 0; st.pop += 1; }
+    }
+  }
+  // (`pure`: the rule alone - no sparks, no fading, no shake - for the tests)
+  function coreStep(world, core, vigor = 1, pure = false) {
+    const st = coreState(core);
+    st.t += 1;
+    if (st.t % CORE_EVERY) return st;
+    st.gen += 1;
+    const cx = Math.round(core.x), cy = Math.round(core.y), { a, b, age, glow, home } = st;
+    for (let dy = -CORE_H, k = 0; dy <= CORE_H; dy += 1) for (let dx = -CORE_H; dx <= CORE_H; dx += 1, k += 1) home[k] = CORE_RING[k] && coreHome(world, cx + dx, cy + dy) ? 1 : 0;
+    const salt = (cx * 7 + cy * 13) | 0;
+    // (a blast's shake: a share of it blown out, a burst of sparks thrown in, and stirred a while)
+    if (st.shock > 0 && !pure) {
+      for (let k = 0; k < a.length; k += 1) if (a[k] && (PW.hash3(salt, k, st.gen) & 1023) < st.shock * 512) { a[k] = 0; glow[k] = 2; }
+      for (let s = 0, n = 2 + Math.round(st.shock * 5); s < n; s += 1) coreSpark(st, PW.hash3(salt, st.gen, 900 + s), true);
+      st.stirred = Math.max(st.stirred, Math.round(st.shock * 15));   // (generations: about a second)
+      st.shock = 0;
+    }
+    // One generation, B3/S23, where it has its home.
+    let pop = 0;
+    for (let y = 0, k = 0; y < CORE_S; y += 1) for (let x = 0; x < CORE_S; x += 1, k += 1) {
+      if (!CORE_RING[k]) { b[k] = 0; continue; }
+      let n = 0;
+      for (let ny = Math.max(0, y - 1); ny <= Math.min(CORE_S - 1, y + 1); ny += 1) for (let nx = Math.max(0, x - 1); nx <= Math.min(CORE_S - 1, x + 1); nx += 1) n += a[ny * CORE_S + nx];
+      n -= a[k];
+      const lives = home[k] && (n === 3 || (a[k] === 1 && n === 2));
+      b[k] = lives ? 1 : 0;
+      if (lives) { age[k] = a[k] ? Math.min(255, age[k] + 1) : 0; glow[k] = 0; pop += 1; } else if (a[k]) glow[k] = 2; else if (glow[k]) glow[k] -= 1;
+    }
+    // (a dead core's Life dies away)
+    if (vigor <= 0 && !pure) for (let k = 0; k < b.length; k += 1) if (b[k] && (PW.hash3(salt, k, st.gen + 7) & 1023) < CORE_FADE * 1024) { b[k] = 0; glow[k] = 2; pop -= 1; }
+    st.a = b; st.b = a; st.pop = pop;
+    // Its energy out of the heart: a spark now and then - when the ring runs low, and the more,
+    // the more it is stirred.
+    if (vigor > 0 && !pure) {
+      const stir = vigor + (st.stirred > 0 ? 1 : 0);
+      if (st.stirred > 0) st.stirred -= 1;
+      const h = PW.hash3(salt, st.gen, 77), p = Math.min(1, CORE_SPARK * stir + (pop < CORE_LOW ? 0.6 : 0));
+      if ((h & 1023) / 1023 < p) coreSpark(st, PW.hash3(salt, st.gen, 78), false);
+    }
+    return st;
+  }
+  // The core's Life drawn over its ball (renderer as the world's draw is given it).
+  function coreDraw(renderer, core) {
+    const st = core.lifeState;
+    if (!st) return;
+    const { ctx, camera } = renderer, z = camera.zoom;
+    if (z < 0.5) return;
+    const size = Math.max(1, Math.round(z)), cx = Math.round(core.x), cy = Math.round(core.y);
+    const ox = (cx - CORE_H - camera.x) * z, oy = (cy - CORE_H - camera.y) * z;
+    const { a, age, glow } = st;
+    const paint = (test, c, alpha) => {
+      ctx.fillStyle = `rgba(${c[0]},${c[1]},${c[2]},${alpha})`;
+      ctx.beginPath();
+      for (let y = 0, k = 0; y < CORE_S; y += 1) for (let x = 0; x < CORE_S; x += 1, k += 1) if (test(k)) ctx.rect(Math.round(ox + x * z), Math.round(oy + y * z), size, size);
+      ctx.fill();
+    };
+    paint((k) => glow[k] === 1, CORE_DIM, 0.35);
+    paint((k) => glow[k] === 2, CORE_DIM, 0.75);
+    paint((k) => a[k] && age[k] > 6, CORE_SOFT, 1);
+    paint((k) => a[k] && age[k] <= 6, CORE_WHITE, 1);
+  }
+  // A blast shakes the cores in its reach: the nearer and harder, the more.
+  function coreBlast(world, x, y, r, power = 1) {
+    const reach = r * 3 + CORE_OUT;
+    const shake = (core) => {
+      if (!core || !core.lifeState) return;
+      const d = Math.hypot(core.x - x, core.y - y);
+      if (d >= reach) return;
+      core.lifeState.shock = Math.max(core.lifeState.shock, Math.min(1, power * (1 - d / reach)));
+    };
+    for (const bld of world.buildings || []) for (const core of bld.cores || []) shake(core);
+    for (const s of world.seedCores || []) shake(s);
+  }
+  PW.coreLife = { step: coreStep, draw: coreDraw, blast: coreBlast, state: coreState, IN: CORE_IN, OUT: CORE_OUT, EVERY: CORE_EVERY,
+    at: (core, dx, dy) => (core.lifeState && Math.abs(dx) <= CORE_H && Math.abs(dy) <= CORE_H ? core.lifeState.a[(dy + CORE_H) * CORE_S + dx + CORE_H] : 0) };
 })();

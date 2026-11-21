@@ -259,6 +259,8 @@
     }
     // The blast wave: a burst of pressure in the air that spreads out as a wind.
     if (world.air) world.air.blast(cx, cy, r * 1.4, power);
+    // (and the cores' Life in its reach is shaken - see PW.coreLife)
+    if (PW.coreLife) PW.coreLife.blast(world, cx, cy, r, power);
     if (world.stability) {
       world.stability.shock(cx, cy, Math.pow(r * power, 3));
     }
