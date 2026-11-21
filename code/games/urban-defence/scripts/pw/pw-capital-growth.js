@@ -58,6 +58,43 @@
     }
     const supplied = (city) => { const p = purseOf(city); return !p || ((p.water || 0) >= 20 && (p.sm || 0) >= 20); };
 
+    // ---- N4: the people. Standing towers house population; the people drink and eat from
+    // the side's stores on their own clock (farms send SM down the line, pumps send water -
+    // the drain is what makes the thresholds LIVE); the fed and watered field the whole
+    // workforce, a starved side a skeleton crew. Workers drive the feed: how fast the
+    // towers come of age. A world without purses (the lab) runs free, as ever.
+    const POP_PER_LEVEL = 6;       // souls a tower houses per level
+    const DRINK = 0.004;           // water a soul draws from the stores, per second
+    const EAT = 0.0028;            // and soft materials
+    const ECON_EVERY = 2;          // seconds between census and consumption passes
+    let econClock = 0;
+    function economy(dt) {
+      econClock += dt;
+      if (econClock < ECON_EVERY || !world.stock) return;
+      const dtE = econClock;
+      econClock = 0;
+      const census = {};
+      for (const city of cities) {
+        if (!city.faction) continue;
+        let pop = 0;
+        for (const lot of [...city.rings.left, ...city.rings.right, city.main]) {
+          if (!lot || !lot.placed || lot.type !== 'population' || lot.mil) continue;
+          const b = world.buildings[lot.owner - 1];
+          if (!b || !b.canvas || b.underConstruction || b.ruined) continue;
+          pop += Math.max(1, lot.level || 1) * POP_PER_LEVEL;
+        }
+        census[city.faction] = (census[city.faction] || 0) + pop;
+      }
+      for (const faction of Object.keys(census)) {
+        const purse = world.stock[faction] || (world.stock[faction] = { sm: 0, hm: 0, water: 0 });
+        purse.pop = census[faction];
+        purse.water = Math.max(0, (purse.water || 0) - purse.pop * DRINK * dtE);
+        purse.sm = Math.max(0, (purse.sm || 0) - purse.pop * EAT * dtE);
+        const fed = (purse.water || 0) >= 20 && (purse.sm || 0) >= 20;
+        purse.workers = Math.round(purse.pop * (fed ? 1 : 0.25));
+      }
+    }
+
     // ---- Reading the land --------------------------------------------------------------------
     const surf = (x) => (world.surface0 || world.groundTop)[Math.max(0, Math.min(world.width - 1, x))];
     const wetAt = (x) => (PW.get(world, x, world.groundTop[x]) & 63) === M.WATER;
@@ -1998,6 +2035,7 @@
       // nothing is scanned - the storm check alone walked the falling-pieces list every
       // tick and that garbage showed in pw-collapse's at-the-line budget.
       if (!cities.length && !flashes.length) return;
+      economy(dt);   // N4: census, consumption, workers
       stepTick += 1;
       if (stepTick % 30 === 0) for (const city of cities) stepBridges(city);   // N56
       const storm = stormy();
@@ -2015,7 +2053,11 @@
         if (city.kind === 'capital') {
           city.appendClock.left += dt; city.appendClock.right += dt;
           city.infillClock += dt;
-          const feed = supplied(city) ? 1 : 0.25;   // N4: unwatered, unfed - the levels rise slow
+          // N4: the WORKERS set the pace the towers come of age - the whole workforce when
+          // fed and watered, the skeleton crew when the stores run dry.
+          const purse = purseOf(city);
+          const feed = purse && purse.pop ? Math.max(0.25, Math.min(1, (purse.workers || 0) / purse.pop))
+            : supplied(city) ? 1 : 0.25;
           for (const side of ['left', 'right']) for (const l of city.rings[side]) l.age += dt * feed;
         }
         city.jointClock += dt;
