@@ -759,7 +759,11 @@
       // N3 vehicle rule: the new strip is graded to armour's limits before it is paved
       if (!PW.NO_LANE_GRADING) gradeLane(prevEdge, dir > 0 ? lot.placed.worksL : lot.placed.worksR);
       paveSegment(city, prevEdge, dir > 0 ? lot.placed.worksL : lot.placed.worksR);
-      refreshSigs(city, Math.min(prevEdge, lot.placed.worksL), Math.max(prevEdge, lot.placed.worksR));
+      // ...and the APPROACH beyond the city's new outer edge ramps long into the open
+      // country, so a bank at the frontier never stands steeper than a tank climbs
+      // (PS's drive: a 57-degree bank left a whole tower unreachable from its own side).
+      if (!PW.NO_LANE_GRADING) gradeLane(city.edge[side], city.edge[side] + dir * 160);
+      refreshSigs(city, Math.min(prevEdge, lot.placed.worksL) - 10, Math.max(prevEdge, lot.placed.worksR) + 170);
       city.blocked[side] = null;
       return true;
     }

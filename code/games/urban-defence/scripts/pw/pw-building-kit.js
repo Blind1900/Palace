@@ -380,6 +380,19 @@
         deco(c, x, g - 1, (d & 1) ? [188, 158, 48] : [30, 30, 32]);
         if (d < 3) deco(c, x, top - 1, (d & 1) ? [188, 158, 48] : [30, 30, 32]);
       }
+      // the eave recess: tile canopies and brackets overhanging the portal pinch the
+      // street's headroom under armour height (PS's drive: an asian eave at g-37 over a
+      // g-2 street stopped every tank at the facade) - the portal's reach is cut clear
+      for (let d = -1; d < 9; d += 1) {
+        const x = px + side * d;
+        for (let y = top - 8; y < top; y += 1) {
+          const i = y * c.width + x;
+          if (i < 0 || i >= c.mat.length || !c.mat[i]) continue;
+          const role = c.role[i];
+          if (role !== ROLE.ROOF && role !== ROLE.ORNAMENT) continue;
+          c.mat[i] = 0; c.paint[i] = 0; c.role[i] = ROLE.NONE; c.deco[i] = 0;
+        }
+      }
     }
     for (let x = L + 20; x <= R - 20; x += 44) ceilingLamp(c, style, x, top + 1);
     c.meta.undercroft = { top, height: g - top };
