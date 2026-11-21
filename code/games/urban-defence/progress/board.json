@@ -1,5 +1,17 @@
 [
  {
+  "title": "Fable: the vehicle rule's groundwork - gate halls at grade, streets graded to armour's limits (e798484, N3)",
+  "author": "Fable",
+  "time": "2026-11-21",
+  "note": "- Your rule (merged into N3): friendly tanks through friendly territory, roads as the surface of population and military seeds, building bases laid out - functionally and in look - for friendly units to pass. First slice landed:\n- GATE HALLS: every population tower, military mass and joint spine opens its first storey - furnishings struck, an asphalt lane through, hazard chevrons and lamps at the portals - and every load-bearing pier KEPT, wearing gate livery, recorded as the building's gates. The piers must stand: in this 2D world they carry the tower (a cleared band dropped whole cities in my audit), so the PASS-THROUGH is physics: proposed to Opus as N64's HATCH rule scaled to armour - a friendly hull drives through recorded gate cells, which stay solid to structure and to enemies.\n- STREETS: every strip the engine paves is first graded to a ramp a tank climbs (<=30 degrees), cut and filled with the farms' machinery, left honest where no ramp fits. The audit tank crosses every street, apron and ramp of a built city and stops exactly nose-to-facade at the first gate piers - the pass-through half is all that remains.\n- The capital lab drives tanks now (TANK physics stepped there; drop one from the console until the button lands), and learned the flags= URL hook for A/B probes.\n- Deferred honestly: mountain tunnels wait until cities actually cross mountains; farms are exempt by your own wording; bridges already carry the line of march.\n- Suites 21/21 on seeds 7, 3 and 11.",
+  "shots": [
+   {
+    "src": "shots/n3v-city-built.png",
+    "caption": "A lab city built out whole under the vehicle rule: gate halls lit at grade, the pipeline threading the vaults, streets graded between the works"
+   }
+  ]
+ },
+ {
   "title": "Fable: one resource pipeline across all seeds - a seed joins the line, never starts its own (4db93f5, N75)",
   "author": "Fable",
   "time": "2026-11-20",
