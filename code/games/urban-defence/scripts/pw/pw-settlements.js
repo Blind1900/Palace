@@ -1526,12 +1526,9 @@
       }
       footprints.push([Math.min(mouth, px) - 4, Math.max(mouth, px) + 4]);
     }
-    // Embrasure slits climbing from the command gallery's enemy-side wall to the face.
-    for (const lift of [8, 22]) {
-      const sx = (facing > 0 ? g1.x1 : g1.x0) + facing * 5;
-      const cut = PW.bunkers.cutOpening(world, sx, g1.y0 + lift, facing, -1, 3, 90, id);
-      if (cut) footprints.push([cut.x0 - 2, cut.x1 + 2]);
-    }
+    // (N32 REMOVED by the user: the embrasure slits that climbed from the command
+    // gallery to the face are gone - no shoot-out openings on mountain bases. The
+    // resupply PORTAL above stays: it is an entrance, and entrances stay.)
     // The crown armoured along the mountain's own shape: the rock face round the works, from
     // shoulder to shoulder, lined five deep wherever it is not already the base's own work. At
     // either end the lining tapers out and breaks up into the bare rock (no hard seam).

@@ -16,8 +16,7 @@
   const FRONT_WALL = 12;        // the firing wall, twice a normal wall, all reinforced
   const COVER = 8;              // rock kept over the roof at the shallowest point
   const SHELL = 6;              // reinforced rock ring round the carved box
-  const EMBRASURE_MAX = 70;     // longest horizontal embrasure cut through the front rock
-  const PORT_MAX = 64;          // longest 45-degree port up to the mountainside
+  const EMBRASURE_MAX = 70;     // front-rock thickness cap: still the box's siting test (N32 removed the cut)
   const REINF_C = [96, 104, 100], REINF_DARK = [74, 80, 78], REINF_LIT = [122, 130, 124];
 
   // ---- The gallery canvas ---------------------------------------------------------------------------
@@ -55,20 +54,8 @@
         K.solid(c, X(frontRight - d), y, M.REINFORCED, rib ? REINF_DARK : face ? REINF_LIT : REINF_C, ROLE.WALL);
       }
     }
-    // The embrasure: a slit through the firing wall at kneeling height, splayed on the inside,
-    // with a step under it for the guard. (The cut carries on through the rock at placement.)
-    const slitTop = fRow - 21, slitBottom = fRow - 15;
-    for (let d = 0; d < FRONT_WALL; d += 1) {
-      const splay = d > FRONT_WALL - 5 ? 0 : 1;   // wider in than out
-      for (let y = slitTop - splay; y <= slitBottom + splay; y += 1) {
-        K.clear(c, X(frontRight - d), y);
-        K.back(c, X(frontRight - d), y, [18, 20, 22]);
-      }
-    }
-    c.embrasure = { top: slitTop, bottom: slitBottom };
-    for (let lx = frontRight - FRONT_WALL - 8; lx < frontRight - FRONT_WALL; lx += 1) {
-      for (let y = fRow - 8; y < fRow; y += 1) K.solid(c, X(lx), y, M.PLATFORM, y === fRow - 8 ? tone(P.ornament, 0.85) : tone(P.frame, 0.78), ROLE.STAIR);
-    }
+    // (N32 REMOVED by the user, 2026-11-21: no peek holes, windows or shoot-out openings
+    // on mountain bases - the firing wall stands solid. Everything else stays as it was.)
     // Roof and floor slabs, reinforced.
     for (let lx = rearLeft; lx <= frontRight; lx += 1) {
       for (let row = 0; row < S.SLAB + 2; row += 1) {
@@ -277,15 +264,10 @@
           const canvasX = facing > 0 ? xR : xF;
           const stamp = PW.stampBuilding(world, canvas, canvasX, ground, { owner: id });
           reinforce(world, canvasX, roofTop - 2, canvasX + BW - 1, ground + K.VAULT_DEPTH + 2, id);
-          const cuts = [];
-          // The embrasure runs on through the rock to daylight...
-          // (halfH 4: a window a trooper can shoot through AND crawl out of - the reopen's rule)
-          cuts.push(cutOpening(world, xF + facing, slitY, facing, 0, 4, EMBRASURE_MAX, id));
-          // ...and two ports climb from under the gallery ceiling to openings higher on the
-          // mountainside.
-          for (const back of [Math.round(BW * 0.18), Math.round(BW * 0.42)]) {
-            cuts.push(cutOpening(world, xF - facing * back, ground - S.CLEAR + 3, facing, -1, 4, PORT_MAX, id));
-          }
+          // (N32 REMOVED by the user: no openings are cut through the rock. The front-
+          // thickness test above still sites the box exactly as before, so the bases
+          // stand where they always did, just blind. cutOpening itself remains: it is
+          // the ENTRANCE cutter - the outposts' resupply portal - and entrances stay.)
           // The shaft: a ladder drop from outside the rear door down to a junction stub for the
           // tunnels to find (step H).
           const shaftX = xR - facing * (SHELL + 4);
@@ -319,10 +301,9 @@
             level: 2, facing, neutral: false, underConstruction: false, works: [Math.min(xF, xR) - SHELL, Math.max(xF, xR) + SHELL], plant: null,
             base: { G: ground, walls: [], under: null, cores: canvas.cores.map((q) => ({ x: canvasX + q.x, y: ground + q.y - canvas.ground })) } });
           world.buildings.push(record);
-          // Everything that broke the surface - the works and every opening's mouth - keeps the
+          // Everything that broke the surface - the works and the shaft head - keeps the
           // wild off it (pw-gen-vegetation's blockedColumns reads these).
-          const spans = [[record.works[0], record.works[1]], [Math.min(shaftX - 8, xR), Math.max(shaftX + 8, xR)],
-            ...cuts.filter(Boolean).map((q) => [q.x0 - 2, q.x1 + 2])];
+          const spans = [[record.works[0], record.works[1]], [Math.min(shaftX - 8, xR), Math.max(shaftX + 8, xR)]];
           world.bunkers.push({ side, style, building: record, peak, front: xF,
             shaft: { x: shaftX, top: shaftTop, bottom: shaftBottom },
             footprints: [[Math.min(...spans.map((q) => q[0])), Math.max(...spans.map((q) => q[1]))]] });
