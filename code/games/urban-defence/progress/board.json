@@ -1,5 +1,12 @@
 [
  {
+  "title": "Fable: capitals from every seed, seeds only in vision, and the road crosses the mountains (N33 done, N2 done, N3 advanced; b5978f2, 7955b99, 9befc34)",
+  "author": "Fable",
+  "time": "2026-11-21",
+  "note": "- N33 DONE: every population seed founds a CAPITAL with the MAIN core set in its seat's centre vault - the root of the side's core tree, surviving every level-up re-seat. A side's capitals rank by founding order: the first is the grandest (level cap 7), each later seat one lower, never under 4 - the founding city keeps its crown. Standing towns count: adopt one first and your next seed founds a lesser city.\n- N2 DONE: a new vision rule - a side sees around what it holds (cities, standing towns, buildings, planted cores, and tanks driven forward), and the hand's seed is REFUSED beyond that sight, with the reason shown. Seed cities are born LEVEL 1: the core and the god's gift first, the crews raise the modest first building, and it re-seats grander with each level.\n- N3 ADVANCED - the road crosses the mountains: at level 5 a mountain step in the road's way is CROSSED for real now, not noted. One constant-grade drive runs portal to portal at the tanks' slope: rock that roofs it is BORED as a true tunnel (the dig system's own lining follows, and a struck ore vein opens a mine on the pipeline); shallow faces are cut open to the sky so nothing hangs to avalanche; dips fill as embankment; the whole drive is paved. The drive is protected ground - the city's own street graders stop at its portals and no lot may seat over it (the growth's re-seats were quietly chewing the road until that rule).\n- Proven on the 77-row step: crossed at level 5, worst bump 1 cell, grade 0.43, fully paved, full tank headroom - and IDENTICAL after two minutes of level-ups and re-seats. Opus's N77 combat is also wired live (rounds on both pages, wreck salvage, tanks drawn in the lab). 22/22 suites, seeds 7/3/11.\n- N3 still open: the podium-slope slice (proven direction, taken fresh) and the end-to-end drive suite. N4 (pop economy) is next in the queue.",
+  "shots": []
+ },
+ {
   "title": "Opus + Fable: the tank now drives through four of the ring's towers; one podium slope is the last blocker (4f3ca04, N3 vehicle rule)",
   "author": "Fable",
   "time": "2026-11-21",
@@ -2123,7 +2130,7 @@
         "id": "N71",
         "owner": "O",
         "step": "0b2eefa",
-        "text": "Tank clipping and turret (user, 2026-11-20, screenshot of the tank ramp): the tank must not clip into its body when facing up or down. The turret head moves with the body. Only the gun barrel moves up and down, and its elevation range follows the body of the tank.",
+        "text": "Tank clipping and turret (user, 2026-11-20, screenshot of the tank ramp): the tank must not clip into its body when facing up or down. The turret head moves with the body. Only the gun barrel moves up and down, and its elevation range follows the body of the tank. Tank reference images (user, 2026-11-21, forward-facing tanks, three photos): the reference for how the head turns to point the gun barrel.",
         "pct": 100,
         "done": true,
         "left": ""
@@ -2472,7 +2479,7 @@
         "id": "N32",
         "owner": "F",
         "step": "C2, K",
-        "text": "REOPENED 2026-11-20 (user): garrison peek holes must be real openings like a window or a tube, so troopers can shoot through and move through them. They stop at the structure or terrain and do not jut outward at their top end or corner. Same rules as the pipe: clean edges, not wider than needed, the hole follows the wall. Earlier note: Military bases level up by hollowing out more of the mountain, with more rooms and defences at each level. At max level, a deployment hangar sits at the base of the mountain. Garrison peeking holes become real openings (a window or tube, like the resource pipe) that troopers can shoot and move through, and they are much shorter so they are practical. Refs: underground defence facility and bunker cross-sections (the military photos the user sent). status: hangars, levels and variants live in the kit + lab bases level/dig in (N57 cac8766); per-level mountain hollowing itself lands with the game-side growth (N3).",
+        "text": "REOPENED 2026-11-21 (user): garrison peek holes are openings troops can shoot out of at wide angles, or enter the building through. The edges have no sharp cut-off: the corners smooth out and merge into the terrain or building structure at both ends. Same rules as the pipe: clean edges, not wider than needed. Earlier note: military bases level up by hollowing out more of the mountain, with more rooms and defences at each level; at max level a deployment hangar sits at the base of the mountain. Refs: the underground defence facility and bunker cross-sections the user sent.",
         "pct": 0
        },
        {
@@ -2545,6 +2552,18 @@
         "step": "M9",
         "id": "N8",
         "pct": 0
+       },
+       {
+        "id": "N77",
+        "owner": "O",
+        "step": "M5, M8",
+        "text": "Bullets and vehicle combat (user, 2026-11-21): bullet physics for tank shots, plane missiles, ground troop fire and mech shooting. Vehicles take damage and are destroyed in blasts, leaving smoke from the blast. A destroyed vehicle becomes part of the terrain, like a building leaves recognisable ruins."
+       },
+       {
+        "id": "N78",
+        "owner": "F",
+        "step": "M5, M6",
+        "text": "Unit selection and control (user, 2026-11-21): click a unit to select it, with a highlight. A side panel shows that unit's control keys. Ground troops also get the item bar (rifle, grenades, drills) while selected."
        }
       ]
      },
