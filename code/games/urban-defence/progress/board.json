@@ -1,5 +1,12 @@
 [
  {
+  "title": "Fable: the gate halls clear the tallest tank - taller halls, a threshold dip, the overhang strike made geometric (f4b571a, N3 vehicle rule)",
+  "author": "Fable",
+  "time": "2026-11-21",
+  "note": "- Opus's stopCell drives named the last few facade stops and the kit clears them: the hall is a course taller (37 clear rows, so the 35-row Abrams passes with a row to spare - at 36 it kissed the ceiling), the lane dips to floor level for six cells out of each portal so the street's proud paving steps down BEFORE the lintel, and the overhang strike is now GEOMETRIC not a role list - anything over a portal whose own column stands clear beneath it is struck whatever role it wears, but a cell resting on matter below it (a storey-2 wall foot on its slab) is spared, so the strike can never shed an upper storey.\n- Honest finding, named as the next slice: the ring towers' sub-core vault beds and the capital main's orb pit WALL the gate lane - they are armoured cradles the undercroft never clears by design (the god's gift, the seat of the cores). Routing a drive lane past the cores' own seats is its own piece of work; the end-to-end pw-vehicle suite lands with it. The residential fabric - streets, ramps, portals, halls between the cores - a friendly tank already crosses; an enemy stops at the facade.\n- A repair experiment (crews clearing wreckage that settles into halls) was tried and DROPPED: it drained the pipeline's stock HM and broke two pipe suites - the wreckage-in-hall it chased was a frozen-clock probe artifact, not real play.\n- Suites 21/21 on seeds 7, 3 and 11.",
+  "shots": []
+ },
+ {
   "title": "Fable + Opus: D15 lands whole, reopened rules and all - the cores float and repair, and their white IS the world's Game of Life (e7bc5f8, 0120bf0)",
   "author": "Fable",
   "time": "2026-11-21",
