@@ -16,6 +16,8 @@
   const GROW_EVERY = 3.2;        // growth-seconds between a city's actions
   const MAX_LEVEL = 7;
   const UNLOCK = 5;              // N44: capitals cross water / climb mountains from this level
+  const TUNNEL_MAX = 560;        // N3: longest drive the crews bore through a mountain
+  const TUNNEL_CLEAR = 38;       // ...headroom over its floor: the tallest hull and its margin
   const FARM_BRIDGE_LEVEL = 3;   // N46: farms bridge small water from this level...
   const FARM_BRIDGE_MAX = 72;    // ...and only this narrow (a lesser bridge)
   const CAPITAL_BRIDGE_MAX = 1400;
@@ -189,6 +191,14 @@
       const canvas = lot.canvas || (lot.canvas = canvasFor(city, lot));
       const w = bodyWidth(canvas);
       const worldX = Math.round(centerX - canvas.body.left - w / 2);
+      // N3: no lot seats over a mountain drive - its terracing and aprons reach ~30 cells
+      // past the body and would chew the road's earthworks (the seatChain's transient
+      // re-seats did exactly that). The drive is the road's ground, kept clear like a
+      // barrier's. One rule here covers appends, infill, chains and joints alike.
+      for (const t of lot.ring >= 0 ? city.tunnels || [] : []) {
+        const tA = Math.min(t.nearX ?? t.x0, t.farX ?? t.x1) - 34, tB = Math.max(t.nearX ?? t.x0, t.farX ?? t.x1) + 34;
+        if (centerX + w / 2 > tA && centerX - w / 2 < tB) return false;
+      }
       // N73: cores first - with a repair system standing, only the gift and the hearts are
       // stamped; the body above is blueprint, raised by the translators cell by cell.
       const grow = !!(world.repair && !PW.INSTANT_BUILDS);
@@ -341,6 +351,122 @@
       clearSimAround(b.x0 - 4, deckTop - 4, b.x1 + 4, deckTop + 60);
       city.bridges.push({ x0: b.x0 - 2, x1: b.x1 + 2, y: deckTop, rows, strong, piers, legGap, sag: 0 });
       note(city, strong ? 'main bridge raised' : 'lesser bridge laid');
+    }
+
+    // N3: a mountain in the road is CROSSED, not noted. One constant-grade drive runs
+    // portal to portal at the hulls' slope: columns the rock roofs are BORED as the side's
+    // own tunnel (lining follows at the dig system's pace, a struck vein opens a mine);
+    // shallow rock above the line is CUT open; ground below it is FILLED as embankment;
+    // the whole drive is paved. Where the two ends stand far apart the drive runs on into
+    // the high flank until the grade meets the ground (a real mountain road's length).
+    // Refused - left blocked as before - when the massif outruns the crews (TUNNEL_MAX),
+    // when water stands anywhere over the line (a flooded bore), or over a true chasm.
+    function mountainPass(city, b, side) {
+      if (!ST || !ST.paveStreet) return false;
+      const dir = side === 'left' ? -1 : 1;
+      let nearX = dir > 0 ? Math.max(6, b.x0 - 8) : Math.min(world.width - 7, b.x1 + 8);
+      let farX = dir > 0 ? Math.min(world.width - 7, b.x1 + 8) : Math.max(6, b.x0 - 8);
+      // the portal stands clear of the city's own works - the whole corridor column (an
+      // edge lot's armoured vault bed can jut over the face), with a LOOK-AHEAD so the
+      // drive never starts under a bed it must yield to. The city's own street grading
+      // owns everything before the portal.
+      const worksAt = (x) => {
+        const g = world.groundTop[x];
+        for (let y = g - 44; y <= g + 2; y += 3) {
+          const o = PW.getOwner(world, x, y);
+          if (o > 0 && o < 50000) return true;   // a building's; the pipeline's own spans re-lay
+        }
+        return false;
+      };
+      const clearRun = (x) => {
+        for (let k = 0; k < 18; k += 1) {
+          const cx = x + dir * k;
+          if (cx < 6 || cx > world.width - 7) return false;
+          if (worksAt(cx)) return false;
+        }
+        return true;
+      };
+      while (!clearRun(nearX)) {
+        nearX += dir;
+        if (Math.abs(farX - nearX) < 40) return false;   // the city's own works wall the face
+      }
+      const G = 0.45;                                  // the drive's grade, under the hulls' 0.58
+      const yNear = world.groundTop[nearX] - 1;
+      if (Math.abs(world.groundTop[farX] - 1 - yNear) > Math.abs(farX - nearX) * G) {
+        const need = Math.ceil(Math.abs(world.groundTop[farX] - 1 - yNear) / G);
+        farX = Math.max(6, Math.min(world.width - 7, nearX + dir * need));
+      }
+      if (Math.abs(farX - nearX) > TUNNEL_MAX) return false;
+      const yFar = world.groundTop[farX] - 1;
+      const span = farX - nearX;
+      if (Math.abs(yFar - yNear) > Math.abs(span) * (G + 0.1)) return false;
+      const fAt = (x) => Math.round(yNear + (yFar - yNear) * (x - nearX) / span);
+      const x0 = Math.min(nearX, farX), x1 = Math.max(nearX, farX);
+      // the guards: no water over the line, no chasm under it, no neighbour's works carved
+      for (let x = x0; x <= x1; x += 1) {
+        const f = fAt(x), g = world.groundTop[x];
+        if (g - f > 60) return false;        // a true chasm: a causeway won't bank it (no road)
+        for (let y = Math.min(g, f - TUNNEL_CLEAR); y <= f + 2; y += 1) {
+          if ((PW.get(world, x, y) & 63) === M.WATER) return false;      // the bore would flood
+        }
+      }
+      // bore the roofed stretches as the side's own tunnel
+      const sideName = city.faction || 'right';
+      let net = null, cells = 0;
+      for (let sx = x0; sx <= x1; sx += 14) {
+        const ex = Math.min(x1, sx + 15);
+        const top = Math.min(fAt(sx), fAt(ex)) - TUNNEL_CLEAR;
+        let roofed = false;
+        for (let x = sx; x <= ex; x += 3) if (world.groundTop[x] < top - 4) { roofed = true; break; }
+        if (!roofed || !PW.tunnels) continue;
+        if (!net) {
+          for (let x = x0; x <= x1 && !net; x += 20) {
+            const f = PW.tunnels.networkAt(world, x, fAt(x) - 8);
+            if (f && f.side === sideName) net = f;
+          }
+          if (!net) net = PW.tunnels.createNetwork(world, { side: sideName, x: Math.round((x0 + x1) / 2), y: fAt(Math.round((x0 + x1) / 2)) });
+        }
+        const r = PW.tunnels.digBox(world, net, sx, top, ex, Math.max(fAt(sx), fAt(ex)) + 2);
+        if (r && r.cells) cells += r.cells;
+        if (r && r.ok && PW.mining) {
+          const op = PW.mining.afterDig(world, net, { x0: sx, y0: top, x1: ex, y1: Math.max(fAt(sx), fAt(ex)) + 2 });
+          if (op && !op.blocked && world.pipes && world.pipes.attach) world.pipes.attach(op);
+        }
+      }
+      // cut the shallow faces open, fill the dips - the road's own earthworks
+      for (let x = x0; x <= x1; x += 1) {
+        const f = fAt(x), g = world.groundTop[x], ceil = f - TUNNEL_CLEAR;
+        if (g <= ceil - 4) { /* roofed: the bore above took it */ }
+        else {
+          // open stretch: a DAYLIGHT cut - everything above the road line is cleared to the
+          // sky, so no lip is left hanging to avalanche into the corridor. The pipeline's
+          // old spans clear with the rock (the line heals itself along the new grade - the
+          // N3 heals - a surface pipe like any city street's, a bump the hulls step over).
+          // Dips fill as embankment.
+          let air = 0;
+          for (let y = f - 1; y >= 2 && air < 12; y -= 1) {
+            const o = PW.getOwner(world, x, y);
+            if (o > 0 && o < 50000) break;         // a building's works stand; the road yields
+            const id = PW.get(world, x, y) & 63;
+            if (!id) { air += 1; continue; }
+            if (id === M.ORE || id === M.BEDROCK) { air = 0; continue; }
+            air = 0;
+            PW.set(world, x, y, M.AIR, { quiet: true });
+            PW.setLayer(world, 'paint', x, y, 0); PW.setLayer(world, 'deco', x, y, 0);
+          }
+          for (let y = g; y > f; y -= 1) {
+            const o = PW.getOwner(world, x, y);
+            if (o > 0 && o < 50000) continue;
+            PW.set(world, x, y, M.FOUNDATION, { quiet: true });
+          }
+        }
+        PW.refreshGroundTop(world, x);
+      }
+      ST.paveStreet(world, x0, x1, (x) => fAt(x), () => city.style);
+      for (let x = x0; x <= x1; x += 1) PW.refreshGroundTop(world, x);
+      (city.tunnels = city.tunnels || []).push({ x0: b.x0, x1: b.x1, nearX, farX, floorL: fAt(x0), floorR: fAt(x1), cells });
+      note(city, cells ? 'the road bores through the mountain' : 'the road is cut over the flank');
+      return true;
     }
 
     // ---- Cities ------------------------------------------------------------------------------
@@ -501,7 +627,18 @@
     // (surface0), so spacing, erasing and re-seating all read it as the ground thereafter.
     let regradeCount = 0;
     function regrade(xa, xb, maxSlope, maxMove) {
-      const x0 = Math.max(8, Math.round(Math.min(xa, xb))), x1 = Math.min(world.width - 9, Math.round(Math.max(xa, xb)));
+      let x0 = Math.max(8, Math.round(Math.min(xa, xb))), x1 = Math.min(world.width - 9, Math.round(Math.max(xa, xb)));
+      // N3: a mountain drive's earthworks are already at the hulls' grade - the pre-seat
+      // grading stops at its portals (a second line cut through the drive chews the road)
+      for (const c of cities) {
+        for (const t of c.tunnels || []) {
+          const tA = Math.min(t.nearX ?? t.x0, t.farX ?? t.x1), tB = Math.max(t.nearX ?? t.x0, t.farX ?? t.x1);
+          if (x1 < tA || x0 > tB) continue;
+          if (x0 < tA && x1 <= tB) x1 = tA - 1;
+          else if (x0 >= tA && x1 > tB) x0 = tB + 1;
+          else return false;
+        }
+      }
       if (x1 - x0 < 8) return false;
       const g0 = world.groundTop[x0], g1 = world.groundTop[x1];
       const refuse = (why) => { dbg.push(`grade-${why}@${x0}`); if (dbg.length > 40) dbg.shift(); return false; };
@@ -612,7 +749,20 @@
     // frozen where buildings, laid roads, water or fields stand. Too steep to ramp at all
     // (a cliff between pads tighter than the grade allows) is left honest and unpaved.
     function gradeLane(xa, xb) {
-      const x0 = Math.max(8, Math.round(Math.min(xa, xb))), x1 = Math.min(world.width - 9, Math.round(Math.max(xa, xb)));
+      let x0 = Math.max(8, Math.round(Math.min(xa, xb))), x1 = Math.min(world.width - 9, Math.round(Math.max(xa, xb)));
+      // N3: a mountain drive is already graded at the hulls' slope by its own earthworks -
+      // the street grading stops at its portals instead of re-cutting a second road
+      // through the span (two graders fighting left interleaved steps).
+      for (const c of cities) {
+        for (const t of c.tunnels || []) {
+          const tA = Math.min(t.nearX ?? t.x0, t.farX ?? t.x1), tB = Math.max(t.nearX ?? t.x0, t.farX ?? t.x1);
+          if (x1 < tA || x0 > tB) continue;
+          if (x0 < tA && x1 <= tB) x1 = tA - 1;
+          else if (x0 >= tA && x1 > tB) x0 = tB + 1;
+          else if (x0 >= tA && x1 <= tB) return false;   // wholly inside the drive: nothing to do
+          else return false;                             // spans the whole drive: the drive stands
+        }
+      }
       const n = x1 - x0 + 1;
       if (n < 4) return false;
       const g = new Int32Array(n), t = new Int32Array(n), frozen = new Uint8Array(n);
@@ -710,8 +860,17 @@
         if (b.kind === 'water') {
           if (b.x1 - b.x0 > CAPITAL_BRIDGE_MAX) { city.blocked[side] = 'water-wide'; return false; }
           if (!city.bridges.some((g) => g.x0 === b.x0)) bridge(city, b, true);
-        } else note(city, 'the road climbs the flank');
+        } else {
+          // N3: the road bores a tunnel through the mountain (wider massifs stay walls)
+          if (b.x1 - b.x0 > TUNNEL_MAX) { city.blocked[side] = 'mountain-wide'; return false; }
+          if (!(city.tunnels || []).some((t) => t.x0 === b.x0)) mountainPass(city, b, side);
+        }
         cursor = dir > 0 ? b.x1 + 8 : b.x0 - 8;
+        // N3: the next lot seats CLEAR of the drive's earthworks - a lot's own terracing
+        // and aprons reach back ~26 cells, and a failed try leaves its groundwork (the
+        // engine never unwinds terrain), so repeated failed seats would chew the road
+        const drive = (city.tunnels || []).find((t) => t.x0 === b.x0);
+        if (drive && drive.farX !== undefined) cursor = dir > 0 ? Math.max(cursor, drive.farX + 30) : Math.min(cursor, drive.farX - 30);
         lot.massEdge = cursor;                      // born on the far side: it stays there (N43)
         far = cursor + dir * (w + 6);
         if (barrierIn(cursor, far)) { city.blocked[side] = 'mountain'; return false; }
