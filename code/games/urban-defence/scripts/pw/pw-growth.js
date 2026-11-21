@@ -49,6 +49,8 @@
     function attempt(side) {
       stats.attempts += 1;
       const s = (world.settlements || []).find((q) => q.side === side);
+      // N3: an adopted town grows through the capital-growth engine instead.
+      if (s && s.adopted) return;
       const stock = world.stock && world.stock[side];
       if (!s || !stock || stock.hm < RESERVE + SEED_HM) return;
       // One newcomer at a time per side: the next seed waits until the last stands whole.

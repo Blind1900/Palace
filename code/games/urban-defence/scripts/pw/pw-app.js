@@ -92,6 +92,12 @@
   // world changes until the player plants one.
   const capital = PW.createCapitalGrowth && !gallery ? PW.createCapitalGrowth(world, { seed }) : null;
   if (capital) world.capitalGrowth = capital;
+  // N3: the standing worldgen towns join the growth engine (level-ups, infill, joints and
+  // appends like any seed city). Default OFF (flags=ADOPT_TOWNS turns it on): the adopted
+  // towns' aging re-seats out-churn the bundle mend on their long worldgen lines - until a
+  // re-seat heals its own cut (rather than leaving it for the slow crews), adoption stays
+  // behind the flag. The groundwork, the crash guards and the richer mend draught ship on.
+  if (capital && PW.ADOPT_TOWNS) capital.adoptSettlements();
   // Ground that loses its footing breaks loose: cave-ins, landslides and avalanches.
   const stability = world.stability = PW.createStability ? PW.createStability(world, particles) : null;
   // Air pressure and wind, worked only where a blast has stirred it.

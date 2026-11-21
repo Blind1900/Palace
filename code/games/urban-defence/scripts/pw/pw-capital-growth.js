@@ -369,6 +369,62 @@
       return { ok: true, city };
     }
 
+    // ---- N3: the worldgen towns adopt the engine -----------------------------------------------
+    // The towns that generated with the world join the growth system as standing cities:
+    // their population towers become ring lots, AGED so their levels stand (the aging only
+    // ever raises them from here); their farms, bases and the core building hold their
+    // ground as FIXED ring members the chains never move; and from then on the engine runs
+    // their appends, infill, level-ups and joints like any seed city's - paid from the
+    // faction's stock like everything else (N4), threaded on the bundle like everything
+    // else (the worldgen already threaded them; re-seats release and re-thread).
+    function adoptSettlements() {
+      let adopted = 0;
+      for (const s of world.settlements || []) {
+        if (s.adopted) continue;
+        const buildings = (s.buildings || []).filter((b) => b && b.body && b.works);
+        if (buildings.length < 2) continue;
+        const main = buildings.find((b) => b.type === 'core') || buildings[0];
+        const cx = Math.round((main.body.left + main.body.right) / 2);
+        const city = { id: cities.length + 1, kind: 'capital', style: s.style, x: cx, setting: 'urban',
+          faction: s.side || null, level: 1, clock: 0, actions: 0,
+          appendClock: { left: APPEND_EVERY * 0.5, right: APPEND_EVERY * 0.5 }, infillClock: 0,
+          rings: { left: [], right: [] }, edge: { left: cx, right: cx }, capEdge: { left: main.works[0] - 2, right: main.works[1] + 2 },
+          blocked: { left: null, right: null }, fields: [], fieldEdge: { left: main.works[0] - 4, right: main.works[1] + 4 },
+          bridges: [], joints: [], jointClock: 0, merged: new Set(), notes: [], adopted: true };
+        city.main = { type: 'core', level: main.level || 1, ring: -1, side: 'right', bornLevel: 1,
+          variant: 'core', seedN: 1, owner: main.id, x: cx, fixed: true, faction: s.side || null,
+          placed: { x0: main.body.left, y0: main.body.top, x1: main.body.right, y1: main.body.bottom, worksL: main.works[0], worksR: main.works[1] } };
+        let maxLevel = 1;
+        for (const b of buildings) {
+          if (b === main) continue;
+          const meta = (b.canvas && b.canvas.meta) || {};
+          const bx = Math.round((b.body.left + b.body.right) / 2);
+          const side = bx < cx ? 'left' : 'right';
+          const pop = b.type === 'population';
+          const lot = { type: b.type, level: b.level || meta.level || 1, age: 0, ring: 0, side,
+            bornLevel: 1, variant: meta.variant || b.variant || 'slab', seedN: meta.seed || (b.id * 31 + 7),
+            owner: b.id, x: bx, gapWant: GAP_MIN + 12, faction: s.side || null, fixed: !pop,
+            placed: { x0: b.body.left, y0: b.body.top, x1: b.body.right, y1: b.body.bottom, worksL: b.works[0], worksR: b.works[1] } };
+          lot.age = Math.max(0, (lot.level - 1) * AGE_PER_LEVEL + (AGE_PER_LEVEL >> 1));
+          if (pop) maxLevel = Math.max(maxLevel, lot.level);
+          city.rings[side].push(lot);
+        }
+        for (const side of ['left', 'right']) {
+          const dir = side === 'left' ? -1 : 1;
+          city.rings[side].sort((a, b) => (dir * (a.x - b.x) > 0 ? 1 : -1));
+          city.rings[side].forEach((l, i) => { l.ring = i; });
+          const last = city.rings[side][city.rings[side].length - 1];
+          city.edge[side] = last ? (dir > 0 ? last.placed.worksR + 2 : last.placed.worksL - 2) : city.capEdge[side];
+        }
+        city.level = Math.min(MAX_LEVEL, Math.max(2, maxLevel));
+        cities.push(city);
+        s.adopted = true;
+        adopted += 1;
+        note(city, 'the standing town joins the growth');
+      }
+      return adopted;
+    }
+
     // ---- Capital growth (N43 rings, N45 skyline) ---------------------------------------------
     const POP_LOT_VARIANTS = ['slab', 'setback', 'tapered', 'spire', 'needle', 'crown'];
     // N51: spacing is no uniform row. Each lot carries its own gap, set when it is placed -
@@ -575,6 +631,9 @@
         if (b2) { city.blocked[side] = b2.kind; return false; }
       }
       far = cursor + dir * (w + 6);
+      // The map's edge stops the spread (the adopted border towns sit right against it -
+      // an append that walked off the world threaded cores at negative x into the bundle).
+      if (Math.min(cursor, far) < 80 || Math.max(cursor, far) > world.width - 80) { city.blocked[side] = 'edge'; return false; }
       if (!pay(city, 'lot')) { city.blocked[side] = 'upkeep'; return false; }   // N4: the works are paid for
       lot.canvas = canvas;
       lot.owner = allotOwner();
@@ -713,7 +772,11 @@
       const dir = side === 'left' ? -1 : 1;
       const lots = city.rings[side];
       clearJoints(city, side, fromRing);   // N58: a joint comes down before its neighbours move
-      const chain = lots.slice(fromRing);
+      let chain = lots.slice(fromRing);
+      // N3 adoption: a standing town's own farm, base or core building never moves - the
+      // chain re-seats up to it, and everything beyond keeps its ground.
+      const fixedAt = chain.findIndex((l) => l.fixed);
+      if (fixedAt >= 0) chain = chain.slice(0, fixedAt);
       for (const l of chain) eraseLot(l);
       let edge = fromRing === 0 ? city.capEdge[side] :
         (dir > 0 ? lots[fromRing - 1].placed.worksR + 2 : lots[fromRing - 1].placed.worksL - 2);
@@ -734,8 +797,11 @@
       }
       city.rings[side] = lots.filter((l) => l.placed);
       city.rings[side].forEach((l, i) => { l.ring = i; });
-      city.edge[side] = edge;
-      return edge;
+      // (the side's edge is the OUTERMOST stand - with a fixed tail beyond the chain, the
+      // chain's own end is not the town's end)
+      const lastL = city.rings[side][city.rings[side].length - 1];
+      city.edge[side] = lastL ? (dir > 0 ? lastL.placed.worksR + 2 : lastL.placed.worksL - 2) : edge;
+      return city.edge[side];
     }
 
     // N48: levels rise with age. A building starts at level 1 when the edge reaches it and
@@ -786,11 +852,15 @@
     // stay on their own land mass, pulled up against its shore.
     function levelUp(city) {
       city.level += 1;
-      eraseLot(city.main);
-      city.main.level = Math.min(7, city.level + 1);
-      city.main.canvas = null;
-      if (!placeLot(city, city.main, city.main.x)) { city.main.level -= 1; city.main.canvas = null; placeLot(city, city.main, city.main.x); }
-      city.capEdge = { left: city.main.placed.worksL - 2, right: city.main.placed.worksR + 2 };
+      // N3 adoption: a standing town's main is the god's own core building - it is never
+      // erased or re-stamped; the rings tighten around it as it stands.
+      if (!city.main.fixed) {
+        eraseLot(city.main);
+        city.main.level = Math.min(7, city.level + 1);
+        city.main.canvas = null;
+        if (!placeLot(city, city.main, city.main.x)) { city.main.level -= 1; city.main.canvas = null; placeLot(city, city.main, city.main.x); }
+        city.capEdge = { left: city.main.placed.worksL - 2, right: city.main.placed.worksR + 2 };
+      }
       for (const side of ['left', 'right']) {
         seatChain(city, side, 0);
         if (city.blocked[side] && city.blocked[side] !== 'merged' && city.blocked[side] !== 'edge') city.blocked[side] = null;
@@ -1716,7 +1786,7 @@
       }).join(' | ');
     }
 
-    return { cities, barriers, drop, step, draw, describe, dbg, regrades: () => regradeCount,
+    return { cities, barriers, drop, adoptSettlements, step, draw, describe, dbg, regrades: () => regradeCount,
       _adapt: adaptNeighbours };   // (test hook: the N57 neighbour re-seat, called by the harness)
   }
 

@@ -125,6 +125,11 @@
     }
     // Pipe top row per column: cover depth under the ground, then below anything in the way.
     function contour(x0, x1, depth) {
+      // A reversed span must never ask for a negative array: under the adoption era's
+      // constant release-and-rethread a mend can race a re-lay and hand a span inside
+      // out; it collapses to its own first column and the next pass reads it fresh.
+      // (breadcrumbed for the quiet investigation: see the progress notes)
+      if (x1 < x0) x1 = x0;
       const depthAt = typeof depth === 'function' ? depth : () => depth;
       const ys = new Int32Array(x1 - x0 + 1);
       const BRIDGE = 20;
@@ -781,7 +786,10 @@
     function freshPath(line, a, b) {
       const g = line.growPath;
       if (g && g.a <= a && g.b >= b && tick - g.at < PATH_REFRESH) return g;
-      const a0 = Math.max(0, a - 10), b0 = Math.min(line.ys.length - 1, b + 10);
+      // (the adoption era re-threads lines while they mend: a stale hurt index past the
+      // line's end must never ask for a negative span)
+      const b0 = Math.min(line.ys.length - 1, b + 10);
+      const a0 = Math.max(0, Math.min(a - 10, b0));
       const ys = contour(line.x0 + a0, line.x0 + b0, depthAt);
       snapToCores(ys, line.x0 + a0, line.cores.filter((c) => c.x >= line.x0 + a0 - SPAN && c.x <= line.x0 + b0 + SPAN));
       return (line.growPath = { at: tick, a: a0, b: b0, ys });
@@ -876,19 +884,30 @@
       for (const line of lines) {
         if (!line.brokenCount || !line.hurt) { if (!line.brokenCount) line.growPath = null; continue; }
         // (only the hurt span is walked - the physics track profiled the full-line walk; a
-        // snapshot, because the closure sweep clears line.hurt the moment the last column heals)
-        const h0 = line.hurt.k0, h1 = line.hurt.k1;
+        // snapshot, because the closure sweep clears line.hurt the moment the last column heals.
+        // Clamped to the arrays: a re-thread mid-mend can leave the hurt pointing past them.)
+        const h0 = Math.max(0, line.hurt.k0);
+        const h1 = Math.min(line.hurt.k1, line.broken.length - 1, line.ys.length - 1);
         for (let k = h0; k <= h1; k += 1) {
           if (!line.broken[k]) continue;
           let k1 = k;
           while (k1 + 1 < line.broken.length && line.broken[k1 + 1]) k1 += 1;
           const settled = tick - Math.max(line.brokenAt[k], line.brokenAt[k1]) >= REGROW_DELAY;
+          stats.gapsSeen = (stats.gapsSeen || 0) + 1;
+          if (!settled) stats.gapsFresh = (stats.gapsFresh || 0) + 1;
           if (settled && tick % GROW_EVERY === 0) {
-            // Starved ends draw a trickle from their side's stock (the cores send it down the
-            // line); otherwise the clogged HM pays for every cell.
+            stats.growTries = (stats.growTries || 0) + 1;
+            // Starved ends draw from their side's stock (the cores send it down the line);
+            // otherwise the clogged HM pays for every cell. A RICH purse buys a bigger
+            // draught - the adoption era's re-seat churn cuts the line by the dozen, and a
+            // one-coin trickle paced the crews to minutes; a funded town mends in step
+            // with its own growth (still paid for, coin for coin: N4).
             if ((line.fuel || 0) < REPAIR_HM_PER_CELL && tick - (line.fedAt || 0) > STARVED) {
               const stock = world.stock && world.stock[line.side];
-              if (stock && stock.hm >= 1) { stock.hm -= 1; line.fuel = (line.fuel || 0) + 1; }
+              if (stock && stock.hm >= 1) {
+                const draw = Math.min(8, Math.floor(stock.hm / 40) + 1, stock.hm);
+                stock.hm -= draw; line.fuel = (line.fuel || 0) + draw;
+              }
             }
             for (const [kk, dir] of k1 === k ? [[k, 1]] : [[k, 1], [k1, -1]]) {
               if ((line.fuel || 0) < REPAIR_HM_PER_CELL) break;
@@ -906,6 +925,9 @@
     function connectCore(x, y, side, taps, building) {
       const line = lineFor(side);
       if (!line) return null;
+      // A core the map cannot hold cannot thread (a walked-off append once offered one at
+      // negative x, and the line extended right off the world after it).
+      if (x < 80 || x > world.width - 80) return null;
       const core = { x, y, building: building || 0, type: taps ? 'building' : 'seed', taps: taps || { hm: 'in', sm: 'in', water: 'in' }, timer: 0 };
       registerSpan(core, building || 0);
       line.cores.push(core);
