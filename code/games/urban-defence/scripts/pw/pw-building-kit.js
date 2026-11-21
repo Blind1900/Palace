@@ -518,15 +518,26 @@
   // it: the dead god machine's black tendrils curling about one white point - black and white,
   // nothing else. Stands on the vault floor `b`; returns the core's centre row.
   const INK = [8, 8, 10], INK_DEEP = [40, 40, 44], WHITE_CORE = [238, 242, 246], WHITE_DIM = [152, 158, 164];
-  function coreUnit(c, cx, b) {
-    const oy = b - 10;   // the bed: a perfect square, 21 x 21, flush on the floor
+  // N35: the three core tiers, each the user's same design at its own station - the MAIN
+  // core the largest, the descendant smaller, the sub smaller still, and the sizes hold
+  // wherever they are placed. Width and unit mass scale; the vault DEPTH stays one number
+  // (the gift, floors and every stamp consumer key on it). The ball's recess never passes
+  // 8.4: that is the disc the Life lives on (PS's caution - the white stays alive).
+  const CORE_TIERS = Object.freeze({
+    main: Object.freeze({ half: 13, bed: 12, streak: 7, socket: 13, nozzle: 6, lamp: 26, recess: 8.4 }),
+    descendant: Object.freeze({ half: 11, bed: 10, streak: 6, socket: 11, nozzle: 5, lamp: 20, recess: 8.4 }),
+    sub: Object.freeze({ half: 8, bed: 7, streak: 4, socket: 8, nozzle: 3, lamp: 14, recess: 5.4 }),
+  });
+  function coreUnit(c, cx, b, T = CORE_TIERS.descendant) {
+    const B = T.bed;
+    const oy = b - B;   // the bed: a perfect square, flush on the floor, sized to its tier
     // The bed plate, with a dark circular recess where the ball stands - no steel box about the
     // core any more (the user's redesign).
-    for (let dy = -10; dy <= 10; dy += 1) for (let dx = -10; dx <= 10; dx += 1) {
-      const edge = Math.abs(dx) === 10 || Math.abs(dy) === 10;
+    for (let dy = -B; dy <= B; dy += 1) for (let dx = -B; dx <= B; dx += 1) {
+      const edge = Math.abs(dx) === B || Math.abs(dy) === B;
       const d = Math.hypot(dx, dy);
       solid(c, cx + dx, oy + dy, M.STEEL,
-        edge ? PLATE_DARK : d < 8.4 ? mix(INK_DEEP, [24, 25, 30], Math.min(1, d / 8.4)) : dy === -9 ? PLATE_LIT : PLATE, ROLE.CRADLE);
+        edge ? PLATE_DARK : d < T.recess ? mix(INK_DEEP, [24, 25, 30], Math.min(1, d / T.recess)) : dy === -(B - 1) ? PLATE_LIT : PLATE, ROLE.CRADLE);
     }
     // The ENERGY BALL (the user's design): a white heart in a black nucleus and lightning
     // streaks pointing in every direction - exponentially more at the poles - black and white,
@@ -538,9 +549,9 @@
         const j = ((grain(Math.round(a * 57) + cx, t) & 3) - 1.5) * 0.45;
         const px = cx + Math.round(Math.cos(a) * t + Math.cos(a + Math.PI / 2) * j);
         const py = oy + Math.round(Math.sin(a) * t + Math.sin(a + Math.PI / 2) * j);
-        // (the ball keeps inside the plate's shelter: streak tips past 6 would trade armour
-        // for filament and die in every collapse)
-        if (Math.abs(px - cx) > 6 || Math.abs(py - oy) > 6) break;
+        // (the ball keeps inside the plate's shelter: streak tips past the tier's reach
+        // would trade armour for filament and die in every collapse)
+        if (Math.abs(px - cx) > T.streak || Math.abs(py - oy) > T.streak) break;
         solid(c, px, py, M.CORE, t >= len - 1 ? INK : INK_DEEP, ROLE.CORE);
       }
     };
@@ -549,25 +560,26 @@
       solid(c, cx + dx, oy + dy, M.CORE, INK, ROLE.CORE);
     }
     for (const pole of [-Math.PI / 2, Math.PI / 2]) {
-      for (let i = -2; i <= 2; i += 1) ray(pole + i * 0.24, 6 - Math.abs(i));
+      for (let i = -2; i <= 2; i += 1) ray(pole + i * 0.24, T.streak - 1 + (2 - Math.abs(i)));
     }
-    for (let i = 0; i < 8; i += 1) ray(i * Math.PI / 4 + 0.39, 4 + (grain(cx, i) & 1));
+    for (let i = 0; i < 8; i += 1) ray(i * Math.PI / 4 + 0.39, Math.max(3, T.streak - 2) + (grain(cx, i) & 1));
     for (const [dx, dy] of [[0, 0], [1, 0], [0, 1], [1, 1]]) solid(c, cx + dx, oy + dy, M.CORE, WHITE_CORE, ROLE.CORE);
     // The bed's connectors, left and right: a plain socket with a white port point.
     for (const side of [-1, 1]) {
-      for (let dy = -3; dy <= 3; dy += 1) for (let d = 11; d <= 13; d += 1) {
-        solid(c, cx + side * d, oy + dy, M.STEEL, Math.abs(dy) === 3 || d === 13 ? PLATE_DARK : ARMOUR, ROLE.CRADLE);
+      for (let dy = -3; dy <= 3; dy += 1) for (let d = T.socket; d <= T.socket + 2; d += 1) {
+        solid(c, cx + side * d, oy + dy, M.STEEL, Math.abs(dy) === 3 || d === T.socket + 2 ? PLATE_DARK : ARMOUR, ROLE.CRADLE);
       }
-      solid(c, cx + side * 12, oy, M.CORE, WHITE_DIM, ROLE.CORE);
+      solid(c, cx + side * (T.socket + 1), oy, M.CORE, WHITE_DIM, ROLE.CORE);
     }
     // The bed's translator on top: a plain nozzle with a white slot down its middle.
-    for (let y = b - 25; y <= b - 21; y += 1) for (let dx = -5; dx <= 5; dx += 1) {
-      const slot = Math.abs(dx) <= 2 && y >= b - 24;
+    const top = b - 2 * B;
+    for (let y = top - 5; y <= top - 1; y += 1) for (let dx = -T.nozzle; dx <= T.nozzle; dx += 1) {
+      const slot = Math.abs(dx) <= Math.max(1, T.nozzle - 3) && y >= top - 4;
       solid(c, cx + dx, y, slot ? M.CORE : M.STEEL,
-        slot ? ((y + dx) & 1 ? WHITE_CORE : WHITE_DIM) : y === b - 25 || Math.abs(dx) === 5 ? PLATE_DARK : PLATE,
+        slot ? ((y + dx) & 1 ? WHITE_CORE : WHITE_DIM) : y === top - 5 || Math.abs(dx) === T.nozzle ? PLATE_DARK : PLATE,
         slot ? ROLE.CORE : ROLE.CRADLE);
     }
-    c.lamps.push({ x: cx, y: oy, radius: 20, strength: 0.5, color: WHITE_CORE });
+    c.lamps.push({ x: cx, y: oy, radius: T.lamp, strength: 0.5, color: WHITE_CORE });
     return oy;
   }
   function core(c, cx, floor, options = {}) {
@@ -576,7 +588,12 @@
       c.cores.push({ x: cx, y: oy, standing: true });
       return;
     }
-    const { half, height, wall, lid } = VAULT;
+    // N35: the tier sets the size - main widest, descendant the standard, sub the smallest -
+    // at one shared depth (every stamp consumer keys on VAULT_DEPTH).
+    const tier = options.tier || (options.main ? 'main' : 'descendant');
+    const T = CORE_TIERS[tier] || CORE_TIERS.descendant;
+    const { height, wall, lid } = VAULT;
+    const half = T.half;
     const top = floor + lid, bottom = top + height - 1;
     // The vault: armour walls and floor, dark ribbed panels inside, a hazard band along its rim.
     rect(c, cx - half - wall, floor, cx + half + wall, bottom + wall, (x, y) => {
@@ -593,11 +610,12 @@
       solid(c, x, floor, M.PLATFORM, (x & 1) ? [92, 96, 104] : tone(WHITE_CORE, 0.55), ROLE.GRATE);
       solid(c, x, floor + 1, M.PLATFORM, (x % 4 === 0) ? [70, 74, 82] : [104, 108, 116], ROLE.GRATE);
     }
-    const oy = coreUnit(c, cx, bottom);
-    // N33: the capital's seat carries the MAIN core - the root of the side's core tree
-    // (pipes bundle core to core from it, seeds descend from it). Every other vault core
-    // is a descendant; subs come later, when level-ups widen a building (step H).
-    c.cores.push({ x: cx, y: oy, kind: options.main ? 'main' : 'descendant',
+    const oy = coreUnit(c, cx, bottom, T);
+    // N33/N35: the capital's seat carries the MAIN core - the root of the side's core
+    // tree - at the largest tier; ring towers' primary cores are descendants; the
+    // flanking cores a level-up widens a building with are SUBS, the smallest. The
+    // vault records its own extents, so the sizes read off every placement.
+    c.cores.push({ x: cx, y: oy, kind: tier, tier,
       vault: { x0: cx - half, x1: cx + half, top, bottom, lid: floor } });
   }
 
@@ -611,9 +629,13 @@
     for (const core of c.cores || []) {
       if (core.standing || !core.vault) continue;
       const lid = core.vault.lid;
-      // The roof over this pillar: walk up from the grating; past 8 open rows it is sky.
+      // The roof over this pillar: walk up from the grating. The search reaches THROUGH an
+      // undercroft hall (37 clear rows) to the first storey's slab - the old 8-row look
+      // predated the halls and left every undercroft tower's core SEVERED from its
+      // building (N80: the user's cut-off cores, root cause). Past 48 open rows it is sky
+      // (a farm-yard vault keeps its open ground - no pillar into the air).
       let top = lid;
-      for (let y = lid - 1; y >= 0 && top - y <= 8; y -= 1) {
+      for (let y = lid - 1; y >= 0 && top - y <= 48; y -= 1) {
         for (let dx = -2; dx <= 2; dx += 1) if (isSolid(c, core.x + dx, y)) { top = y; break; }
       }
       if (top >= lid - 2) continue;   // nothing standing over this core
@@ -682,7 +704,7 @@
     S, STYLES, ROLE, CORE_COLOR, CORE_SHADE, BEACON, SCREEN, GLASS_DARK, GLASS_SIDE, SHINE,
     tone, mix, pack, grain, clamp255,
     createCanvas, inside, solid, solidIfEmpty, clear, back, backIfEmpty, deco, isSolid, rect, bitmap,
-    wallColor, slabColor, backWallColor, backWindow, FURNITURE, ceilingLamp, bakeLights, undercroft, core, coreColumn, coreUnit, corePillars,
+    wallColor, slabColor, backWallColor, backWindow, FURNITURE, ceilingLamp, bakeLights, undercroft, core, coreColumn, coreUnit, corePillars, CORE_TIERS,
     VAULT, VAULT_DEPTH, CORE_HOT,
   };
 })();

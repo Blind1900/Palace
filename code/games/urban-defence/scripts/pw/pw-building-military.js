@@ -396,7 +396,8 @@
     }
     // Extra cores in vaults under the floor.
     const extraCores = level >= 4 ? 3 : 2;
-    for (let i = 0; i < extraCores; i += 1) K.core(c, X(30 + i * Math.round((bodyWidth - 80) / Math.max(1, extraCores - 1))), ground);
+    // N35: a base's service cores are SUBS - the smallest tier; its heart is the orb above.
+    for (let i = 0; i < extraCores; i += 1) K.core(c, X(30 + i * Math.round((bodyWidth - 80) / Math.max(1, extraCores - 1))), ground, { tier: 'sub' });
     K.corePillars(c, style);
     if (!PW.NO_UNDERCROFT) K.undercroft(c, style, margin, margin + bodyWidth - 1);   // N3 vehicle rule: armour rolls through the base
     K.bakeLights(c, style);

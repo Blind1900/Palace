@@ -273,14 +273,17 @@
       if (level >= 3) PW.buildingOrnaments.devices(c, style, roofs, ['interceptor', 'turret'], options.deviceFacing ?? (options.facing || 1), random);
     }
 
-    // The cores, each in its vault under the ground floor, spread along it. A capital's
-    // seat (N33) sets its MAIN core in the centre vault - the heart the city grows from.
+    // The cores, each in its vault under the ground floor, spread along it. N33/N35: a
+    // capital's seat sets its MAIN core (the largest tier) in the centre vault; a ring
+    // tower's centre is a DESCENDANT; and the flanking cores a level-up widens the
+    // building with are SUBS, the smallest - the three sizes in order wherever placed.
     const coreCount = populationCores(level);
-    const reach = K.VAULT.half + K.VAULT.wall;
+    const reach = (K.CORE_TIERS ? K.CORE_TIERS.main.half : K.VAULT.half) + K.VAULT.wall;
     const centre = Math.round((coreCount - 1) / 2);
     for (let i = 0; i < coreCount; i += 1) {
       const cx = Math.round(margin + reach + (bodyWidth - 1 - 2 * reach) * (coreCount === 1 ? 0.5 : i / (coreCount - 1)));
-      K.core(c, mx(cx), ground, { main: !!options.mainCore && i === centre });
+      const tier = i === centre ? (options.mainCore ? 'main' : 'descendant') : 'sub';
+      K.core(c, mx(cx), ground, { tier });
     }
     K.corePillars(c, style);
     if (!PW.NO_UNDERCROFT) K.undercroft(c, style, margin, margin + bodyWidth - 1);   // N3 vehicle rule: the ground storey is a drive-through
