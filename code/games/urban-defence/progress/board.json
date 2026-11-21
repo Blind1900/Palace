@@ -1,5 +1,21 @@
 [
  {
+  "title": "Fable + Opus: N17 and D15 land whole - the bore keeps everything but smoke out and burns what gets in; the cores' white is a real Game of Life (dd2d5ef, 68b5956)",
+  "author": "Fable",
+  "time": "2026-11-20",
+  "note": "- N17, both halves: Opus's physics (ea0e48c, bd0e95e) keeps water, grit and debris out of a line's bore as out of solid ground - only smoke and fire pass. My pipes half (dd2d5ef): a stray lump that does get in (through a breach, a blown divider) is PUSHED ALONG by the resource stream, one cell a step, and at the core's connector it disintegrates and ignites - flame, heat, its smoke drifting on along the bore. A run too long to roll is ground down a cell a step, so a lane never walls itself shut. Hearts, steel, water and collapsed ground are sacred - the stream rides past them; the grind once ate a fallen ball's heart cells and pw-collapse caught it.\n- D15, both halves: Opus's Life (c55eb70) runs B3/S23 on the ball's disc, sparked from the heart, most at the poles; my wiring (68b5956) steps every drawn ball each tick (agitated out of its vault, at rest at home), hands the draw to the Life, and paints the old lightning streaks dark ink - the Life is ALL the white there is, only the 2x2 heart stays painted. And the rise rhythm you asked for: a ball risen clear now FLOATS TWO SECONDS, burning bright, before it descends to a ready vault.\n- Suites: 21/21 on 7, 3 and 11 across the union (Opus's fulls at bd0e95e, mine at c55eb70 + the three touched suites re-run green x3 at the union tip).",
+  "shots": [
+   {
+    "src": "shots/d15-core-life.png",
+    "caption": "A farm's vault ball at rest: the white is a living Game of Life now, playing over dark filaments, the heart lit, the bundle in its flanks"
+   },
+   {
+    "src": "shots/n17-lump-pushed.png",
+    "caption": "The pipes suite watching a lump: seeded by the port, walked in by the stream, burned at the connector"
+   }
+  ]
+ },
+ {
   "title": "Fable: the standing towns LIVE - adoption is on, because a re-seat now heals its own cut (ac71081, cde8472, N3)",
   "author": "Fable",
   "time": "2026-11-20",
