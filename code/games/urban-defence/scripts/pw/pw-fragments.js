@@ -1500,12 +1500,15 @@
         const ox = was.px + pts[k] * c0 - pts[k + 1] * s0, oy = was.py + pts[k] * s0 + pts[k + 1] * c0;
         const inside = Math.floor(ox) === x && Math.floor(oy) === y;
         // Loose debris is ploughed aside by a swinging or fast piece rather than landed on - and
-        // what it throws aside takes its share of the piece's motion there (see plough).
+        // what it throws aside takes its share of the piece's motion there (see plough). Rubble
+        // that has come to lie where the piece is, is squeezed out from under it sideways, away
+        // from its middle, clear of it (thrown up, it would only land back under it).
         if (phase[mat[y * W + x] & ID_MASK] === PW.PHASE.POWDER && (inside || p.mode === 'hinge' || Math.hypot(...velocityAt(p, wx, wy)) > 70)) {
           const byte = mat[y * W + x];
           PW.set(world, x, y, M.AIR);
           const [vx, vy] = velocityAt(p, wx, wy);
-          particles.spawn(x + 0.5, y + 0.5, vx * 0.6 + (random() - 0.5) * 60, Math.min(vy, 0) * 0.4 - 20 - random() * 40, byte, 0, F.LAND | F.LOOSE, 5);
+          if (inside) particles.spawn(x + 0.5, y + 0.5, vx * 0.6 + Math.sign(x + 0.5 - mid || random() - 0.5) * (50 + random() * 70), Math.min(vy, 0) * 0.4 - 10 - random() * 20, byte, 0, F.LAND | F.LOOSE, 5);
+          else particles.spawn(x + 0.5, y + 0.5, vx * 0.6 + (random() - 0.5) * 60, Math.min(vy, 0) * 0.4 - 20 - random() * 40, byte, 0, F.LAND | F.LOOSE, 5);
           if (!pinned(p)) plough(p, wx, wy, vx, vy);
           continue;
         }
@@ -2148,7 +2151,7 @@
         puff(hx, hy - 2, Math.min(600, Math.round(Math.sqrt(p.mass) * 4)), 30 + Math.sqrt(p.mass), 12);
         return;
       }
-      const placed = place(p, p.data, c, s);
+      const placed = place(p, p.data, c, s, true);
       let lowest = -Infinity;
       for (let j = 0; j < placed.x.length; j += 1) if (placed.solid[j]) lowest = Math.max(lowest, placed.y[j]);
       // (a few rows at a time, each crushed band bursting out of its sides as it goes - the
@@ -2157,14 +2160,14 @@
       const crushedKs = [], restKs = [];
       for (let j = 0; j < placed.x.length; j += 1) (placed.y[j] >= lowest - band ? crushedKs : restKs).push(j);
       const [mid] = centre(p);
-      scatter(pick(placed, crushedKs), vx * 0.3, 0, 0, mid, wy, 0.6, undefined, undefined, undefined, Math.min(1.6, 0.6 + speed / 220));
+      scatter(pick(placed, crushedKs, true), vx * 0.3, 0, 0, mid, wy, 0.6, undefined, undefined, undefined, Math.min(1.6, 0.6 + speed / 220));
       let restMass = 0;
       for (const k of restKs) if (p.data.solid[k]) restMass += 1;
       if (restMass >= CHUNK_MIN) {
         spawn({ data: pick(p.data, restKs), parent: p, owner: p.owner, from: p.from, vx: vx * 0.4, vy: Math.max(30, vy * 0.65), omega: p.omega * 0.5,
           drop: true, floor: p.yf, base: p.base, generation: p.generation, sunk: p.sunk + 1, h0: p.h0 });
         stats.crushSteps = (stats.crushSteps || 0) + 1;
-      } else if (restKs.length) settle(pick(placed, restKs), vx, vy);
+      } else if (restKs.length) settle(pick(placed, restKs, true), vx, vy);
       // The air under it is driven out of its sides: dust and grit blast out low and wide.
       let x0 = Infinity, x1 = -Infinity;
       for (const k of crushedKs) if (placed.solid[k]) { if (placed.x[k] < x0) x0 = placed.x[k]; if (placed.x[k] > x1) x1 = placed.x[k]; }
@@ -2327,9 +2330,19 @@
       PW.set(world, x, y, byte);
       PW.stir(world, x, y, x, y);   // (rubble just come down settles to its slope)
     }
-    // The piece's cells at their present places in the world, as data for a new piece.
-    function place(p, part, c, s) {
-      const n = part.x.length, out = { x: new Int32Array(n), y: new Int32Array(n), color: part.color, byte: part.byte, solid: part.solid, girth: part.girth };
+    // (grow-only scratch arrays, for cells only read where they are made - a sink's placing and its
+    // crushed band, a scatter's world places: no garbage from one piece coming down to the next)
+    const SCRATCH = new Map();
+    function scratch(key, Type, n) {
+      let a = SCRATCH.get(key);
+      if (!a || a.length < n) { a = new Type(Math.ceil(n * 1.25) + 64); SCRATCH.set(key, a); }
+      return a.subarray(0, n);
+    }
+    // The piece's cells at their present places in the world, as data for a new piece (or, temp,
+    // in scratch arrays, to be read on the spot).
+    function place(p, part, c, s, temp = false) {
+      const n = part.x.length, out = { x: temp ? scratch('placeX', Int32Array, n) : new Int32Array(n), y: temp ? scratch('placeY', Int32Array, n) : new Int32Array(n),
+        color: part.color, byte: part.byte, solid: part.solid, girth: part.girth };
       // (toWorld, cell by cell)
       const ox = p.ox0 - 0.5, oy = p.oy0 - 0.5, px = p.px, py = p.py;
       for (let j = 0; j < n; j += 1) {
@@ -2338,11 +2351,13 @@
       }
       return out;
     }
-    function pick(data, ks) {
+    function pick(data, ks, temp = false) {
       const n = ks.length;
-      const out = { x: new Int32Array(n), y: new Int32Array(n), color: new Uint32Array(n), byte: new Uint8Array(n), solid: new Uint8Array(n) };
+      const out = temp
+        ? { x: scratch('pickX', Int32Array, n), y: scratch('pickY', Int32Array, n), color: scratch('pickC', Uint32Array, n), byte: scratch('pickB', Uint8Array, n), solid: scratch('pickS', Uint8Array, n) }
+        : { x: new Int32Array(n), y: new Int32Array(n), color: new Uint32Array(n), byte: new Uint8Array(n), solid: new Uint8Array(n) };
       for (let j = 0; j < n; j += 1) { const k = ks[j]; out.x[j] = data.x[k]; out.y[j] = data.y[k]; out.color[j] = data.color[k]; out.byte[j] = data.byte[k]; out.solid[j] = data.solid[k]; }
-      if (data.girth) { out.girth = new Uint8Array(n); for (let j = 0; j < n; j += 1) out.girth[j] = data.girth[ks[j]]; }
+      if (data.girth) { out.girth = temp ? scratch('pickG', Uint8Array, n) : new Uint8Array(n); for (let j = 0; j < n; j += 1) out.girth[j] = data.girth[ks[j]]; }
       return out;
     }
     // Break a set of cells up where they are: most heap as rubble in open cells, a share is thrown
@@ -2359,7 +2374,7 @@
     // (burst: thrown out sideways, low, away from (cx, cy), this hard - a storey crushed under the
     // weight above it bursts out of its sides rather than up)
     function scatter(data, vx, vy, omega, cx, cy, thrown, p, c, s, burst = 0) {
-      const n = data.x.length, wxs = new Int32Array(n), wys = new Int32Array(n);
+      const n = data.x.length, wxs = scratch('scatterX', Int32Array, n), wys = scratch('scatterY', Int32Array, n);
       const lowest = new Map();
       for (let k = 0; k < n; k += 1) {
         let x = data.x[k], y = data.y[k];
@@ -2436,7 +2451,8 @@
         if (x1 <= x0 || y1 <= y0) continue;
         const iw = Math.ceil((x1 - x0) / step), ih = Math.ceil((y1 - y0) / step);
         if (!canvas || canvas.width < iw || canvas.height < ih) {
-          const cw = Math.max(iw, canvas ? canvas.width : 0), ch = Math.max(ih, canvas ? canvas.height : 0);
+          // (grown in steps of 128, so a run of pieces a little bigger each does not remake it each time)
+          const cw = Math.ceil(Math.max(iw, canvas ? canvas.width : 0) / 128) * 128, ch = Math.ceil(Math.max(ih, canvas ? canvas.height : 0) / 128) * 128;
           canvas = document.createElement('canvas');
           canvas.width = cw; canvas.height = ch;
           ctx2 = canvas.getContext('2d');

@@ -455,7 +455,7 @@
       const gear = gearOf(t);
       const iw = Math.ceil((x1 - x0) / skip), ih = Math.ceil((y1 - y0) / skip);
       if (!canvas || canvas.width < iw || canvas.height < ih) {
-        const cw = Math.max(iw, canvas ? canvas.width : 0), ch = Math.max(ih, canvas ? canvas.height : 0);
+        const cw = Math.ceil(Math.max(iw, canvas ? canvas.width : 0) / 128) * 128, ch = Math.ceil(Math.max(ih, canvas ? canvas.height : 0) / 128) * 128;
         canvas = document.createElement('canvas');
         canvas.width = cw; canvas.height = ch;
         ctx2 = canvas.getContext('2d'); image = ctx2.createImageData(cw, ch); px32 = new Uint32Array(image.data.buffer);
