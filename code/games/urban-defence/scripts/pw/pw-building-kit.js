@@ -594,7 +594,11 @@
       solid(c, x, floor + 1, M.PLATFORM, (x % 4 === 0) ? [70, 74, 82] : [104, 108, 116], ROLE.GRATE);
     }
     const oy = coreUnit(c, cx, bottom);
-    c.cores.push({ x: cx, y: oy, kind: 'descendant', vault: { x0: cx - half, x1: cx + half, top, bottom, lid: floor } });
+    // N33: the capital's seat carries the MAIN core - the root of the side's core tree
+    // (pipes bundle core to core from it, seeds descend from it). Every other vault core
+    // is a descendant; subs come later, when level-ups widen a building (step H).
+    c.cores.push({ x: cx, y: oy, kind: options.main ? 'main' : 'descendant',
+      vault: { x0: cx - half, x1: cx + half, top, bottom, lid: floor } });
   }
 
   // F2 (the user's support hierarchy): each core's translator grows the building's MAIN PILLAR -

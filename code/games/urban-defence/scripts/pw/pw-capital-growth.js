@@ -150,6 +150,8 @@
         lot.type === 'farm' ? Math.max(1, Math.min(7, lot.level)) : Math.max(1, Math.min(7, lot.level));   // N69: farms reach as high as the rest
       const opts = { style: city.style, level, variant: lot.variant, seed: lot.seedN, facing: lot.side === 'left' ? 1 : -1 };
       if (lot.type === 'population' && lot.ring >= 0) opts.storeys = skylineStoreys(level);
+      // N33: the capital's seat houses the MAIN core - the heart of the side's core tree.
+      if (city.kind === 'capital' && lot.ring === -1 && lot.type === 'population') opts.mainCore = true;
       if (lot.type === 'military') {
         opts.vertical = true;   // N57: taller bases, narrower hangars
         if (city.setting && city.setting !== 'urban') opts.setting = city.setting;   // N59: dressed for its ground
@@ -355,6 +357,14 @@
 
     // `faction` names the side ('left'/'right') whose supply bundle the city threads onto as
     // it grows (the live world passes it; the lab has no lines and passes none).
+    // N33: a side's capitals rank by founding order - the first is the grandest (cap 7),
+    // each later one caps a level lower, floored at 4. Adopted towns count: a standing
+    // town that joined first IS the side's seat, and a seed after it founds a lesser city.
+    function capitalCap(faction) {
+      const rank = cities.filter((o) => o.kind === 'capital' && (o.faction || null) === (faction || null)).length + 1;
+      return Math.max(4, MAX_LEVEL - (rank - 1));
+    }
+
     function drop(xIn, kind, style, faction) {
       const x = Math.round(xIn);
       if (x < 120 || x > world.width - 120) return { ok: false, note: 'off the map' };
@@ -386,6 +396,9 @@
         rings: { left: [], right: [] }, edge: { left: x, right: x }, capEdge: { left: x, right: x },
         blocked: { left: null, right: null }, fields: [], fieldEdge: { left: x, right: x },
         bridges: [], joints: [], jointClock: 0, merged: new Set(), notes: [] };
+      // N33: the FIRST capital of a side is the grandest - each later seat caps a level
+      // lower (never under 4), so the founding city keeps its crown as the side spreads.
+      if (kind === 'capital') city.levelCap = capitalCap(faction);
       const main = { type: kind === 'capital' ? 'population' : kind, level: 2, ring: -1, side: 'right',
         bornLevel: 1, variant: kind === 'capital' ? 'offset' : kind === 'farm' ? 'homestead' : 'compound',
         seedN: seedN += 17, owner: allotOwner(), x };
@@ -450,6 +463,8 @@
           const last = city.rings[side][city.rings[side].length - 1];
           city.edge[side] = last ? (dir > 0 ? last.placed.worksR + 2 : last.placed.worksL - 2) : city.capEdge[side];
         }
+        // N33: the town ranks like any capital - but never capped under what already stands.
+        city.levelCap = Math.max(Math.min(MAX_LEVEL, Math.max(2, maxLevel)), capitalCap(s.side || null));
         city.level = Math.min(MAX_LEVEL, Math.max(2, maxLevel));
         cities.push(city);
         s.adopted = true;
@@ -967,7 +982,9 @@
       // erased or re-stamped; the rings tighten around it as it stands.
       if (!city.main.fixed) {
         eraseLot(city.main);
-        city.main.level = Math.min(7, city.level + 1);
+        // N33: the seat's own grandeur follows its rank - a later capital's main stays
+        // below the first's even full-grown.
+        city.main.level = Math.min(city.levelCap || 7, city.level + 1);
         city.main.canvas = null;
         if (!placeLot(city, city.main, city.main.x)) { city.main.level -= 1; city.main.canvas = null; placeLot(city, city.main, city.main.x); }
         city.capEdge = { left: city.main.placed.worksL - 2, right: city.main.placed.worksR + 2 };
@@ -1747,8 +1764,8 @@
       city.actions += 1;
       if (city.kind === 'capital') {
         const lots = city.rings.left.length + city.rings.right.length;
-        if (lots >= city.level * 2 && city.level < MAX_LEVEL
-          && !nearBlast(city.edge.left, city.edge.right)) { if (!pay(city, 'level')) return false; return levelUp(city); }   // N60 fire gate; N4 paid
+        if (lots >= city.level * 2 && city.level < (city.levelCap || MAX_LEVEL)
+          && !nearBlast(city.edge.left, city.edge.right)) { if (!pay(city, 'level')) return false; return levelUp(city); }   // N60 fire gate; N4 paid; N33 rank cap
         // The edge creeps out on its own slow clock; the towers level by age, not here (N48).
         const sides = city.rings.left.length <= city.rings.right.length ? ['left', 'right'] : ['right', 'left'];
         for (const s of sides) {
