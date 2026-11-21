@@ -340,7 +340,10 @@
   // a friendly hull drives through marked gate cells as water passes a HATCH (with PS).
   function undercroft(c, style, boundL, boundR) {
     const g = c.ground;
-    const top = g - (S.FLOOR - S.SLAB);            // the band under storey 1's ceiling slab
+    // one slab course is absorbed into the hall: 37 clear rows, so the tallest hull (35
+    // rows, needing its height plus one) passes with a true row to spare - at exactly 36
+    // the Abrams kissed the slab's bottom edge mid-hall and stopped
+    const top = g - (S.FLOOR - S.SLAB + 1);
     const L = boundL ?? c.body.left, R = boundR ?? c.body.right;
     const GATE = [172, 150, 58], GATE_DK = [60, 56, 40];
     c.gates = c.gates || [];
@@ -406,11 +409,34 @@
           if (i < 0 || i >= c.mat.length || !c.mat[i]) continue;
           if (c.role[i] === ROLE.SLAB || c.role[i] === ROLE.CORE || c.role[i] === ROLE.GRATE) continue;
           if (outside && (c.role[i] === ROLE.WALL || c.role[i] === ROLE.FRAME)) continue;
+          // a TRUE overhang carries nothing and rests on nothing: a cell with matter
+          // directly beneath it stands ON that matter (a storey-2 wall foot on its slab)
+          // and striking it shed whole upper storeys over the next minutes - the decayed
+          // cities were this strike's slow wake, not physics
+          if (!outside && (c.mat[(y + 1) * c.width + x] || c.mat[(y + 2) * c.width + x])) continue;
           c.mat[i] = 0; c.paint[i] = 0; c.role[i] = ROLE.NONE; c.deco[i] = 0;
         }
       }
     }
     for (let x = L + 20; x <= R - 20; x += 44) ceilingLamp(c, style, x, top + 1);
+    // the THRESHOLD: the lane runs OUT of each portal at floor level for a few cells, so
+    // the street's proud paving steps down BEFORE the lintel - at the plane itself the
+    // tallest hull keeps the hall's full headroom (PS's drive: the 35-row Abrams stopped
+    // with exactly 35 clear where a g-2 street ran under the facade).
+    for (const [px, side] of [[L, -1], [R, 1]]) {
+      for (let d = 1; d <= 6; d += 1) {
+        const x = px + side * d;
+        if (x < 1 || x >= c.width - 1) continue;
+        for (let r = 0; r < 2; r += 1) {
+          const i = (g + r) * c.width + x;
+          const role = c.role[i];
+          if (role === ROLE.CORE || role === ROLE.GRATE || role === ROLE.VAULT || role === ROLE.CRADLE) continue;
+          if (c.mat[i] && role !== ROLE.NONE && role !== ROLE.ORNAMENT) continue;
+          c.mat[i] = M.ASPHALT; c.role[i] = ROLE.NONE;
+          c.paint[i] = pack(tone([74, 76, 80], (x & 3) === 0 ? 1.08 : r ? 0.9 : 1));
+        }
+      }
+    }
     c.meta.undercroft = { top, height: g - top };
     return c;
   }
