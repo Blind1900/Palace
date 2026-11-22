@@ -137,7 +137,11 @@ check(![...water.broken].some(Boolean), `the broken ends regrow toward each othe
 // carries a well joining the two bores; the old pipe is taken up as the ends close (well
 // shafts are the line's own and stay).
 let steep = 0, stray = 0;
-const inWell = (x, y) => (water.wells || []).some((w) => Math.abs(x - w.x) <= 3 && (y === undefined || (y >= w.y0 && y <= w.y1)));
+// (a fitting's own cells - its shaft, its turns' outer rings and its jacket reach four columns
+// off its axis - are read off its cell map where it keeps one)
+const inWell = (x, y) => [...(water.wells || []), ...(water.joints || [])].some((w) => (y !== undefined && w.cells)
+  ? w.cells.has(y * world.width + x)
+  : Math.abs(x - w.x) <= 3 && (y === undefined || (y >= w.y0 && y <= w.y1)));
 for (let x = cutX - 90; x < cutX + 90; x += 1) {
   const k = x - water.x0;
   if (k < 1 || k >= water.ys.length) continue;

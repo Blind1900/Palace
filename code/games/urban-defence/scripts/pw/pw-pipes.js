@@ -902,6 +902,12 @@
           if (zs + ze > k + kl) q = Math.min(q, zs - 1); else p = Math.max(p, ze + 1);
         }
         if (q < p) { k = kl; continue; }
+        // (never across a break: the regrowth lays the broken columns along its own fresh path,
+        // and a fitting re-levelling them under it kept re-breaking the front as fast as it
+        // healed - seed 11's cut never closed. The step is fitted once the front has passed.)
+        let cut = false;
+        for (let kk = Math.max(0, p - 1); kk <= Math.min(len - 1, q + 1) && !cut; kk += 1) if (line.broken[kk]) cut = true;
+        if (cut) { k = kl; continue; }
         // (cut short by a bed and too steep to ramp: the free side gives the shaft its room)
         const rise = Math.abs(line.ys[Math.min(len - 1, q + 1)] - line.ys[Math.max(0, p - 1)]);
         if (rise > q - p + 2 && q - p + 1 < 9) {
@@ -1129,6 +1135,10 @@
       line.broken[k] = 0;
       line.brokenCount -= 1;
       if (!line.brokenCount && line.hurt) {
+        // (the fittings kept off the break while it was open are laid across the whole healed
+        // span now it has closed - a step a few columns from the last column to heal was left
+        // bare otherwise)
+        layWells(line, Math.max(1, line.hurt.k0 - FIT), Math.min(line.ys.length - 1, line.hurt.k1 + FIT));
         sweepAround(line, line.hurt.k0, line.hurt.k1);
         line.tidy = { k0: line.hurt.k0, k1: line.hurt.k1, at: tick + 10 * 60 };
         line.hurt = null;
@@ -1244,6 +1254,11 @@
       // clean pipe and nothing else. Same design as every pipe; no overlay.
       const tipX = line.x0 + k + dir * 4;
       for (let r = 0; r < BORE; r += 1) {
+        // (only into the gap: stamped over the standing run beyond a narrow cut, the vertical
+        // turned its lanes on end, the watch read those columns as broken, and the break rolled
+        // on ahead of the front for ever - seed 11's cut never closed)
+        const kk = tipX - 3 + r - line.x0;
+        if (kk < 0 || kk >= line.broken.length || !line.broken[kk]) continue;
         for (let y = ny - 8; y < ny + BORE + 8; y += 1) layCell(line, tipX - 3 + r, y, pipeColor(r, y), r);
       }
       // A searching feeler now and then: a few cells of ink reaching off the fresh work into
@@ -1257,6 +1272,9 @@
       }
       if (intactAt(line, line.x0 + k)) {
         clearBroken(line, k);
+        // (the fittings round the healed column are laid now the front has passed it - they
+        // keep off broken columns, and this one was broken until a moment ago)
+        layWells(line, Math.max(1, k - FIT), Math.min(line.ys.length - 1, k + FIT));
         // The wreck of the old run in this column is taken up as the end closes over it - a
         // wide sweep for casing the blast let come to rest anywhere nearby (wells and the
         // risers' own verticals excepted).
@@ -1750,6 +1768,10 @@
               const qy = rowAt(qx);
               const qid = mat[qy * W + qx] & ID_MASK;
               if (qid === M.PIPE) break;   // jammed against true casing: nothing rolls
+              // (only along the lane itself: inside a bed's carry zone, or anywhere the row is not
+              // the line's own channel, the shove swapped the made ground under a building's
+              // footing sideways a cell at a time - seed 11's re-founded tower got its seams so)
+              if (throughAt(line, qx) || !(PW.getFlags(world, qx, qy) & FLAG.HOLLOW) || PW.getOwner(world, qx, qy) !== line.owner) break;
               if (qid === M.AIR || PW.mat.phase[qid] <= PW.PHASE.GAS) {
                 for (let j = m - 1; j >= 0; j -= 1) {
                   const ax = nx + dirL * j, bx = nx + dirL * (j + 1);

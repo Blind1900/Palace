@@ -85,7 +85,10 @@ for (let x = cutX - 90; x <= cutX + 90; x += 1) {
   if (water.risers.some((r) => Math.abs(x - r.x) <= 8)) continue;
   for (let y = water.ys[k] - 60; y < water.ys[k] + 70; y += 1) {
     if (y >= water.ys[k] - 1 && y <= water.ys[k] + BORE) continue;
-    if ((water.wells || []).some((w) => Math.abs(x - w.x) <= 3 && y >= w.y0 && y <= w.y1)) continue;
+    // (a fitting's own cells - its shaft, its turns' outer rings, its jacket four columns off its
+    // axis - are read off its cell map where it keeps one)
+    if ([...(water.wells || []), ...(water.joints || [])].some((w) => (w.cells ? w.cells.has(y * world.width + x)
+      : Math.abs(x - w.x) <= 3 && y >= w.y0 && y <= w.y1))) continue;
     if (PW.getOwner(world, x, y) !== water.owner) continue;
     if (id(x, y) === M.PIPE) strayPipe += 1;
     else if (PW.getFlags(world, x, y) & FLAG.HOLLOW) strayCarve += 1;
