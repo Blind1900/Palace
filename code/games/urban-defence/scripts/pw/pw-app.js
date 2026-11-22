@@ -1,13 +1,17 @@
 'use strict';
 // Development bootstrap for the pixel world: generate, simulate at a fixed 60 Hz step, render, and
 // a sandbox tool bar (material brushes and blasts). Left drag uses the tool; right/middle drag pans.
+// N6: the same bootstrap runs the game. mode=game (or a page that sets PW.GAME_PAGE first, as the
+// game's own page does) opens on the match menu instead, makes the world chosen there behind a
+// loading screen, and hands the match to PW.game (its rules and the computer players) and
+// PW.gameUI (the menu, the HUD and the game bar); the sandbox tools stay on the dev page.
 (function () {
   const PW = window.PW;
   const params = new URL(window.location.href).searchParams;
   const canvas = document.getElementById('world-canvas');
   const status = document.getElementById('world-status');
   const toolbar = document.getElementById('world-tools');
-  const seed = Number(params.get('seed')) || (Math.random() * 1e9) >>> 0;
+  const gameMode = params.get('mode') === 'game' || !!PW.GAME_PAGE;
   // Engine switches from the URL, for the labs and the suite runner: flags=PIPE_CAVITY turns
   // PW.PIPE_CAVITY on (flags=REBUILD_RUINS:0 turns one off) before anything is generated.
   for (const f of (params.get('flags') || '').split(',')) {
@@ -16,101 +20,140 @@
     PW[name] = v === undefined ? true : v !== '0';
   }
 
+  // The world and the systems that work it, made by the generation stages below.
+  let seed = 0, world = null, layout = null, gallery = false, pipes = null, renderer = null;
+  let sim = null, particles = null, heat = null, life = null, fragments = null, structure = null;
+  let repair = null, cores = null, growth = null, capital = null, stability = null, air = null;
+  let match = null;   // N6: the match on the game page (PW.game), null on the dev page
   const timings = {};
-  let t = performance.now();
-  // 2.2 times the first map's width (16384), in whole chunks: room for the towns to spread into.
-  const world = PW.createWorld(Number(params.get('width')) || 36096, 4096);
-  world.random = PW.createRandom(seed + 99);
-  world.effects = [];
-  timings.allocate = performance.now() - t; t = performance.now();
-  const gallery = params.has('gallery');
-  const gallerySet = params.get('gallery') === '1' ? 'population' : params.get('gallery');
-  const layout = gallery ? PW.generateGallery(world, seed, gallerySet) : PW.generateTerrain(world, seed);
-  timings.terrain = performance.now() - t; t = performance.now();
-  // Settlements first (pads, buildings, mines), then wild growth on the final ground, then cave
-  // formations.
-  if (PW.generateSettlements && !gallery) {
-    PW.generateSettlements(world, layout, seed);
-    if (PW.bunkers) PW.bunkers.generate(world, layout, seed);
-    timings.settlements = performance.now() - t; t = performance.now();
+
+  // ---- Generation, in stages -------------------------------------------------------------------
+  // Making the world is a fixed list of stages, run in order. The dev page runs them back to back
+  // as it loads; the game page runs one a frame behind its loading screen (N8). Nothing else runs
+  // in between, so it is the same world either way.
+  function genStages(opts) {
+    seed = opts.seed;
+    gallery = opts.gallery !== null && opts.gallery !== undefined;   // (?gallery, with or without a set)
+    const gallerySet = opts.gallery === '1' ? 'population' : opts.gallery;
+    const wild = () => !gallery;
+    return [
+      { name: 'allocate', label: 'Laying out the map', run() {
+        // 2.2 times the first map's width (16384), in whole chunks: room for the towns to spread into.
+        world = PW.createWorld(opts.width || 36096, 4096);
+        world.random = PW.createRandom(seed + 99);
+        world.effects = [];
+      } },
+      { name: 'terrain', label: 'Shaping the land', run() {
+        layout = gallery ? PW.generateGallery(world, seed, gallerySet) : PW.generateTerrain(world, seed);
+      } },
+      // Settlements first (pads, buildings, mines), then wild growth on the final ground, then cave
+      // formations.
+      { name: 'settlements', label: 'Founding the towns', when: () => wild() && PW.generateSettlements, run() {
+        PW.generateSettlements(world, layout, seed);
+        if (PW.bunkers) PW.bunkers.generate(world, layout, seed);
+      } },
+      { name: 'vegetation', label: 'Growing the wilds', when: () => wild() && PW.generateVegetation, run() {
+        PW.generateVegetation(world, layout, seed);
+      } },
+      { name: 'props', label: 'Furnishing the caves', when: () => wild() && PW.props, run() {
+        PW.props.decorateCaves(world, layout, PW.createRandom(seed + 313));
+      } },
+      // Supply lines under each base, connecting its buildings, pump and mining operations (and
+      // first the drills left here and there in the tunnels, for troops to pick up).
+      { name: 'pipes', label: 'Laying the supply lines', run() {
+        if (PW.pickups && !gallery) PW.pickups.placeDrills(world, PW.createRandom(seed + 727));
+        pipes = PW.createPipes ? PW.createPipes(world) : null;
+        if (pipes && !gallery) pipes.build();
+      } },
+      // Made ground under the towns, down to their supply lines.
+      { name: 'urban', label: 'Making the ground under the towns', when: () => wild() && PW.urban, run() {
+        world.madeGround = PW.urban.lay(world);
+      } },
+      { name: 'overview', label: 'Drawing the map', run() {
+        // With the world finally standing, every pump's cells become its repair print (N50).
+        if (PW.capturePumpPrints && !gallery) PW.capturePumpPrints(world);
+        // Generation leaves the simulation idle: the world starts settled.
+        world.activeList.length = 0;
+        world.simActive.fill(0);
+        for (let c = 0; c < world.chunkCount; c += 1) PW.clearSimRect(world, c);
+        renderer = PW.createRenderer(canvas, world, { seed });
+        world.colorAt = renderer.colorAt;
+        renderer.refreshOverview(Infinity);
+      } },
+      { name: 'systems', label: 'Starting the world', run: makeSystems },
+    ];
   }
-  if (PW.generateVegetation && !gallery) {
-    PW.generateVegetation(world, layout, seed);
-    timings.vegetation = performance.now() - t; t = performance.now();
+  function runStage(stage) {
+    const t = performance.now();
+    stage.run();
+    timings[stage.name] = performance.now() - t;
   }
-  if (PW.props && !gallery) {
-    PW.props.decorateCaves(world, layout, PW.createRandom(seed + 313));
-    timings.props = performance.now() - t; t = performance.now();
+  const due = (stage) => !stage.when || stage.when();
+  // (back to back: the dev page)
+  function generateNow(opts) {
+    for (const stage of genStages(opts)) if (due(stage)) runStage(stage);
   }
-  // Drills left here and there in the tunnels, for troops to pick up.
-  if (PW.pickups && !gallery) PW.pickups.placeDrills(world, PW.createRandom(seed + 727));
-  // Supply lines under each base, connecting its buildings, pump and mining operations.
-  const pipes = PW.createPipes ? PW.createPipes(world) : null;
-  if (pipes && !gallery) {
-    pipes.build();
-    timings.pipes = performance.now() - t; t = performance.now();
+  // (one a frame, reporting each before it runs so the loading screen shows what is under way)
+  async function generateStaged(opts, progress) {
+    const stages = genStages(opts);
+    for (let i = 0; i < stages.length; i += 1) {
+      if (!due(stages[i])) continue;
+      if (progress) progress(i / stages.length, stages[i].label);
+      await new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0)));
+      runStage(stages[i]);
+    }
+    if (progress) progress(1, 'Ready');
   }
-  // Made ground under the towns, down to their supply lines.
-  if (PW.urban && !gallery) {
-    world.madeGround = PW.urban.lay(world);
-    timings.urban = performance.now() - t; t = performance.now();
+
+  // The systems that work the world once it is made.
+  function makeSystems() {
+    world.windSeed = seed;
+    sim = PW.createSim(world);
+    particles = PW.createParticles(world);
+    heat = world.heatSystem = PW.createHeat(world);
+    life = PW.createLife(world);
+    world.particles = particles;
+    // Damage brings buildings down: blasts and flying debris report the cells they break, the
+    // structure is analysed and what fails falls as rigid pieces.
+    fragments = PW.createFragments ? PW.createFragments(world, particles) : null;
+    structure = fragments && PW.createStructure ? PW.createStructure(world, fragments) : null;
+    world.fragments = fragments;   // (trees and boughs that break off fall as rigid pieces too)
+    // Repair through the cores: a damaged building rebuilds itself from its blueprint (step F).
+    repair = world.repair = PW.createRepair ? PW.createRepair(world, particles) : null;
+    if (structure) {
+      world.onDamage = (id) => { structure.notify(id); if (repair) repair.notify(id); };
+      particles.listeners.chip = (owner) => { if (owner) { structure.notify(owner); if (repair) repair.notify(owner); } };
+    }
+    // A ruined building's cores lie open in their vaults, kept clear of rubble.
+    cores = PW.createCores ? PW.createCores(world, particles) : null;
+    // The city grows by itself: seeds carried past the street's end, towers grown by repair (step H).
+    growth = PW.createGrowth && !gallery ? PW.createGrowth(world) : null;
+    // N2/N3: the capital-growth engine in the live world - the whole lab system (rings, levels,
+    // spacing, earthworks, farms, military spread, merge joints) runs any city dropped with the
+    // SEED tools. Idle until a seed lands: with no cities its step is a no-op, so nothing in the
+    // world changes until the player plants one.
+    capital = PW.createCapitalGrowth && !gallery ? PW.createCapitalGrowth(world, { seed }) : null;
+    if (capital) world.capitalGrowth = capital;
+    // N3: the standing worldgen towns join the growth engine (level-ups, infill, joints and
+    // appends like any seed city). Default OFF (flags=ADOPT_TOWNS turns it on): the adopted
+    // towns' aging re-seats out-churn the bundle mend on their long worldgen lines - until a
+    // re-seat heals its own cut (rather than leaving it for the slow crews), adoption stays
+    // behind the flag. The groundwork, the crash guards and the richer mend draught ship on.
+    // N3: ON by default since the adoption-era pipe freeze fell (a re-seat heals its own cut -
+    // releaseBuilding lays the leaving bed's span, connectCore clears its window; the frozen
+    // pool of ~350 breaks drained to ~13 on the seed-7 probe). flags=STANDING_TOWNS turns it off.
+    if (capital && PW.ADOPT_TOWNS !== false && !PW.STANDING_TOWNS) capital.adoptSettlements();
+    // Ground that loses its footing breaks loose: cave-ins, landslides and avalanches.
+    stability = world.stability = PW.createStability ? PW.createStability(world, particles) : null;
+    // Air pressure and wind, worked only where a blast has stirred it.
+    air = world.air = PW.createAir ? PW.createAir(world, particles) : null;
+    // Bubbles the water simulation releases: one or two cells of pale air, rising to pop.
+    const BUBBLE_COLORS = [PW.abgr(206, 232, 248, 230), PW.abgr(168, 210, 238, 210), PW.abgr(232, 244, 252, 240)];
+    world.emitBubble = (x, y) => {
+      const h = PW.hash3(x, y, world.tick);
+      particles.spawn(x + 0.5, y + 0.5, ((h & 15) - 7.5) * 0.6, -2, 0, BUBBLE_COLORS[h % 3], PW.PARTICLE.BUBBLE, 25);
+    };
   }
-  // With the world finally standing, every pump's cells become its repair print (N50).
-  if (PW.capturePumpPrints && !gallery) PW.capturePumpPrints(world);
-  // Generation leaves the simulation idle: the world starts settled.
-  world.activeList.length = 0;
-  world.simActive.fill(0);
-  for (let c = 0; c < world.chunkCount; c += 1) PW.clearSimRect(world, c);
-  const renderer = PW.createRenderer(canvas, world, { seed });
-  world.colorAt = renderer.colorAt;
-  renderer.refreshOverview(Infinity);
-  timings.overview = performance.now() - t;
-  world.windSeed = seed;
-  const sim = PW.createSim(world);
-  const particles = PW.createParticles(world);
-  const heat = world.heatSystem = PW.createHeat(world);
-  const life = PW.createLife(world);
-  world.particles = particles;
-  // Damage brings buildings down: blasts and flying debris report the cells they break, the
-  // structure is analysed and what fails falls as rigid pieces.
-  const fragments = PW.createFragments ? PW.createFragments(world, particles) : null;
-  const structure = fragments && PW.createStructure ? PW.createStructure(world, fragments) : null;
-  world.fragments = fragments;   // (trees and boughs that break off fall as rigid pieces too)
-  // Repair through the cores: a damaged building rebuilds itself from its blueprint (step F).
-  const repair = world.repair = PW.createRepair ? PW.createRepair(world, particles) : null;
-  if (structure) {
-    world.onDamage = (id) => { structure.notify(id); if (repair) repair.notify(id); };
-    particles.listeners.chip = (owner) => { if (owner) { structure.notify(owner); if (repair) repair.notify(owner); } };
-  }
-  // A ruined building's cores lie open in their vaults, kept clear of rubble.
-  const cores = PW.createCores ? PW.createCores(world, particles) : null;
-  // The city grows by itself: seeds carried past the street's end, towers grown by repair (step H).
-  const growth = PW.createGrowth && !gallery ? PW.createGrowth(world) : null;
-  // N2/N3: the capital-growth engine in the live world - the whole lab system (rings, levels,
-  // spacing, earthworks, farms, military spread, merge joints) runs any city dropped with the
-  // SEED tools. Idle until a seed lands: with no cities its step is a no-op, so nothing in the
-  // world changes until the player plants one.
-  const capital = PW.createCapitalGrowth && !gallery ? PW.createCapitalGrowth(world, { seed }) : null;
-  if (capital) world.capitalGrowth = capital;
-  // N3: the standing worldgen towns join the growth engine (level-ups, infill, joints and
-  // appends like any seed city). Default OFF (flags=ADOPT_TOWNS turns it on): the adopted
-  // towns' aging re-seats out-churn the bundle mend on their long worldgen lines - until a
-  // re-seat heals its own cut (rather than leaving it for the slow crews), adoption stays
-  // behind the flag. The groundwork, the crash guards and the richer mend draught ship on.
-  // N3: ON by default since the adoption-era pipe freeze fell (a re-seat heals its own cut -
-  // releaseBuilding lays the leaving bed's span, connectCore clears its window; the frozen
-  // pool of ~350 breaks drained to ~13 on the seed-7 probe). flags=STANDING_TOWNS turns it off.
-  if (capital && PW.ADOPT_TOWNS !== false && !PW.STANDING_TOWNS) capital.adoptSettlements();
-  // Ground that loses its footing breaks loose: cave-ins, landslides and avalanches.
-  const stability = world.stability = PW.createStability ? PW.createStability(world, particles) : null;
-  // Air pressure and wind, worked only where a blast has stirred it.
-  const air = world.air = PW.createAir ? PW.createAir(world, particles) : null;
-  // Bubbles the water simulation releases: one or two cells of pale air, rising to pop.
-  const BUBBLE_COLORS = [PW.abgr(206, 232, 248, 230), PW.abgr(168, 210, 238, 210), PW.abgr(232, 244, 252, 240)];
-  world.emitBubble = (x, y) => {
-    const h = PW.hash3(x, y, world.tick);
-    particles.spawn(x + 0.5, y + 0.5, ((h & 15) - 7.5) * 0.6, -2, 0, BUBBLE_COLORS[h % 3], PW.PARTICLE.BUBBLE, 25);
-  };
 
   // ---- Sandbox tools -----------------------------------------------------------------------------
   const { M } = PW;
@@ -231,6 +274,7 @@
   }
   // Space pauses and resumes, as the PAUSE button does (not while typing into a field).
   window.addEventListener('keydown', (event) => {
+    if (!world) return;   // (the game page's menu and loading screen come first)
     if (event.code === 'Escape' && selected) { select(null); return; }   // N78
     // N78: the drive keys follow the SELECTED tank too, not only the tank tool - key()
     // drives the held one, and selecting holds (PS's hold()).
@@ -460,6 +504,9 @@
   }
   canvas.addEventListener('contextmenu', (event) => event.preventDefault());
   canvas.addEventListener('pointerdown', (event) => {
+    if (!renderer) return;   // (the game page's menu and loading screen come first)
+    // N6: the game bar's tools in hand (a seed, a deployment, an order) take the click first
+    if (match && event.button === 0 && PW.gameUI && PW.gameUI.pointerDown(event, toWorld(event))) return;
     drag.active = true; drag.x = event.clientX; drag.y = event.clientY;
     drag.pan = event.button !== 0 || tool === 'pan';
     canvas.setPointerCapture(event.pointerId);
@@ -498,6 +545,8 @@
     }
   });
   canvas.addEventListener('pointermove', (event) => {
+    if (!renderer) return;
+    if (match && PW.gameUI) PW.gameUI.pointerMove(event, toWorld(event));
     if (tool === 'digL' || tool === 'digR') planDig(tool === 'digL' ? 'left' : 'right', toWorld(event));
     if (!drag.active) return;
     if (drag.pan) renderer.panByDevice((event.clientX - drag.x) * renderer.view.dpr, (event.clientY - drag.y) * renderer.view.dpr);
@@ -509,11 +558,11 @@
   canvas.addEventListener('pointercancel', release);
   canvas.addEventListener('wheel', (event) => {
     event.preventDefault();
+    if (!renderer) return;
     const rect = canvas.getBoundingClientRect();
     const ax = (event.clientX - rect.left) * renderer.view.dpr, ay = (event.clientY - rect.top) * renderer.view.dpr;
     renderer.setZoomIndex(renderer.camera.zoomIndex + (event.deltaY < 0 ? 1 : -1), ax, ay);
   }, { passive: false });
-  new ResizeObserver(() => renderer.resize(canvas.clientWidth, canvas.clientHeight)).observe(canvas);
 
   // ---- Loop: fixed 60 Hz simulation, render every frame -------------------------------------------
   const DT = 1 / 60;
@@ -543,14 +592,16 @@
       if (growth) growth.step(DT);
       // (seed cities grow at the dev speed, like the lab's controllable speeds)
       if (capital) capital.step(DT * devSpeed);
+      if (match) PW.game.step(match, DT);   // N6: the match's rules and its computer players
       life.step();
       simTimes.push(performance.now() - s);
       if (simTimes.length > 240) simTimes.shift();
     }
   }
   let frames = 0, fpsClock = performance.now(), fps = 0, last = performance.now(), accumulator = 0;
+  let speed = 1;   // N6: a watched match may run fast (the game bar's speed)
   function frame(now) {
-    accumulator = Math.min(accumulator + (now - last) / 1000, DT * 3);
+    accumulator = Math.min(accumulator + (now - last) / 1000 * speed, DT * 3 * speed);
     last = now;
     // A heavy moment runs the world a touch slow instead of stuttering: once the ticks this
     // frame have eaten ~12 ms the rest of the backlog is dropped, so one expensive tick can
@@ -578,14 +629,18 @@
     particles.draw(renderer);
     if (life.draw) life.draw(renderer);
     if (cores && cores.draw) cores.draw(renderer, now);
-    if (capital && capital.draw) capital.draw(renderer, now / 1000);
+    // (the growth engine's labels and blocked-edge marks are the dev page's, not the game's)
+    if (capital && capital.draw && (!gameMode || params.get('dev') === '1')) capital.draw(renderer, now / 1000);
     if (PW.debugHitboxes && fragments && fragments.drawHitboxes) fragments.drawHitboxes(renderer);
     PW.drawEffects(world, renderer, (now - (frame.prev || now)) / 1000);
+    if (match && PW.gameUI) PW.gameUI.drawWorld(renderer, now);   // N6: the match's marks over the world
     frame.prev = now;
     frames += 1;
     if (now - fpsClock >= 500) {
       fps = frames * 1000 / (now - fpsClock);
       frames = 0; fpsClock = now;
+    }
+    if (frames === 0 && status) {
       const s = renderer.stats();
       const sorted = simTimes.slice().sort((a, b) => a - b);
       const p95 = sorted.length ? sorted[Math.floor(sorted.length * 0.95)] : 0;
@@ -597,7 +652,6 @@
     }
     requestAnimationFrame(frame);
   }
-  requestAnimationFrame(frame);
 
   function tunnelSummary() {
     if (!world.tunnels) return '-';
@@ -606,21 +660,51 @@
     return `${cells ? Math.round(developed / cells * 100) : 0}% developed${devSpeed > 1 ? ' x20' : ''}`;
   }
 
-  window.pwApp = { world, layout, renderer, sim, particles, seed, timings, ready: true,
-    explode, dig, planDig, preview, pipes, setDevelopSpeed: (k) => { devSpeed = k; }, heat, life, structure, fragments, cores, stability, air,
-    dropSeed: (which, x) => { dropSeed(which, { x }); return lastDig; },   // N2: the hand's seed path (vision-gated)
-    selectAt: (x, y) => { const hit = unitAt(x, y); select(hit); return hit; },   // N78
-    selected: () => selected, clearSelection: () => select(null),
-    setBrush: (b) => { brush = b; },
-    paint: (x, y, radius, material) => paint(x, y, radius, () => material),
-    stepWorld, countWater: () => sim.countWater(), simTimes,
-    setPaused: (value) => { paused = value; },
-    focus: (x, y, zoomIndex) => renderer.focus(x, y, zoomIndex),
-    focusWorld: (x, y, zoomIndex) => renderer.focus(x, y, zoomIndex),
-    // Viewport (client) coordinates of a world cell, for real mouse input in harness scenarios.
-    toClient: (x, y) => {
-      const rect = canvas.getBoundingClientRect();
-      const screen = renderer.worldToScreen(x + 0.5, y + 0.5);
-      return { x: rect.left + screen.x, y: rect.top + screen.y };
-    } };
+  // ---- Start ------------------------------------------------------------------------------------
+  // Once the world is made: the view follows the window, the loop runs, and the harness and the
+  // game's own modules get their handle on it all (pwApp).
+  function start() {
+    new ResizeObserver(() => renderer.resize(canvas.clientWidth, canvas.clientHeight)).observe(canvas);
+    window.pwApp = { world, layout, renderer, sim, particles, seed, timings, ready: true, gameMode,
+      explode, dig, planDig, preview, pipes, setDevelopSpeed: (k) => { devSpeed = k; }, heat, life, structure, fragments, cores, stability, air,
+      dropSeed: (which, x) => { dropSeed(which, { x }); return lastDig; },   // N2: the hand's seed path (vision-gated)
+      selectAt: (x, y) => { const hit = unitAt(x, y); select(hit); return hit; },   // N78
+      selected: () => selected, clearSelection: () => select(null), select,
+      setBrush: (b) => { brush = b; },
+      paint: (x, y, radius, material) => paint(x, y, radius, () => material),
+      stepWorld, countWater: () => sim.countWater(), simTimes,
+      setPaused: (value) => { paused = value; }, paused: () => paused,
+      setSpeed: (k) => { speed = k; }, speed: () => speed, fps: () => fps,
+      match: () => match,
+      focus: (x, y, zoomIndex) => renderer.focus(x, y, zoomIndex),
+      focusWorld: (x, y, zoomIndex) => renderer.focus(x, y, zoomIndex),
+      // Viewport (client) coordinates of a world cell, for real mouse input in harness scenarios.
+      toClient: (x, y) => {
+        const rect = canvas.getBoundingClientRect();
+        const screen = renderer.worldToScreen(x + 0.5, y + 0.5);
+        return { x: rect.left + screen.x, y: rect.top + screen.y };
+      } };
+    requestAnimationFrame(frame);
+  }
+
+  // N6: a match - the world the menu chose, made behind the loading screen, then the match's
+  // rules and players set going on it, and the HUD and game bar over it.
+  async function startMatch(choice) {
+    const ui = PW.gameUI;
+    await generateStaged({ seed: choice.seed, width: choice.width }, ui.loading);
+    start();
+    match = PW.game.create(world, { ...choice, app: window.pwApp });
+    ui.attach(match, window.pwApp);
+  }
+
+  const urlSeed = Number(params.get('seed')) || (Math.random() * 1e9) >>> 0;
+  if (!gameMode) {
+    generateNow({ seed: urlSeed, width: Number(params.get('width')) || 0, gallery: params.has('gallery') ? params.get('gallery') : null });
+    start();
+  } else {
+    // (the sandbox's tools and readout are the dev page's; dev=1 keeps them for a look under the hood)
+    if (toolbar && params.get('dev') !== '1') toolbar.style.display = 'none';
+    if (status && params.get('dev') !== '1') status.style.display = 'none';
+    PW.gameUI.menu({ seed: urlSeed, params, onStart: startMatch });
+  }
 })();

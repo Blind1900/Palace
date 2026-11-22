@@ -28,6 +28,10 @@ const SUITES = [
   { name: 'pw-vehicle', alone: true, page: 'capital-lab.html', ready: 'window.pwLab && pwLab.ready', params: 'det=1' },
   // N92: the tunnel and traversal lab - a squad finds its way through a course dug as it watches
   { name: 'pw-unit-lab', page: 'pw-unit-lab.html', ready: 'window.pwLab && pwLab.ready', params: 'det=1' },
+  // N6: the match on the game page - against the computer from a link, and from the menu watching
+  // the computer play itself (the person takes a chair and hands it back)
+  { name: 'pw-game', params: 'mode=game&start=versus&side=left&det=1' },
+  { name: 'pw-game-menu', scenario: 'pw-game', ready: "!!document.getElementById('gm-menu')", params: 'mode=game&det=1' },
 ].filter((s) => !args.only || args.only.split(',').includes(s.name));
 const root = path.resolve(__dirname, '..');
 const out = path.join(os.tmpdir(), 'claude-scratch', 'shots');
@@ -38,7 +42,7 @@ function run(suite, attempt = 1) {
     const params = suite.params ? `${suite.params}&seed=${seed}` : `seed=${seed}`;
     const child = spawn(process.execPath, [path.join(__dirname, 'check-beta-game.cjs'), `--page=${suite.page || 'pixel-world.html'}`, `--params=${params}`,
       ...(suite.ready ? [`--ready=${suite.ready}`] : []),
-      '--wait=300', '--size=1600x900', `--timeout=${(limit - 10) * 1000}`, `--out=${out}`, `--scenario=tools/scenarios/${suite.name}.js`],
+      '--wait=300', '--size=1600x900', `--timeout=${(limit - 10) * 1000}`, `--out=${out}`, `--scenario=tools/scenarios/${suite.scenario || suite.name}.js`],
     { cwd: root, env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' } });
     let text = '';
     child.stdout.on('data', (d) => { text += d; });
