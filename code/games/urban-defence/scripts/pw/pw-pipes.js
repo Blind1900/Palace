@@ -50,7 +50,12 @@
 
   // N34/N38 redesign: near-black gunmetal shell with a teal sheen on the spine - vertical
   // and horizontal are one design, one palette (the riser is the same pipe turned).
-  const CASING = [52, 58, 68], CASING_LIT = [64, 86, 98], CASING_DARK = [30, 34, 42], DIVIDER = [20, 23, 29];
+  const CASING = [52, 58, 68], CASING_LIT = [74, 92, 106], CASING_DARK = [48, 54, 66], DIVIDER = [20, 23, 29];
+  // N84: the armoured JACKET - a second shell ring outside the bore (rows -1 and BORE, the
+  // first trench row), light cool steel over the gunmetal casing so the tube reads as a
+  // thick cased body against its own neon lanes and against the ground round it. Lit on
+  // the spine (top / left), shaded underneath (bottom / right), plates jointed every 14.
+  const JACKET_LIT = [140, 160, 174], JACKET_DARK = [92, 104, 118];
   const NEON_RING = [96, 212, 232], NEON_RING_DIM = [48, 110, 124];
   const SAND = [170, 156, 118], STEEL = [120, 128, 134], STEEL_DARK = [72, 78, 84];
   const INK = [10, 10, 12], WHITE_DIM = [152, 158, 164];
@@ -178,9 +183,11 @@
       // over one cell (down to a mitred bend, a shaft for the taller ones) into open
       // pipe. No global deepening: that dragged the whole run below the made ground that
       // beds it (seed 3's gothic neutral). The turn stays where the contour put it.
-      const a = Math.max(0, k0 - 2), b = Math.min(line.ys.length - 1, k1 + 2);
+      // (a fitting reaches FIT columns from its step: one re-laid in its box is re-laid whole)
+      const a = Math.max(0, k0 - FIT), b = Math.min(line.ys.length - 1, k1 + FIT);
       if (b > a) layWells(line, a, b);
     }
+    const FIT = 5;
     function runHeals() {
       if (!pendingHeals.length) return;
       for (const h of pendingHeals) {
@@ -188,7 +195,7 @@
         const k0 = Math.max(0, h.x0 - line.x0), k1 = Math.min(line.ys.length - 1, h.x1 - line.x0);
         if (k1 < k0) continue;
         for (let k = k0; k <= k1; k += 1) layColumn(line, line.x0 + k);
-        layWells(line, k0, k1);
+        layWells(line, Math.max(1, k0 - FIT), Math.min(line.ys.length - 1, k1 + FIT));
         checkSpan(line, k0, k1);
         stats.healed = (stats.healed || 0) + (k1 - k0 + 1);
       }
@@ -333,12 +340,22 @@
         if (b.x - a.x > 140) continue;
         const Ta = a.y - 3, Tb = b.y - 3;
         const s0 = a.x + SPAN, s1 = b.x - SPAN;
+        const shelfY = (x) => Math.round(Ta + (Tb - Ta) * ((x - s0) / Math.max(1, s1 - s0)));
+        // N83: only where the straight shelf is clear - run bed to bed through a neighbour's
+        // works (a stage's flight of steps between two towers, seed 7) its cells were refused
+        // and the lanes cut there. A blocked shelf keeps the contour's dive under them.
+        let clear = true;
+        for (let x = s0; x <= s1 && clear; x += 1) {
+          const y = shelfY(x);
+          for (let yy = y - 1; yy <= y + BORE && clear; yy += 1) if (blocked(x, yy)) clear = false;
+        }
+        if (!clear) continue;
         // The shelf runs straight bed to bed; any single level change it leaves is turned
         // into a swept mitred bend or a well by layWells (N81), never a bare cliff.
         for (let x = s0; x <= s1; x += 1) {
           const k = x - x0;
           if (k < 0 || k >= ys.length) continue;
-          ys[k] = Math.round(Ta + (Tb - Ta) * ((x - s0) / Math.max(1, s1 - s0)));
+          ys[k] = shelfY(x);
         }
       }
       // A column whose bore would hang in bare open sky is tucked under that column's own
@@ -367,6 +384,12 @@
     const tendrilAt = (along) => ((along % TENDRIL_EVERY) + TENDRIL_EVERY) % TENDRIL_EVERY < TENDRIL_W;
     function pipeColor(row, along) {
       const wisp = tendrilAt(along);
+      if (row < 0 || row >= BORE) {
+        if (wisp) return INK;   // (the tendril grips the whole tube, jacket and all)
+        if (collarAt(along)) return row < 0 ? NEON_RING : NEON_RING_DIM;
+        const plate = row < 0 ? JACKET_LIT : JACKET_DARK;
+        return along % 14 === 0 ? tone(plate, 0.7) : plate;
+      }
       if (row === 0 || row === BORE - 1) {
         if (wisp) return ((along + row) % 7 === 3) ? WHITE_DIM : INK;
         // N34/N38 redesign: the collar is a NEON RING every 36 cells - a glowing coupler
@@ -389,24 +412,66 @@
     // lanes 1/3/5, dividers 2/4; omitted for fittings laid solid whatever the mode. `solid`
     // keeps the lanes solid even with the cavity on: a riser pierces the surface and the
     // machines - carved open it would drain the pump's own lake into the line for real.
-    function layCell(line, x, y, color, row, solid) {
+    function layCell(line, x, y, color, row, solid, through) {
       if (x < 1 || y < 1 || x >= W - 1 || y >= H - 1) return false;
       // The bore is hollow (N17F): its inside rows are marked - bookkeeping for the line's own
       // take-up and repair; what the physics sees is the carve itself, its lanes open air (see
       // PW.PIPE_CAVITY above).
       const inside = row !== undefined && row > 0 && row < BORE - 1;
-      if (inside) PW.setFlag(world, x, y, FLAG.HOLLOW);
       const id = mat[y * W + x] & ID_MASK;
+      // N83: the line's own carved channel is re-laid as what it now is - a lane takes its new
+      // lane's colour (re-read as open space it kept the OLD lane's back wall), and any other
+      // row closes it into body (re-read as open space, a casing row stayed open air).
+      if (id !== M.PIPE && (PW.mat.open[id] || id === M.WATER) && (PW.getFlags(world, x, y) & FLAG.HOLLOW)
+        && PW.getOwner(world, x, y) === line.owner) {
+        if (PW.PIPE_CAVITY && !solid && inside && (row & 1)) {
+          PW.setLayer(world, 'back', x, y, rgb(color));
+          PW.setLayer(world, 'pipe', x, y, 0);
+          return true;
+        }
+        // (hardware - a flange, a valve, a tee's socket - never plugs a live channel)
+        if (row === undefined && !solid) return false;
+        if (id === M.WATER && world.particles) world.particles.spawn(x + 0.5, y + 0.5, 0, -30, M.WATER, 0, PW.PARTICLE.WATER, 6);
+        PW.set(world, x, y, M.PIPE, { quiet: true, lay: true });
+        if (!inside) PW.setFlag(world, x, y, FLAG.HOLLOW, false);
+        PW.setLayer(world, 'back', x, y, 0);
+        PW.setLayer(world, 'pipe', x, y, 0);
+        PW.setLayer(world, 'paint', x, y, rgb(color));
+        return true;
+      }
       const cover = id === M.COVER_ROCK || id === M.COVER_WOOD || id === M.COVER_METAL || id === M.COVER_SAND;
       if (PW.mat.open[id] || id === M.WATER || cover) {
         // Across sheltered open space the bundle is fixed to the wall face (A2.6): a tunnel's, a
         // building's, or any back wall standing there (a terrace's bench wall, a bunker room).
         // Only bare open sky refuses it - the router bridges where a wall face is, and without
         // this the laying refused what the route relied on, leaving the line broken in the open.
-        if (y < world.groundTop[x] && !isTunnel(x, y) && !buildingOwned(x, y) && !PW.getLayer(world, 'back', x, y)) return false;
-        PW.setLayer(world, 'pipe', x, y, rgb(color));
+        // N83: a JOINT is the exception (`through`): a shaft crossing a bare cleft stands as a
+        // real cased tube, anchored into the ground above and below - never a gap in the lanes.
+        // (the HOLLOW mark goes only on cells actually laid: a refused cell flagged anyway
+        // would read as bore to every guard that honours the mark)
+        const bare = y < world.groundTop[x] && !isTunnel(x, y) && !buildingOwned(x, y) && !PW.getLayer(world, 'back', x, y);
+        if (bare && !through) return false;
+        if (!bare) {
+          if (inside) PW.setFlag(world, x, y, FLAG.HOLLOW);
+          PW.setLayer(world, 'pipe', x, y, rgb(color));
+          return true;
+        }
+        // bare + through: real tube cells across the cleft (the terrain gate below would
+        // refuse the open cell and leave the shaft a stub again).
+        if (inside) PW.setFlag(world, x, y, FLAG.HOLLOW);
+        if (PW.PIPE_CAVITY && !solid && inside && (row & 1)) {
+          PW.set(world, x, y, M.AIR, { quiet: true, lay: true });
+          PW.setLayer(world, 'back', x, y, rgb(color));
+          PW.setLayer(world, 'paint', x, y, 0);
+          PW.setOwner(world, x, y, line.owner);
+          return true;
+        }
+        PW.set(world, x, y, M.PIPE, { quiet: true, lay: true });
+        PW.setLayer(world, 'paint', x, y, rgb(color));
+        PW.setOwner(world, x, y, line.owner);
         return true;
       }
+      if (inside) PW.setFlag(world, x, y, FLAG.HOLLOW);
       if (id === M.REINFORCED || id === M.LINING) {
         PW.setLayer(world, 'paint', x, y, rgb(color));
         PW.setFlag(world, x, y, FLAG.FIXTURE);
@@ -414,8 +479,12 @@
       }
       // Through a registered core span the bundle runs in a SLEEVE through whatever the building
       // put there - vault plate, plinth, a stage's timber pier, a buttress - painted across it,
-      // the structure itself untouched (nothing load-bearing is cut).
-      if (spanAt(x, y) && structural[id]) {
+      // the structure itself untouched (nothing load-bearing is cut). A fitting (`through`)
+      // sleeves through any works it meets: the router picks a shaft's two levels, never what
+      // stands between them, and refused there the lanes broke (seed 7's 289-row shaft down
+      // through a building's floors).
+      if ((spanAt(x, y) && structural[id])
+        || (through && (structural[id] || (buildingOwned(x, y) && !terrain[id])) && id !== M.CORE)) {
         PW.setLayer(world, 'paint', x, y, rgb(color));
         PW.setFlag(world, x, y, FLAG.FIXTURE);
         return true;
@@ -451,6 +520,45 @@
       if (!terrain[id] || id === M.ORE || id === M.BEDROCK || PW.getOwner(world, x, y) || isTunnel(x, y)) return;
       PW.set(world, x, y, M.FILL, { quiet: true, lay: true });
       PW.setLayer(world, 'paint', x, y, rgb(color));
+    }
+    // N84: one cell of the armoured jacket - the line's own solid PIPE wherever the bed would
+    // lie (never over a road, a tunnel, ore or someone's building), sleeve paint through
+    // works the bundle may cross, wall-face paint across sheltered space. `through` lays it
+    // real over a bare cleft, as the fittings' bore is (N83).
+    function jacketCell(line, x, y, color, through) {
+      if (x < 1 || y < 1 || x >= W - 1 || y >= H - 1) return false;
+      const id = mat[y * W + x] & ID_MASK;
+      const own = PW.getOwner(world, x, y) === line.owner;
+      if (id === M.PIPE) {
+        if (!own) return false;
+        PW.setFlag(world, x, y, FLAG.HOLLOW, false);
+        PW.setLayer(world, 'back', x, y, 0);
+        PW.setLayer(world, 'paint', x, y, rgb(color));
+        return true;
+      }
+      if (PW.getFlags(world, x, y) & FLAG.HOLLOW) {
+        if (!own) return false;   // (another line's bore)
+        fillCell(line, x, y, color);
+        return true;
+      }
+      const cover = id === M.COVER_ROCK || id === M.COVER_WOOD || id === M.COVER_METAL || id === M.COVER_SAND;
+      if (PW.mat.open[id] || id === M.WATER || cover) {
+        const bare = y < world.groundTop[x] && !isTunnel(x, y) && !buildingOwned(x, y) && !PW.getLayer(world, 'back', x, y);
+        if (!bare) { PW.setLayer(world, 'pipe', x, y, rgb(color)); return true; }
+        if (!through || id === M.WATER || cover) return false;
+      } else if (id === M.REINFORCED || id === M.LINING || id === M.FOUNDATION
+        || (spanAt(x, y) && structural[id])
+        || (through && (structural[id] || (buildingOwned(x, y) && !terrain[id])) && id !== M.CORE)) {
+        PW.setLayer(world, 'paint', x, y, rgb(color));
+        PW.setFlag(world, x, y, FLAG.FIXTURE);
+        return true;
+      } else if (!terrain[id] || id === M.ORE || id === M.BEDROCK || isTunnel(x, y) || buildingOwned(x, y)) {
+        return false;
+      }
+      PW.set(world, x, y, M.PIPE, { quiet: true, lay: true });
+      PW.setLayer(world, 'paint', x, y, rgb(color));
+      PW.setOwner(world, x, y, line.owner);
+      return true;
     }
     // Is (x, y) the line's own work? Its casing and dividers are its M.PIPE cells; with the bore
     // carved (PW.PIPE_CAVITY) its open lane cells are its too, marked HOLLOW under its owner.
@@ -504,15 +612,13 @@
       const y = line.ys[x - line.x0];
       const slim = inIntake(line, x);
       const wisp = tendrilAt(x);
-      const collar = collarAt(x);
-      for (let b = 1; b <= BED; b += 1) {
-        // The trench profile (your pipeline refs): fine sand right against the casing, coarser
-        // darker gravel in the outer bed row; a joint collar's lip reaches into the first row.
-        const sand = (k) => (wisp ? tone(INK, 1 + Math.abs(k))
-          : Math.abs(k) >= BED ? tone(SAND, (PW.hash2(x, y + k) & 3) === 0 ? 0.62 : 0.74)
-          : tone(SAND, (PW.hash2(x, y + k) & 3) === 0 ? 0.88 : 1));
-        bedCell(x, y - b, b === 1 && collar ? tone(CASING, 1.2) : sand(-b));
-        bedCell(x, y + BORE - 1 + b, b === 1 && collar ? tone(CASING, 0.78) : sand(b));
+      // N84: the first trench row is the armoured jacket; the gravel bed lies beyond it.
+      jacketCell(line, x, y - 1, pipeColor(-1, x));
+      jacketCell(line, x, y + BORE, pipeColor(BORE, x));
+      for (let b = 2; b <= BED; b += 1) {
+        const sand = (k) => (wisp ? tone(INK, 1 + Math.abs(k)) : tone(SAND, (PW.hash2(x, y + k) & 3) === 0 ? 0.62 : 0.74));
+        bedCell(x, y - b, sand(-b));
+        bedCell(x, y + BORE - 1 + b, sand(b));
       }
       for (let r = 0; r < BORE; r += 1) layCell(line, x, y + r, slim ? intakeColor(r, x) : pipeColor(r, x), r);
     }
@@ -524,9 +630,32 @@
     function layRiser(line, anchor) {
       const lineY = line.ys[Math.max(0, Math.min(line.ys.length - 1, anchor.x - line.x0))];
       const yA = Math.min(anchor.y, lineY), yB = Math.max(anchor.y, lineY + BORE - 1);
+      // N83: the run's own band (jacket to jacket) passes straight through the tee - laid over
+      // it, the solid riser walled every lane of the trunk for seven columns. The riser stops
+      // at the trunk's jacket, and its lanes open into the trunk there as ports.
+      const inBand = (x, y) => {
+        const yr = line.ys[Math.max(0, Math.min(line.ys.length - 1, x - line.x0))];
+        return y >= yr - 1 && y <= yr + BORE;
+      };
       for (let r = 0; r < BORE; r += 1) {
         const x = anchor.x - 3 + r;
-        for (let y = yA; y <= yB; y += 1) layCell(line, x, y, pipeColor(r, y), r, true);
+        for (let y = yA; y <= yB; y += 1) if (!inBand(x, y)) layCell(line, x, y, pipeColor(r, y), r, true);
+      }
+      // (N84: the jacket stands up the riser too - one design, turned)
+      for (let y = yA; y <= yB; y += 1) {
+        if (!inBand(anchor.x - 4, y)) jacketCell(line, anchor.x - 4, y, pipeColor(-1, y));
+        if (!inBand(anchor.x + 4, y)) jacketCell(line, anchor.x + 4, y, pipeColor(BORE, y));
+      }
+      {
+        const above = anchor.y < lineY;
+        for (const lane of LANES) {
+          if (anchor.resource && lane.resource !== anchor.resource) continue;
+          const x = anchor.x - 3 + lane.row;
+          const yr = line.ys[Math.max(0, Math.min(line.ys.length - 1, x - line.x0))];
+          for (const y of above ? [yr - 1, yr] : [yr + BORE - 1, yr + BORE]) {
+            if (boreCell(line, x, y) && (mat[y * W + x] & ID_MASK) === M.PIPE) PW.setLayer(world, 'paint', x, y, rgb(tone(lane.channel, 1.5)));
+          }
+        }
       }
       layFlange(line, anchor.x, yA - 1);
       if (yB > lineY + BORE - 1) layFlange(line, anchor.x, yB + 1);
@@ -587,93 +716,229 @@
         layCell(line, xc + dx, y, corner ? [150, 156, 164] : tone(CASING, 0.7));
       }
     }
-    // One corner of a well as a swept elbow. horiz: which side of the shaft the run lies
-    // (-1 left, +1 right); vert: which way the shaft leaves this level (+1 down, -1 up).
-    // Rings about the inner corner: ring index = BORE - distance, so at the box edges the
-    // rings become the straight cross-sections they meet (casing to casing, lane to lane).
-    function layElbow(line, xc, yLevel, horiz, vert) {
-      const cx = xc + horiz * 3;
-      const cy = yLevel + (vert > 0 ? BORE : -1);
-      for (let x = xc - 3; x <= xc + 3; x += 1) {
-        for (let y = yLevel - 1; y <= yLevel + BORE; y += 1) {
-          const cross = BORE - Math.hypot(x - cx, y - cy);
-          if (cross < -1) {
-            // beyond the sweep: the squared outer corner goes back to the bed
-            if (takeUp(line, x, y)) PW.setLayer(world, 'pipe', x, y, 0);
-            continue;
-          }
-          if (cross < 0) continue;   // (the soft ring between arc and bed keeps what it has)
-          const r = Math.max(0, Math.min(BORE - 1, Math.round(cross)));
-          layCell(line, x, y, pipeColor(r, x + y), r);
+    // A solid cell of a fitting's body (N83): lays real tube even over a bare void (`through`),
+    // and clears any carved-lane mark it covers so no stale channel haunts the body.
+    function fillCell(line, x, y, color) {
+      const id0 = mat[y * W + x] & ID_MASK;
+      // (already the line's own body: repaint only - a re-laid fitting rewriting every cell
+      // fed the structure system churn it never needed)
+      if (id0 === M.PIPE && PW.getOwner(world, x, y) === line.owner) {
+        if (PW.getFlags(world, x, y) & FLAG.HOLLOW) PW.setFlag(world, x, y, FLAG.HOLLOW, false);
+        PW.setLayer(world, 'back', x, y, 0);
+        PW.setLayer(world, 'paint', x, y, rgb(color));
+        return;
+      }
+      // The line's own carved channel becomes body directly: layCell would read the open
+      // cell with its lane back wall as sheltered space and only paint it. Standing water
+      // is ejected first, never buried (the N42O rule, as in takeUp).
+      if (id0 !== M.PIPE && (PW.getFlags(world, x, y) & FLAG.HOLLOW) && PW.getOwner(world, x, y) === line.owner) {
+        if (id0 === M.WATER && world.particles) {
+          world.particles.spawn(x + 0.5, y + 0.5, 0, -30, M.WATER, 0, PW.PARTICLE.WATER, 6);
         }
+        PW.set(world, x, y, M.PIPE, { quiet: true, lay: true });
+        PW.setFlag(world, x, y, FLAG.HOLLOW, false);
+        PW.setLayer(world, 'back', x, y, 0);
+        PW.setLayer(world, 'paint', x, y, rgb(color));
+        return;
+      }
+      if (!layCell(line, x, y, color, undefined, true, true)) return;
+      if ((mat[y * W + x] & ID_MASK) === M.PIPE) {
+        PW.setFlag(world, x, y, FLAG.HOLLOW, false);
+        PW.setLayer(world, 'back', x, y, 0);
       }
     }
-    function layWells(line, k0 = 1, k1 = Infinity) {
-      const dropped = (line.wells || []).filter((w) => w.k >= k0 && w.k <= k1);
-      line.wells = (line.wells || []).filter((w) => w.k < k0 || w.k > k1);
-      for (let k = Math.max(1, k0); k <= Math.min(line.ys.length - 1, k1); k += 1) {
-        const a = line.ys[k - 1], b = line.ys[k];
-        const dy = Math.abs(b - a);
-        // N81: a 2-cell step is NOT flat enough to leave bare - the neighbour casing juts
-        // into the lane and walls the cargo (the user's blocked vertical run). It is a
-        // small mitred bend like the 3-6 steps: the bore's rows carried across the joint,
-        // lanes unbroken. (One cell is a true flat run.)
-        if (dy <= 1) continue;
-        const xc = line.x0 + k;
-        const yTop = Math.min(a, b), yBot = Math.max(a, b) + BORE - 1;
-        // A shaft standing within a few columns of another is merged into it instead (the
-        // user's note on the regrowing span: less wide, more tubular - one clean well where
-        // an oscillating fresh path would have raised a curtain of them).
-        const near = dy > 6 && line.wells.find((w) => Math.abs(w.x - xc) <= 9 && yTop <= w.y1 && yBot >= w.y0);
-        if (near) {
-          const y0 = Math.min(near.y0 + 1, yTop), y1 = Math.max(near.y1 - 1, yBot);
-          for (let r = 0; r < BORE; r += 1) {
-            for (let y = y0; y <= y1; y += 1) layCell(line, near.x - 3 + r, y, pipeColor(r, y), r);
-          }
-          layFlange(line, near.x, y0 - 1);
-          layFlange(line, near.x, y1 + 1);
-          near.y0 = y0 - 1; near.y1 = y1 + 1;
-          continue;
-        }
-        if (dy <= 6) {
-          // A small step is a mitred bend, not a shaft: the bore's own rows carried across the
-          // joint at both columns, lanes unbroken - the pipe just turns.
-          for (const x of [xc - 1, xc]) {
-            for (let y = yTop; y <= yBot; y += 1) {
-              const r = Math.max(0, Math.min(BORE - 1, y - (x === xc ? b : a)));
-              layCell(line, x, y, pipeColor(r, x), r);
-            }
-          }
-          continue;
-        }
-        for (let r = 0; r < BORE; r += 1) {
-          const x = xc - 3 + r;
-          for (let y = yTop; y <= yBot; y += 1) layCell(line, x, y, pipeColor(r, y), r);
-        }
-        // N34: the pipe compensates through the bend - each corner of the well is a swept
-        // elbow (the user's elbow-fitting references), one continuous pipe, never two bores
-        // butted into a squared joint. The corner box is re-tiled as rings about the bend's
-        // tight inner corner - casing sweeping the outside, the lane bands carried round,
-        // casing again at the inner radius - and the squared outer corner beyond the sweep
-        // is given back to the bed, so the silhouette itself turns.
-        const drop = b > a;
-        layElbow(line, xc, Math.min(a, b), drop ? -1 : 1, 1);
-        layElbow(line, xc, Math.max(a, b), drop ? 1 : -1, -1);
-        line.wells.push({ k, x: xc, y0: yTop - 1, y1: yBot + 1 });
-        stats.wells = (stats.wells || 0) + 1;
+    // The cells of one fitting: key (y*W+x) -> (idx+1)*4 + kind, idx the ring (-1 and BORE the
+    // jacket, 0..BORE-1 the bore's rows), kind 0 a ramp column, 1 the shaft, 2 a turn.
+    // A fitting serves a run of level changes that lean the same way with their boxes
+    // touching (a staircase the grade left, every 2-row step its own box once - they cut each
+    // other's lanes). It meets the runs where they actually arrive, just outside its span.
+    // Gentle enough (a row a column or less) it is a RAMP: the bore laid on a slant across
+    // the span, every lane running straight through. Steeper, it ramps a row a column into
+    // a SHAFT at its tallest step, between two swept TURNS - each a set of concentric
+    // quarter rings about the turn's inner corner, so the lane on the outside of the run
+    // stays on the outside round the turn and no channel ever crosses another (the old
+    // elbows reversed the order against the shaft and dead-ended 45 of 51 lane paths on
+    // seed 7). Past the jacket ring the outer corner goes back to the bed: the silhouette
+    // itself sweeps. `tops` is the level every ramp and shaft-face column now has.
+    // (p..q: the columns the fitting rewrites, met to the runs at p-1 and q+1; kc0 its tallest
+    // step. A core bed's carry zone is never written - the bundle is carried inside it.)
+    function fittingCells(line, p, q, kc0) {
+      const cells = new Map();
+      const put = (x, y, idx, kind) => {
+        if (x < 1 || y < 1 || x >= W - 1 || y >= H - 1 || throughAt(line, x)) return;
+        cells.set(y * W + x, (idx + 1) * 4 + kind);
+      };
+      const at = (kk) => line.ys[Math.max(0, Math.min(line.ys.length - 1, kk))];
+      const A0 = at(p - 1), B0 = at(q + 1), D = B0 - A0, s = Math.sign(D);
+      const span = q - p + 1;
+      const tops = new Map();
+      cells.tops = tops;
+      cells.kc = -1;
+      if (Math.abs(D) <= span + 1 || span < 7) {
+        for (let kk = p; kk <= q; kk += 1) tops.set(kk, Math.round(A0 + D * (kk - p + 1) / (span + 1)));
+      } else {
+        const kc = Math.max(p + 3, Math.min(q - 3, kc0));
+        for (let kk = p; kk <= kc - 4; kk += 1) tops.set(kk, A0 + s * (kk - p + 1));
+        for (let kk = q; kk >= kc + 4; kk -= 1) tops.set(kk, B0 - s * (q + 1 - kk));
+        const A = kc - 4 >= p ? tops.get(kc - 4) : A0, B = kc + 4 <= q ? tops.get(kc + 4) : B0;
+        cells.kc = kc;
+        shaftCells(put, line.x0 + kc, A, B);
+        // (the shaft's own columns read their faces' levels: a single clean step at kc)
+        for (let kk = kc - 3; kk <= kc + 3; kk += 1) tops.set(kk, kk < kc ? A : B);
       }
-      // A well whose step a fresh route smoothed away takes its shaft with it: the abandoned
-      // vertical is dug up (keeping the live bore and every well still standing).
-      for (const w of dropped) {
-        if (line.wells.some((q) => q.k === w.k)) continue;
-        for (let x = w.x - 3; x <= w.x + 3; x += 1) {
-          const kk = x - line.x0;
-          for (let y = Math.max(1, w.y0); y <= Math.min(H - 2, w.y1); y += 1) {
-            if (kk >= 0 && kk < line.ys.length && y >= line.ys[kk] - 1 && y <= line.ys[kk] + BORE) continue;
-            if (line.wells.some((q) => Math.abs(x - q.x) <= 3 && y >= q.y0 && y <= q.y1)) continue;
-            takeUp(line, x, y);
-            PW.setLayer(world, 'pipe', x, y, 0);
+      for (const [kk, top] of tops) {
+        if (cells.kc >= 0 && Math.abs(kk - cells.kc) <= 3) continue;
+        for (let r = -1; r <= BORE; r += 1) put(line.x0 + kk, top + r, r, 0);
+      }
+      return cells;
+    }
+    function shaftCells(put, xc, A, B) {
+      const down = B > A, hi = Math.min(A, B), lo = Math.max(A, B);
+      const x0 = xc - 3, x1 = xc + 3;
+      const colIdx = (c) => (down ? BORE - 1 - c : c);
+      for (let y = hi + BORE; y < lo; y += 1) for (let c = -1; c <= BORE; c += 1) put(x0 + c, y, colIdx(c), 1);
+      const turn = (y0, y1, cx, cy, idxOf, farX) => {
+        for (let y = y0; y <= y1; y += 1) {
+          for (let x = Math.min(x0, farX); x <= Math.max(x1, farX); x += 1) {
+            const ring = Math.floor(Math.hypot(x - cx, y - cy));
+            if (ring <= BORE) put(x, y, idxOf(ring), 2);
           }
+        }
+      };
+      // the turn off the higher run (the run on the left when the line steps down), and the
+      // turn onto the lower run (on the right when it steps down)
+      turn(hi - 1, hi + BORE - 1, down ? x0 - 0.5 : x1 + 0.5, hi + BORE - 0.5,
+        (ring) => (ring >= BORE ? -1 : BORE - 1 - ring), down ? x1 + 1 : x0 - 1);
+      turn(lo, lo + BORE, down ? x1 + 0.5 : x0 - 0.5, lo - 0.5, (ring) => ring, down ? x0 - 1 : x1 + 1);
+    }
+    // A turn's colour: the ring's own tone, ribbed lanes, no collar or tendril cut across it.
+    function plainColor(idx, along) {
+      if (idx < 0) return JACKET_LIT;
+      if (idx >= BORE) return JACKET_DARK;
+      if (idx === 0) return CASING_LIT;
+      if (idx === BORE - 1) return CASING_DARK;
+      if (idx === 2 || idx === 4) return DIVIDER;
+      const ch = LANES[(idx - 1) >> 1].channel;
+      return (along & 1) ? tone(ch, 1.5) : tone(ch, 0.66);
+    }
+    function layFitting(line, p, q, kc0, others) {
+      const cells = fittingCells(line, p, q, kc0);
+      const slim = inIntake(line, line.x0 + ((p + q) >> 1));
+      // Clear what the fitting's own columns no longer hold (the run laid there before it,
+      // an old fitting) - never a riser standing in them.
+      let y0 = Infinity, y1 = -Infinity;
+      for (const key of cells.keys()) { const y = (key / W) | 0; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+      for (let kk = p; kk <= q; kk += 1) {
+        const yr = line.ys[Math.max(0, Math.min(line.ys.length - 1, kk))];
+        y0 = Math.min(y0, yr - 2); y1 = Math.max(y1, yr + BORE + 1);
+      }
+      for (let x = line.x0 + p; x <= line.x0 + q; x += 1) {
+        if (throughAt(line, x)) continue;
+        for (let y = Math.max(1, y0 - 1); y <= Math.min(H - 2, y1 + 1); y += 1) {
+          const key = y * W + x;
+          if (cells.has(key) || others.some((w) => w.cells && w.cells.has(key))) continue;
+          if (line.risers.some((q) => Math.abs(x - q.x) <= 8 && y >= Math.min(q.y0, q.tTop ?? q.y0) - 1 && y <= Math.max(q.y1, q.tBot ?? q.y1) + 1)) continue;
+          if (takeUp(line, x, y)) PW.setLayer(world, 'pipe', x, y, 0);
+        }
+      }
+      for (const [key, v] of cells) {
+        const x = key % W, y = (key - x) / W;
+        const idx = (v >> 2) - 1, kind = v & 3;
+        const along = kind === 0 ? x : kind === 1 ? y : x + y;
+        const color = idx < 0 || idx >= BORE ? (kind === 2 ? plainColor(idx, along) : pipeColor(idx, along))
+          : slim ? intakeColor(idx, along) : kind === 2 ? plainColor(idx, along) : pipeColor(idx, along);
+        if (idx < 0 || idx >= BORE) jacketCell(line, x, y, color, true);
+        else if (idx & 1) layCell(line, x, y, color, idx, false, true);
+        else fillCell(line, x, y, color);
+      }
+      // The fitting IS the run through its columns: their levels are now what was laid (the
+      // watch, the cargo and the sweeps all read the bore off ys - a staircase or a one-column
+      // spike left in it would read as wounds under a whole ramp, and re-lay differently).
+      for (const [kk, top] of cells.tops) if (kk >= 0 && kk < line.ys.length) line.ys[kk] = top;
+      return cells;
+    }
+    // Is (x, y) one of a standing fitting's own cells? (the sweeps must leave them be)
+    function fittingAt(line, x, y) {
+      const key = y * W + x;
+      for (const list of [line.wells || [], line.joints || []]) {
+        for (const w of list) {
+          if (x < w.xa || x > w.xb || y < w.y0 || y > w.y1) continue;
+          if (w.cells.has(key)) return true;
+        }
+      }
+      return false;
+    }
+    function layWells(line, k0 = 1, k1 = Infinity) {
+      line.joints = line.joints || [];
+      line.wells = line.wells || [];
+      // (a fitting spanning the window's edge is re-laid whole, never cut in two)
+      const meets = (w) => w.kl >= k0 && w.k <= k1;
+      for (const w of [...line.wells, ...line.joints]) if (meets(w)) { k0 = Math.min(k0, w.k); k1 = Math.max(k1, w.kl); }
+      const dropped = [...line.wells, ...line.joints].filter(meets);
+      line.wells = line.wells.filter((w) => !meets(w));
+      line.joints = line.joints.filter((w) => !meets(w));
+      const len = line.ys.length;
+      for (let k = Math.max(1, k0); k <= Math.min(len - 1, k1); k += 1) {
+        const step = line.ys[k] - line.ys[k - 1];
+        // N81: a 2-cell step is NOT flat enough to leave bare - the neighbour casing juts
+        // into the lane and walls the cargo. One cell is a true flat run; everything over
+        // that is a fitting (N83), ramp or shaft.
+        if (Math.abs(step) <= 1) continue;
+        // the run of steps leaning the same way whose boxes touch this one's
+        let kl = k;
+        for (let j = k + 1; j < len && j <= kl + 8; j += 1) {
+          const d = line.ys[j] - line.ys[j - 1];
+          if (d && Math.sign(d) !== Math.sign(step)) break;
+          if (Math.abs(d) >= 2) kl = j;
+        }
+        // The span it rewrites, kept out of any core bed's carry zone: a fitting against a bed
+        // meets the bed's own pinned level at the zone's edge (seed 7: a shaft whose box
+        // reached into a core unit, its lanes refused by the core's own cells).
+        let p = k - 3, q = kl + 3, kc0 = k, best = -1;
+        for (let kk = k; kk <= kl; kk += 1) { const d = Math.abs(line.ys[kk] - line.ys[kk - 1]); if (d > best) { best = d; kc0 = kk; } }
+        for (const c of line.cores) {
+          const zs = c.x - (HOP - 1) - line.x0, ze = c.x + (HOP - 1) - line.x0;
+          if (ze < p - 1 || zs > q + 1) continue;
+          if (zs + ze > k + kl) q = Math.min(q, zs - 1); else p = Math.max(p, ze + 1);
+        }
+        if (q < p) { k = kl; continue; }
+        // (cut short by a bed and too steep to ramp: the free side gives the shaft its room)
+        const rise = Math.abs(line.ys[Math.min(len - 1, q + 1)] - line.ys[Math.max(0, p - 1)]);
+        if (rise > q - p + 2 && q - p + 1 < 9) {
+          if (q < kl + 3 && p === k - 3) p = Math.max(1, q - 8);
+          else if (p > k - 3 && q === kl + 3) q = Math.min(len - 2, p + 8);
+        }
+        const others = [...line.wells, ...line.joints];
+        const cells = layFitting(line, p, q, kc0, others);
+        let y0 = Infinity, y1 = -Infinity, xa = Infinity, xb = -Infinity;
+        for (const key of cells.keys()) {
+          const y = (key / W) | 0, x = key - y * W;
+          if (y < y0) y0 = y; if (y > y1) y1 = y; if (x < xa) xa = x; if (x > xb) xb = x;
+        }
+        const kc = cells.kc;
+        const rec = { k: p, kl: q, x: line.x0 + (kc >= 0 ? kc : (p + q) >> 1), xa, xb, y0, y1, cells };
+        if (kc >= 0) {
+          line.wells.push(rec);
+          stats.wells = (stats.wells || 0) + 1;
+        } else {
+          line.joints.push(rec);
+        }
+        k = kl;
+      }
+      // A fitting whose step a fresh route smoothed away (or moved) takes its old cells
+      // with it: whatever no standing fitting and no live run column holds is dug up.
+      const held = (x, y, key) => {
+        const kk = x - line.x0;
+        if (kk >= 0 && kk < line.ys.length && y >= line.ys[kk] - 1 && y <= line.ys[kk] + BORE) return true;
+        return line.wells.some((q) => q.cells && q.cells.has(key)) || line.joints.some((q) => q.cells && q.cells.has(key));
+      };
+      for (const w of dropped) {
+        if (!w.cells) continue;
+        for (const key of w.cells.keys()) {
+          const x = key % W, y = (key - x) / W;
+          if (held(x, y, key)) continue;
+          takeUp(line, x, y);
+          PW.setLayer(world, 'pipe', x, y, 0);
         }
       }
     }
@@ -967,7 +1232,7 @@
       }
       line.ys[k] = ny;
       layColumn(line, line.x0 + k);
-      layWells(line, Math.max(1, k - 1), Math.min(line.ys.length - 1, k + 1));
+      layWells(line, Math.max(1, k - FIT), Math.min(line.ys.length - 1, k + FIT));
       if (rr) {
         const fresh = layRiser(line, { x: rr.x, y: rr.anchorY, flow: rr.flow, kind: rr.kind, resource: rr.resource, building: rr.building, op: rr.op });
         Object.assign(rr, { y0: fresh.y0, y1: fresh.y1, occ: fresh.occ, tTop: fresh.tTop, tBot: fresh.tBot });
@@ -999,8 +1264,8 @@
           if (r >= -1 && r <= BORE) continue;
           const y = ny + r;
           if (y < 1 || y >= H - 1) continue;
-          if ((line.wells || []).some((w) => Math.abs(x - w.x) <= 3 && y >= w.y0 && y <= w.y1)) continue;
-          if (line.risers.some((q) => (Math.abs(x - q.x) <= 3 && y >= q.y0 - 1 && y <= q.y1 + 1)
+          if (fittingAt(line, x, y)) continue;
+          if (line.risers.some((q) => (Math.abs(x - q.x) <= 4 && y >= q.y0 - 1 && y <= q.y1 + 1)
             || (Math.abs(x - q.x) <= 8 && y >= (q.tTop ?? q.y0) && y <= (q.tBot ?? q.y1)))) continue;   // (shaft, and the T-valve's band out to +-8)
           takeUp(line, x, y);
           PW.setLayer(world, 'pipe', x, y, 0);
@@ -1020,10 +1285,10 @@
           if (r >= -1 && r <= BORE) continue;
           const y = y0 + r;
           if (y < 1 || y >= H - 1) continue;
-          if ((line.wells || []).some((w) => Math.abs(x - w.x) <= 3 && y >= w.y0 && y <= w.y1)) continue;
+          if (fittingAt(line, x, y)) continue;
           // (a riser's fresh vertical is the line's own and stays; old casing in its columns
           // but outside it is wreckage like any other - a pump must not shelter a snarl)
-          if (line.risers.some((q) => (Math.abs(x - q.x) <= 3 && y >= q.y0 - 1 && y <= q.y1 + 1)
+          if (line.risers.some((q) => (Math.abs(x - q.x) <= 4 && y >= q.y0 - 1 && y <= q.y1 + 1)
             || (Math.abs(x - q.x) <= 8 && y >= (q.tTop ?? q.y0) && y <= (q.tBot ?? q.y1)))) continue;   // (shaft, and the T-valve's band out to +-8)
           if (takeUp(line, x, y)) PW.setLayer(world, 'pipe', x, y, 0);
         }
@@ -1231,7 +1496,7 @@
         line.ys[k] = ny;
       }
       for (let k = a; k <= bk; k += 1) layColumn(line, line.x0 + k);
-      layWells(line, a, bk);
+      layWells(line, Math.max(1, a - FIT), Math.min(line.ys.length - 1, bk + FIT));
       relayMovedRisers(line, rsnap);
       enforceGrade(line, a, bk);   // N81: the window's seams obey the law
       // N3: the re-lay closes its own window now - stale marks clear here, not when the
