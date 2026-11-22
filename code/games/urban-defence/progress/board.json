@@ -1,5 +1,28 @@
 [
  {
+  "title": "Fable: N82 STUDY - Terraria 1.2 worldgen read (behaviour only, no code copied); five takes reported, build still waits on the plan go",
+  "author": "Fable",
+  "time": "2026-11-21",
+  "note": "Source extracted untrusted to Tempclaude-scratch\refs-terraria-12 (never run). Takes: (1) terrain = two coupled random-walked lines (surface + rock top) in runs of 5-40 columns with slope modes and geometric step sizes, hard clamps, calm coast shelves at the edges; (2) ONE primitive - a tapered drifting blob-walker with a conversion policy - makes ore veins, caves, biome tongues, hills and flooded pockets, just different parameters; (3) one-way pass order: strata, material swaps, carving, biomes, structures, liquids settled, cleanup, dressing last - nothing later ever re-levels earlier work; (4) placement law: sample-validate-retry with attempt budgets, probe-drop to find ground, build solid then hollow the rooms, underground rooms conform to their cavity, overlap guarded by claimed back-walls; (5) the world is born at rest (liquids settled and sand dropped at gen). All five map onto our pw passes; details in the chat reply. Our own code throughout.",
+  "shots": []
+ },
+ {
+  "title": "Fable: N88-N90 PLAN - basin pumps as water cores, roof cores over underground basins, seeds on enemy rubble (awaiting go; builds after N87)",
+  "author": "Fable",
+  "time": "2026-11-21",
+  "note": "Order honoured: N86 is landed, N87 (core re-founding) builds first on the go-ahead - N88-N90 lean on the same core code.\n- N88: underground water basins become a real terrain feature sized like surface lakes (today cave pools are 5-12 rows deep; lakes are half 160-600, depth 160-280 - the new flooded caverns join that class). ALL pumps become one design, the user's sketch: the pump IS a water core, set in a carved pocket on the basin's flank just under the waterline, its slim intake tap to the trunk kept (tee flanges, eye). The old under-bed machine chamber retires. Pumps keep the N62 rule: they METER the basin, never drain it. Farms connect to basins through their pumps - water originates only at pump cores; the farm's branch meets the trunk at the pump's tee.\n- N89: each underground basin gets a water core socketed into the cavern ROOF above the water (pocket in roof rock, owned mount ring), a pump in the economy like any other; the line reaches it by a bored well down from the surface run (the pit-riser precedent). Roof collapses - the core floats (N86) and waits over water (N87's water gate).\n- N90: a seed placed on the rubble of destroyed enemy territory replaces capture: it plants into the settled rubble line with N87's seat/underpin and the rebuild eats the wreck; overlapping dead enemy claims retire. Enemy pipes NEVER connect (lines are per-side; cross-side unite asserted away) and lines AVOID each other where they overlap: the newer run dips under the standing one with N81-legal swept transitions, clearing bore+casing by margin; crossings read as two separate casings, no shared tees. Player seed tool is a pw-app edit - PS gets the heads-up first.\n- Proof: new/extended suites - basin sizing + pump-core attachment on 7/3/11, a rival-lines check (no cell shared by two sides' lines, cargo passes the crossing on both), seed-on-rubble end-to-end. Gen change re-rolls det worlds: re-baseline window coordinated with PS like 000fc62.",
+  "shots": [
+   "n88-sketch.jpg"
+  ]
+ },
+ {
+  "title": "Fable: N87 PLAN - a floating core re-founds its bed at the new surface; the building rebuilds to the new terrain (awaiting go)",
+  "author": "Fable",
+  "time": "2026-11-21",
+  "note": "The standing law: a core floating over its wreck no longer waits for its OLD bed to come back - it lays a NEW foundational bed flush with the ground as it now lies (rubble heap or crater floor), and the building re-raises from that bed to fit the new terrain.\n- WHEN: the core keeps its N86 float (50 cells clear) while the ground still moves; once the wreck is at rest it descends at the N86 speed onto its new seat. Ground moves again - it climbs back and waits; the seat always tracks the CURRENT surface.\n- THE BED: seat picked inside the old lot (core's column first, a few columns' slide to gentler lying); bed TOP flush with the local surface - up on a heap, down on a crater floor; proud loose cells taken as spoil, hollows under the span packed with owned masonry to the first firm cell (the N79 underpin move) so it bears on packed ground, not scree; the tier's own bed size (N35 main/descendant/sub hold).\n- THE BUILDING: the seed-grow machinery re-aimed - same type/style/level/variant, fresh canvas anchored on the re-founded core, ground line averaged over the NEW footprint, the gift below ground set whole, underbody bedded to the rubble line, body above a blueprint repair raises cell by cell. The rebuild EATS the wreck: the debris-recycle lane takes the rubble as material as the walls go up. Multi-core: highest-tier survivor anchors; the other balls descend into their matching new vaults; a lost ball leaves an empty vault (re-seeding is a later slice).\n- GATES: gentle-ground rule stays (too-wild crater - the core floats and re-tests as the rubble settles); water-filled craters wait; neutral ruins stay ruins; blasted again later - the cycle re-runs.\n- CHECK: new suite pw-refound on seeds 7/3/11 - flat, heap and crater variants; bed flush with surface, no air seams under the gift, repair visibly raises it, rubble consumed, pipes re-thread, nothing collapses.\nAll my files (pw-cores, pw-seeds, pw-growth); PS gets a heads-up (their rubble scenes will start seeing wrecks rebuild themselves). Building starts on the go-ahead.",
+  "shots": []
+ },
+ {
   "title": "Fable: pipe bends swept + flow never blocks, three core tiers, cores clear the rubble by 50, no core cut off (N81/N35/N86/N79/N80; d616a10)",
   "author": "Fable",
   "time": "2026-11-21",
@@ -2515,6 +2538,13 @@
      {
       "name": "Growth and economy",
       "items": [
+       {
+        "id": "N84",
+        "owner": "F",
+        "step": "E",
+        "pct": 0,
+        "text": "Resource pipe outer layer more obvious and thicker (user, 2026-11-21, reference shot pipe2-cross-25800): the casing of each pipe should read clearly against the lanes inside it. Keep the cyberpunk look and keep the lanes continuous (N83). Reply with a before and after shot."
+       },
        {
         "id": "N83",
         "owner": "F",
