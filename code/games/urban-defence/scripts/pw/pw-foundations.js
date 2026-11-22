@@ -50,6 +50,10 @@
   // ---- Cells ----------------------------------------------------------------------------------------
   function put(world, x, y, mat, color, owner) {
     if (x < 1 || y < 1 || x >= world.width - 1 || y >= world.height - 1) return;
+    // N83: never over the supply bundle - its casing and its carved lanes alike. The
+    // wall parts around the pipe; the pipe sleeves on through the works.
+    const was = PW.get(world, x, y) & ID_MASK;
+    if (was === M.PIPE || (PW.getFlags(world, x, y) & PW.FLAG.HOLLOW)) return;
     PW.set(world, x, y, mat, { quiet: true });
     PW.setLayer(world, 'paint', x, y, rgb(color));
     PW.setLayer(world, 'deco', x, y, 0);
@@ -57,6 +61,7 @@
   }
   function dig(world, x, y) {
     const id = PW.get(world, x, y) & ID_MASK;
+    if (id === M.PIPE || (PW.getFlags(world, x, y) & PW.FLAG.HOLLOW)) return;   // N83: the bundle stands
     if (id !== M.AIR && id !== M.BEDROCK) PW.set(world, x, y, M.AIR, { quiet: true });
     PW.setLayer(world, 'deco', x, y, 0);
   }
@@ -237,10 +242,11 @@
 
   // ---- Downhill: deck, stage and the structure under them ----------------------------------------------
   // How the stage on `side` is left (no cells written): down a 1:2 vehicle ramp from a hangar, a
-  // 45° flight of steps where it meets the slope within a short run, a ladder where the hill falls
-  // away about as fast as the steps would, or level with the ground.
+  // flight of steps (4 down per 5 along, 38.7° - under the tanks' 43° limit) where it meets the
+  // slope within a short run, a ladder where the hill falls away about as fast as the steps
+  // would, or level with the ground.
   const RUN = 96;
-  const treadRow = (G, k) => G + 4 * (((k - 1) >> 2) + 1);
+  const treadRow = (G, k) => G + 4 * (Math.floor((k - 1) / 5) + 1);
   function stagePlan(p, side) {
     const { G, natural } = p;
     const end = (side < 0 ? p.x0 : p.x1) + side * STYLE[p.style].stage;
@@ -416,7 +422,7 @@
         }
       }
     }
-    // Down from the end of the stage: a 45° flight of steps where it meets the slope within a
+    // Down from the end of the stage: a flight of steps (treadRow: 38.7°) where it meets the slope within a
     // short run (timber treads on posts, a solid stone perron, concrete treads on columns), or a
     // ladder where the hill falls away about as fast as the steps would.
     const stepMat = style === 'asian' ? M.WOOD : style === 'gothic' ? M.MASONRY : M.CONCRETE;

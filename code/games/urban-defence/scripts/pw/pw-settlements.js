@@ -287,6 +287,7 @@
     for (let x = x0; x <= x1; x += 1) ys[x - x0] = typeof surface === 'function' ? surface(x) : surface;
     const sorted = Array.from(ys).sort((p, q) => p - q);
     const field = { x0, x1, y: sorted[sorted.length >> 1], ys, growth: 0.55 + random() * 0.4, stalks: [], columns: 0, alive: 0 };
+    let first = -1, last = -1;
     for (let x = x0; x <= x1; x += 1) {
       const padY = ys[x - x0];
       if (PW.getFlags(world, x, padY) & FLAG.ROAD) continue;
@@ -301,7 +302,13 @@
         PW.setFlag(world, x, y, FLAG.FIELD);
         sown = true;
       }
-      if (sown) field.columns += 1;
+      if (sown) { field.columns += 1; if (first < 0) first = x; last = x; }
+    }
+    // The field ends where its sowing ends: a road or a yard at its edge trims it, never
+    // stands inside it unsown (seed 11: a street end over farm 24's first five columns).
+    if (first > x0 || (last >= 0 && last < x1)) {
+      field.ys = ys.slice(first - x0, last - x0 + 1);
+      field.x0 = first; field.x1 = last;
     }
     field.alive = field.columns;
     drawCrop(world, field);
@@ -1559,9 +1566,14 @@
           if (PW.getOwner(world, x, y) === id && (PW.get(world, x, y) & 63) !== 0) { base = y; break; }
         }
         if (base < 0) continue;
-        let gap = 0;
-        while (gap < 9 && (PW.get(world, x, base + 1 + gap) & 63) === 0) gap += 1;
-        if (gap === 0 || gap >= 9) continue;   // seated, or spanning a room by design
+        let gap = 0, bore = false;
+        while (gap < 9 && (PW.get(world, x, base + 1 + gap) & 63) === 0) {
+          // N83: an open cell flagged HOLLOW is the supply bundle's carved lane, not a
+          // seam to pack - the fort spans the bundle like any other room.
+          if (PW.getFlags(world, x, base + 1 + gap) & PW.FLAG.HOLLOW) { bore = true; break; }
+          gap += 1;
+        }
+        if (bore || gap === 0 || gap >= 9) continue;   // seated, bore below, or spanning a room by design
         for (let g = 1; g <= gap; g += 1) {
           PW.set(world, x, base + g, M.MASONRY, { quiet: true });
           PW.setOwner(world, x, base + g, id);
