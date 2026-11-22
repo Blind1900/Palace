@@ -47,6 +47,19 @@
       job.printAt = 0;   // the prints (N50: the pump) are looked over again on any damage
       jobs.set(id, job);
     };
+    // N87: a building re-founded at a new level keeps its blueprint but not its old work - the
+    // queue holds world cells of the old placement. The job starts over from the new one, its
+    // salvage carried across - and the wreck packed into the new footing is salvage too, worth
+    // what the same debris recycled would have been (the rebuild eats its own wreck).
+    const refit = (id, packed = 0) => {
+      const old = jobs.get(id);
+      jobs.delete(id);
+      notify(id);
+      const job = jobs.get(id);
+      if (!job) return;
+      job.pool = (old ? old.pool || 0 : 0) + packed * HM_PER_DEBRIS;
+      stats.hmFromDebris += packed * HM_PER_DEBRIS;
+    };
     // The flat list of a building's print cells (N50: world-drawn works like the lake pump,
     // captured at generation, rebuilt by the same translators as the canvas).
     const printCells = (b) => (b.prints ? (b.printList || (b.printList = b.prints.flatMap((p) => p.cells))) : EMPTY_PRINT);
@@ -62,7 +75,7 @@
     // a building's cores are out of their vaults, their whole descent corridor is left unscanned:
     // a risen core IS its own cells and brings them back down with it, and nothing may be rebuilt
     // across its way home. Once the cores settle, the corridor is scanned like everything else.
-    const inUnit = (b, x, y) => !!b.coresOpen && (b.cores || []).some((core) => !core.orb && !core.settled && Math.abs(x - core.x) <= 14
+    const inUnit = (b, x, y) => !!b.coresOpen && (b.cores || []).some((core) => !core.orb && !core.settled && !core.lost && Math.abs(x - core.x) <= 14
       && y >= Math.min(core.y, core.homeY ?? core.y) - 18 && y <= (core.homeY ?? core.y) + 11);
     function scan(b, job) {
       const c = b.canvas, W = c.width;
@@ -336,6 +349,9 @@
         const risen = PW.REBUILD_RUINS && b.ruined && (!!b.underConstruction
           || (b.cores || []).some((core) => core.free || core.settled) || !!b.coresHome);
         if (b.ruined && !risen) continue;
+        // N87: while its balls float and the new bed is being decided, the crews keep off the
+        // lot - eating the heap would carry the ground the bed must sit on away under it.
+        if (b.refoundPending) continue;
         // A parked job stood down starved: its queue and seen set are let go (tens of
         // thousands of entries per tower - the long war's memory leak, PS's soak). It wakes
         // when HM reaches its side's stock, or when fresh damage calls notify (scanCol 0),
@@ -394,7 +410,7 @@
         }
       }
     }
-    return { step, notify, stats, jobs };
+    return { step, notify, refit, stats, jobs };
   }
 
   PW.createRepair = createRepair;
