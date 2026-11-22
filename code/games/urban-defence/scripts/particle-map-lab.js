@@ -119,7 +119,7 @@
     const frame = document.createElement('iframe');
     frame.hidden = true;
     frame.title = 'Temporary map generator';
-    frame.src = 'index.html?particleMapLab=1';
+    frame.src = 'beta-legacy.html?particleMapLab=1';   // (the old beta, since index.html became the game)
     try {
       const loaded = new Promise((resolve, reject) => {
         const timeout = setTimeout(() => reject(new Error('Map generator timed out')), 15000);

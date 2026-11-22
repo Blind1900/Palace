@@ -509,9 +509,11 @@
     // ---- Cities ------------------------------------------------------------------------------
     function note(city, text) { city.notes.push(text); if (city.notes.length > 4) city.notes.shift(); }
     const claimSpan = (c) => [c.edge.left - CLAIM, c.edge.right + CLAIM];
+    // (N6: a fallen city - every core of it destroyed, see PW.game - claims nothing: its ruins are
+    // open ground for anyone's seed)
     function claimed(x0, x1, self) {
       for (const c of cities) {
-        if (c === self) continue;
+        if (c === self || c.fallen) continue;
         const [l, r] = claimSpan(c);
         if (r >= Math.min(x0, x1) && l <= Math.max(x0, x1)) return c;
       }
@@ -2042,6 +2044,7 @@
       const heavyMax = storm ? 0 : (world.particles && world.particles.count > 1500 ? 1 : 3);
       let heavy = 0;
       for (const city of cities) {
+        if (city.fallen) continue;   // (N6: nothing grows from a fallen city)
         if (city.kind === 'farm') {
           for (const field of city.fields) {
             if (field.growth >= 1) continue;

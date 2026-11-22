@@ -34,13 +34,21 @@
   #gm-top .res i { font-style: normal; color: #7e9a70; }
   #gm-top .gap { flex: 1; }
   #gm-top .clock { color: #e8f0d8; min-width: 56px; text-align: center; }
-  #gm-bar { position: fixed; left: 50%; transform: translateX(-50%); bottom: 8px; display: flex; gap: 4px; padding: 4px;
+  #gm-bar { position: fixed; left: 8px; bottom: 8px; display: flex; flex-wrap: wrap; gap: 4px; padding: 4px; max-width: calc(100vw - 480px);
     background: #05080ae0; border: 2px solid #2c4030; z-index: 10; }
   #gm-alerts { position: fixed; left: 10px; top: 40px; display: flex; flex-direction: column; gap: 3px; z-index: 9; pointer-events: none; }
   #gm-alerts div { background: #05080acc; border-left: 3px solid #3c5a40; padding: 1px 8px; }
   #gm-alerts div.good { border-color: #c8b040; color: #fff0b8; }
   #gm-alerts div.bad { border-color: #b04030; color: #ffc8b8; }
   #unit-panel { top: 44px !important; }
+  #gm-sel { position: fixed; right: 8px; top: 44px; width: 250px; display: none; background: #05080ae0; border: 2px solid #2c4030;
+    padding: 8px; z-index: 10; }
+  #gm-sel h3 { margin: 0 0 4px; font: 20px 'Ithaca', Consolas, monospace; color: #e8f0d8; letter-spacing: 1px; }
+  #gm-sel .deploys { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+  #gm-sel .deploys button { padding: 1px 6px; font-size: 14px; }
+  #gm-map { position: fixed; right: 8px; bottom: 8px; width: 440px; height: 70px; border: 2px solid #2c4030; z-index: 10;
+    image-rendering: pixelated; cursor: pointer; background: #05080a; }
+  #gm-bar button[data-deploy] { font-size: 14px; padding: 2px 6px 1px; }
   `;
   let styled = false;
   function style() {
@@ -82,6 +90,8 @@
       <div class="row"><span>MAP</span><button data-map="standard" class="on">STANDARD</button><button data-map="laptop">LAPTOP (SMALLER)</button></div>
       <div class="row"><span>SEED</span><input id="gm-seed" value="${seed}"><button data-act="reroll">NEW</button></div>
       <button class="go" data-act="start">START</button>
+      <div class="sub" style="margin:14px 0 0;font-size:14px">Click selects · Shift+drag boxes · right-click sends · WASD pans · F3 costs ·
+        <a href="beta-legacy.html" style="color:#7e9a70">old beta</a> · <a href="pixel-world.html" style="color:#7e9a70">sandbox</a></div>
     </div>`;
     document.body.appendChild(root);
     const pick = (attr, value) => root.querySelectorAll(`[data-${attr}]`).forEach((b) => b.classList.toggle('on', b.dataset[attr] === value));
@@ -128,9 +138,17 @@
     { id: 'seed:military', label: 'SEED MILITARY', tip: 'Plant a military seed in your vision' },
   ];
 
+  let cmd = null;
   function attach(m, a) {
     style();
     match = m; app = a;
+    cmd = PW.command.create({ world: m.world, side: () => match.human, order: (units, ord) => PW.game.order(match, units, ord) });
+    selEl = make('aside', { id: 'gm-sel', class: 'gm' });
+    selEl.addEventListener('click', onSelClick);
+    mapEl = make('canvas', { id: 'gm-map', width: MAP_W, height: MAP_H, title: 'Click to look there' });
+    mapCtx = mapEl.getContext('2d');
+    mapEl.addEventListener('click', onMapClick);
+    document.body.append(selEl, mapEl);
     top = make('div', { id: 'gm-top', class: 'gm' },
       '<span data-info style="display:flex;gap:14px"></span><span class="gap"></span><span class="clock"></span><span class="gap"></span><span data-ctl style="display:flex;gap:4px"></span>');
     bar = make('div', { id: 'gm-bar', class: 'gm' });
@@ -186,12 +204,30 @@
     const lines = match.log.filter((l) => (l.side === null || l.side === side || match.view === 'both') && match.clock - l.t < 14).slice(-5);
     alerts.innerHTML = lines.map((l) => `<div class="${l.tone}">${l.text}</div>`).join('');
     if (match.over && !endEl) showEnd();
-    // (the seed tools are for the side a person plays)
-    bar.querySelectorAll('[data-tool^="seed:"]').forEach((b) => { b.disabled = !match.human; });
+    // (the seed and deploy tools are for the side a person plays)
+    bar.querySelectorAll('[data-tool^="seed:"], [data-deploy]').forEach((b) => { if (!match.human) b.disabled = true; else if (b.dataset.tool) b.disabled = false; });
+    refreshDeploys();
+    renderSel();
   }
 
+  // The game bar: the tools, then a deploy button per unit kind - from the selected base, or else
+  // from the base nearest the front that can.
   function renderBar() {
-    bar.innerHTML = TOOLS.map((t) => `<button data-tool="${t.id}" title="${t.tip}" class="${gameTool === t.id ? 'on' : ''}">${t.label}</button>`).join('');
+    const K = PW.game.UNIT_KINDS;
+    bar.innerHTML = TOOLS.map((t) => `<button data-tool="${t.id}" title="${t.tip}" class="${gameTool === t.id ? 'on' : ''}">${t.label}</button>`).join('') +
+      '<span style="width:10px"></span>' +
+      Object.keys(K).map((k) => `<button data-deploy="${k}" title="Deploy a ${K[k].label.toLowerCase()} (${K[k].hm} HM)">${K[k].label} ${K[k].hm}</button>`).join('');
+    deployKey = '';
+  }
+  let deployKey = '';
+  function refreshDeploys() {
+    if (!match.human) return;
+    const base = cmd.building && PW.game.ownerOf(cmd.building) === match.human && cmd.building.type === 'military' ? cmd.building : null;
+    const can = Object.keys(PW.game.UNIT_KINDS).map((k) => PW.game.canDeploy(match, match.human, k, base));
+    const key = can.map((c) => (c.ok ? '1' : c.note)).join('|');
+    if (key === deployKey) return;
+    deployKey = key;
+    bar.querySelectorAll('[data-deploy]').forEach((b, i) => { b.disabled = !can[i].ok; b.title = can[i].ok ? b.title.replace(/ - .*/, '') : `${PW.game.UNIT_KINDS[b.dataset.deploy].label}: ${can[i].note}`; });
   }
   function setTool(id) {
     gameTool = id;
@@ -200,7 +236,14 @@
   }
   function onBarClick(event) {
     const b = event.target.closest('button');
-    if (b && b.dataset.tool) setTool(b.dataset.tool === gameTool ? 'select' : b.dataset.tool);
+    if (!b) return;
+    if (b.dataset.tool) setTool(b.dataset.tool === gameTool ? 'select' : b.dataset.tool);
+    if (b.dataset.deploy && match.human) {
+      const base = cmd.building && PW.game.ownerOf(cmd.building) === match.human && cmd.building.type === 'military' ? cmd.building : null;
+      const r = PW.game.deploy(match, match.human, b.dataset.deploy, base);
+      if (PW.notify) PW.notify.flash(r.ok ? `${PW.game.UNIT_KINDS[b.dataset.deploy].label} deployed` : r.note, r.ok ? 'good' : 'bad', 2);
+      deployKey = '';
+    }
   }
   function onTopClick(event) {
     const b = event.target.closest('button');
@@ -223,28 +266,201 @@
     document.body.appendChild(endEl);
   }
 
-  // ---- The tools in hand ---------------------------------------------------------------------------
+  // ---- The hand: selection, orders, the tools in hand ----------------------------------------------
+  // A plain left click (one that does not drag) selects; a left drag pans; Shift+drag draws a box;
+  // a right click sends the selection. With a seed in hand a left click plants it.
+  const down = { x: 0, y: 0, on: false, box: false };
   function pointerDown(event, p) {
-    if (!match || !gameTool.startsWith('seed:')) return false;
-    if (!match.human) return true;
-    const kind = gameTool.slice(5);
-    const r = PW.game.seed(match, match.human, kind, p.x);
-    if (PW.notify) PW.notify.flash(r.ok ? `${kind} seed planted` : `Seed refused: ${r.note}`, r.ok ? 'good' : 'bad', 2.5);
-    if (r.ok) setTool('select');
-    return true;
+    if (!match) return false;
+    if (event.button === 0 && gameTool.startsWith('seed:')) {
+      if (!match.human) return true;
+      const kind = gameTool.slice(5);
+      const r = PW.game.seed(match, match.human, kind, p.x);
+      if (PW.notify) PW.notify.flash(r.ok ? `${kind} seed planted` : `Seed refused: ${r.note}`, r.ok ? 'good' : 'bad', 2.5);
+      if (r.ok) setTool('select');
+      return true;
+    }
+    if (event.button === 2) {
+      if (!cmd.sel.some(cmd.mine)) return false;   // (nothing to send: a right drag pans)
+      const n = cmd.command(p);
+      if (n && PW.notify) PW.notify.flash(`${n} sent`, '', 1.2);
+      return true;
+    }
+    if (event.button !== 0) return false;
+    if (event.shiftKey) { cmd.boxStart(p); down.box = true; return true; }
+    down.on = true; down.x = event.clientX; down.y = event.clientY;
+    return false;
   }
   function pointerMove(event, p) {
     cursor = p;
-    if (!match || !gameTool.startsWith('seed:') || !match.human) return;
+    if (!match) return;
+    if (down.box) cmd.boxMove(p);
+    if (!gameTool.startsWith('seed:') || !match.human) return;
     const sees = !PW.vision || PW.vision.sees(match.world, match.human, Math.round(p.x));
     if (PW.notify) PW.notify.cursor(sees ? `Plant a ${gameTool.slice(5)} seed here` : 'Beyond your vision', sees ? '' : 'bad');
   }
+  function pointerUp(event, p) {
+    if (!match) return;
+    if (down.box) { down.box = false; cmd.boxEnd(p, true); selectionChanged(); return; }
+    if (!down.on) return;
+    down.on = false;
+    if (Math.abs(event.clientX - down.x) + Math.abs(event.clientY - down.y) > 5) return;   // (that was a pan)
+    cmd.click(p, event.shiftKey);
+    selectionChanged();
+  }
+  // One unit of one's own selected is also held - its keys drive it and its panel shows (N78);
+  // a group or a building gets the selection panel.
+  const N78_KIND = { trooper: 'troop', mech: 'mech', jet: 'jet', defence: 'defence' };
+  function selectionChanged() {
+    const own = cmd.sel.filter(cmd.mine);
+    if (own.length === 1 && cmd.sel.length === 1) app.select({ kind: N78_KIND[own[0].kind] || 'tank', t: own[0] });
+    else app.select(null);
+    selKey = '';
+    renderSel();
+  }
+  // (a key a held unit took: it is the person's now, off its own way until they leave it be)
+  function tookControl() {
+    const u = cmd.sel.length === 1 ? cmd.sel[0] : null;
+    if (!u || !u.game || !cmd.mine(u)) return;
+    u.game.order = { type: 'manual' };
+    u.game.manualAt = match.clock;
+  }
+  // The game's keys: WASD and the arrows pan the view (a held unit takes them first), Esc lets the
+  // selection go, H holds the selection where it stands and Q sends it on its own way again.
+  const PAN_KEYS = { KeyA: [-1, 0], ArrowLeft: [-1, 0], KeyD: [1, 0], ArrowRight: [1, 0], KeyW: [0, -1], ArrowUp: [0, -1], KeyS: [0, 1], ArrowDown: [0, 1] };
+  function key(event) {
+    if (!match) return false;
+    if (event.code === 'Escape') { cmd.clear(); setTool('select'); selectionChanged(); return true; }
+    const own = cmd.sel.filter(cmd.mine);
+    if (event.code === 'KeyH' && own.length) { PW.game.order(match, own, { type: 'hold' }); return true; }
+    if (event.code === 'KeyQ' && own.length) { PW.game.order(match, own, { type: 'auto' }); return true; }
+    const pan = PAN_KEYS[event.code];
+    if (pan) { app.renderer.panByDevice(-pan[0] * 90 * app.renderer.view.dpr, -pan[1] * 90 * app.renderer.view.dpr); return true; }
+    return false;
+  }
 
-  // Over the world: where a seed in hand would land.
+  // ---- The selection panel: a group, or a building (a base of one's own deploys from it) ----------
+  let selEl = null, selKey = '';
+  const BUILDING_NAMES = { population: 'TOWER', military: 'MILITARY', farm: 'FARM', core: 'BASE CORE', mine: 'MINE', joint: 'JOINT' };
+  function renderSel() {
+    if (!selEl) return;
+    const own = cmd.sel.filter(cmd.mine);
+    const b = cmd.building;
+    if (!b && own.length <= 1) { selEl.style.display = 'none'; selKey = ''; return; }
+    const G = PW.game, side = match.human;
+    if (b) {
+      const owner = G.ownerOf(b) || 'neutral', mineB = owner === side;
+      const kinds = Object.keys(G.UNIT_KINDS);
+      const can = mineB && b.type === 'military' ? kinds.map((k) => G.canDeploy(match, side, k, b)) : [];
+      const key = `b${b.id}|${owner}|${b.level}|${can.map((c) => (c.ok ? 1 : 0)).join('')}|${b.coresOpen ? 1 : 0}`;
+      if (key === selKey) return;
+      selKey = key;
+      const health = Math.round((b.health ?? 1) * 100);
+      selEl.innerHTML = `<h3>${BUILDING_NAMES[b.type] || (b.type || 'BUILDING').toUpperCase()} · LV ${b.level || 1}</h3>` +
+        `<div>${owner.toUpperCase()}${mineB ? ' (YOURS)' : ''} · ${b.coresOpen ? 'RUINED' : `standing ${health}%`}</div>` +
+        (can.length ? `<div class="sub" style="margin-top:6px">DEPLOY FROM HERE</div><div class="deploys">${kinds.map((k, i) =>
+          `<button data-deploy="${k}" ${can[i].ok ? '' : 'disabled'} title="${can[i].ok ? '' : can[i].note}">${G.UNIT_KINDS[k].label} ${G.UNIT_KINDS[k].hm}</button>`).join('')}</div>` : '');
+    } else {
+      const counts = {};
+      for (const u of own) { const k = G.kindOf(u); counts[k] = (counts[k] || 0) + 1; }
+      const key = `g${Object.entries(counts).map(([k, n]) => k + n).join(',')}`;
+      if (key === selKey) return;
+      selKey = key;
+      selEl.innerHTML = `<h3>${own.length} SELECTED</h3><div>${Object.entries(counts).map(([k, n]) => `${n} ${(G.UNIT_KINDS[k] || { label: k }).label}`).join(' · ')}</div>` +
+        `<div class="sub" style="margin-top:6px">right-click: go / attack</div>` +
+        `<div class="deploys"><button data-order="hold">HOLD (H)</button><button data-order="auto">ON THEIR OWN (Q)</button></div>`;
+    }
+    selEl.style.display = 'block';
+  }
+  function onSelClick(event) {
+    const btn = event.target.closest('button');
+    if (!btn || !match.human) return;
+    if (btn.dataset.deploy && cmd.building) {
+      const r = PW.game.deploy(match, match.human, btn.dataset.deploy, cmd.building);
+      if (PW.notify) PW.notify.flash(r.ok ? `${PW.game.UNIT_KINDS[btn.dataset.deploy].label} deployed` : r.note, r.ok ? 'good' : 'bad', 2);
+      selKey = '';
+    }
+    if (btn.dataset.order) PW.game.order(match, cmd.sel.filter(cmd.mine), { type: btn.dataset.order });
+  }
+
+  // ---- The minimap: the whole map, its buildings and the units the side can see -------------------
+  let mapEl = null, mapCtx = null, mapAt = 0, profile = null, profileAt = -1e9;
+  const MAP_W = 440, MAP_H = 70;
+  function drawMap(now) {
+    if (!mapEl || now - mapAt < 400) return;
+    mapAt = now;
+    const world = match.world, k = world.width / MAP_W, side = viewSide();
+    // (the ground's skyline, sampled anew every 10 s: blasts and growth change it slowly)
+    if (!profile || now - profileAt > 10000) {
+      profileAt = now;
+      profile = new Float32Array(MAP_W);
+      let lo = Infinity, hi = -Infinity;
+      for (let i = 0; i < MAP_W; i += 1) { const g = world.groundTop[Math.min(world.width - 1, Math.round((i + 0.5) * k))]; profile[i] = g; lo = Math.min(lo, g); hi = Math.max(hi, g); }
+      profile.lo = lo; profile.hi = hi;
+    }
+    const yOf = (y) => 8 + (y - profile.lo + 200) / (profile.hi - profile.lo + 500) * (MAP_H - 14);
+    const ctx = mapCtx;
+    ctx.fillStyle = '#05080a'; ctx.fillRect(0, 0, MAP_W, MAP_H);
+    ctx.fillStyle = '#3a3226';
+    for (let i = 0; i < MAP_W; i += 1) { const y = yOf(profile[i]); ctx.fillRect(i, y, 1, MAP_H - y); }
+    // (the fog: what the side does not see is dimmed)
+    if (match.view !== 'both' || match.human) {
+      const spans = PW.vision ? PW.vision.spans(world, side) : [[0, world.width]];
+      ctx.fillStyle = 'rgba(0,0,0,0.55)';
+      let x = 0;
+      for (const [a, b] of spans) { if (a > x) ctx.fillRect(x / k, 0, (a - x) / k, MAP_H); x = Math.max(x, b); }
+      if (x < world.width) ctx.fillRect(x / k, 0, (world.width - x) / k, MAP_H);
+    }
+    const tone = (owner) => (owner === side ? '#e8dcb0' : owner === 'neutral' || !owner ? '#8a9488' : '#ff8c96');
+    for (const b of world.buildings || []) {
+      if (!b || !b.body || b.dismantled || b.body.left < 0) continue;
+      ctx.fillStyle = tone(PW.game.ownerOf(b));
+      ctx.globalAlpha = b.coresOpen ? 0.35 : 1;
+      const h = Math.max(2, (b.ground - b.body.top) / 120);
+      ctx.fillRect(b.body.left / k, yOf(b.ground) - h, Math.max(1, (b.body.right - b.body.left) / k), h);
+    }
+    ctx.globalAlpha = 1;
+    const both = match.view === 'both' && !match.human;
+    for (const u of [...(world.troops || []), ...(world.tanks || []), ...(world.mechs || []), ...(world.jets || []), ...(world.defence || [])]) {
+      if (u.dead) continue;
+      if (!both && u.side !== side && PW.vision && !PW.vision.sees(world, side, u.x)) continue;
+      ctx.fillStyle = tone(u.side);
+      ctx.fillRect(Math.round(u.x / k) - 1, Math.round(yOf(u.y)) - 2, 2, 2);
+    }
+    // (the view's frame)
+    const cam = app.renderer.camera, view = app.renderer.view;
+    ctx.strokeStyle = '#c8dcb0'; ctx.lineWidth = 1;
+    ctx.strokeRect(cam.x / k + 0.5, 1.5, view.width / cam.zoom / k, MAP_H - 3);
+  }
+  function onMapClick(event) {
+    const r = mapEl.getBoundingClientRect(), world = match.world;
+    const x = Math.round((event.clientX - r.left) / r.width * world.width);
+    app.focus(x, (world.groundTop[Math.max(0, Math.min(world.width - 1, x))] || 1600) - 150);
+  }
+
+  // ---- Over the world: the fog, the selection, where a seed in hand would land ---------------------
   function drawWorld(renderer, now) {
     refresh(now);
-    if (!match || !cursor || !gameTool.startsWith('seed:')) return;
-    const { ctx, camera } = renderer, z = camera.zoom, world = match.world;
+    if (!match) return;
+    const { ctx, camera, view } = renderer, z = camera.zoom, world = match.world;
+    // The fog: the ground the side does not see is veiled (the other side's units in it are not its
+    // to see - PS's draws skip them as the fog query lands there).
+    if (match.view !== 'both' || match.human) {
+      const spans = PW.vision ? PW.vision.spans(world, viewSide()) : [];
+      const x0 = camera.x, x1 = camera.x + view.width / z;
+      ctx.fillStyle = 'rgba(3, 5, 9, 0.55)';
+      let x = x0;
+      for (const [a, b] of spans) {
+        if (b < x0) continue;
+        if (a > x1) break;
+        if (a > x) ctx.fillRect(Math.floor((x - camera.x) * z), 0, Math.ceil((a - x) * z), view.height);
+        x = Math.max(x, b);
+      }
+      if (x < x1) ctx.fillRect(Math.floor((x - camera.x) * z), 0, Math.ceil((x1 - x) * z), view.height);
+    }
+    cmd.draw(renderer, now);
+    drawMap(now);
+    if (!cursor || !gameTool.startsWith('seed:')) return;
     const x = Math.round(cursor.x), g = world.groundTop[x] || cursor.y;
     const sx = Math.round((x - camera.x) * z), sy = Math.round((g - camera.y) * z);
     const sees = !match.human || !PW.vision || PW.vision.sees(world, match.human, x);
@@ -252,5 +468,6 @@
     for (let k = 0; k < 9; k += 1) ctx.fillRect(sx - 1, sy - (k + 1) * 6 * Math.max(1, z / 2), Math.max(2, z), Math.max(2, 3 * z / 2));
   }
 
-  PW.gameUI = { menu, loading, attach, pointerDown, pointerMove, drawWorld, setTool, tool: () => gameTool };
+  PW.gameUI = { menu, loading, attach, pointerDown, pointerMove, pointerUp, key, tookControl, drawWorld, setTool,
+    tool: () => gameTool, command: () => cmd };
 })();

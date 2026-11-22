@@ -32,6 +32,12 @@ const SUITES = [
   // the computer play itself (the person takes a chair and hands it back)
   { name: 'pw-game', params: 'mode=game&start=versus&side=left&det=1' },
   { name: 'pw-game-menu', scenario: 'pw-game', ready: "!!document.getElementById('gm-menu')", params: 'mode=game&det=1' },
+  // N6: the rules - deploying, hacking, cover - and the ruins and the win
+  { name: 'pw-game-rules', alone: true, limit: 420, params: 'mode=game&start=versus&side=left&det=1' },
+  { name: 'pw-game-win', params: 'mode=game&start=versus&side=left&det=1' },
+  // N8: the game is the main page, opened from disk as a downloaded copy is; the old beta still loads
+  { name: 'pw-main-page', page: 'index.html', file: true, alone: true, ready: "!!document.getElementById('gm-menu')" },
+  { name: 'pw-beta-legacy', page: 'beta-legacy.html' },
   // N5: the item bar, drills and dirt tunnels, guards, turrets, orders, the sentry, a skirmish
   { name: 'pw-units', page: 'pw-unit-lab.html', ready: 'window.pwLab && pwLab.ready', params: 'det=1&go=0' },
 ].filter((s) => !args.only || args.only.split(',').includes(s.name));
@@ -42,14 +48,15 @@ function run(suite, attempt = 1) {
   return new Promise((resolve) => {
     const started = Date.now();
     const params = suite.params ? `${suite.params}&seed=${seed}` : `seed=${seed}`;
+    const cap = suite.limit || limit;   // (a long match suite may take more than the usual cap)
     const child = spawn(process.execPath, [path.join(__dirname, 'check-beta-game.cjs'), `--page=${suite.page || 'pixel-world.html'}`, `--params=${params}`,
-      ...(suite.ready ? [`--ready=${suite.ready}`] : []),
-      '--wait=300', '--size=1600x900', `--timeout=${(limit - 10) * 1000}`, `--out=${out}`, `--scenario=tools/scenarios/${suite.scenario || suite.name}.js`],
+      ...(suite.ready ? [`--ready=${suite.ready}`] : []), ...(suite.file ? ['--file'] : []),
+      '--wait=300', '--size=1600x900', `--timeout=${(cap - 10) * 1000}`, `--out=${out}`, `--scenario=tools/scenarios/${suite.scenario || suite.name}.js`],
     { cwd: root, env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' } });
     let text = '';
     child.stdout.on('data', (d) => { text += d; });
     child.stderr.on('data', (d) => { text += d; });
-    const timer = setTimeout(() => { text += '\nRESULT: TIMEOUT'; child.kill(); }, limit * 1000);
+    const timer = setTimeout(() => { text += '\nRESULT: TIMEOUT'; child.kill(); }, cap * 1000);
     child.on('close', async () => {
       clearTimeout(timer);
       const result = (text.match(/RESULT: .*/) || ['RESULT: no result'])[0];

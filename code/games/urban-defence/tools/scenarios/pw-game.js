@@ -73,6 +73,39 @@ if (m.mode === 'versus') {
     `the person's farm seed is planted by real clicks in their vision, in their style (at ${at})`);
   pwApp.stepWorld(60 * 4);
   shots.push(await shot('pw-game-versus'));
+  // Deploy by real clicks on the game bar; select the squad with a Shift+drag box; send it with a
+  // right click. (The box and the right click go in as pointer events on the canvas - the harness's
+  // real mouse has no Shift or right button - through the same handlers a mouse would reach.)
+  const troops0 = G.unitsOf(m, 'left').filter((u) => u.kind === 'trooper').length;
+  for (let k = 0; k < 3; k += 1) await press('#gm-bar [data-deploy="trooper"]');
+  const squad = G.unitsOf(m, 'left').filter((u) => u.kind === 'trooper');
+  check(squad.length - troops0 === 3, `three real clicks on TROOPER deploy three troopers (${squad.length - troops0})`);
+  const lead = squad[squad.length - 1];
+  pwApp.focus(lead.x, lead.y - 30, 4);
+  await sleep(200);
+  const canvas = document.getElementById('world-canvas');
+  const fire = (type, wx, wy, opts = {}) => {
+    const p = pwApp.toClient(wx, wy);
+    canvas.dispatchEvent(new PointerEvent(type, { bubbles: true, clientX: p.x, clientY: p.y, pointerId: 1, ...opts }));
+  };
+  const xs = squad.slice(-3).map((u) => u.x);
+  fire('pointerdown', Math.min(...xs) - 30, lead.y - 40, { button: 0, buttons: 1, shiftKey: true });
+  fire('pointermove', Math.max(...xs) + 30, lead.y + 6, { button: 0, buttons: 1, shiftKey: true });
+  fire('pointerup', Math.max(...xs) + 30, lead.y + 6, { button: 0, buttons: 0, shiftKey: true });
+  const sel = PW.gameUI.command().sel;
+  check(sel.length >= 3 && squad.slice(-3).every((u) => sel.includes(u)), `a Shift+drag box selects the squad (${sel.length})`);
+  const goal = Math.round(lead.x + 160 * m.sides.left.dir);
+  fire('pointerdown', goal, world.groundTop[goal] - 4, { button: 2, buttons: 2 });
+  fire('pointerup', goal, world.groundTop[goal] - 4, { button: 2, buttons: 0 });
+  check(squad.slice(-3).every((u) => u.game.order.type === 'move' && Math.abs(u.game.order.x - goal) < 40),
+    `a right click sends the squad there (${squad.slice(-3).map((u) => u.game.order.type).join(', ')})`);
+  pwApp.stepWorld(60 * 8);
+  check(squad.slice(-3).some((u) => Math.abs(u.x - goal) < Math.abs(xs[0] - goal) - 20), 'and it goes');
+  await press('#gm-bar [data-tool="select"]');
+  document.dispatchEvent(new KeyboardEvent('keydown', { code: 'Escape', bubbles: true }));
+  window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Escape', bubbles: true }));
+  check(PW.gameUI.command().sel.length === 0, 'Esc lets the selection go');
+  shots.push(await shot('pw-game-squad'));
   // The computer grows its side too, by the same rule.
   pwApp.stepWorld(60 * 150);
   const ai = m.sides.right.ai.brain;

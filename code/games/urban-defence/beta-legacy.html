@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Urban Defence</title>
+    <link rel="stylesheet" href="styles/main.css?v=10">
+  </head>
+  <body class="game-shell" data-base-side="left">
+    <div class="game-root">
+      <header class="game-header">
+        <div class="game-brand">
+          <span class="nav-bracket">[</span>
+          <span class="brand-text">URBAN DEFENCE</span>
+          <span class="nav-bracket">]</span>
+          <span class="game-version">PARTICLE GRID // BETA</span>
+        </div>
+        <div class="game-actions">
+          <button id="cycle-base-side" class="mini-button" type="button">BASE: LEFT</button>
+          <a id="fullscreen-button" class="mini-button" href="index.html?fullscreen=1" target="_blank" rel="noopener noreferrer">FULLSCREEN ↗</a>
+        </div>
+      </header>
+
+      <div class="game-body">
+        <aside class="hud resources" aria-label="Resources">
+          <div class="resource-label">STATUS</div>
+          <div class="resource-line">HM <span id="hm-value">—</span></div>
+          <div class="resource-line">SM <span id="sm-value">—</span></div>
+          <div class="resource-line">POP <span id="pop-value">—</span></div>
+        </aside>
+        <aside class="hud building-stats" aria-label="Building production">
+          <div class="resource-label">PRODUCTION</div>
+          <div id="building-stats"></div>
+        </aside>
+
+        <aside class="hud commands" aria-label="Build commands">
+          <div class="command-label">ACTIONS</div>
+          <button id="build-command" type="button" aria-expanded="false" aria-controls="build-panel">BUILD</button>
+          <section id="build-panel" class="command-panel" hidden>
+            <button type="button" data-build="housing">HOUSING / POPULATION</button>
+            <button type="button" data-build="farm">FARM / SOFT MATERIALS</button>
+            <button type="button" data-build="military">MILITARY / DEFENSE</button>
+            <button type="button" data-build="mine">MINE / HARD MATERIALS</button>
+          </section>
+          <button id="route-command" type="button" aria-expanded="false" aria-controls="route-panel">ROADS / TUNNELS</button>
+          <section id="route-panel" class="command-panel" hidden>
+            <button type="button" data-route="road">ROAD / BRIDGE</button>
+            <button type="button" data-route="tunnel">TUNNEL</button>
+          </section>
+          <button id="deploy-command" type="button" aria-expanded="false" aria-controls="deploy-panel">DEPLOY</button>
+          <section id="deploy-panel" class="command-panel" hidden>
+            <button id="deploy-select" type="button">SELECT BASES</button>
+            <button id="deploy-all" type="button">SELECT ALL BASES</button>
+            <button id="deploy-order" type="button">ORDER ACTIVE UNITS</button>
+            <button id="deploy-select-units" type="button">SELECT ALL ACTIVE</button>
+            <fieldset id="deploy-bases" class="missile-launchers"><legend>AVAILABLE BASES</legend></fieldset>
+            <button id="deploy-fire" type="button">DEPLOY SELECTED</button>
+            <button id="deploy-clear" type="button">CLEAR SELECTION</button>
+            <p class="command-help">ORDER ACTIVE UNITS selects troops on the map. Click selected troops to toggle them, then click a destination to move or attack.</p>
+          </section>
+          <button id="missile-command" type="button" aria-expanded="false" aria-controls="missile-panel">MISSILE</button>
+          <section id="missile-panel" class="missile-panel" aria-label="Missile launch controls" hidden>
+            <div class="missile-heading">MISSILE TEST</div>
+            <p id="missile-status" role="status" aria-live="polite"></p>
+            <button id="missile-select" type="button">SELECT LAUNCHERS</button>
+            <fieldset id="missile-launchers" class="missile-launchers">
+              <legend>AVAILABLE LAUNCHERS</legend>
+            </fieldset>
+            <button id="missile-target" type="button">SELECT TARGETS</button>
+            <p>Each selected tube fires a staggered salvo: 7 missiles at level 3, 9 at level 4. Shots cycle through targets. Level 4 defenses intercept nearby threats.</p>
+            <button id="missile-fire" type="button">FIRE SALVO</button>
+            <button id="missile-clear" type="button">CLEAR SELECTION</button>
+            <button id="missile-close" type="button">CLOSE</button>
+          </section>
+          <p id="command-status" role="status" aria-live="polite"></p>
+        </aside>
+
+        <main class="battlefield-wrap" aria-label="Urban Defence battlefield">
+          <canvas id="game-canvas" width="1100" height="620"></canvas>
+        </main>
+      </div>
+    </div>
+
+    <script src="scripts/particle-world.js"></script>
+    <script src="scripts/particle-terrain-import.js"></script>
+    <script src="scripts/pixel-construction-scenario.js"></script>
+    <script src="scripts/pixel-city-farms.js"></script>
+    <script src="scripts/pixel-construction-logistics.js"></script>
+    <script src="scripts/pixel-city-military.js"></script>
+    <script src="scripts/pixel-map-construction.js"></script>
+    <script src="assets/unit-reference.js"></script>
+    <script src="assets/tank-reference.js"></script>
+    <script src="assets/hopper-reference.js"></script>
+    <script src="assets/jet-reference.js"></script>
+    <script src="scripts/pixel-unit.js"></script>
+    <script src="scripts/pixel-unit-vehicles.js"></script>
+    <script src="scripts/pixel-population-scale.js"></script>
+    <script src="scripts/pixel-building-interiors.js"></script>
+    <script src="scripts/pixel-building-shapes.js"></script>
+    <script src="scripts/pixel-building-styles.js"></script>
+    <script src="scripts/pixel-building-devices.js"></script>
+    <script src="scripts/pixel-building-sprite.js?v=3"></script>
+    <script src="scripts/urban-unit-sprites.js?v=4"></script>
+    <script src="scripts/world-object-render.js?v=4"></script>
+    <script src="scripts/building-render.js?v=5"></script>
+    <script src="scripts/missile-control.js?v=5"></script>
+    <script src="scripts/urban-pipeline.js?v=1"></script>
+    <script src="scripts/command-control.js?v=12"></script>
+    <script src="scripts/fixed-step.js"></script>
+    <script src="scripts/terrain-surface.js"></script>
+    <script src="scripts/terrain-detail.js"></script>
+    <script src="scripts/main.js?v=17"></script>
+    <script src="scripts/particle-map-source.js"></script>
+  </body>
+</html>

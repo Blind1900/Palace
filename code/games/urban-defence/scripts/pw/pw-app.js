@@ -275,17 +275,22 @@
   // Space pauses and resumes, as the PAUSE button does (not while typing into a field).
   window.addEventListener('keydown', (event) => {
     if (!world) return;   // (the game page's menu and loading screen come first)
+    if (event.code === 'F3') { event.preventDefault(); togglePerf(); return; }   // N8: the costs
     if (event.code === 'Escape' && selected) { select(null); return; }   // N78
     // N78: the drive keys follow the SELECTED tank too, not only the tank tool - key()
     // drives the held one, and selecting holds (PS's hold()).
     if (event.target.closest?.('input, textarea, select')) return;
+    // (N6: a key a held unit takes puts it in the person's hands - off its own way for a while)
+    const took = () => { event.preventDefault(); if (match && PW.gameUI) PW.gameUI.tookControl(); };
     if ((tool === 'tank' || (selected && selected.kind === 'tank'))
-      && PW.tanks && PW.tanks.key && PW.tanks.key(event)) { event.preventDefault(); return; }   // (N10 drive keys)
+      && PW.tanks && PW.tanks.key && PW.tanks.key(event)) { took(); return; }   // (N10 drive keys)
     // The troops', jets' and batteries' keys (PS's modules): each answers only for the unit
     // it holds, and selection holds one at a time - the first that takes the key keeps it.
     for (const mod of [PW.troops, PW.jets, PW.defence, PW.mechs]) {
-      if (mod && mod.key && mod.key(event)) { event.preventDefault(); return; }
+      if (mod && mod.key && mod.key(event)) { took(); return; }
     }
+    // N6: the game's own keys (pan the view, put the selection down)
+    if (match && PW.gameUI && PW.gameUI.key(event)) { event.preventDefault(); return; }
     if (event.code !== 'Space' || event.repeat || event.target.closest?.('input, textarea, select')) return;
     event.preventDefault();
     paused = !paused;
@@ -505,8 +510,14 @@
   canvas.addEventListener('contextmenu', (event) => event.preventDefault());
   canvas.addEventListener('pointerdown', (event) => {
     if (!renderer) return;   // (the game page's menu and loading screen come first)
-    // N6: the game bar's tools in hand (a seed, a deployment, an order) take the click first
-    if (match && event.button === 0 && PW.gameUI && PW.gameUI.pointerDown(event, toWorld(event))) return;
+    // N6: in a match the game's own hand (PW.gameUI: selection, orders, the tools in hand) takes
+    // the click; what it leaves is a drag that pans the view
+    if (match && PW.gameUI) {
+      if (PW.gameUI.pointerDown(event, toWorld(event))) return;
+      drag.active = true; drag.pan = true; drag.x = event.clientX; drag.y = event.clientY;
+      canvas.setPointerCapture(event.pointerId);
+      return;
+    }
     drag.active = true; drag.x = event.clientX; drag.y = event.clientY;
     drag.pan = event.button !== 0 || tool === 'pan';
     canvas.setPointerCapture(event.pointerId);
@@ -554,7 +565,10 @@
     drag.x = event.clientX; drag.y = event.clientY;
   });
   const release = () => { drag.active = false; };
-  canvas.addEventListener('pointerup', release);
+  canvas.addEventListener('pointerup', (event) => {
+    release();
+    if (match && PW.gameUI && renderer) PW.gameUI.pointerUp(event, toWorld(event));
+  });
   canvas.addEventListener('pointercancel', release);
   canvas.addEventListener('wheel', (event) => {
     event.preventDefault();
@@ -567,25 +581,51 @@
   // ---- Loop: fixed 60 Hz simulation, render every frame -------------------------------------------
   const DT = 1 / 60;
   const simTimes = [];
+  // N8: what each part of the world costs a frame. A stopwatch runs through the ticks and the draw;
+  // each part's time is summed over the frame and the last 240 frames kept, for its p95 against
+  // its budget (M9's, plus heat and the town services). F3 shows them over the game.
+  const BUDGET = { sim: 3, heat: 1, particles: 2, integrity: 1, fragments: 1.5, units: 2, services: 1.5, raster: 3, draw: 3 };
+  const PERF_FRAMES = 240;
+  const perf = { frame: {}, rings: {}, n: 0 };
+  for (const k of Object.keys(BUDGET)) { perf.frame[k] = 0; perf.rings[k] = new Float32Array(PERF_FRAMES); }
+  let lap = 0;
+  const charge = (k) => { const t = performance.now(); perf.frame[k] += t - lap; lap = t; };
+  function perfReport() {
+    const out = {};
+    const n = Math.min(perf.n, PERF_FRAMES);
+    for (const k of Object.keys(BUDGET)) {
+      const sorted = Array.from(perf.rings[k].subarray(0, n)).sort((a, b) => a - b);
+      out[k] = { p95: n ? sorted[Math.floor(n * 0.95)] : 0, max: n ? sorted[n - 1] : 0, budget: BUDGET[k] };
+    }
+    return { frames: n, parts: out };
+  }
   function stepWorld(n) {
     for (let k = 0; k < n; k += 1) {
       const s = performance.now();
-      sim.step(3);
-      particles.step(DT);
+      lap = s;
+      sim.step(3); charge('sim');
+      particles.step(DT); charge('particles');
       if (PW.tunnels) PW.tunnels.step(world, DT * devSpeed);
-      heat.step(1);
+      charge('services');
+      heat.step(1); charge('heat');
       if (structure) structure.step(1.5);
+      charge('integrity');
       if (fragments) fragments.step(DT);
+      charge('fragments');
       if (PW.tanks) PW.tanks.step(world, DT);
+      charge('units');
       // (N77 rounds step inside PW.tanks.step - the suites' scenarios manual-step it, so
       // the loop does not claim them with the looped flag; PS's default stands)
       if (PW.streetProps) PW.streetProps.step(world, particles);
       if (PW.flora && PW.flora.step) PW.flora.step(world, particles);
       if (cores) cores.step();
+      charge('services');
       if (stability) stability.step();
+      charge('integrity');
       if (air) air.step();
       if (PW.stepSmokeBursts) PW.stepSmokeBursts(world, DT);
       if (PW.stepSmoulders) PW.stepSmoulders(world, DT);
+      charge('particles');
       if (PW.mining) PW.mining.step(world, DT);
       if (pipes) pipes.step();
       if (repair) repair.step(DT);
@@ -594,6 +634,7 @@
       if (capital) capital.step(DT * devSpeed);
       if (match) PW.game.step(match, DT);   // N6: the match's rules and its computer players
       life.step();
+      charge('services');
       simTimes.push(performance.now() - s);
       if (simTimes.length > 240) simTimes.shift();
     }
@@ -603,6 +644,8 @@
   function frame(now) {
     accumulator = Math.min(accumulator + (now - last) / 1000 * speed, DT * 3 * speed);
     last = now;
+    // (the frame's own costs from here: whatever ticks a test ran between frames are not this one's)
+    for (const k in perf.frame) perf.frame[k] = 0;
     // A heavy moment runs the world a touch slow instead of stuttering: once the ticks this
     // frame have eaten ~12 ms the rest of the backlog is dropped, so one expensive tick can
     // never snowball into owing two or three more next frame (the perf pass's blast hitch).
@@ -613,9 +656,11 @@
         if (performance.now() - t0 > 12) { accumulator = 0; break; }
       }
     }
+    lap = performance.now();
     renderer.beginFrame();
     renderer.drawSky();
     renderer.drawBase();
+    charge('raster');
     if (pipes) pipes.draw(renderer, now / 1000);
     if (fragments) fragments.draw(renderer);
     if (PW.mining) PW.mining.draw(renderer, world, now / 1000);
@@ -634,6 +679,11 @@
     if (PW.debugHitboxes && fragments && fragments.drawHitboxes) fragments.drawHitboxes(renderer);
     PW.drawEffects(world, renderer, (now - (frame.prev || now)) / 1000);
     if (match && PW.gameUI) PW.gameUI.drawWorld(renderer, now);   // N6: the match's marks over the world
+    charge('draw');
+    const slot = perf.n % PERF_FRAMES;
+    for (const k in perf.frame) perf.rings[k][slot] = perf.frame[k];
+    perf.n += 1;
+    if (perfPanel && perfPanel.style.display !== 'none' && (perf.n & 15) === 0) showPerf();
     frame.prev = now;
     frames += 1;
     if (now - fpsClock >= 500) {
@@ -651,6 +701,28 @@
         `gen ${Object.entries(timings).map(([k, v]) => `${k} ${v.toFixed(0)}`).join(' ')}`;
     }
     requestAnimationFrame(frame);
+  }
+
+  // F3: each part's p95 over the last frames against its budget, red where it runs over.
+  let perfPanel = null;
+  function togglePerf() {
+    if (!perfPanel) {
+      perfPanel = document.createElement('div');
+      perfPanel.style.cssText = 'position:fixed;right:8px;bottom:8px;z-index:30;font:12px Consolas,monospace;color:#c8dcb0;'
+        + 'background:#05080ae8;border:2px solid #2c4030;padding:6px 8px;pointer-events:none;white-space:pre';
+      document.body.appendChild(perfPanel);
+    } else perfPanel.style.display = perfPanel.style.display === 'none' ? '' : 'none';
+    showPerf();
+  }
+  function showPerf() {
+    const r = perfReport();
+    let total = 0;
+    const lines = Object.entries(r.parts).map(([k, v]) => {
+      total += v.p95;
+      const over = v.p95 > v.budget;
+      return `<span style="color:${over ? '#ff9a80' : '#c8dcb0'}">${k.padEnd(10)} ${v.p95.toFixed(2).padStart(6)} / ${v.budget} ms  max ${v.max.toFixed(1)}</span>`;
+    });
+    perfPanel.innerHTML = `${fps.toFixed(0)} fps · p95 per part (ms a frame)\n${lines.join('\n')}\nsum of p95s ${total.toFixed(1)} ms`;
   }
 
   function tunnelSummary() {
@@ -675,6 +747,7 @@
       stepWorld, countWater: () => sim.countWater(), simTimes,
       setPaused: (value) => { paused = value; }, paused: () => paused,
       setSpeed: (k) => { speed = k; }, speed: () => speed, fps: () => fps,
+      perf: perfReport, togglePerf, BUDGET,   // N8
       match: () => match,
       focus: (x, y, zoomIndex) => renderer.focus(x, y, zoomIndex),
       focusWorld: (x, y, zoomIndex) => renderer.focus(x, y, zoomIndex),

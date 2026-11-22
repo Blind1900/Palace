@@ -1,5 +1,5 @@
-// Loads the Urban Defence beta (index.html) in headless Edge and reports script errors,
-// an optional gameplay scenario, FPS and screenshots.
+// Loads an Urban Defence page (the game, index.html, by default - the old beta is beta-legacy.html)
+// in headless Edge and reports script errors, an optional gameplay scenario, FPS and screenshots.
 //
 // Run from the urban-defence folder with Node (VS Code's Electron works):
 //   ELECTRON_RUN_AS_NODE=1 "C:\Program Files\Microsoft VS Code\Code.exe" tools/check-beta-game.cjs [options]
@@ -18,6 +18,8 @@
 //   --screenshot=path.png   screenshot after everything else
 //   --out=dir               folder for scenario screenshots (default: OS temp)
 //   --timeout=60000         overall scenario timeout in ms
+//   --file                  open the page from disk (file://) instead of the local server - as a
+//                           downloaded copy opened by double-click is
 //
 // Helpers available to scenarios (all return promises):
 //   shot(name)              screenshot saved as <out>/<name>.png
@@ -34,6 +36,7 @@
 // Exit code: 1 when the page throws, logs console errors, fails to load a file, or a scenario check FAILs.
 const fs = require('node:fs'), path = require('node:path'), http = require('node:http'), os = require('node:os');
 const { spawn } = require('node:child_process');
+const { pathToFileURL } = require('node:url');
 
 const root = path.resolve(__dirname, '..');
 const args = {};
@@ -229,10 +232,14 @@ async function main() {
     await send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
     await send('Page.bringToFront');
     const port = server.address().port;
-    report.url = `http://127.0.0.1:${port}/${page}${args.params ? `?${args.params}` : ''}`;
+    // (--file: open the page straight from disk, file://, as a downloaded copy is opened - no server)
+    report.url = args.file
+      ? `${pathToFileURL(path.join(root, page)).href}${args.params ? `?${args.params}` : ''}`
+      : `http://127.0.0.1:${port}/${page}${args.params ? `?${args.params}` : ''}`;
     await send('Page.navigate', { url: report.url });
 
-    const readyExpression = String(args.ready || "document.readyState === 'complete' && ((typeof commandControl !== 'undefined' && typeof missileControl !== 'undefined') || (window.pwApp && window.pwApp.ready))");
+    // (the old beta's controllers, the pixel world up, or the game's menu waiting for a match)
+    const readyExpression = String(args.ready || "document.readyState === 'complete' && ((typeof commandControl !== 'undefined' && typeof missileControl !== 'undefined') || (window.pwApp && window.pwApp.ready) || !!document.getElementById('gm-menu'))");
     const readyDeadline = Date.now() + 30000;
     let ready = false;
     while (Date.now() < readyDeadline) {

@@ -4,112 +4,95 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Urban Defence</title>
-    <link rel="stylesheet" href="styles/main.css?v=10">
+    <!-- The game (N8): the pixel world, opened on the match menu. Runs from the files as they are -
+         no server, nothing to install: open this page in Chrome or Edge. The old beta is
+         beta-legacy.html; the dev page with the sandbox tools is pixel-world.html. -->
+    <style>
+      html, body { margin: 0; height: 100%; background: #05080a; color: #9fc28a; overflow: hidden; }
+      #world-canvas { display: block; width: 100vw; height: 100vh; image-rendering: pixelated; cursor: crosshair; }
+      #world-status { position: fixed; left: 8px; bottom: 6px; font: 12px Consolas, monospace; pointer-events: none;
+        background: #05080acc; padding: 2px 6px; }
+      /* the selected unit's panel - its name, its state, its control keys (N78) */
+      #unit-panel { position: fixed; right: 8px; top: 8px; width: 216px; font: 12px Consolas, monospace;
+        background: #05080acc; border: 1px solid #2c4030; color: #9fc28a; padding: 8px; display: none; }
+      #unit-panel.on { display: block; }
+      #unit-panel h3 { margin: 0 0 6px; font: 13px Consolas, monospace; color: #e4f0c8; letter-spacing: 1px; }
+      #unit-panel .bar { height: 8px; background: #0b140f; border: 1px solid #2c4030; margin: 3px 0 8px; }
+      #unit-panel .bar i { display: block; height: 100%; background: #6fae58; }
+      #unit-panel .bar i.hurt { background: #b8923e; }
+      #unit-panel .bar i.grave { background: #a4502e; }
+      #unit-panel .keys div { display: flex; gap: 6px; margin: 2px 0; align-items: baseline; }
+      #unit-panel kbd { background: #0b140f; border: 1px solid #2c4030; padding: 0 5px; color: #e4f0c8; min-width: 14px; text-align: center; }
+      #unit-panel .items { display: flex; gap: 4px; margin-top: 6px; }
+      #unit-panel .slot { width: 44px; height: 44px; border: 1px solid #2c4030; background: #0b140f;
+        display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 10px; }
+      #unit-panel .slot b { color: #e4f0c8; font-size: 11px; }
+      @font-face { font-family: 'Ithaca'; src: url('assets/Ithaca-LVB75.ttf') format('truetype'); }
+      #cursor-note { position: fixed; pointer-events: none; display: none; font: 16px 'Ithaca', Consolas, monospace;
+        color: #e8f0d8; background: #0a120ee8; border: 2px solid #3c5a40; padding: 3px 7px 2px; white-space: nowrap;
+        box-shadow: 2px 2px 0 #000; image-rendering: pixelated; }
+      #cursor-note.good { border-color: #c8b040; color: #fff0b8; }
+      #cursor-note.bad { border-color: #b04030; color: #ffc8b8; }
+      noscript { display: block; padding: 40px; font: 18px Consolas, monospace; }
+    </style>
   </head>
-  <body class="game-shell" data-base-side="left">
-    <div class="game-root">
-      <header class="game-header">
-        <div class="game-brand">
-          <span class="nav-bracket">[</span>
-          <span class="brand-text">URBAN DEFENCE</span>
-          <span class="nav-bracket">]</span>
-          <span class="game-version">PARTICLE GRID // BETA</span>
-        </div>
-        <div class="game-actions">
-          <button id="cycle-base-side" class="mini-button" type="button">BASE: LEFT</button>
-          <a id="fullscreen-button" class="mini-button" href="index.html?fullscreen=1" target="_blank" rel="noopener noreferrer">FULLSCREEN ↗</a>
-        </div>
-      </header>
-
-      <div class="game-body">
-        <aside class="hud resources" aria-label="Resources">
-          <div class="resource-label">STATUS</div>
-          <div class="resource-line">HM <span id="hm-value">—</span></div>
-          <div class="resource-line">SM <span id="sm-value">—</span></div>
-          <div class="resource-line">POP <span id="pop-value">—</span></div>
-        </aside>
-        <aside class="hud building-stats" aria-label="Building production">
-          <div class="resource-label">PRODUCTION</div>
-          <div id="building-stats"></div>
-        </aside>
-
-        <aside class="hud commands" aria-label="Build commands">
-          <div class="command-label">ACTIONS</div>
-          <button id="build-command" type="button" aria-expanded="false" aria-controls="build-panel">BUILD</button>
-          <section id="build-panel" class="command-panel" hidden>
-            <button type="button" data-build="housing">HOUSING / POPULATION</button>
-            <button type="button" data-build="farm">FARM / SOFT MATERIALS</button>
-            <button type="button" data-build="military">MILITARY / DEFENSE</button>
-            <button type="button" data-build="mine">MINE / HARD MATERIALS</button>
-          </section>
-          <button id="route-command" type="button" aria-expanded="false" aria-controls="route-panel">ROADS / TUNNELS</button>
-          <section id="route-panel" class="command-panel" hidden>
-            <button type="button" data-route="road">ROAD / BRIDGE</button>
-            <button type="button" data-route="tunnel">TUNNEL</button>
-          </section>
-          <button id="deploy-command" type="button" aria-expanded="false" aria-controls="deploy-panel">DEPLOY</button>
-          <section id="deploy-panel" class="command-panel" hidden>
-            <button id="deploy-select" type="button">SELECT BASES</button>
-            <button id="deploy-all" type="button">SELECT ALL BASES</button>
-            <button id="deploy-order" type="button">ORDER ACTIVE UNITS</button>
-            <button id="deploy-select-units" type="button">SELECT ALL ACTIVE</button>
-            <fieldset id="deploy-bases" class="missile-launchers"><legend>AVAILABLE BASES</legend></fieldset>
-            <button id="deploy-fire" type="button">DEPLOY SELECTED</button>
-            <button id="deploy-clear" type="button">CLEAR SELECTION</button>
-            <p class="command-help">ORDER ACTIVE UNITS selects troops on the map. Click selected troops to toggle them, then click a destination to move or attack.</p>
-          </section>
-          <button id="missile-command" type="button" aria-expanded="false" aria-controls="missile-panel">MISSILE</button>
-          <section id="missile-panel" class="missile-panel" aria-label="Missile launch controls" hidden>
-            <div class="missile-heading">MISSILE TEST</div>
-            <p id="missile-status" role="status" aria-live="polite"></p>
-            <button id="missile-select" type="button">SELECT LAUNCHERS</button>
-            <fieldset id="missile-launchers" class="missile-launchers">
-              <legend>AVAILABLE LAUNCHERS</legend>
-            </fieldset>
-            <button id="missile-target" type="button">SELECT TARGETS</button>
-            <p>Each selected tube fires a staggered salvo: 7 missiles at level 3, 9 at level 4. Shots cycle through targets. Level 4 defenses intercept nearby threats.</p>
-            <button id="missile-fire" type="button">FIRE SALVO</button>
-            <button id="missile-clear" type="button">CLEAR SELECTION</button>
-            <button id="missile-close" type="button">CLOSE</button>
-          </section>
-          <p id="command-status" role="status" aria-live="polite"></p>
-        </aside>
-
-        <main class="battlefield-wrap" aria-label="Urban Defence battlefield">
-          <canvas id="game-canvas" width="1100" height="620"></canvas>
-        </main>
-      </div>
-    </div>
-
-    <script src="scripts/particle-world.js"></script>
-    <script src="scripts/particle-terrain-import.js"></script>
-    <script src="scripts/pixel-construction-scenario.js"></script>
-    <script src="scripts/pixel-city-farms.js"></script>
-    <script src="scripts/pixel-construction-logistics.js"></script>
-    <script src="scripts/pixel-city-military.js"></script>
-    <script src="scripts/pixel-map-construction.js"></script>
+  <body>
+    <noscript>Urban Defence needs JavaScript. Open this page in Chrome or Edge.</noscript>
+    <canvas id="world-canvas"></canvas>
+    <div id="world-status"></div>
+    <aside id="unit-panel"></aside>
+    <div id="cursor-note"></div>
+    <!-- (the game page: pw-app opens on the menu, not the sandbox) -->
+    <script>window.PW = { GAME_PAGE: true };</script>
     <script src="assets/unit-reference.js"></script>
-    <script src="assets/tank-reference.js"></script>
-    <script src="assets/hopper-reference.js"></script>
-    <script src="assets/jet-reference.js"></script>
-    <script src="scripts/pixel-unit.js"></script>
-    <script src="scripts/pixel-unit-vehicles.js"></script>
-    <script src="scripts/pixel-population-scale.js"></script>
-    <script src="scripts/pixel-building-interiors.js"></script>
-    <script src="scripts/pixel-building-shapes.js"></script>
-    <script src="scripts/pixel-building-styles.js"></script>
-    <script src="scripts/pixel-building-devices.js"></script>
-    <script src="scripts/pixel-building-sprite.js?v=3"></script>
-    <script src="scripts/urban-unit-sprites.js?v=4"></script>
-    <script src="scripts/world-object-render.js?v=4"></script>
-    <script src="scripts/building-render.js?v=5"></script>
-    <script src="scripts/missile-control.js?v=5"></script>
-    <script src="scripts/urban-pipeline.js?v=1"></script>
-    <script src="scripts/command-control.js?v=12"></script>
-    <script src="scripts/fixed-step.js"></script>
-    <script src="scripts/terrain-surface.js"></script>
-    <script src="scripts/terrain-detail.js"></script>
-    <script src="scripts/main.js?v=17"></script>
-    <script src="scripts/particle-map-source.js"></script>
+    <script src="scripts/pw/pw-core.js"></script>
+    <script src="scripts/pw/pw-gen-terrain.js"></script>
+    <script src="scripts/pw/pw-gen-vegetation.js"></script>
+    <script src="scripts/pw/pw-props.js"></script>
+    <script src="scripts/pw/pw-tunnels.js"></script>
+    <script src="scripts/pw/pw-unit-art.js"></script>
+    <script src="scripts/pw/pw-tank.js"></script>
+    <script src="scripts/pw/pw-shots.js"></script>
+    <script src="scripts/pw/pw-troops.js"></script>
+    <script src="scripts/pw/pw-jets.js"></script>
+    <script src="scripts/pw/pw-defence.js"></script>
+    <script src="scripts/pw/pw-mechs.js"></script>
+    <script src="scripts/pw/pw-units.js"></script>
+    <script src="scripts/pw/pw-mining.js"></script>
+    <script src="scripts/pw/pw-pickups.js"></script>
+    <script src="scripts/pw/pw-pipes.js"></script>
+    <script src="scripts/pw/pw-urban.js"></script>
+    <script src="scripts/pw/pw-notify.js"></script>
+    <script src="scripts/pw/pw-building-kit.js"></script>
+    <script src="scripts/pw/pw-building-ornaments.js"></script>
+    <script src="scripts/pw/pw-building-population.js"></script>
+    <script src="scripts/pw/pw-building-military.js"></script>
+    <script src="scripts/pw/pw-building-farm.js"></script>
+    <script src="scripts/pw/pw-stamp.js"></script>
+    <script src="scripts/pw/pw-foundations.js"></script>
+    <script src="scripts/pw/pw-settlements.js"></script>
+    <script src="scripts/pw/pw-bunkers.js"></script>
+    <script src="scripts/pw/pw-repair.js"></script>
+    <script src="scripts/pw/pw-seeds.js"></script>
+    <script src="scripts/pw/pw-vision.js"></script>
+    <script src="scripts/pw/pw-growth.js"></script>
+    <script src="scripts/pw/pw-capital-growth.js"></script>
+    <script src="scripts/pw/pw-district.js"></script>
+    <script src="scripts/pw/pw-sim.js"></script>
+    <script src="scripts/pw/pw-particles.js"></script>
+    <script src="scripts/pw/pw-explode.js"></script>
+    <script src="scripts/pw/pw-fragments.js"></script>
+    <script src="scripts/pw/pw-structure.js"></script>
+    <script src="scripts/pw/pw-cores.js"></script>
+    <script src="scripts/pw/pw-stability.js"></script>
+    <script src="scripts/pw/pw-air.js"></script>
+    <script src="scripts/pw/pw-heat.js"></script>
+    <script src="scripts/pw/pw-life.js"></script>
+    <script src="scripts/pw/pw-render.js"></script>
+    <script src="scripts/pw/pw-game.js"></script>
+    <script src="scripts/pw/pw-command.js"></script>
+    <script src="scripts/pw/pw-ai.js"></script>
+    <script src="scripts/pw/pw-ui.js"></script>
+    <script src="scripts/pw/pw-app.js"></script>
   </body>
 </html>
