@@ -527,6 +527,8 @@
         // what still holds it - a building, a prop or a rock, a lamp, a core - and stands, or
         // comes down whole and breaks)
         if (Math.floor(s.age * 2) !== Math.floor((s.age - dt) * 2) || (u >= 1 && !behind)) {
+          // (its ground sinking under it is a hard blow - see PW structure's urgent)
+          if (s.owners.length && world.structure && world.structure.urgent) for (const id of s.owners) world.structure.urgent(id);
           if (s.owners.length && world.onDamage) for (const id of s.owners) world.onDamage(id, 0);
           const box = { x0: s.x0, y0: s.slip - 300, x1: s.x1, y1: s.yBottom };
           if (PW.props) PW.props.afterBlast(world, particles, box);

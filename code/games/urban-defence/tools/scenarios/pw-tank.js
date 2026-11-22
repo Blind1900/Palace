@@ -530,13 +530,17 @@ else {
     const friend = drive(own, sideOf(own), 12);
     const passed = through(own, friend), f1 = frame(own);
     // (ramming an enemy's farm: shoved over the way it drives - its pieces let go a moment after it
-    // fails, at their speed the tank's way)
+    // fails going the tank's way, all told: their weight's speed along it in the second after - one
+    // landing on the tank slides back off it, as off a car's roof: see pw-fragments' glance)
     const fails0 = (farm.failures || []).length;
     let shoved = null, dir = 0;
     const watch = (t) => {
       dir = t.facing;
-      if (!shoved && (farm.failures || []).length > fails0) shoved = { reason: farm.failures[fails0], vx: 0, back: 0 };
-      if (shoved) for (const p of (world.fragments ? world.fragments.list : [])) if (p.owner === farm.id) { shoved.vx = Math.max(shoved.vx, p.vx * dir); shoved.back = Math.min(shoved.back, p.vx * dir); }
+      if (!shoved && (farm.failures || []).length > fails0) shoved = { reason: farm.failures[fails0], vx: 0, mean: 0, ticks: 0 };
+      if (!shoved || shoved.ticks++ > 60) return;
+      let m = 0, mv = 0;
+      for (const p of (world.fragments ? world.fragments.list : [])) if (p.owner === farm.id) { shoved.vx = Math.max(shoved.vx, p.vx * dir); m += p.mass; mv += p.mass * p.vx * dir; }
+      if (m && Math.abs(mv / m) > Math.abs(shoved.mean)) shoved.mean = mv / m;
     };
     const raider = drive(farm, 'raiders', 10, watch);
     for (let k = 0; k < 60 * 3; k += 1) { pwApp.stepWorld(1); watch(raider); }
@@ -549,8 +553,8 @@ else {
     const how = towerFell ? (tower.failed || []).filter((f) => f.reason === 'swept').pop() : null;
     world.tanks.length = 0;
     // (none of the tower's cells crushed by it - though the town may build on while it drives)
-    check(passed && !friend.rammed && f1 >= f0 && shoved && shoved.reason === 'swept' && shoved.vx > 10 && shoved.vx > -shoved.back && rammer.rammed > 100 && !towerFell,
-      `in the world's towns: a tank of a tower's side drives right through it (${passed ? 'its nose out through the far wall' : `stopped short: ${friend.blocked}`}, ${friend.rammed || 0} of its cells crushed); an enemy's rams a farm and shoves it over the way it drives (${shoved ? `${shoved.reason}, its pieces going up to ${shoved.vx.toFixed(0)} cells/s the tank's way, ${(-shoved.back).toFixed(0)} back` : 'it stood'}); one ramming a tower (${tower.ground - tower.body.top} cells tall) smashes ${rammer.rammed || 0} cells of its ground floor and the tower stands (${towerFell ? `it went over: pushed ${how && how.push} against ${how && how.holds}, ${how && tower.ground - how.y} up, ${how && how.load} over it` : 'standing'})`);
+    check(passed && !friend.rammed && f1 >= f0 && shoved && shoved.reason === 'swept' && shoved.vx > 10 && shoved.mean > 5 && rammer.rammed > 100 && !towerFell,
+      `in the world's towns: a tank of a tower's side drives right through it (${passed ? 'its nose out through the far wall' : `stopped short: ${friend.blocked}`}, ${friend.rammed || 0} of its cells crushed); an enemy's rams a farm and shoves it over the way it drives (${shoved ? `${shoved.reason}, its pieces going ${shoved.mean.toFixed(0)} cells/s the tank's way all told, the fastest ${shoved.vx.toFixed(0)}` : 'it stood'}); one ramming a tower (${tower.ground - tower.body.top} cells tall) smashes ${rammer.rammed || 0} cells of its ground floor and the tower stands (${towerFell ? `it went over: pushed ${how && how.push} against ${how && how.holds}, ${how && tower.ground - how.y} up, ${how && how.load} over it` : 'standing'})`);
   }
 }
 pwApp.setPaused(false);

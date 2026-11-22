@@ -172,44 +172,86 @@
     // As built, from its canvas: per row above the floor, the load (frame above the row), the
     // supporting columns (frame with frame on top), their span and centre, the widest gap between
     // them, and whether the load sat over them.
-    function blueprintOf(b) {
+    // (worked out a row at a time, `cells` of its canvas at most at a go - a tower's is tens of
+    // thousands, too many for one tick ahead of need: it goes on from where it was the next time;
+    // null until it is done. Asked for with no limit - by an analysis - it is finished then)
+    function blueprintOf(b, cells = Infinity) {
       if (b.blueprint) return b.blueprint;
-      const c = b.canvas, rows = c.ground;
-      const isFrame = new Uint8Array(rows * c.width);
-      for (let i = 0; i < isFrame.length; i += 1) isFrame[i] = frameOf[c.mat[i] & ID_MASK] || c.back[i] !== 0 ? 1 : 0;
-      const frame = (x, y) => isFrame[y * c.width + x] === 1;
-      const load = new Float32Array(rows), support = new Int32Array(rows), left = new Int32Array(rows).fill(1e9), right = new Int32Array(rows).fill(-1e9);
-      const supportX = new Float64Array(rows), maxGap = new Int32Array(rows), balanced = new Uint8Array(rows);
-      let total = 0, above = 0, aboveX = 0;
-      for (let y = 0; y < rows; y += 1) {
-        load[y] = above;
+      const c = b.canvas, rows = c.ground, w = c.width;
+      const J = b.bpJob || (b.bpJob = { y: 0, total: 0, above: 0, aboveX: 0, prev: new Uint8Array(w), cur: new Uint8Array(w),
+        load: new Float32Array(rows), support: new Int32Array(rows), left: new Int32Array(rows).fill(1e9), right: new Int32Array(rows).fill(-1e9),
+        supportX: new Float64Array(rows), maxGap: new Int32Array(rows), balanced: new Uint8Array(rows) });
+      const { load, support, left, right, supportX, maxGap, balanced } = J;
+      for (; J.y < rows && cells > 0; J.y += 1, cells -= w) {
+        const y = J.y, cur = J.cur, prev = J.prev;
+        for (let x = 0, i = y * w; x < w; x += 1, i += 1) cur[x] = frameOf[c.mat[i] & ID_MASK] || c.back[i] !== 0 ? 1 : 0;
+        load[y] = J.above;
         let rowX = 0, rowN = 0, last = -1;
-        for (let x = 0; x < c.width; x += 1) {
-          if (!frame(x, y)) continue;
-          rowN += 1; rowX += x + b.ox + 0.5; total += 1;
-          if (y > 0 && frame(x, y - 1)) {
+        for (let x = 0; x < w; x += 1) {
+          if (!cur[x]) continue;
+          rowN += 1; rowX += x + b.ox + 0.5; J.total += 1;
+          if (y > 0 && prev[x]) {
             support[y] += 1; supportX[y] += x + b.ox + 0.5; left[y] = Math.min(left[y], x + b.ox); right[y] = Math.max(right[y], x + b.ox);
             if (last >= 0) maxGap[y] = Math.max(maxGap[y], x - last - 1);
             last = x;
           }
         }
-        if (above) { const centre = aboveX / above; balanced[y] = centre >= left[y] - TOPPLE_MARGIN && centre <= right[y] + 1 + TOPPLE_MARGIN ? 1 : 0; }
-        above += rowN; aboveX += rowX;
+        if (J.above) { const centre = J.aboveX / J.above; balanced[y] = centre >= left[y] - TOPPLE_MARGIN && centre <= right[y] + 1 + TOPPLE_MARGIN ? 1 : 0; }
+        J.above += rowN; J.aboveX += rowX;
+        J.prev = cur; J.cur = prev;
       }
-      b.blueprint = { load, support, supportX, maxGap, left, right, balanced, total };
+      if (J.y < rows) return null;
+      b.bpJob = null;
+      b.blueprint = { load, support, supportX, maxGap, left, right, balanced, total: J.total };
       return b.blueprint;
+    }
+    const BLUEPRINT_CELLS = 12000;   // canvas cells a tick worked through ahead of need
+    // (the chunks over a building's area as they stand: their versions summed - see PW.markDirty;
+    // any change in them but gas drifting through moves it on)
+    function versionOf(b) {
+      const A = areaOf(b), V = world.chunkHardVersion;
+      if (!V) return NaN;
+      let v = 0;
+      for (let cy = A.y0 >> CHUNK_SHIFT; cy <= A.y1 >> CHUNK_SHIFT; cy += 1) for (let cx = A.x0 >> CHUNK_SHIFT; cx <= A.x1 >> CHUNK_SHIFT; cx += 1) v += V[cy * world.chunksX + cx];
+      return v;
+    }
+    // (nothing in it or round it changed since it was last looked at - no cell broken, laid, fallen
+    // or flooded there - and nothing else bears on it: no works on it, no water or tank pushing on
+    // it. The same look would find the same: it is not looked at again)
+    function unchanged(b) {
+      if (b.seenV === undefined || b.site || b.siteWanted || b.growing) return false;
+      const now = world.tick || 0;
+      if (now - (b.waterAt ?? -1e9) < WET_FOR || (b.ram && now - b.ram.at < RAM_FOR) || tick - (b.floodAt ?? -1e9) < WATER_QUICK) return false;
+      return versionOf(b) === b.seenV;
     }
 
     // ---- Analysis ---------------------------------------------------------------------------------
     // (a building is analysed at most once every REPEAT ticks however often it is hit - but when
     // water first comes against it, `soon`, at once and every WATER_REPEAT ticks for a while: a
     // flood's push is greatest as it strikes, and falls off as the water spreads)
+    // (a whole building that stands on unchanged look after look - chipped by flying rubble, its
+    // fittings knocked off, nothing of its frame giving - is looked at less and less often: REPEAT,
+    // twice that, ... up to REPEAT << CALM_MAX ticks; struck hard - a blast, a heavy piece crushing
+    // into it, its ground sinking - it is looked at again at once at the usual pace: see urgent)
     const last = new Map();
+    const CALM_MAX = 3;
     function notify(id, soon = false) {
       const b = building(id);
       if (!b || (due.has(id) && !soon)) return;
       if (soon) b.floodAt = tick;
-      due.set(id, soon ? Math.min(due.get(id) ?? Infinity, tick + 2) : Math.max(tick + 2, (last.get(id) ?? -1e9) + REPEAT));
+      // (only a whole building calms: one damaged is looked at at the usual pace - what hangs loose
+      // on it comes down, its repairs go on, see loosePanels - and so is one water or a tank pushes
+      // on now, the push coming and going)
+      const now = world.tick || 0, pushed = now - (b.waterAt ?? -1e9) < WET_FOR || (b.ram && now - b.ram.at < RAM_FOR);
+      const wait = pushed || !(b.health >= 1) ? REPEAT : REPEAT << Math.min(CALM_MAX, b.calm || 0);
+      due.set(id, soon ? Math.min(due.get(id) ?? Infinity, tick + 2) : Math.max(tick + 2, (last.get(id) ?? -1e9) + wait));
+    }
+    function urgent(id) {
+      const b = building(id);
+      if (!b) return;
+      b.calm = 0;
+      const at = Math.max(tick + 2, (last.get(id) ?? -1e9) + REPEAT);
+      if (due.has(id) && due.get(id) > at) due.set(id, at);
     }
     // (what is found to come away is lifted out of the world as a falling piece on the tick after:
     // for a tower the search and the lifting are each tens of thousands of cells, and are not done
@@ -244,17 +286,19 @@
         if (!PW.DETERMINISTIC && performance.now() - t0 > budgetMs) break;
         due.delete(id);
         last.set(id, tick);
-        analyse(building(id));
+        const b = building(id);
+        if (b && unchanged(b)) { stats.unchanged = (stats.unchanged || 0) + 1; b.calm = (b.calm || 0) + 1; continue; }
+        analyse(b);
       }
-      // (with time to spare, one building a tick has its blueprint worked out ahead of the first
-      // blow to it, so the analysis right after a blast does not pay for that too - it is the same
-      // whenever it is worked out)
+      // (with time to spare, a building's blueprint is worked out ahead of the first blow to it - a
+      // few of its rows a tick, one building after another - so the analysis right after a blast
+      // does not pay for that too: it is the same whenever it is worked out)
       if (all.length && performance.now() - t0 < budgetMs * 0.5) {
         for (let k = 0; k < all.length; k += 1) {
           const b = all[(blueprintAt + k) % all.length];
           if (b.blueprint || !b.canvas) continue;
-          blueprintOf(b);
-          blueprintAt = (blueprintAt + k + 1) % all.length;
+          if (blueprintOf(b, BLUEPRINT_CELLS)) blueprintAt = (blueprintAt + k + 1) % all.length;
+          else blueprintAt = (blueprintAt + k) % all.length;
           break;
         }
       }
@@ -473,13 +517,18 @@
         b.grownFrame = report.frame; b.grownAnchored = standing; b.asBuilt = { load: rowLoad, support: rowSup };
       }
       report.site = site;
+      // (nothing gave and it stands as it stood: calmer - see notify)
+      const was = b.health;
       b.health = Math.max(0, Math.min(1, standing / Math.max(1, bp.total)));
+      b.calm = fail || report.detached || was === undefined || Math.abs(b.health - was) > 0.002 ? 0 : (b.calm || 0) + 1;
       b.ruined = b.health < 0.25;
       // (all but whole, and no longer being worked: a building like any other again)
       if ((site || b.siteWanted) && b.health >= SITE_DONE && !PW.isGrowing(world, b)) { b.site = false; b.siteWanted = false; b.asBuilt = null; b.grownAnchored = undefined; b.grownFrame = undefined; }
       if (b.health < 1) loosePanels(b);
       // (the water has just come against it: looked at again soon - see notify)
       if (!fail && tick - (b.floodAt ?? -1e9) < WATER_QUICK) due.set(b.id, tick + WATER_REPEAT);
+      // (how it stood when looked at - what it shed of its fittings counted in: see unchanged)
+      b.seenV = fail ? undefined : versionOf(b);
       stats.last = report;
       return report;
     }
@@ -602,7 +651,7 @@
     }
 
     // (the world's: water pressing on a building tells it - see pw-sim's pushOn)
-    world.structure = { notify, step, analyse, stats, blueprintOf };
+    world.structure = { notify, urgent, step, analyse, stats, blueprintOf };
     return world.structure;
   }
 

@@ -46,6 +46,7 @@
   // crushed storeys and its breaking pieces is thrown; LOFT how much of it goes up.
   const SPILL = 2, LOFT = 0.55;
   const weightOf = (solid) => (solid === 1 ? 1 : solid === THIN ? THIN_WEIGHT : 0);
+  const SOLID_WEIGHT = [0, 1, THIN_WEIGHT];     // (weightOf, as a table: a cell's `solid` is 0, 1 or THIN)
   // (a plant's wood cells weighted by the girth of the stem each hangs from, over the mean, so
   // they weigh as many cells in all)
   function girthWeights(solid, girth) {
@@ -160,11 +161,14 @@
       // in all as much as its wood cells, spread by girth)
       const wt = spec.flora && data.girth ? girthWeights(SOL, data.girth) : null;
       const wOf = wt ? (k) => wt[k] : (k) => weightOf(SOL[k]);
-      let mass = 0, heavy = 0, thin = 0, sx = 0, sy = 0;
+      // (its weight and middle - and the box its cells lie in, in the same pass: see the grid below)
+      let mass = 0, heavy = 0, thin = 0, sx = 0, sy = 0, xMin = Infinity, xMax = -Infinity, yMin = Infinity, yMax = -Infinity;
       for (let k = 0; k < n; k += 1) {
-        const w = wOf(k);
+        const x = X[k], y = Y[k];
+        if (x < xMin) xMin = x; if (x > xMax) xMax = x; if (y < yMin) yMin = y; if (y > yMax) yMax = y;
+        const w = wt ? wt[k] : SOLID_WEIGHT[SOL[k]];
         if (!w) continue;
-        mass += w; sx += (X[k] + 0.5) * w; sy += (Y[k] + 0.5) * w;
+        mass += w; sx += (x + 0.5) * w; sy += (y + 0.5) * w;
         if (SOL[k] === 1) heavy += 1; else thin += 1;
       }
       // A part of a piece (a chunk it broke into, what is left of it) goes on from just where it
@@ -195,8 +199,7 @@
       let cx = sx / mass, cy = sy / mass;
       const ax = Math.floor(cx), ay = Math.floor(cy);
       // Local grid around the anchor cell (ax, ay), for drawing and contact.
-      let u0 = Infinity, v0 = Infinity, u1 = -Infinity, v1 = -Infinity;
-      for (let k = 0; k < n; k += 1) { const u = X[k] - ax, v = Y[k] - ay; if (u < u0) u0 = u; if (u > u1) u1 = u; if (v < v0) v0 = v; if (v > v1) v1 = v; }
+      const u0 = xMin - ax, v0 = yMin - ay, u1 = xMax - ax, v1 = yMax - ay;
       const gw = u1 - u0 + 1, gh = v1 - v0 + 1, N = gw * gh;
       const grid = new Int32Array(N);
       for (let k = 0; k < n; k += 1) grid[(Y[k] - ay - v0) * gw + (X[k] - ax - u0)] = k + 1;
@@ -249,7 +252,7 @@
       let inertia = 0;
       const gcx = cx - ax, gcy = cy - ay;
       for (let k = 0; k < n; k += 1) {
-        const wgt = wOf(k);
+        const wgt = wt ? wt[k] : SOLID_WEIGHT[SOL[k]];
         if (!wgt) continue;
         inertia += wgt * ((X[k] - ax + 0.5 - gcx) ** 2 + (Y[k] - ay + 0.5 - gcy) ** 2);
       }
@@ -1242,6 +1245,9 @@
           }
           done = contact(p, h);
           if (!done && p.mode === 'fly' && ((world.tanks && world.tanks.length) || (world.troops && world.troops.length) || (world.mechs && world.mechs.length))) glance(p, h);
+          // (folded up where it struck, or its bottom crushed sinking - see crumple, sink - it comes
+          // on from there on the next tick)
+          if (!done && p.paused === world.tick) break;
         }
         if (p.mode === 'flex') {
           // (rung down - or ringing on too long - it is put back as it grew)
@@ -1550,7 +1556,8 @@
         // until its outline is made over: see reshape)
         if (p.stage === 'self' && p.mode === 'hinge' && pts[k + 1] >= -p.ry) continue;
         if (!p.grid[p.ptCell[k >> 1]]) { ghosts += 1; continue; }
-        const [wx, wy] = toWorld(p, c, s, pts[k], pts[k + 1]);
+        // (toWorld, written out: thousands of points a sub-step)
+        const pu = pts[k], pv = pts[k + 1], wx = p.px + pu * c - pv * s, wy = p.py + pu * s + pv * c;
         const x = Math.floor(wx), y = Math.floor(wy);
         tested += 1;
         if (!blocking(x, y)) {
@@ -1826,6 +1833,8 @@
         particles.hold(x + 0.5, y + 0.5, out * (40 + random() * 110) * SPILL, -(10 + random() * 60) * LOFT, debrisOf(m), paint, F.LAND, 5, owner);
       } else if (y + 1 < H && !blocking(x, y + 1)) PW.set(world, x, y, debrisOf(m));
       if ((PW.hash3(x, y, 7) & 3) === 0) puff(x, y - 1, 1);
+      // (crushed under a heavy piece: a hard blow - see PW structure's urgent)
+      if (owner && world.structure && world.structure.urgent) world.structure.urgent(owner);
       if (world.onDamage && owner) world.onDamage(owner, 1, x, y);
     }
 
@@ -1891,7 +1900,7 @@
       const [vx, vy] = velocityAt(p, wx, wy);
       lastFelt = Math.hypot(vx, vy);
       // A big piece coming straight down into its own footprint sinks into it storey by storey.
-      if (p.mode === 'drop' && p.mass >= SPLIT_MIN * 4 && Math.abs(vx) < Math.abs(vy) * 0.6 && Math.abs(p.angle) < 0.6) { sink(p, vx, vy, wx, wy, hx, hy); return true; }
+      if (p.mode === 'drop' && p.mass >= SPLIT_MIN * 4 && Math.abs(vx) < Math.abs(vy) * 0.6 && Math.abs(p.angle) < 0.6) return sink(p, vx, vy, wx, wy, hx, hy) === 'gone';
       // A plant: if the thinnest wood that took the blow cannot bear its share of it - of the blow
       // that would stop it there, or of its weight resting there - that branch snaps off and the
       // plant comes on past it (see snapBranch).
@@ -1963,7 +1972,10 @@
       // A hollow piece - a building, mostly air - folds up where it lands, like a box (see crumple).
       if (p.hollow > HOLLOW && felt >= FOLD_SPEED && p.mass >= SPLIT_MIN && p.crumpled !== world.tick) {
         blow(hx, hy, vx, vy, hit, j * hit, tx * fwd, ty * fwd, Math.abs(vt), hard, !p.owner && !p.from && !p.flora, p.mass >= GROW_HEAVY);
-        if (crumple(p, wx, wy, nx, ny, felt, spread, vt)) return true;
+        // (folded where it is, it comes on; come apart, it is gone)
+        const folded = crumple(p, wx, wy, nx, ny, felt, spread, vt);
+        if (folded === 'gone') return true;
+        if (folded) return false;
       }
       const jt = Math.max(-FRICTION * j, Math.min(FRICTION * j, -vt / (invM + rt * rt * invI)));
       const ix = j * nx + jt * tx, iy = j * ny + jt * ty, omega0 = p.omega;
@@ -2043,17 +2055,29 @@
         if (world.air) world.air.gust(ex + tx * side * 12, ey - 6, 24, tx * side * go * 0.8, ty * side * go * 0.8 - 10);
       }
       crushedAt(wx, wy, folded.length, p.from || p.owner);
-      // What is left comes on into the space, slowed by as much as the folding took up: the more
-      // of its frame folded, the more of its speed into what it struck is spent.
-      const piece = spawn({ data: pick(d, rest), parent: p, inherit: true, owner: p.owner, from: p.from, generation: p.generation, h0: p.h0, floor: p.yf, base: p.base, sunk: p.sunk });
-      if (piece) {
-        const vn = piece.vx * nx + piece.vy * ny, spent = Math.min(0.65, lost / p.mass * 2.5);
-        if (vn < 0) { piece.vx -= nx * vn * spent; piece.vy -= ny * vn * spent; }
-        piece.omega *= 0.85;
-        piece.crumpled = world.tick;
-      }
       stats.crumples = (stats.crumples || 0) + 1;
-      return true;
+      // What is left comes on into the space, slowed by as much as the folding took up: the more
+      // of its frame folded, the more of its speed into what it struck is spent. (The folded cells
+      // are taken out of it where it is - a tower's piece is tens of thousands of cells, not copied
+      // over again for every storey that folds - and its weight, its middle, how it turns, how
+      // hollow it is and its outline worked out again from what is left; whether it still hangs
+      // together is looked at on the step - see partsDue. Too little left to hold together, it
+      // comes apart where it is.)
+      const mass0 = p.mass, { grid, gw, u0, v0, ox0, oy0 } = p;
+      for (const k of folded) { grid[(Y[k] - oy0 - v0) * gw + (X[k] - ox0 - u0)] = 0; d.solid[k] = 0; d.color[k] = 0; }
+      regather(p, null);
+      let heavy = 0, thin = 0;
+      for (let k = 0; k < n; k += 1) { const sk = d.solid[k]; if (sk === 1) heavy += 1; else if (sk === THIN) thin += 1; }
+      if (p.mass < CHUNK_MIN || heavy < CHUNK_MIN / 2) { settle(place(p, pick(d, rest), c, s), p.vx, p.vy); return 'gone'; }
+      p.hollow = heavy + thin ? thin / (heavy + thin) : 0;
+      reoutline(p);
+      afresh(p);
+      p.partsDue = true;
+      const vn = p.vx * nx + p.vy * ny, spent = Math.min(0.65, lost / mass0 * 2.5);
+      if (vn < 0) { p.vx -= nx * vn * spent; p.vy -= ny * vn * spent; }
+      p.omega *= 0.85;
+      p.crumpled = world.tick; p.paused = world.tick;
+      return 'folded';
     }
     // A piece ploughing through loose rubble throws it aside: each cell it throws takes the momentum
     // it is given out of the piece, at the point that threw it - so a piece comes to a stop in a
@@ -2120,6 +2144,7 @@
         PW.set(world, x, y, M.AIR);
         particles.spawn(x + 0.5, y + 0.5, vx * 0.3 + (random() - 0.5) * 80, -Math.abs(vy) * 0.2 - 30, debrisOf(m), 0, F.LAND, 5, owner);
         stats.chipped += 1;
+        if (owner && world.structure && world.structure.urgent) world.structure.urgent(owner);
         if (owner && world.onDamage) world.onDamage(owner, 1, x, y);
       }
       const dust = Math.min(1400, Math.round(energy / 30000));
@@ -2212,41 +2237,63 @@
     // comes on down into it, slowed, to be crushed in turn - it sinks into its own rubble, breaking
     // apart as it goes. What is left of it at last (its top floors) settles on the heap in a few big
     // chunks that come to rest, misplaced, as ruins.
+    // (what is left of a piece that folded or sank where it is goes on as a piece new made - see
+    // spawn - would: its age, its rest, its last touch, its wear and its jamming start afresh)
+    function afresh(p) {
+      p.age = 0; p.still = 0; p.touched = -1; p.crushedRows = 0; p.eaten = 0; p.dir = 1;
+      for (const key of ['jam', 'jamX', 'jamY', 'm0', 'worn', 'grit', 'remadeAt', 'partsAt', 'reshape', 'feltV', 'feltAt', 'gain', 'lastMotion', 'splashed', 'floatedAt', 'embedTick', 'hitUnits']) p[key] = undefined;
+    }
+    // ('sunk': its bottom crushed, the rest of it coming on down, where it is; 'gone': come apart -
+    // broken up at the last, or too little left to hold together)
     function sink(p, vx, vy, wx, wy, hx, hy) {
       const [c, s] = cosSin(p);
-      const speed = Math.hypot(vx, vy);
-      if (p.sunk >= 3 && (speed < 50 || p.gh < p.h0 * 0.45)) {
+      const speed = Math.hypot(vx, vy), tall = p.ghLive ?? p.gh;
+      if (p.sunk >= 3 && (speed < 50 || tall < p.h0 * 0.45)) {
         const all = [];
         for (let k = 0; k < p.data.x.length; k += 1) all.push(k);
         breakUp(p, all, 30 + random() * 14, 0.4);
         puff(hx, hy - 2, Math.min(600, Math.round(Math.sqrt(p.mass) * 4)), 30 + Math.sqrt(p.mass), 12);
-        return;
+        return 'gone';
       }
       const placed = place(p, p.data, c, s, true);
       let lowest = -Infinity;
       for (let j = 0; j < placed.x.length; j += 1) if (placed.solid[j]) lowest = Math.max(lowest, placed.y[j]);
       // (a few rows at a time, each crushed band bursting out of its sides as it goes - the
       // harder it comes down, the harder)
-      const band = Math.max(6, Math.round(p.gh * 0.05));
+      const band = Math.max(6, Math.round(tall * 0.05));
       const crushedKs = [], restKs = [];
       for (let j = 0; j < placed.x.length; j += 1) (placed.y[j] >= lowest - band ? crushedKs : restKs).push(j);
       const [mid] = centre(p);
       scatter(pick(placed, crushedKs, true), vx * 0.3, 0, 0, mid, wy, 0.6, undefined, undefined, undefined, Math.min(1.6, 0.6 + speed / 220));
-      let restMass = 0;
-      for (const k of restKs) if (p.data.solid[k]) restMass += 1;
-      if (restMass >= CHUNK_MIN) {
-        spawn({ data: pick(p.data, restKs), parent: p, owner: p.owner, from: p.from, vx: vx * 0.4, vy: Math.max(30, vy * 0.65), omega: p.omega * 0.5,
-          drop: true, floor: p.yf, base: p.base, generation: p.generation, sunk: p.sunk + 1, h0: p.h0 });
-        stats.crushSteps = (stats.crushSteps || 0) + 1;
-      } else if (restKs.length) settle(pick(placed, restKs, true), vx, vy);
-      // The air under it is driven out of its sides: dust and grit blast out low and wide.
+      // (the width of what was crushed, before it goes: the air under it blasts out there - below)
       let x0 = Infinity, x1 = -Infinity;
       for (const k of crushedKs) if (placed.solid[k]) { if (placed.x[k] < x0) x0 = placed.x[k]; if (placed.x[k] > x1) x1 = placed.x[k]; }
+      const d = p.data, mass0 = p.mass;
+      let restMass = 0, top = Infinity, bottom = -Infinity;
+      for (const k of restKs) if (d.solid[k]) { restMass += 1; if (d.y[k] < top) top = d.y[k]; if (d.y[k] > bottom) bottom = d.y[k]; }
+      let left = 'gone';
+      if (restMass >= CHUNK_MIN) {
+        // (what is left comes on down where it is - its crushed storeys taken out of it, not the
+        // tens of thousands of cells above them copied over again: its weight and middle, how it
+        // turns and its outline worked out again from what is left - slowed by what it crushed,
+        // its turning spent; whether it still hangs together is looked at on the step)
+        const { grid, gw, u0, v0, ox0, oy0 } = p;
+        for (const k of crushedKs) { grid[(d.y[k] - oy0 - v0) * gw + (d.x[k] - ox0 - u0)] = 0; d.solid[k] = 0; d.color[k] = 0; }
+        regather(p, null);
+        reoutline(p);
+        afresh(p);
+        p.vx = vx * 0.4; p.vy = Math.max(30, vy * 0.65); p.omega *= 0.5;
+        p.sunk += 1; p.ghLive = bottom - top + 1; p.partsDue = true; p.paused = world.tick; p.crumpled = undefined;
+        stats.crushSteps = (stats.crushSteps || 0) + 1;
+        left = 'sunk';
+      } else if (restKs.length) settle(pick(placed, restKs, true), vx, vy);
+      // The air under it is driven out of its sides: dust and grit blast out low and wide.
       if (x1 >= x0) blowOut(x0, x1, Math.round(wy), speed, 1);
-      puff(hx, hy - 2, Math.min(900, Math.round(band * Math.sqrt(p.mass) / 2)), 30 + Math.sqrt(p.mass) * 1.2, 10 + band);
+      puff(hx, hy - 2, Math.min(900, Math.round(band * Math.sqrt(mass0) / 2)), 30 + Math.sqrt(mass0) * 1.2, 10 + band);
       if (world.stability) world.stability.shock(hx, hy, crushedKs.length * speed * speed / 40);
       // (the crushed storeys smoulder in the heap)
       crushedAt(hx, hy, crushedKs.length, p.from || p.owner);
+      return left;
     }
     // A floor coming down drives the air out from under it: dust and grit blast out of both its
     // sides (x0..x1) at row y, low along the ground - the faster it comes down, the harder.
