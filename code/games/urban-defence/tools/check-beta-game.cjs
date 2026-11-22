@@ -118,11 +118,22 @@ async function main() {
   try {
     const endpoint = await new Promise((resolve, reject) => {
       let buffer = '';
-      const timer = setTimeout(() => reject(new Error('Edge debugging endpoint timeout')), 20000);
+      // Edge 158 re-launches itself into a child process, so the "DevTools listening" line
+      // never reaches our stderr pipe; the endpoint is also written to DevToolsActivePort
+      // (port, then path) in the profile, which works either way.
+      const portFile = path.join(profile, 'DevToolsActivePort');
+      const poll = setInterval(() => {
+        try {
+          const [port, wsPath] = fs.readFileSync(portFile, 'utf8').split(/\r?\n/);
+          if (port && wsPath) done(`ws://127.0.0.1:${port.trim()}${wsPath.trim()}`);
+        } catch (error) { /* not written yet */ }
+      }, 200);
+      const timer = setTimeout(() => { clearInterval(poll); reject(new Error('Edge debugging endpoint timeout')); }, 20000);
+      const done = (url) => { clearTimeout(timer); clearInterval(poll); resolve(url); };
       child.stderr.on('data', (data) => {
         buffer += data;
         const found = buffer.match(/DevTools listening on (ws:\/\/[^\s]+)/);
-        if (found) { clearTimeout(timer); resolve(found[1]); }
+        if (found) done(found[1]);
       });
       child.on('error', reject);
     });
@@ -268,6 +279,8 @@ async function main() {
       report.screenshot = path.resolve(String(args.screenshot));
     }
   } finally {
+    // (a re-launched Edge is not our child: ask the browser itself to close, or it lingers)
+    if (socket) { try { socket.send(JSON.stringify({ id: 1e9, method: 'Browser.close' })); } catch (error) { /* closed */ } }
     if (socket) socket.close();
     child.kill();
     // Edge's helper processes can keep the stderr pipe open for minutes; don't wait for them.
