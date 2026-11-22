@@ -23,6 +23,8 @@ const SUITES = [
   { name: 'pw-fire', alone: true, params: 'det=1' }, { name: 'pw-collapse', alone: true, params: 'det=1' },
   // the first capital-lab suite: the vehicle rule end to end (N3) - heavy, so it runs alone
   { name: 'pw-vehicle', alone: true, page: 'capital-lab.html', ready: 'window.pwLab && pwLab.ready', params: 'det=1' },
+  // N92: the tunnel and traversal lab - a squad finds its way through a course dug as it watches
+  { name: 'pw-unit-lab', page: 'pw-unit-lab.html', ready: 'window.pwLab && pwLab.ready', params: 'det=1' },
 ].filter((s) => !args.only || args.only.split(',').includes(s.name));
 const root = path.resolve(__dirname, '..');
 const out = path.join(os.tmpdir(), 'claude-scratch', 'shots');

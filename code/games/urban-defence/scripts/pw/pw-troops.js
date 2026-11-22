@@ -111,6 +111,7 @@
     if (t.cooldown > 0) t.cooldown -= dt;
     wade(world, t);
     if (t.buried || buriedNow(world, t)) { dig(world, t, dt); return; }
+    if (t.route) follow(world, t, dt);
     const h = heightOf(t), g = G();
     // On a ladder: up or down it as it is told, gravity held off; off its top or foot it stands.
     const onLadder = ladderAt(world, Math.floor(t.x), t.y - 4) || ladderAt(world, Math.floor(t.x), t.y + 1);
@@ -271,6 +272,187 @@
       if (particles && F && (PW.hash3(xx, yy, t.seed) & 3) === 0) particles.spawn(xx + 0.5, yy + 0.5, -dir * (30 + (PW.hash2(xx, yy) & 31)), -20, m & 0xff, 0, F.LAND, 4);
     }
   }
+
+  // ---- Finding the way ------------------------------------------------------------------------------------
+  // Told to go somewhere, a trooper finds its way there by the same rules it moves by: over the
+  // ground and along tunnels, stepping up and down their stairs and slopes, crouching under a low
+  // roof, up and down ladders, off a ledge no higher than it drops unhurt - never through water over
+  // its head (a flooded tunnel is no way: the user's design). The places it can stand - each column,
+  // each floor in it - are searched outward from where it is, the nearest by its going first (a
+  // cell's walk; crouched, more; a rung's climb), to the place under where it was told; then it goes
+  // the way, a leg at a time - a walk, a climb - and if it is held up, looks for the way again.
+  const PLAN_MARGIN = 160;      // cells round both ends of the way the search looks over
+  const PLAN_NODES = 300000;    // places it looks at, at most
+  const SAFE_DROP = 40;         // cells it drops off a ledge unhurt (see FALL_SAFE)
+  const FREE_CAP = 40;
+  const PLAN = { n: 0, free: null, foot: null, cost: null, prev: null, how: null };
+  const HOW = { WALK: 1, CROUCH: 2, UP: 3, DOWN: 4 };
+  function plan(world, from, to) {
+    const { mat, width: W, height: H } = world;
+    const sx = Math.floor(from.x), sy = Math.round(from.y), gx = Math.floor(to.x), gy = Math.round(to.y);
+    const x0 = Math.max(HALF + 1, Math.min(sx, gx) - PLAN_MARGIN), x1 = Math.min(W - HALF - 2, Math.max(sx, gx) + PLAN_MARGIN);
+    const y0 = Math.max(FREE_CAP + 2, Math.min(sy, gy) - PLAN_MARGIN * 2), y1 = Math.min(H - 3, Math.max(sy, gy) + PLAN_MARGIN * 2);
+    const bw = x1 - x0 + 1, bh = y1 - y0 + 1, n = bw * bh;
+    // (cost in doubles: the heap's are, and a float's rounding would make a place look already done)
+    if (PLAN.n < n) { PLAN.n = n; PLAN.free = new Uint8Array(n); PLAN.foot = new Uint8Array(n); PLAN.cost = new Float64Array(n); PLAN.prev = new Int32Array(n); PLAN.how = new Uint8Array(n); }
+    const { free, foot, cost, prev, how } = PLAN;
+    // (each cell of the box: how many cells are open straight up from it - itself too; and what it
+    // is underfoot - something that bears a foot (1), a ladder (2), water (4))
+    const LADDER = PW.FLAG.LADDER;
+    for (let x = x0; x <= x1; x += 1) {
+      let run = 0;
+      for (let y = y0 - FREE_CAP; y < y0; y += 1) { const id = mat[y * W + x] & ID_MASK; run = phase[id] >= POWDER && !passable[id] && id !== M.PLATFORM ? 0 : Math.min(FREE_CAP, run + 1); }
+      for (let y = y0, i = x - x0; y <= y1; y += 1, i += bw) {
+        const id = mat[y * W + x] & ID_MASK, solid = phase[id] >= POWDER && !passable[id] && id !== M.PLATFORM;
+        run = solid ? 0 : Math.min(FREE_CAP, run + 1);
+        free[i] = run;
+        foot[i] = (solid || id === M.PLATFORM ? 1 : 0) | (PW.getFlags(world, x, y) & LADDER ? 2 : 0) | (id === M.WATER ? 4 : 0);
+      }
+    }
+    const at = (x, y) => (y - y0) * bw + (x - x0);
+    const inBox = (x, y) => x - HALF >= x0 && x + HALF - 1 <= x1 && y - HEIGHT >= y0 && y + 1 <= y1;
+    const room = (x, y) => { let m = FREE_CAP; for (let xx = x - HALF, i = at(x - HALF, y); xx < x + HALF; xx += 1, i += 1) if (free[i] < m) m = free[i]; return m; };
+    const bearsAt = (x, y) => {
+      for (let xx = x - HALF, i = at(x - HALF, y + 1); xx < x + HALF; xx += 1, i += 1) if (foot[i] & 1) return true;
+      return (foot[at(x, y + 1)] & 2) !== 0 && (foot[at(x, y)] & 2) === 0;
+    };
+    // (how tall it can stand there, 0 not at all; it wades no deeper than its thighs - deeper is
+    // flooded, no way)
+    const WADE = 10;
+    const standH = (x, y) => {
+      const r = room(x, y), h = r >= HEIGHT ? HEIGHT : r >= CROUCH ? CROUCH : 0;
+      return h && !(foot[at(x, y - WADE)] & 4) ? h : 0;
+    };
+    // (where it ends up let go at (x, y), h tall: on what bears it, or a drop no deeper than it takes unhurt)
+    const landAt = (x, y, h) => {
+      for (let k = 0; k <= SAFE_DROP; k += 1) {
+        if (!inBox(x, y + k) || (k && room(x, y + k) < h)) return -1;
+        if (bearsAt(x, y + k)) return y + k;
+      }
+      return -1;
+    };
+    if (!inBox(sx, sy)) return null;
+    // (the place under where it was told: the first it can stand on going down from there)
+    let goal = -1;
+    for (let dy = -12; dy <= 90 && goal < 0; dy += 1) for (const dx of [0, -1, 1, -2, 2, -3, 3]) {
+      const x = gx + dx, y = gy + dy;
+      if (inBox(x, y) && bearsAt(x, y) && standH(x, y)) { goal = at(x, y); break; }
+    }
+    cost.fill(Infinity, 0, n); how.fill(0, 0, n);
+    const start = at(sx, sy);
+    cost[start] = 0; prev[start] = -1;
+    // (the open places, cheapest first: a binary heap of [cost, place])
+    const heapC = [], heapI = [];
+    const push = (c, i) => { let k = heapC.length; heapC.push(c); heapI.push(i); while (k) { const p = (k - 1) >> 1; if (heapC[p] <= c) break; heapC[k] = heapC[p]; heapI[k] = heapI[p]; k = p; } heapC[k] = c; heapI[k] = i; };
+    const pop = () => {
+      const top = heapI[0], c = heapC.pop(), i = heapI.pop(), m = heapC.length;
+      if (m) { let k = 0; for (;;) { let s = 2 * k + 1; if (s >= m) break; if (s + 1 < m && heapC[s + 1] < heapC[s]) s += 1; if (heapC[s] >= c) break; heapC[k] = heapC[s]; heapI[k] = heapI[s]; k = s; } heapC[k] = c; heapI[k] = i; }
+      return top;
+    };
+    const relax = (from, i, c, kind) => { if (c < cost[i]) { cost[i] = c; prev[i] = from; how[i] = kind; push(c, i); } };
+    push(0, start);
+    let best = start, bestD = Math.hypot(sx - gx, sy - gy), seen = 0;
+    while (heapC.length && seen < PLAN_NODES) {
+      const c0 = heapC[0], i = pop();
+      if (c0 > cost[i]) continue;
+      seen += 1;
+      if (i === goal) { best = i; break; }
+      const x = x0 + i % bw, y = y0 + ((i / bw) | 0);
+      // (the nearest it can get, should there be no way there)
+      const d = Math.hypot(x - gx, y - gy);
+      if (d < bestD) { bestD = d; best = i; }
+      const hNow = standH(x, y) || CROUCH;
+      // Along: a cell each way - standing if there is room, else crouched; up a step its legs take;
+      // then down to what bears it.
+      for (const dir of [-1, 1]) {
+        const nx = x + dir;
+        if (!inBox(nx, y)) continue;
+        let y2 = -1, h = 0;
+        for (const hh of [HEIGHT, CROUCH]) {
+          if (room(nx, y) >= hh) { y2 = y; h = hh; break; }
+          for (let k = 1; k <= STEP_UP; k += 1) if (inBox(nx, y - k) && room(nx, y - k) >= hh) { y2 = y - k; h = hh; break; }
+          if (y2 >= 0) break;
+        }
+        if (y2 < 0) continue;
+        const land = landAt(nx, y2, h);
+        if (land < 0 || !standH(nx, land)) continue;
+        const crouched = h < HEIGHT || hNow < HEIGHT;
+        relax(i, at(nx, land), c0 + (crouched ? 2.2 : 1) + (land - y2 > STEP_DOWN ? 2 : 0), crouched ? HOW.CROUCH : HOW.WALK);
+      }
+      // Up a ladder from its foot, to where it stands at its top; down one, to what bears it at its foot.
+      const xi = at(x, y);
+      if (foot[xi] & 2) {
+        let y2 = y;
+        while ((foot[at(x, y2)] & 2) && inBox(x, y2 - 1) && room(x, y2 - 1) >= hNow) y2 -= 1;
+        if (y2 < y && bearsAt(x, y2) && standH(x, y2)) relax(i, at(x, y2), c0 + (y - y2) * 1.6, HOW.UP);
+      }
+      if (foot[at(x, y + 1)] & 2) {
+        let y2 = y;
+        while (inBox(x, y2 + 1) && (foot[at(x, y2 + 1)] & 2) && room(x, y2 + 1) >= hNow) y2 += 1;
+        const land = y2 > y ? landAt(x, y2, hNow) : -1;
+        if (land > y && standH(x, land)) relax(i, at(x, land), c0 + (land - y) * 1.6, HOW.DOWN);
+      }
+    }
+    if (best === start) return { legs: [], reached: goal === start, seen };
+    // The way back from where it gets to, then forward as legs: each run of walking one way (standing
+    // or crouched) one leg, each climb one.
+    const steps = [];
+    for (let i = best; i !== start; i = prev[i]) steps.push(i);
+    steps.reverse();
+    const legs = [];
+    let px = sx;
+    for (const i of steps) {
+      const x = x0 + i % bw, y = y0 + ((i / bw) | 0), k = how[i];
+      if (k === HOW.UP || k === HOW.DOWN) legs.push({ mode: k === HOW.UP ? 'up' : 'down', x, y });
+      else {
+        const dir = Math.sign(x - px), crouch = k === HOW.CROUCH, last = legs[legs.length - 1];
+        if (last && last.mode === 'walk' && last.dir === dir && last.crouch === crouch) { last.x = x; last.y = y; } else legs.push({ mode: 'walk', x, y, dir, crouch });
+      }
+      px = x;
+    }
+    return { legs, reached: best === goal, seen };
+  }
+  // (sent on its way: the way found, or null when there is none)
+  function goTo(world, t, x, y) {
+    if (!t || t.dead) return null;
+    const p = plan(world, t, { x, y });
+    if (!p) { t.route = null; return null; }
+    t.route = { legs: p.legs, at: 0, goal: { x, y }, reached: p.reached, lastX: t.x, lastY: t.y, idle: 0, tries: 0, climbed: false };
+    t.lost = false;
+    return t.route;
+  }
+  const REPLAN_IDLE = 2;        // s held up on a leg before it looks for the way again...
+  const REPLAN_TRIES = 3;       // ...this many times, before it gives up
+  function follow(world, t, dt) {
+    const r = t.route, w = r.legs[r.at];
+    if (!w) { t.route = null; t.walk = 0; t.wantUp = 0; t.arrived = true; return; }
+    // (held up: no headway for a while - it looks for the way again from where it is)
+    if (Math.abs(t.x - r.lastX) + Math.abs(t.y - r.lastY) > 1.5) { r.lastX = t.x; r.lastY = t.y; r.idle = 0; }
+    else if ((r.idle += dt) > REPLAN_IDLE) {
+      const tries = r.tries + 1;
+      if (tries > REPLAN_TRIES || !goTo(world, t, r.goal.x, r.goal.y)) { t.route = null; t.walk = 0; t.lost = true; return; }
+      t.route.tries = tries;
+      return;
+    }
+    const cx = Math.floor(t.x);
+    if (w.mode === 'walk') {
+      if (w.crouch) t.crouch = true;
+      else if (t.crouch && clear(world, t.x, t.y, HEIGHT)) t.crouch = false;
+      const dx = w.x + 0.5 - t.x;
+      if (Math.abs(dx) < 0.8 || Math.sign(dx) !== w.dir) { r.at += 1; if (!r.legs[r.at]) t.walk = 0; return; }
+      t.walk = w.dir;
+      return;
+    }
+    // (a climb: to the ladder, on to it, up or down it to its end)
+    const up = w.mode === 'up';
+    if (t.climbing) { t.walk = 0; t.wantUp = up ? 1 : -1; r.climbed = true; return; }
+    if (r.climbed) { r.climbed = false; r.at += 1; return; }
+    const on = up ? ladderAt(world, cx, t.y) : ladderAt(world, cx, t.y + 1);
+    if (on && t.onGround) { t.walk = 0; t.vx = 0; t.climbing = true; t.wantUp = up ? 1 : -1; t.crouch = false; return; }
+    t.walk = Math.sign(w.x + 0.5 - t.x) || 1;
+  }
+  // (under cover of the ground: its head under the surface over it - in a tunnel, a cave, a cellar)
+  const underground = (world, t) => t.y - heightOf(t) > world.groundTop[Math.max(0, Math.min(world.width - 1, Math.floor(t.x)))] + 4;
 
   // ---- Struck, hurt, killed ----------------------------------------------------------------------------
   function hurt(world, t, amount, cause) {
@@ -486,6 +668,8 @@
   function key(event) {
     if (!held || held.dead || event.repeat) return false;
     const t = held, world = current || (window.pwApp && window.pwApp.world), k = event.code;
+    // (taken in hand, it does as it is told, not where it was going)
+    if (['KeyA', 'ArrowLeft', 'KeyD', 'ArrowRight', 'KeyW', 'ArrowUp', 'KeyS', 'ArrowDown'].includes(k)) t.route = null;
     if (k === 'KeyA' || k === 'ArrowLeft') { t.walk = -1; t.climbing = false; t.wantUp = 0; }
     else if (k === 'KeyD' || k === 'ArrowRight') { t.walk = 1; t.climbing = false; t.wantUp = 0; }
     else if (k === 'KeyW' || k === 'ArrowUp') t.wantUp = 1;
@@ -502,8 +686,8 @@
     return true;
   }
   // (driving it by code, as the keys do: walk -1 / 0 / +1)
-  function walk(t, dir) { t.walk = Math.sign(dir); if (dir) { t.climbing = false; t.wantUp = 0; } }
+  function walk(t, dir) { t.route = null; t.walk = Math.sign(dir); if (dir) { t.climbing = false; t.wantUp = 0; } }
 
-  PW.troops = { create, step, draw, walk, fire, throwGrenade, reload, hurt, blast, touches, struck, target, tool, key, hold, held: () => held, stats,
-    clear, blocks, HEIGHT, CROUCH, HALF, WALK, STEP_UP, STEP_DOWN, FALL_SAFE, HP, MAG, GRENADES, DIG_HARD };
+  PW.troops = { create, step, draw, walk, goTo, plan, underground, fire, throwGrenade, reload, hurt, blast, touches, struck, target, tool, key, hold, held: () => held, stats,
+    clear, blocks, HEIGHT, CROUCH, HALF, WALK, STEP_UP, STEP_DOWN, FALL_SAFE, SAFE_DROP, HP, MAG, GRENADES, DIG_HARD };
 })();

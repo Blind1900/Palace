@@ -106,6 +106,10 @@ life.advance(60 * 300);   // five minutes of the slow lane
 let green = 0; for (let x = left; x <= right; x += 1) if (top(x) === M.GRASS) green += 1;
 check(green > (right - left + 1) * 0.6, `after five minutes the burn scar has grown back (${green} of ${right - left + 1} columns green)`);
 await view('fire-regrown', fx, fy - 40, 5);
+// (N82: what is big in regrowth - a seedling coming up, a young plant drawn again bigger - waits
+// until it is out of the player's sight: the scar in view is in sight, ground far off is not)
+check(PW.DETERMINISTIC || (life.inSight(fx - 10, fy - 50, fx + 10, fy - 30) && !life.inSight(fx + 6000, fy - 50, fx + 6020, fy - 30)),
+  `big regrowth waits out of sight: the scar the camera looks at is in sight (${life.inSight(fx - 10, fy - 50, fx + 10, fy - 30)}), ground 6000 cells off is not (${life.inSight(fx + 6000, fy - 50, fx + 6020, fy - 30)})`);
 const fields = world.buildings.filter((b) => b.field);
 check(fields.every((b) => b.field.growth >= 0.95), `fields have grown to ripe wheat (${fields.map((b) => b.field.growth.toFixed(2)).join(', ')})`);
 check(world.heatList.length < 6, `cold chunks drop their heat arrays (${world.heatList.length} chunks still hold heat)`);

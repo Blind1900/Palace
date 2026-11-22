@@ -45,7 +45,14 @@
   const GROW_EVERY = 60 * 30;     // ticks between a young plant's growth steps
   const GROW_STEP = 0.13;         // ...each this share of its full size
   const LOST_EXPIRE = 60 * 600;   // ticks a place waits for grass and a plant near enough to seed it
-  const YOUNG_MAX = 240;          // young plants growing at once, at most
+  const YOUNG_MAX = 240;          // young plants growing at once, at most (on a map 16384 wide: so many to the width)
+  // (N82: regrowth goes at the same pace on any map - each place a plant was lost, and each young
+  // plant, is looked at about every LOOK_EACH ticks, however many there are; and what is big - a
+  // seedling coming up, a young plant drawn again bigger - happens out of sight, never where the
+  // player is looking: see view. Not in a deterministic run, which must not depend on the camera)
+  const LOOK_EACH = 120;
+  const LOOKS_MAX = 64;           // places or plants looked at a tick, at most
+  const OUT_OF_SIGHT = 60;        // cells round the view still in sight
 
   // The live cells: world cell index -> a value (never 0), in typed arrays - a generation makes
   // some hundred thousand lookups, far quicker so than in a Map. The cells are listed in the
@@ -284,10 +291,12 @@
     }
     // Live cells drawn as the world's pixels: green by its age (bright when new), white.
     function draw(renderer) {
-      if (!live.size) return;
       const { ctx, camera, view } = renderer;
       const z = camera.zoom, size = Math.max(1, Math.round(z));
       const x0 = camera.x, y0 = camera.y, x1 = x0 + view.width / z, y1 = y0 + view.height / z;
+      // (what the player sees: big regrowth waits until it is out of it - see inSight)
+      sight = { x0: x0 - OUT_OF_SIGHT, y0: y0 - OUT_OF_SIGHT, x1: x1 + OUT_OF_SIGHT, y1: y1 + OUT_OF_SIGHT };
+      if (!live.size) return;
       const groups = new Map(), K = live.cells, V = live.vals;
       for (let s = 0, n = live.n; s < n; s += 1) {
         const i = K[s];
@@ -409,19 +418,32 @@
       }
       return true;
     }
-    // One place a plant was lost is looked at: in time, once grass is back on it, a grown plant
-    // standing near seeds it - of the kind that was lost, if one of that kind is near enough.
+    // (the player's view, as last drawn - null before the first frame)
+    let sight = null;
+    const inSight = (x0, y0, x1, y1) => !PW.DETERMINISTIC && !!sight && x1 >= sight.x0 && x0 <= sight.x1 && y1 >= sight.y0 && y0 <= sight.y1;
+    // (so many looks this time that each of `count` comes round about every LOOK_EACH ticks)
+    const looksFor = (count, every) => Math.min(LOOKS_MAX, Math.max(1, Math.ceil(count * every / LOOK_EACH)));
+    const youngMax = () => Math.max(24, Math.round(YOUNG_MAX * W / 16384));
+    // The places plants were lost are looked at in turn: in time, once grass is back on one, a
+    // grown plant standing near seeds it - of the kind that was lost, if one of that kind is near
+    // enough.
     let lostAt = 0;
     function regrow() {
       const lost = world.floraLost;
       if (!lost || !lost.length || !PW.flora || !PW.flora.plant) return;
-      if ((world.floraYoung || []).length >= YOUNG_MAX) return;
+      for (let k = 0, n = looksFor(lost.length, REGROW_EVERY); k < n && lost.length; k += 1) regrowOne(lost);
+    }
+    function regrowOne(lost) {
+      if ((world.floraYoung || []).length >= youngMax()) return;
       if (lostAt >= lost.length) lostAt = 0;
       const spot = lost[lostAt];
       if ((world.tick || 0) - spot.at < REGROW_DELAY) { lostAt += 1; return; }
       // (a place waits for the grass to come back over it - see the Game of Life - and for a plant
       // near enough to seed it; left bare or out of reach that long, it is given up)
       if ((world.tick || 0) - spot.at > LOST_EXPIRE) { lost.splice(lostAt, 1); return; }
+      // (and for the player to look away: a seedling does not come up before his eyes)
+      const gy = world.groundTop[Math.max(0, Math.min(W - 1, spot.x))];
+      if (inSight(spot.x - 40, gy - 80, spot.x + 40, gy)) { lostAt += 1; return; }
       const parent = parentNear(spot.x, spot.type);
       if (parent) {
         const type = parent.type, kind = kindOf(type);
@@ -454,17 +476,21 @@
       if (i >= 0) world.flora.splice(i, 1);
       world.floraIndex = null;
     }
-    // One young plant is looked at: now and then, while it stands whole and green on its ground,
-    // it grows a step towards its full size - drawn again a little bigger where it stands. (Struck,
-    // burnt, felled or fallen, it grows no more.)
+    // The young plants are looked at in turn: now and then, while one stands whole and green on its
+    // ground, it grows a step towards its full size - drawn again a little bigger where it stands,
+    // out of the player's sight. (Struck, burnt, felled or fallen, it grows no more.)
     let youngAt = 0;
     function grow() {
       const young = world.floraYoung;
       if (!young || !young.length) return;
+      for (let k = 0, n = looksFor(young.length, GROW_LOOK_EVERY); k < n && young.length; k += 1) growOne(young);
+    }
+    function growOne(young) {
       if (youngAt >= young.length) youngAt = 0;
       const r = young[youngAt];
       if (r.felled || r.fallen || r.hit || !world.flora.includes(r) || !living(r)) { young.splice(youngAt, 1); return; }
       if ((world.tick || 0) - r.grow.at < GROW_EVERY) { youngAt += 1; return; }
+      if (inSight(r.x - r.width, r.y - r.height, r.x + 2 * r.width, r.y + r.height)) { youngAt += 1; return; }
       const size = Math.min(r.grow.full, r.size + r.grow.full * GROW_STEP);
       const x = r.anchorX, row = world.groundTop[x];
       // (its ground gone from under it: the plants' footing sees to it)
@@ -597,7 +623,7 @@
     function advance(ticks) { for (let t = 0; t < ticks; t += 1) step(); return stats; }
     // (one live cell put exactly, where it has room: patterns for the tests)
     const put = (x, y, kind = WHITE) => { if (room(x, y, kind)) live.set(y * W + x, kind); };
-    const api = { step, advance, stats, seed, put, clear, draw, sprout, generation, parentNear, living, get cells() { return live.size; }, at: (x, y) => live.get(y * W + x) || 0, GREEN, WHITE,
+    const api = { step, advance, stats, seed, put, clear, draw, sprout, generation, parentNear, living, inSight, get cells() { return live.size; }, at: (x, y) => live.get(y * W + x) || 0, GREEN, WHITE,
       coreTick, coreShock, coreCells, coreSparks, stepCores, drawCore, coreEntry: (core) => coreOf.get(core) || null, get cores() { return coreOf.size; } };
     world.lifeGame = api;
     return api;

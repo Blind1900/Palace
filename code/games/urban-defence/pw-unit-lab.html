@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Urban Defence - tunnel and traversal lab</title>
+    <style>
+      html, body { margin: 0; height: 100%; background: #05080a; color: #9fc28a; overflow: hidden; }
+      #world-canvas { display: block; width: 100vw; height: 100vh; image-rendering: pixelated; cursor: crosshair; }
+      #world-status { position: fixed; left: 8px; bottom: 6px; font: 12px Consolas, monospace; pointer-events: none;
+        background: #05080acc; padding: 2px 6px; }
+      #world-tools { position: fixed; left: 8px; top: 8px; display: flex; flex-wrap: wrap; gap: 4px; max-width: 76vw;
+        font: 12px Consolas, monospace; background: #05080acc; padding: 4px; border: 1px solid #2c4030; }
+      #world-tools button { font: inherit; color: #9fc28a; background: #0b140f; border: 1px solid #2c4030; padding: 2px 7px; cursor: pointer; }
+      #world-tools button.on { background: #2c4a30; color: #e4f0c8; }
+      #world-tools .sep { width: 1px; background: #2c4030; margin: 0 3px; }
+      @font-face { font-family: 'Ithaca'; src: url('assets/Ithaca-LVB75.ttf') format('truetype'); }
+      #cursor-note { position: fixed; pointer-events: none; display: none; font: 16px 'Ithaca', Consolas, monospace;
+        color: #e8f0d8; background: #0a120ee8; border: 2px solid #3c5a40; padding: 3px 7px 2px; white-space: nowrap;
+        box-shadow: 2px 2px 0 #000; image-rendering: pixelated; }
+      #cursor-note.good { border-color: #c8b040; color: #fff0b8; }
+      #cursor-note.bad { border-color: #b04030; color: #ffc8b8; }
+    </style>
+  </head>
+  <body>
+    <canvas id="world-canvas"></canvas>
+    <div id="world-tools">
+      <button data-tool="pan">PAN</button>
+      <button data-tool="go" class="on" title="Click a place: the squad finds its way there">GO</button>
+      <button data-action="send" title="Send the squad through the course to the exit">SEND</button>
+      <button data-tool="troop" title="Drop a trooper of ours (click one to take it in hand: A/D, W, S, F, G, R)">TROOP</button>
+      <button data-tool="enemy" title="Drop a sentry of the other side: it fires at ours in its sights">ENEMY</button>
+      <button data-tool="dig" title="Drag a box: the miners dig it">DIG</button>
+      <button data-tool="water" title="Pour water: flood a tunnel">WATER</button>
+      <button data-tool="blast" title="A grenade's blast">BLAST</button>
+      <div class="sep"></div>
+      <button data-speed="1" title="Digging and lining speed">x1</button>
+      <button data-speed="4">x4</button>
+      <button data-speed="16" class="on">x16</button>
+      <button data-speed="64">x64</button>
+      <div class="sep"></div>
+      <button data-action="routes" class="on">ROUTES</button>
+      <button data-action="pause">PAUSE</button>
+      <button data-action="step">STEP</button>
+      <button data-action="reset">RESET</button>
+    </div>
+    <div id="world-status">generating…</div>
+    <div id="cursor-note"></div>
+    <script src="assets/unit-reference.js"></script>
+    <script src="scripts/pw/pw-core.js"></script>
+    <script src="scripts/pw/pw-gen-terrain.js"></script>
+    <script src="scripts/pw/pw-gen-vegetation.js"></script>
+    <script src="scripts/pw/pw-props.js"></script>
+    <script src="scripts/pw/pw-tunnels.js"></script>
+    <script src="scripts/pw/pw-unit-art.js"></script>
+    <script src="scripts/pw/pw-tank.js"></script>
+    <script src="scripts/pw/pw-shots.js"></script>
+    <script src="scripts/pw/pw-troops.js"></script>
+    <script src="scripts/pw/pw-jets.js"></script>
+    <script src="scripts/pw/pw-defence.js"></script>
+    <script src="scripts/pw/pw-mechs.js"></script>
+    <script src="scripts/pw/pw-mining.js"></script>
+    <script src="scripts/pw/pw-pickups.js"></script>
+    <script src="scripts/pw/pw-pipes.js"></script>
+    <script src="scripts/pw/pw-urban.js"></script>
+    <script src="scripts/pw/pw-notify.js"></script>
+    <script src="scripts/pw/pw-building-kit.js"></script>
+    <script src="scripts/pw/pw-building-ornaments.js"></script>
+    <script src="scripts/pw/pw-building-population.js"></script>
+    <script src="scripts/pw/pw-building-military.js"></script>
+    <script src="scripts/pw/pw-building-farm.js"></script>
+    <script src="scripts/pw/pw-stamp.js"></script>
+    <script src="scripts/pw/pw-foundations.js"></script>
+    <script src="scripts/pw/pw-settlements.js"></script>
+    <script src="scripts/pw/pw-sim.js"></script>
+    <script src="scripts/pw/pw-particles.js"></script>
+    <script src="scripts/pw/pw-explode.js"></script>
+    <script src="scripts/pw/pw-fragments.js"></script>
+    <script src="scripts/pw/pw-structure.js"></script>
+    <script src="scripts/pw/pw-stability.js"></script>
+    <script src="scripts/pw/pw-air.js"></script>
+    <script src="scripts/pw/pw-heat.js"></script>
+    <script src="scripts/pw/pw-life.js"></script>
+    <script src="scripts/pw/pw-render.js"></script>
+    <script src="scripts/pw/pw-unit-lab.js"></script>
+  </body>
+</html>
