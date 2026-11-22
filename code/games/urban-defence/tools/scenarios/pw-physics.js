@@ -37,6 +37,9 @@ const fx = Math.round(m.x - m.half * 0.45), fy = world.groundTop[fx] + 30;
 await view('ph-mountain-before', fx, fy - 60, 4);
 const brokenBefore = stability.stats.broken;
 for (const [dx, dy] of [[0, 0], [30, -10], [-25, 15], [10, -30], [45, 10]]) { pwApp.explode(fx + dx, fy + dy, 60, 1.35); pwApp.stepWorld(20); }
+// (the flank is on the move - and ground far off, untouched, at rest: see stability.atRest)
+const farX = fx > W / 2 ? 400 : W - 600, farY = world.groundTop[farX] + 200;
+const movingAfter = !stability.atRest(fx - 120, fy - 400, fx + 160, fy + 120), restFar = stability.atRest(farX, farY, farX + 200, farY + 100);
 pwApp.stepWorld(60 * 14);
 // (and on until the ground there has settled - the looks the slide set off all done: a big slide's
 // last ones come seconds after it; 30 s more at most)
@@ -62,6 +65,7 @@ check(slid > 500 && hanging === 0, `a mountain blown open comes down in a rocksl
 check((stability.stats.shocks || 0) > 5 && stability.stats.loosened > 0, `blasts, the slide and falling rock all shake the ground (${stability.stats.shocks || 0} shocks, ${stability.stats.loosened} cells shaken loose)`);
 await view('ph-mountain-after', fx, fy - 60, 4);
 check((stability.stats.maxMs || 0) < 8, `looking for ground that lost its footing stays in budget (worst ${(stability.stats.maxMs || 0).toFixed(1)} ms)`);
+check(movingAfter && restFar, `what waits on a wreck to come to rest can ask (stability.atRest): the flank blown open is on the move (${movingAfter}), ground far off untouched is at rest (${restFar})`);
 
 // 2b. The blast wave: a blast beside a glazed building shatters glass it does not touch, and the
 // air goes still again within a few seconds; working it stays cheap.

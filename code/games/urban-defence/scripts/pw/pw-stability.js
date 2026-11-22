@@ -977,7 +977,25 @@
       }
       return sags.some((s) => s.x0 <= x1 && s.x1 >= x0) || toppling.length > 0;
     }
-    return { step, disturb, shock, panels, loose, looseLater, stats, settling, busy:() => pending.length > 0 || sags.length > 0 || toppling.length > 0 || stillFalling() };
+    // Nothing moving in the box (for what waits on a wreck to come to rest - a core coming down
+    // onto it to found its building again, N87): no look of the ground's own pending there (see
+    // settling), no piece of anything in flight or swinging there (pw-fragments), and no powder or
+    // water still running in a chunk of it (the cell sim's awake chunks). A caller wanting it quiet
+    // a while counts its own looks: it is cheap, but not free - a few times a second is plenty.
+    function atRest(x0, y0, x1, y1) {
+      if (settling(x0, y0, x1, y1)) return false;
+      const fr = world.fragments;
+      if (fr) for (const p of fr.list) {
+        const c = Math.cos(p.angle), s = Math.sin(p.angle), cx = p.px + p.gx * c - p.gy * s, cy = p.py + p.gx * s + p.gy * c;
+        if (cx >= x0 && cx <= x1 && cy >= y0 && cy <= y1) return false;
+      }
+      const S = PW.CHUNK_SHIFT, CX = world.chunksX;
+      for (let cy = Math.max(0, y0 >> S); cy <= Math.min(world.chunksY - 1, y1 >> S); cy += 1) {
+        for (let cx = Math.max(0, x0 >> S); cx <= Math.min(CX - 1, x1 >> S); cx += 1) if (world.simActive[cy * CX + cx]) return false;
+      }
+      return true;
+    }
+    return { step, disturb, shock, panels, loose, looseLater, stats, settling, atRest, busy:() => pending.length > 0 || sags.length > 0 || toppling.length > 0 || stillFalling() };
   }
 
   PW.createStability = createStability;

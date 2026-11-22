@@ -242,34 +242,56 @@ else {
   }
 }
 
-// 4b. Steep ground (N72, the user's screenshots: a tank stopped "too steep" at a mountainside and
-// at a flight of stairs): it climbs a 55-degree mountainside, crawling, and a flight of stairs -
-// steps 6 cells high - each to the top, and drives on.
+// 4b. Steep ground (N72; the user's limit, 43 degrees): it climbs a mountainside of 43 degrees,
+// crawling, and a flight of stairs no steeper - steps 6 cells high and 7 deep, 41 degrees along
+// their nosings - each to the top, and drives on; and it stops short of a mountainside of 47
+// degrees and of a flight of stairs of 45 (steps 6 high and 6 deep): its tracks would lie steeper
+// than it climbs.
 {
   const E = site(1100);
   if (!E) check(false, 'a stretch of the wilds for the climbs');
   else {
     const { x0, g } = E;
-    // (a mountainside of 55 degrees up 90 cells, and a flight of 10 steps 6 high and 6 deep beyond it)
-    const hillAt = x0 + 220, hill = 90, run55 = Math.round(hill / Math.tan(55 * deg));
-    for (let d = 0; d <= run55; d += 1) fill(hillAt + d, g - Math.round(d * Math.tan(55 * deg)), hillAt + d, g - 1, M.STONE);
-    fill(hillAt + run55, g - hill, hillAt + run55 + 160, g - 1, M.STONE);
-    const stairsAt = hillAt + run55 + 160;
-    for (let k = 0; k < 10; k += 1) fill(stairsAt + k * 6, g - hill - (k + 1) * 6, x0 + 1100, g - hill - k * 6 - 1, M.CONCRETE);
+    // (a mountainside of 43 degrees up 90 cells, and a flight of 10 steps 6 high and 7 deep beyond it)
+    const hillAt = x0 + 220, hill = 90, run43 = Math.round(hill / Math.tan(43 * deg));
+    for (let d = 0; d <= run43; d += 1) fill(hillAt + d, g - Math.round(d * Math.tan(43 * deg)), hillAt + d, g - 1, M.STONE);
+    fill(hillAt + run43, g - hill, hillAt + run43 + 160, g - 1, M.STONE);
+    const stairsAt = hillAt + run43 + 160;
+    for (let k = 0; k < 10; k += 1) fill(stairsAt + k * 7, g - hill - (k + 1) * 6, x0 + 1100, g - hill - k * 6 - 1, M.CONCRETE);
     const t = T.create(world, { style: 'modern', x: x0 + 100, y: g, facing: 1 });
     T.drive(t, 1);
     let slowest = Infinity, onHill = null, ticks = 0;
-    while (ticks < 20 * 60 && t.x < hillAt + run55 + 80) {
+    while (ticks < 20 * 60 && t.x < hillAt + run43 + 80) {
       T.step(world, DT); ticks += 1;
-      if (t.x > hillAt + 20 && t.x < hillAt + run55 - 20) { slowest = Math.min(slowest, Math.abs(t.v)); if (!onHill && t.angle < -45 * deg) onHill = { angle: t.angle / deg, v: t.v }; }
+      if (t.x > hillAt + 20 && t.x < hillAt + run43 - 20) { slowest = Math.min(slowest, Math.abs(t.v)); if (!onHill && t.angle < -40 * deg) onHill = { angle: t.angle / deg, v: t.v }; }
     }
     const upHill = t.y < g - hill + 3 && !t.falling, hillSecs = ticks * DT;
-    if (onHill) await view('tank-mountainside', hillAt + run55 / 2, g - hill / 2, 6);
-    while (ticks < 40 * 60 && t.x < stairsAt + 60 + 80) { T.step(world, DT); ticks += 1; }
+    if (onHill) await view('tank-mountainside', hillAt + run43 / 2, g - hill / 2, 6);
+    while (ticks < 40 * 60 && t.x < stairsAt + 70 + 80) { T.step(world, DT); ticks += 1; }
     const upStairs = t.y < g - hill - 60 + 3 && !t.falling;
-    await view('tank-stairs', stairsAt + 30, g - hill - 40, 6);
-    check(upHill && upStairs && onHill && slowest < T.VMAX * 0.45,
-      `it climbs steep ground: a 55-degree mountainside, crawling up it (${onHill ? `the hull at ${onHill.angle.toFixed(0)} deg, ${slowest.toFixed(0)} cells/s at the slowest` : 'never on it'}; at the top: ${upHill ? `yes, in ${hillSecs.toFixed(1)} s` : `no - ${t.blocked}`}), and a flight of stairs 6 cells a step to the top (${upStairs ? 'yes' : `no - ${t.blocked}, at ${(t.y - (g - hill)).toFixed(0)}`})`);
+    await view('tank-stairs', stairsAt + 35, g - hill - 40, 6);
+    check(upHill && upStairs && onHill && onHill.angle > -T.MAX_SLOPE - 1.5 && slowest < T.VMAX * 0.55,
+      `it climbs ground as steep as its ${T.MAX_SLOPE} degrees: a mountainside of 43, crawling up it (${onHill ? `the hull at ${onHill.angle.toFixed(0)} deg, ${slowest.toFixed(0)} cells/s at the slowest` : 'never on it'}; at the top: ${upHill ? `yes, in ${hillSecs.toFixed(1)} s` : `no - ${t.blocked}`}), and a flight of stairs 6 cells high and 7 deep, 41 along its nosings, to the top (${upStairs ? 'yes' : `no - ${t.blocked}, at ${(t.y - (g - hill)).toFixed(0)}`})`);
+    world.tanks.length = 0;
+  }
+  const F = site(900);
+  if (!F) check(false, 'a stretch of the wilds for the climbs too steep');
+  else {
+    const { x0, g } = F;
+    // (a mountainside of 47 degrees up 60 cells, and beyond it a flight of 10 steps 6 high and 6 deep)
+    const hillAt = x0 + 250, hill = 60, run47 = Math.round(hill / Math.tan(47 * deg));
+    for (let d = 0; d <= run47; d += 1) fill(hillAt + d, g - Math.round(d * Math.tan(47 * deg)), hillAt + d, g - 1, M.STONE);
+    fill(hillAt + run47, g - hill, x0 + 400, g - 1, M.STONE);
+    const stairsAt = x0 + 640;
+    for (let k = 0; k < 10; k += 1) fill(stairsAt + k * 6, g - (k + 1) * 6, x0 + 900, g - k * 6 - 1, M.CONCRETE);
+    const a = T.create(world, { style: 'gothic', x: x0 + 120, y: g, facing: 1 });
+    const b = T.create(world, { style: 'asian', x: x0 + 500, y: g, facing: 1 });
+    for (const t2 of [a, b]) T.drive(t2, 1);
+    run(a, 6);
+    const short = (t2, at) => at - t2.x - 58;
+    await view('tank-too-steep', stairsAt - 60, g - 40, 6);
+    check([a, b].every((t2) => t2.blocked === 'too steep' && t2.v === 0 && !t2.falling && Math.abs(t2.angle) < 3 * deg) && [short(a, hillAt), short(b, stairsAt)].every((d) => d >= -2 && d < 16),
+      `steeper than ${T.MAX_SLOPE} degrees it stops at the foot: a mountainside of 47 (${a.blocked || 'went on'}, its nose ${short(a, hillAt).toFixed(0)} cells off it, the hull at ${(a.angle / deg).toFixed(0)} deg) and a flight of stairs of 45 - 6 high, 6 deep (${b.blocked || 'went on'}, ${short(b, stairsAt).toFixed(0)} off, at ${(b.angle / deg).toFixed(0)} deg)`);
     world.tanks.length = 0;
   }
 }

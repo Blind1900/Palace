@@ -39,12 +39,12 @@
   const ACCEL = VMAX / 1.5;     // cells/s^2: from rest to top speed in 1.5 s
   const BRAKE = VMAX / 0.6;     // cells/s^2 to a stop
   const CLIMB = 0.75;           // of its top speed it loses climbing, by the sine of the slope
-  const MAX_SLOPE = 60;         // degrees it climbs, at most (a mountainside, a flight of stairs: the user's)
+  const MAX_SLOPE = 43;         // degrees it climbs, at most - a mountainside, a flight of stairs (the user's)
   const STEP = 15;              // cells it climbs straight up at most (an Abrams' vertical step, 1.07 m)
   const DROP = 16;              // cells it goes down straight at most (it stops at a higher edge)
-  const LOOK = 48;              // cells ahead of its leading wheel it looks at the ground (room to brake)
+  const LOOK = 96;              // cells ahead of its leading wheel it looks at the ground (room to brake, and
+                                // to tell a slope a degree over MAX_SLOPE: a cell in 60)
   const NOSE = 60;              // cells from its middle its nose and lower plate reach, and a little
-  const SPAN = 16;              // cells a slope is measured over (a kerb within it is a step, not a slope)
   const DEEP = 26;              // cells of water it fords at most
   // In water (N82; see wade): what of its hull is under the surface bears its weight off its tracks
   // and drags on it.
@@ -331,11 +331,18 @@
     if (dt > 0) { t.falling = true; t.tipping = false; for (let i = 0; i < n; i += 1) t.springs[i] = SPRING_DOWN; }
   }
   // What stops it going on `dir` (-1 / +1) from here, looking LOOK cells on from its leading wheel:
-  // ground rising straighter than STEP or, over SPAN cells, steeper than MAX_SLOPE; a drop; too
-  // little room over it (a tunnel, an overhang); deep water. ('' if nothing; t.room is then how far
-  // it can still go, its nose short of it.) For the probes, each look leaves on the tank where it
-  // stopped it: t.stopAt [column, ground there, why] and, for 'no room', t.stopCell - the cell
-  // over that ground in its way (see explain).
+  // ground too steep (see below); a drop; too little room over it (a tunnel, an overhang); deep
+  // water. ('' if nothing; t.room is then how far it can still go, its nose short of it.) For the
+  // probes, each look leaves on the tank where it stopped it: t.stopAt [column, ground there, why]
+  // and, for 'no room', t.stopCell - the cell over that ground in its way (see explain).
+  // Too steep: its tracks laid on the ground from any column to one further on, as a plank would lie
+  // - resting on it there, nothing between standing over it - rising more than a STEP, and steeper
+  // than MAX_SLOPE. So a flight of stairs is as steep as the line along its nosings, where its
+  // tracks bear, not its risers; a kerb or a step up to STEP high it climbs, but not a bank higher
+  // than that and steeper than MAX_SLOPE, nor a slope as steep as that from the top of a kerb (its
+  // hull would lie steeper than it climbs, its tail below the kerb). (Ground drawn in cells is a
+  // cell off its line at most: its rise is allowed that.)
+  const SLACK = 1;
   const HS = new Float64Array(LOOK + 1);
   // (carried: borne along by a current, deep water ahead does not stop it - it is in it)
   function ahead(world, t, dir, carried = false) {
@@ -354,7 +361,18 @@
       const h = surface(world, x, prev, t);
       HS[k] = h; kNow = k;
       if (h < 0 || h - prev > DROP) return stop(k - 1, 'drop');
-      for (let s = 1; s <= Math.min(k, SPAN); s += 1) if (HS[k - s] - h > Math.max(STEP, s * tanMax)) return stop(k - s, 'too steep');
+      // (back from here: `least` the shallowest of the lines to here from the columns between - a
+      // plank from column j lies on the ground there if no steeper than that)
+      for (let j = k - 1, least = Infinity; j >= 0; j -= 1) {
+        const rise = HS[j] - h, s = k - j;
+        if (rise <= least * s + 1e-9 && rise > STEP && rise > s * tanMax + SLACK) {
+          // (it stops at the foot of that rise - a slope drawn in cells rises with a level cell
+          // here and there)
+          while (j > 0 && (HS[j - 1] > HS[j] || (j > 1 && HS[j - 1] === HS[j] && HS[j - 2] > HS[j - 1]))) j -= 1;
+          return stop(j, 'too steep');
+        }
+        least = Math.min(least, rise / s);
+      }
       // (room for its height over its tracks: no tunnel, no overhang - its own side's buildings, and
       // what it rams or flattens, aside: see meets)
       for (let up = 1; up <= t.art.height && h - up >= 0; up += 1) {
@@ -461,6 +479,24 @@
     }
     if (pressed) t.flattened = (t.flattened || 0) + pressed;
   }
+  // Troopers in its way as it drives (see pw-troops): its own side's step aside as it passes - out of
+  // the picture's plane, as on a road, untouched; the other side's it runs down, by its speed (a tank
+  // at a walk hurts a man, one at speed kills him).
+  const RUN_DOWN = 6;           // of a trooper's 100, for each cell/s of the tank's speed
+  function runOver(world, t) {
+    const list = world.troops, U = PW.troops;
+    if (!list || !list.length || !U) return;
+    const P = poseOf(t);
+    for (const u of list) {
+      if (u.dead || u.buried || (t.side && u.side === t.side) || Math.abs(u.x - t.x) > 70 || u.y < t.y - 45 || u.y > t.y + 8) continue;
+      // (any of its body against the hull or the tracks: a few points down its middle)
+      let hit = false;
+      for (let k = 0; k < U.HEIGHT && !hit; k += 4) for (const ox of [-U.HALF, 0, U.HALF - 1]) if (pixel(t, P, u.x + ox, u.y - k)) { hit = true; break; }
+      if (!hit) continue;
+      U.hurt(world, u, Math.abs(t.v) * RUN_DOWN, 'run over');
+      u.vx = t.v; u.vy = -30;
+    }
+  }
   // How deep it wades: the share of its hull's box under water (t.wet), and the way and speed the
   // water there runs (t.flow, cells/s: pw-sim's moving water, left or right - still water none).
   // Wading, it grips the ground the less, drives slower, and a current pushes it along once the
@@ -495,6 +531,10 @@
     // (the rounds in flight - until the world's loop steps them itself - and the tanks among what
     // they can strike)
     if (PW.shots) { PW.shots.addTarget(target); if (!PW.shots.looped) PW.shots.step(world, dt); }
+    // (and the troopers - until the world's loop steps them itself: see pw-troops)
+    if (PW.troops && !PW.troops.looped) PW.troops.step(world, dt);
+    if (PW.jets && !PW.jets.looped) PW.jets.step(world, dt);
+    if (PW.defence && !PW.defence.looped) PW.defence.step(world, dt);
     if (world.wrecks && world.wrecks.length) stepWrecks(world, dt);
     const list = world.tanks;
     if (!list) return;
@@ -557,7 +597,7 @@
       t.travel += t.v * dt;
       settle(world, t, dt);
       // (driving: what it rams is crushed, what it drives over flattened)
-      if (Math.abs(t.v) > 0.5) { ram(world, t); flatten(world, t); }
+      if (Math.abs(t.v) > 0.5) { ram(world, t); flatten(world, t); runOver(world, t); }
     }
     aim(t, dt);
     if (t.hp < SMOKES) fume(world, t, dt);

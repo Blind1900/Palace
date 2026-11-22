@@ -41,6 +41,14 @@
     // a missile: thrown off its rail at `launch`, then flown on its motor (thrust, for burn seconds)
     // up to its speed, turning for its mark at up to `turn` rad/s; it leaves a trail of smoke
     missile: { speed: 1500, launch: 340, thrust: 2600, burn: 4, turn: 3.2, drag: 0.05, blast: [16, 1.3], damage: 45, len: 7, life: 12, missile: true },
+    // a launcher's artillery rocket (a salvo's - Grad, MLRS): off its tube at its speed, flying
+    // straight on its motor a moment, then on a high arc, unguided, to burst where it comes down
+    rocket: { speed: 1100, launch: 1100, thrust: 0, burn: 0.8, turn: 0, drag: 0.004, blast: [12, 1.1], damage: 40, len: 6, life: 30, missile: true },
+    // interceptors (N90, the user's Iron Dome and Patriot): fast, turning hard for the threat they
+    // were launched at - led, where it will be - and bursting beside it on their proximity fuse,
+    // destroying it more often than not (kill: the share of their bursts that do)
+    interceptor: { speed: 2000, launch: 500, thrust: 5000, burn: 4, turn: 7, drag: 0.02, blast: [5, 0.5], damage: 20, len: 6, life: 8, missile: true, prox: 16, kill: 0.85 },
+    patriot: { speed: 2400, launch: 400, thrust: 4000, burn: 6, turn: 4.5, drag: 0.01, blast: [9, 0.9], damage: 100, len: 9, life: 12, missile: true, prox: 22, kill: 0.85 },
   };
   const WATER_DRAG = 0.8;       // of a round's speed kept per cell of water it goes through
   const SINKS = 260;            // cells/s: slower than this in water, it has stopped
@@ -116,17 +124,92 @@
     if (travel(world, s, x1, y1) && !s.done) { s.x = x1; s.y = y1; }
     s.run += Math.hypot(s.x - s.px, s.y - s.py);
     if (s.y > world.height + 20 || s.x < -200 || s.x > world.width + 200) { s.done = true; stats.gone += 1; }
+    // (an interceptor's proximity fuse: passing close enough to what it was launched at - the nearest
+    // it came all this tick, the two closing faster than a tick's step - it bursts, and, a round of
+    // the fuse's share, destroys it)
+    if (!s.done && k.prox && s.target && !s.target.done && !s.target.dead) {
+      const t = s.target, [tvx, tvy] = velOf(t);
+      const rx = s.x - t.x, ry = s.y - (t.y - (s.aimDy || 0)), dx = (s.vx - tvx) * dt, dy = (s.vy - tvy) * dt;
+      // (r: where it is from its mark now; it was r - d a tick ago)
+      const u = Math.max(0, Math.min(1, ((rx - dx) * -dx + (ry - dy) * -dy) / (dx * dx + dy * dy || 1)));
+      if (Math.hypot(rx - dx + dx * u, ry - dy + dy * u) < k.prox) {
+        burst(world, s, s.x, s.y);
+        if (t.k && (PW.hash3(s.n, 0x1e, 0x77) & 1023) / 1023 < k.kill) intercepted(world, t);
+      }
+    }
+    // (what it was launched at gone - destroyed by another - it destroys itself up in the sky: at
+    // once if it is well up, else once it is; its motor out and its mark getting further off - it
+    // missed - the same)
+    if (!s.done && k.prox) {
+      const t = s.target, gone = !t || t.done || t.dead;
+      if (gone) {
+        const xi = Math.max(0, Math.min(world.width - 1, Math.floor(s.x)));
+        if (!(s.fuel > 0) || s.y < world.groundTop[xi] - SELF_DESTRUCT) burst(world, s, s.x, s.y);
+      } else if (!(s.fuel > 0)) {
+        const d = Math.hypot(s.x - t.x, s.y - t.y);
+        if (d > s.dPrev) burst(world, s, s.x, s.y);
+        else s.dPrev = d;
+      }
+    }
+  }
+  const SELF_DESTRUCT = 150;    // cells over the ground an interceptor that has lost its mark must be to burst
+  // (the way and speed of a mark: a round in flight, a jet, a tank driving, a trooper running)
+  function velOf(t) {
+    if (t.k) return [t.vx, t.vy];
+    if (t.kind === 'jet' && PW.jets) { const h = PW.jets.heading(t); return [Math.cos(h) * t.v, -Math.sin(h) * t.v]; }
+    if (Number.isFinite(t.vx)) return [t.vx, t.vy || 0];
+    if (Number.isFinite(t.v)) return [t.v * Math.cos(t.angle || 0), 0];
+    return [0, 0];
+  }
+  // (where a guided round steers for: its mark - led, where the mark will be when it gets there at
+  // its own speed, the meeting worked out; a round falling free, its fall too)
+  function aimOf(s) {
+    const t = s.target;
+    let tx = t.x, ty = t.y - (s.aimDy || 0);
+    const [tvx, tvy] = velOf(t);
+    if (tvx || tvy) {
+      // (tau: when the two meet - |D + V tau| = S tau, S its own speed)
+      const Dx = tx - s.x, Dy = ty - s.y, S = Math.max(300, Math.hypot(s.vx, s.vy), s.fuel > 0 ? s.k.speed * 0.8 : 0);
+      const a = tvx * tvx + tvy * tvy - S * S, b = 2 * (Dx * tvx + Dy * tvy), c = Dx * Dx + Dy * Dy;
+      let tau = a < -1e-6 ? (-b - Math.sqrt(Math.max(0, b * b - 4 * a * c))) / (2 * a) : Math.sqrt(c) / S;
+      tau = Math.max(0, Math.min(3, tau));
+      tx += tvx * tau; ty += tvy * tau;
+      if (t.k && !(t.fuel > 0)) ty += 0.5 * G() * tau * tau;
+    }
+    return [tx, ty];
+  }
+  // A threat in flight destroyed by an interceptor's burst: its warhead goes up in the sky, and what
+  // is left of it falls, burning.
+  function intercepted(world, t) {
+    if (t.done) return;
+    t.done = true; t.intercepted = true;
+    stats.intercepted = (stats.intercepted || 0) + 1;
+    if (PW.explode) PW.explode(world, world.particles, { x: t.x, y: t.y, radius: 5, power: 0.5 });
+    const particles = world.particles, fl = F();
+    if (particles) for (let k = 0; k < 8; k += 1) particles.spawn(t.x, t.y, t.vx * 0.2 + (rnd() - 0.5) * 120, t.vy * 0.2 - rnd() * 60, M.DEBRIS | PW.DEBRIS_KIND.METAL << 6, 0, fl.LAND, 6);
   }
   // A missile on its motor: turning for its mark, speeding up to its speed, its smoke trailing.
   function steer(world, s, dt) {
     const { k } = s;
-    if (s.fuel <= 0) return;
+    if (s.fuel <= 0) {
+      // (its motor burnt out, an interceptor still steers on its fins for what it was launched at -
+      // turning its way, no faster)
+      if (k.prox && s.target && !s.target.done && !s.target.dead) {
+        const [tx, ty] = aimOf(s), sp = Math.hypot(s.vx, s.vy);
+        let a = Math.atan2(s.vy, s.vx), d = Math.atan2(ty - s.y, tx - s.x) - a;
+        while (d > Math.PI) d -= Math.PI * 2;
+        while (d < -Math.PI) d += Math.PI * 2;
+        a += Math.max(-k.turn * dt, Math.min(k.turn * dt, d));
+        s.vx = Math.cos(a) * sp; s.vy = Math.sin(a) * sp;
+      }
+      return;
+    }
     s.fuel -= dt;
     const sp = Math.hypot(s.vx, s.vy);
     let a = Math.atan2(s.vy, s.vx);
-    // (it clears its rail before it turns)
-    if (s.target && s.age > 0.2) {
-      const tx = s.target.x, ty = s.target.y - (s.aimDy || 0);
+    // (it clears its rail before it turns; an interceptor whose mark is gone flies on straight)
+    if (s.target && s.age > 0.2 && !(k.prox && (s.target.done || s.target.dead))) {
+      const [tx, ty] = aimOf(s);
       let d = Math.atan2(ty - s.y, tx - s.x) - a;
       while (d > Math.PI) d -= Math.PI * 2;
       while (d < -Math.PI) d += Math.PI * 2;

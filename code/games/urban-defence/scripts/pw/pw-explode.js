@@ -136,6 +136,14 @@
     const below = r * 0.55;        // craters are wider than deep
     const x0 = Math.max(1, Math.floor(cx - r - 2)), x1 = Math.min(W - 2, Math.ceil(cx + r + 2));
     const y0 = Math.max(0, Math.floor(cy - r - 2)), y1 = Math.min(H - 1, Math.ceil(cy + below + 2));
+    // (a burst high over the top of the world - an interceptor's, a rocket's it destroyed - has no
+    // cells in its reach: its fireball and sparks, and what flies there, a jet, struck)
+    if (y1 < y0 || x1 < x0) {
+      sparks(world, particles, cx, cy, r, power, random);
+      fireball(world, particles, cx, cy, r, power, random);
+      if (PW.jets && PW.jets.blast) PW.jets.blast(world, cx, cy, r, power);
+      return { removed, damaged };
+    }
     // (how hot what it throws out of (x, y) is: as hot as its heat leaves the cell - see heatDisc
     // below - so what flies from the heart of it glows)
     const heatPeak = 380 + 420 * power, heatR = r * 1.15;
@@ -302,6 +310,9 @@
     // (and the cores' Life in its reach is shaken - see PW.coreLife - and the vehicles in it hurt)
     if (PW.coreLife) PW.coreLife.blast(world, cx, cy, r, power);
     if (PW.tanks && PW.tanks.blast) PW.tanks.blast(world, cx, cy, r, power);
+    if (PW.troops && PW.troops.blast) PW.troops.blast(world, cx, cy, r, power);
+    if (PW.jets && PW.jets.blast) PW.jets.blast(world, cx, cy, r, power);
+    if (PW.defence && PW.defence.blast) PW.defence.blast(world, cx, cy, r, power);
     if (world.stability) {
       world.stability.shock(cx, cy, Math.pow(r * power, 3));
     }

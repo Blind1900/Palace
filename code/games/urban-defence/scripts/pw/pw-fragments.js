@@ -1095,10 +1095,10 @@
     const SLIDE_OFF = 50;         // cells/s a piece too slow to bounce slides off a tank's back or nose at
     function glance(p, h) {
       const T = PW.tanks, pts = p.points;
-      if (!T || !T.touches || !pts.length) return false;
+      if (!pts.length) return false;
       const [c, s] = cosSin(p), [cx, cy] = centre(p), reach = Math.hypot(p.gw, p.gh) / 2 + 4;
       const stride = Math.max(2, (pts.length >> 6) << 1);
-      for (const t of world.tanks) {
+      for (const t of (T && T.touches && world.tanks) || []) {
         if (t.dead || Math.abs(t.x - cx) > 64 + reach || cy < t.y - 50 - reach || cy > t.y + 8 + reach) continue;
         for (let k = 0; k < pts.length; k += stride) {
           const [wx, wy] = toWorld(p, c, s, pts[k], pts[k + 1]);
@@ -1124,6 +1124,23 @@
           p.touched = p.age;
           stats.glanced = (stats.glanced || 0) + 1;
           return true;
+        }
+      }
+      // A trooper in its way is struck by it, once - a man does not turn a falling piece of a
+      // building aside: it comes on down through where he stood (see PW.troops.struck).
+      const U = PW.troops;
+      if (U && world.troops && world.troops.length) {
+        for (const t of world.troops) {
+          if (t.dead || (p.hitUnits && p.hitUnits.has(t)) || Math.abs(t.x - cx) > 8 + reach || cy < t.y - 30 - reach || cy > t.y + 4 + reach) continue;
+          for (let k = 0; k < pts.length; k += stride) {
+            const [wx, wy] = toWorld(p, c, s, pts[k], pts[k + 1]);
+            if (!U.touches(t, wx, wy)) continue;
+            const [vx, vy] = velocityAt(p, wx, wy);
+            U.struck(world, t, wx, wy, 1, p.mass * (p.flora ? 0.25 : 1), vx, vy);
+            (p.hitUnits || (p.hitUnits = new Set())).add(t);
+            stats.struckTroops = (stats.struckTroops || 0) + 1;
+            break;
+          }
         }
       }
       return false;
@@ -1223,7 +1240,7 @@
             p.px = cx - (p.gx * c - p.gy * sn); p.py = cy - (p.gx * sn + p.gy * c);
           }
           done = contact(p, h);
-          if (!done && p.mode === 'fly' && world.tanks && world.tanks.length) glance(p, h);
+          if (!done && p.mode === 'fly' && ((world.tanks && world.tanks.length) || (world.troops && world.troops.length))) glance(p, h);
         }
         if (p.mode === 'flex') {
           // (rung down - or ringing on too long - it is put back as it grew)
