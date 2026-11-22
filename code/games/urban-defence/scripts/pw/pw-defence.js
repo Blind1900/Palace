@@ -156,7 +156,7 @@
       if (s !== side || !b.body) continue;
       if (x >= b.body.left - COVER && x <= b.body.right + COVER) return true;
     }
-    for (const list of [world.tanks, world.troops, world.defence]) for (const v of list || []) if (!v.dead && v.side === side && Math.abs(v.x - x) < COVER) return true;
+    for (const list of [world.tanks, world.troops, world.mechs, world.defence]) for (const v of list || []) if (!v.dead && v.side === side && Math.abs(v.x - x) < COVER) return true;
     return false;
   }
   // (u.engaged: the threats it has fired at, and how many interceptors at each - two, a moment

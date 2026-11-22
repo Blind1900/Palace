@@ -1127,11 +1127,12 @@
         }
       }
       // A trooper in its way is struck by it, once - a man does not turn a falling piece of a
-      // building aside: it comes on down through where he stood (see PW.troops.struck).
-      const U = PW.troops;
-      if (U && world.troops && world.troops.length) {
-        for (const t of world.troops) {
-          if (t.dead || (p.hitUnits && p.hitUnits.has(t)) || Math.abs(t.x - cx) > 8 + reach || cy < t.y - 30 - reach || cy > t.y + 4 + reach) continue;
+      // building aside: it comes on down through where he stood (see PW.troops.struck). A mech the
+      // same - it staggers under it, dented if it was heavy or fast (PW.mechs.struck).
+      for (const [U, list, half, tall] of [[PW.troops, world.troops, 8, 30], [PW.mechs, world.mechs, 50, 96]]) {
+        if (!U || !list || !list.length) continue;
+        for (const t of list) {
+          if (t.dead || (p.hitUnits && p.hitUnits.has(t)) || Math.abs(t.x - cx) > half + reach || cy < t.y - tall - reach || cy > t.y + 4 + reach) continue;
           for (let k = 0; k < pts.length; k += stride) {
             const [wx, wy] = toWorld(p, c, s, pts[k], pts[k + 1]);
             if (!U.touches(t, wx, wy)) continue;
@@ -1240,7 +1241,7 @@
             p.px = cx - (p.gx * c - p.gy * sn); p.py = cy - (p.gx * sn + p.gy * c);
           }
           done = contact(p, h);
-          if (!done && p.mode === 'fly' && ((world.tanks && world.tanks.length) || (world.troops && world.troops.length))) glance(p, h);
+          if (!done && p.mode === 'fly' && ((world.tanks && world.tanks.length) || (world.troops && world.troops.length) || (world.mechs && world.mechs.length))) glance(p, h);
         }
         if (p.mode === 'flex') {
           // (rung down - or ringing on too long - it is put back as it grew)

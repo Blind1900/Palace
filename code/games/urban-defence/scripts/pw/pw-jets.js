@@ -242,7 +242,7 @@
     if (!j || j.dead || j.down || j.onGround || j.missiles <= 0 || !PW.shots) return null;
     const m = muzzle(j), aim = j.aim || { x: m.x + m.dx * 600, y: m.y + m.dy * 600 };
     let target = null, best = 250;
-    for (const list of [world.tanks, world.troops, world.jets]) for (const u of list || []) {
+    for (const list of [world.tanks, world.troops, world.mechs, world.jets]) for (const u of list || []) {
       if (u.dead || u === j || (j.side && u.side === j.side)) continue;
       const d = Math.hypot(u.x - aim.x, u.y - aim.y);
       if (d < best) { best = d; target = u; }

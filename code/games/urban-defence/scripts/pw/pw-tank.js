@@ -535,6 +535,7 @@
     if (PW.troops && !PW.troops.looped) PW.troops.step(world, dt);
     if (PW.jets && !PW.jets.looped) PW.jets.step(world, dt);
     if (PW.defence && !PW.defence.looped) PW.defence.step(world, dt);
+    if (PW.mechs && !PW.mechs.looped) PW.mechs.step(world, dt);
     if (world.wrecks && world.wrecks.length) stepWrecks(world, dt);
     const list = world.tanks;
     if (!list) return;

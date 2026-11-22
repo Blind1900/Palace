@@ -142,6 +142,7 @@
       sparks(world, particles, cx, cy, r, power, random);
       fireball(world, particles, cx, cy, r, power, random);
       if (PW.jets && PW.jets.blast) PW.jets.blast(world, cx, cy, r, power);
+      if (PW.mechs && PW.mechs.blast) PW.mechs.blast(world, cx, cy, r, power);
       return { removed, damaged };
     }
     // (how hot what it throws out of (x, y) is: as hot as its heat leaves the cell - see heatDisc
@@ -313,6 +314,7 @@
     if (PW.troops && PW.troops.blast) PW.troops.blast(world, cx, cy, r, power);
     if (PW.jets && PW.jets.blast) PW.jets.blast(world, cx, cy, r, power);
     if (PW.defence && PW.defence.blast) PW.defence.blast(world, cx, cy, r, power);
+    if (PW.mechs && PW.mechs.blast) PW.mechs.blast(world, cx, cy, r, power);
     if (world.stability) {
       world.stability.shock(cx, cy, Math.pow(r * power, 3));
     }
