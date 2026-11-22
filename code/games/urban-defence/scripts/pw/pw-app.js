@@ -234,8 +234,14 @@
     if (event.code === 'Escape' && selected) { select(null); return; }   // N78
     // N78: the drive keys follow the SELECTED tank too, not only the tank tool - key()
     // drives the held one, and selecting holds (PS's hold()).
+    if (event.target.closest?.('input, textarea, select')) return;
     if ((tool === 'tank' || (selected && selected.kind === 'tank'))
       && PW.tanks && PW.tanks.key && PW.tanks.key(event)) { event.preventDefault(); return; }   // (N10 drive keys)
+    // The troops', jets' and batteries' keys (PS's modules): each answers only for the unit
+    // it holds, and selection holds one at a time - the first that takes the key keeps it.
+    for (const mod of [PW.troops, PW.jets, PW.defence, PW.mechs]) {
+      if (mod && mod.key && mod.key(event)) { event.preventDefault(); return; }
+    }
     if (event.code !== 'Space' || event.repeat || event.target.closest?.('input, textarea, select')) return;
     event.preventDefault();
     paused = !paused;
@@ -253,10 +259,34 @@
   // drive keys follow the selection.
   const unitPanel = document.getElementById('unit-panel');
   const TANK_NAMES = { modern: 'M1 ABRAMS', asian: 'TYPE 99', gothic: 'T-64' };
-  let selected = null;   // { kind: 'tank', t }
+  const DEFENCE_NAMES = { launcher: 'ROCKET LAUNCHER', dome: 'IRON DOME', patriot: 'PATRIOT' };
+  let selected = null;   // { kind: 'tank' | 'troop' | 'jet' | 'defence', t }
+  // Every unit kind the selection knows (PS's modules, one API each): its list on the world,
+  // its module, the box a click finds it by and the box its bracket frames. The small ones
+  // come first - a trooper beside a tank is the one picked.
+  const defenceBox = (u) => {
+    const half = ((PW.defence && PW.defence.TYPES[u.type]) || { length: 100 }).length / 2;
+    return [u.x - half, u.y - 30, u.x + half, u.y];
+  };
+  const UNITS = [
+    { kind: 'troop', list: () => world.troops, mod: () => PW.troops,
+      box: (t) => [t.x - 6, t.y - (t.crouch ? 19 : 27), t.x + 6, t.y + 3] },
+    { kind: 'mech', list: () => world.mechs, mod: () => PW.mechs,
+      box: (m) => [m.x - 15, m.y - 74, m.x + 15, m.y + 3] },
+    { kind: 'jet', list: () => world.jets, mod: () => PW.jets,
+      box: (j) => [j.x - 98, j.y - 22, j.x + 98, j.y + 20] },
+    { kind: 'defence', list: () => world.defence, mod: () => PW.defence,
+      box: (u) => { const [x0, y0, x1, y1] = defenceBox(u); return [x0 - 2, y0 - 20, x1 + 2, y1 + 3]; } },
+    { kind: 'tank', list: () => world.tanks, mod: () => PW.tanks,
+      box: (t) => [t.x - 64, t.y - 50, t.x + 64, t.y + 8] },
+  ];
   const unitAt = (x, y) => {
-    for (const t of world.tanks || []) {
-      if (!t.dead && Math.abs(x - t.x) < 62 && y > t.y - 48 && y < t.y + 6) return { kind: 'tank', t };
+    for (const U of UNITS) {
+      for (const t of U.list() || []) {
+        if (t.dead) continue;
+        const [x0, y0, x1, y1] = U.box(t);
+        if (x >= x0 && x <= x1 && y >= y0 && y <= y1) return { kind: U.kind, t };
+      }
     }
     return null;
   };
@@ -280,25 +310,100 @@
         `</div>`;
     } else if (selected.kind === 'troop') {
       // The trooper's item bar: the loadout the user designed (rifle, grenades, drills),
-      // read off the entity when troops land.
-      const u = selected.t, items = u.items || [{ n: 'RIFLE' }, { n: 'GRND', count: 3 }, { n: 'DRILL' }];
+      // read off the entity (PS's PW.troops).
+      const u = selected.t, hp = Math.max(0, Math.round(u.hp ?? 100));
+      const tone = hp < 30 ? 'grave' : hp < 60 ? 'hurt' : '';
+      const state = u.climbing ? 'on a ladder' : u.swim ? 'swimming' : u.crouch ? 'crouched' : (u.reload || 0) > 0.05 ? `reloading ${u.reload.toFixed(1)}s` : 'ready';
+      const items = [{ n: 'RIFLE', count: `${u.mag ?? 0}/${u.ammo ?? 0}` }, { n: 'GRND', count: u.grenades ?? 0 }, { n: 'DRILL', count: '' }];
       unitPanel.innerHTML = `<h3>TROOPER — ${(u.side || '').toUpperCase()}</h3>` +
-        `<div class="items">${items.map((it) => `<div class="slot"><b>${it.n}</b>${it.count ? `×${it.count}` : ''}</div>`).join('')}</div>`;
+        `<div>health ${hp}/100 · ${state}</div><div class="bar"><i class="${tone}" style="width:${hp}%"></i></div>` +
+        `<div class="items">${items.map((it) => `<div class="slot"><b>${it.n}</b>${it.count !== '' ? `${it.count}` : ''}</div>`).join('')}</div>` +
+        `<div class="keys">` +
+        `<div><kbd>A</kbd><kbd>D</kbd> walk · <kbd>W</kbd> jump/climb</div>` +
+        `<div><kbd>S</kbd> stop/crouch · <kbd>F</kbd> fire</div>` +
+        `<div><kbd>G</kbd> grenade · <kbd>R</kbd> reload</div>` +
+        `<div>click aims · <kbd>Esc</kbd> free</div>` +
+        `</div>`;
+    } else if (selected.kind === 'mech') {
+      const m = selected.t, hp = Math.max(0, Math.round(m.hp ?? 100));
+      const tone = hp < 30 ? 'grave' : hp < 60 ? 'hurt' : '';
+      const state = !m.onGround ? (m.boosting ? 'boosting' : 'in the air') : (m.reload || 0) > 0.05 ? `reloading ${m.reload.toFixed(1)}s` : 'ready';
+      unitPanel.innerHTML = `<h3>MECH — ${(m.style || '').toUpperCase()} ${(m.side || '').toUpperCase()}</h3>` +
+        `<div>armour ${hp}/100 · ${state}</div><div class="bar"><i class="${tone}" style="width:${hp}%"></i></div>` +
+        `<div>cannon <kbd>${m.mag ?? 0}/${m.ammo ?? 0}</kbd> · missiles <kbd>${m.missiles ?? 0}</kbd></div>` +
+        `<div class="keys">` +
+        `<div><kbd>A</kbd><kbd>D</kbd> walk · <kbd>S</kbd> stop</div>` +
+        `<div><kbd>W</kbd> leap (air: boost)</div>` +
+        `<div><kbd>F</kbd> cannon · <kbd>G</kbd> missile · <kbd>R</kbd> reload</div>` +
+        `<div>click aims · <kbd>Esc</kbd> free</div>` +
+        `</div>`;
+    } else if (selected.kind === 'jet') {
+      const j = selected.t, hp = Math.max(0, Math.round(j.hp ?? 100));
+      const tone = hp < 30 ? 'grave' : hp < 60 ? 'hurt' : '';
+      const state = j.down ? 'going down' : j.onGround ? `rolling ${Math.round(j.v)}` : `${Math.round(j.v)} cells/s`;
+      unitPanel.innerHTML = `<h3>JET — ${(j.style || '').toUpperCase()} ${(j.side || '').toUpperCase()}</h3>` +
+        `<div>airframe ${hp}/100 · ${state}</div><div class="bar"><i class="${tone}" style="width:${hp}%"></i></div>` +
+        `<div>missiles <kbd>${j.missiles ?? 0}</kbd></div>` +
+        `<div class="keys">` +
+        `<div><kbd>A</kbd><kbd>D</kbd> turn about</div>` +
+        `<div><kbd>W</kbd><kbd>S</kbd> climb/dive</div>` +
+        `<div><kbd>F</kbd> cannon · <kbd>G</kbd> missile</div>` +
+        `<div>click aims · <kbd>Esc</kbd> free</div>` +
+        `</div>`;
+    } else if (selected.kind === 'defence') {
+      const u = selected.t, T = (PW.defence && PW.defence.TYPES[u.type]) || { hp: 60 };
+      const hp = Math.max(0, Math.round(100 * (u.hp ?? T.hp) / T.hp));
+      const tone = hp < 30 ? 'grave' : hp < 60 ? 'hurt' : '';
+      const state = u.hold ? 'holding fire' : u.salvo > 0 ? 'firing' : 'ready';
+      unitPanel.innerHTML = `<h3>${DEFENCE_NAMES[u.type] || 'BATTERY'} — ${(u.side || '').toUpperCase()}</h3>` +
+        `<div>condition ${hp}% · ${state}</div><div class="bar"><i class="${tone}" style="width:${hp}%"></i></div>` +
+        `<div>rounds <kbd>${u.ammo ?? 0}</kbd></div>` +
+        `<div class="keys">` +
+        (u.type === 'launcher' ? `<div>click aims · <kbd>F</kbd> salvo</div>` : `<div><kbd>F</kbd> hold / free fire</div>`) +
+        `<div><kbd>Esc</kbd> free</div>` +
+        `</div>`;
     }
   }
+  // Selecting takes the unit in hand in its own module (PS's hold()), and lets go of
+  // whatever any other module held - so the keys follow exactly one unit.
   function select(next) {
     selected = next;
-    if (PW.tanks && PW.tanks.hold) PW.tanks.hold(next && next.kind === 'tank' ? next.t : null);
+    for (const U of UNITS) {
+      const mod = U.mod();
+      if (mod && mod.hold) mod.hold(next && next.kind === U.kind ? next.t : null);
+    }
     renderUnitPanel();
   }
+  // A battery placed by hand serves the side whose buildings stand nearest (as a dropped
+  // trooper does in PS's module).
+  const nearestSide = (x) => {
+    let side = null, best = Infinity;
+    for (const b of world.buildings || []) {
+      const s = b.faction || b.side, bx = b.body ? (b.body.left + b.body.right) / 2 : b.x;
+      if (s && s !== 'neutral' && Number.isFinite(bx) && Math.abs(bx - x) < best) { best = Math.abs(bx - x); side = s; }
+    }
+    return side;
+  };
+  const battery = (type) => ({ kind: 'defence', use: (p) => PW.defence && PW.defence.tool(world, p.x, p.y, type, nearestSide(p.x)) });
+  const UNIT_TOOLS = {
+    troop: { kind: 'troop', use: (p, shift) => PW.troops && PW.troops.tool(world, p.x, p.y, shift), miss: 'troop: no room to stand there' },
+    jet: { kind: 'jet', use: (p, shift) => PW.jets && PW.jets.tool(world, p.x, p.y, shift), miss: 'jet: click on or near a runway' },
+    mech: { kind: 'mech', use: (p, shift) => PW.mechs && PW.mechs.tool(world, p.x, p.y, shift), miss: 'mech: no room to stand there' },
+    rocket: battery('launcher'), dome: battery('dome'), patriot: battery('patriot'),
+  };
+  let panelAt = 0;
   function drawSelection(renderer2) {
     if (!selected) return;
-    const t = selected.t;
-    if (!t || t.dead || !(world.tanks || []).includes(t)) { select(null); return; }
+    const t = selected.t, U = UNITS.find((u) => u.kind === selected.kind);
+    if (!t || t.dead || !U || !(U.list() || []).includes(t)) { select(null); return; }
+    // (the panel's live readings - health, rounds, state - refresh a few times a second)
+    const now = performance.now();
+    if (now - panelAt > 250) { panelAt = now; renderUnitPanel(); }
     const { ctx, camera } = renderer2, z = camera.zoom;
-    const x0 = (t.x - 64 - camera.x) * z, x1 = (t.x + 64 - camera.x) * z;
-    const y0 = (t.y - 50 - camera.y) * z, y1 = (t.y + 8 - camera.y) * z;
-    const arm = Math.max(5, 9 * z), pulse = 0.68 + 0.27 * Math.sin(performance.now() / 280);
+    const [bx0, by0, bx1, by1] = U.box(t);
+    const x0 = (bx0 - camera.x) * z, x1 = (bx1 - camera.x) * z;
+    const y0 = (by0 - camera.y) * z, y1 = (by1 - camera.y) * z;
+    const arm = Math.max(4, Math.min(9 * z, (x1 - x0) / 3, (y1 - y0) / 3)), pulse = 0.68 + 0.27 * Math.sin(now / 280);
     ctx.beginPath();
     for (const [cx, cy, dx, dy] of [[x0, y0, 1, 1], [x1, y0, -1, 1], [x0, y1, 1, -1], [x1, y1, -1, -1]]) {
       ctx.moveTo(cx + dx * arm, cy); ctx.lineTo(cx, cy); ctx.lineTo(cx, cy + dy * arm);
@@ -370,6 +475,15 @@
       // N78: a click on a unit SELECTS it, whatever tool is up - the seed or charge in
       // hand is not spent on a friend's hull
       const hit = unitAt(p.x, p.y);
+      // The troop, jet and battery tools (PS's modules): their own tool() drops, takes in
+      // hand, aims or lets go, as the tank's does; a click on another kind of unit selects it.
+      const unitTool = UNIT_TOOLS[tool];
+      if (unitTool && (!hit || hit.kind === unitTool.kind)) {
+        const h = unitTool.use(p, event.shiftKey);
+        select(h ? { kind: unitTool.kind, t: h } : null);
+        if (!h && !hit && unitTool.miss) lastDig = unitTool.miss;
+        return;
+      }
       if (hit) { select(hit); return; }
       if (tool === 'digL' || tool === 'digR') dig(tool === 'digL' ? 'left' : 'right', Math.round(p.x - 30), Math.round(p.y - 18), Math.round(p.x + 30), Math.round(p.y + 18));
       else if (tool === 'seedC' || tool === 'seedF' || tool === 'seedM') dropSeed(tool, p);
