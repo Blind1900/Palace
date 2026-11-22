@@ -20,6 +20,7 @@
 
   const COLUMNS_PER_TICK = 32;
   const TUFT = 0.05, SCORCH_FADE = 0.06, ASH_WEATHERS = 0.2;
+  const CHIPS_ROT = 0.3;          // chance a visit (each column about every 9 s) the top of a litter of splinters rots a cell
   // The Game of Life.
   const LIFE_EVERY = 8;           // ticks per generation (7.5 a second)
   const GREEN = 1, WHITE = 2;     // the two kinds: regrowth, and the sandbox's
@@ -101,6 +102,26 @@
     const stats = { regrown: 0, tufts: 0, unscorched: 0 };
     const rnd = (x, salt) => (PW.hash3(x, salt, tick) & 1023) / 1023;
     const topId = (x) => PW.get(world, x, world.groundTop[x]) & ID_MASK;
+    // (wood splinters - loose, or packed as rubble - by the whole byte)
+    const CHIPS = M.DEBRIS | PW.DEBRIS_KIND.WOOD << 6, PACKED_CHIPS = M.RUBBLE | PW.DEBRIS_KIND.WOOD << 6;
+    const chipsAt = (x, y) => { const b = PW.get(world, x, y); return b === CHIPS || b === PACKED_CHIPS; };
+    // (the top of a litter of splinters over or at the ground in column x - the ground's top as
+    // the world keeps it is under loose splinters, on packed ones - rotted a cell, if it is its time)
+    function rot(x, y) {
+      let ty = chipsAt(x, y) ? y : chipsAt(x, y - 1) ? y - 1 : -1;
+      if (ty < 0) return false;
+      for (let k = 0; k < 80 && ty > 1 && chipsAt(x, ty - 1); k += 1) ty -= 1;
+      // (it rots on the ground: splinters afloat on water are left as they are)
+      let by = ty;
+      while (by < world.height - 2 && chipsAt(x, by + 1)) by += 1;
+      if ((PW.get(world, x, by + 1) & ID_MASK) === M.WATER) return true;
+      if (rnd(x, 13) >= CHIPS_ROT) return true;
+      const under = PW.get(world, x, ty + 1) & ID_MASK;
+      if (under === M.TOPSOIL || under === M.SOIL || under === M.GRASS) PW.set(world, x, ty, M.TOPSOIL | (PW.hash2(x, ty) & 3) << 6, { quiet: true });
+      else PW.set(world, x, ty, M.AIR, { quiet: true });
+      stats.rotted = (stats.rotted || 0) + 1;
+      return true;
+    }
     // ---- The Game of Life -----------------------------------------------------------------------------
     const H = world.height, mat = world.mat;
     let live = createCells(), spare = createCells();   // world cell index -> kind | age << 2 (age in generations)
@@ -308,6 +329,10 @@
         }
       }
       if (flags & FLAG.ROAD || PW.getOwner(world, x, y)) return;
+      // Wood splinters lying out in the open rot away (N85): the top of a litter of them goes a
+      // cell at a visit now and then - to nothing, or, the last of it lying on soil, into the soil,
+      // making it rich - until the ground shows again and the green comes back over it.
+      if (rot(x, y)) return;
       // Ash left by a fire weathers into the soil under it, and makes it rich.
       if (id === M.ASH) {
         const under = PW.get(world, x, y + 1) & ID_MASK;

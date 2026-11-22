@@ -593,12 +593,25 @@
     else if (world && (PW.get(world, x, y) & ID_MASK) === M.AIR) PW.set(world, x, y, M.DUST | (1 + (h >>> 6 & 1)) << 6, { quiet: true });
   }
   // A plant's cell as it comes apart. `hard`: thrown hard enough to hurt what it hits (blast
-  // splinters); a branch that only breaks off and falls does not.
-  function shed(particles, x, y, color, vx, vy, hard = true, world = null) {
+  // splinters); a branch that only breaks off and falls does not. `across`: how thick its wood is
+  // there, if known (N85) - a twig drawn a cell wide is mostly air, a bough partly, a trunk solid:
+  // a cell of each leaves a splinter one time in TWIG_CHIPS, BOUGH_CHIPS, TRUNK_CHIPS (and the rest
+  // of it a puff of sawdust), so a tree blown apart lies as a litter, not a heap. (A trunk is round:
+  // three quarters of its column is wood - and what flies from it in the world's depth spreads that
+  // way too, not only along the ground as a heap drawn in cells does: about half of that lies here.)
+  const TWIG_CHIPS = 1 / 30, BOUGH_CHIPS = 1 / 6, TRUNK_CHIPS = 0.35;
+  const chips = (across) => (across <= 2 ? TWIG_CHIPS : across < 6 ? BOUGH_CHIPS : TRUNK_CHIPS);
+  function shed(particles, x, y, color, vx, vy, hard = true, world = null, across = 0) {
     const F = PW.PARTICLE;
     if (!particles || !F) return;
     const flags = world ? PW.getFlags(world, x, y) : 0;
     const wood = world ? (flags & (PW.FLAG.WOOD | PW.FLAG.CHARRED)) !== 0 : !leafy(color);
+    // (wood of it that leaves no splinter: a puff of sawdust - or soot - now and then)
+    if (wood && across && (PW.hash3(x, y, 41) & 1023) >= chips(across) * 1024) {
+      if (leafy(color) && (PW.hash2(x, y) & 3) === 0) particles.spawn(x + 0.5, y + 0.5, vx, vy, 0, color, F.LEAF, 1.5);
+      if (world && (PW.hash3(x, y, 43) & 7) === 0 && (PW.get(world, x, y) & PW.ID_MASK) === M.AIR) PW.set(world, x, y, M.DUST | 1 << 6, { quiet: true });
+      return;
+    }
     if (flags & PW.FLAG.CHARRED) charcoal(world, particles, x, y, color, vx, vy);
     else if (!wood) {
       if ((PW.hash2(x, y) & 3) === 0) particles.spawn(x + 0.5, y + 0.5, vx, vy, 0, color, F.LEAF, 1.5 + (PW.hash2(y, x) & 3) * 0.5);
@@ -1274,14 +1287,15 @@
   // Snap the stem at (x, y): two rows across an upright stem, two columns across a lying bough,
   // thrown off as splinters (charcoal crumbles to ash and dust).
   function cut(world, particles, x, y) {
-    const { upright } = stem(world, x, y);
+    // (its splinters by how thick the stem is there: see shed, N85)
+    const { upright, across } = stem(world, x, y);
     for (let a = 0; a < 2; a += 1) {
       for (const d of [-1, 1]) {
         for (let k = d < 0 ? 0 : 1; k < 12; k += 1) {
           const cx = upright ? x + d * k : x + a, cy = upright ? y + a : y + d * k;
           if (!isWood(world, cx, cy)) break;
           const color = PW.getLayer(world, 'deco', cx, cy);
-          if (particles && (PW.hash2(cx, cy) & 1) === 0) shed(particles, cx, cy, color, ((PW.hash3(cx, cy, 3) & 63) - 32) * 0.5, -8, false, world);
+          if (particles && (PW.hash2(cx, cy) & 1) === 0) shed(particles, cx, cy, color, ((PW.hash3(cx, cy, 3) & 63) - 32) * 0.5, -8, false, world, across);
           PW.setLayer(world, 'deco', cx, cy, 0);
           PW.setFlag(world, cx, cy, PW.FLAG.FLORA | PW.FLAG.CHARRED | PW.FLAG.WOOD, false);
         }
@@ -1370,7 +1384,9 @@
     if (!dirty || !dirty.size) return 0;
     let n = 0, felled = 0;
     const t0 = performance.now();
-    for (const record of dirty) {
+    // (those dirty now: what settling them makes dirty again waits for the next tick - never
+    // round and round in one)
+    for (const record of Array.from(dirty)) {
       dirty.delete(record);
       settle(world, particles, record, record.from || null);
       record.from = null;
@@ -1501,6 +1517,7 @@
   // snapped off comes apart by branch and is flung away (see settle and fall).
   const BASE_SNAP = 6;          // a push of 1 snaps a trunk this many cells across at its base
   const push = (from, d) => from.power * from.r / (d + from.r * 0.5);
+  const LOG_LENGTH = 30, TRUNK_ACROSS = 6;
   function blastTree(world, particles, record, from) {
     const nx = Math.max(record.x, Math.min(record.x + record.width, from.x)), ny = Math.max(record.y, Math.min(record.y + record.height, from.y));
     const d = Math.hypot(from.x - nx, from.y - ny), near = d < from.r * 0.6 && from.power >= 1;
@@ -1512,7 +1529,9 @@
         if (kind[k] !== 1) continue;
         const x = left + (k % w), y = top + ((k / w) | 0);
         if (x % 6 || y % 6 || Math.hypot(x - from.x, y - from.y) > from.r) continue;
-        if (isWood(world, x, y)) cut(world, particles, x, y);
+        // (its boughs snapped all through; its trunk - stout enough to stand the heart of the blast
+        // whole - broken into logs a couple of metres long, N85)
+        if (isWood(world, x, y) && (y % LOG_LENGTH === 0 || stem(world, x, y).across < TRUNK_ACROSS)) cut(world, particles, x, y);
       }
     }
     if (!record.fallen && record.kind === 'tree' && record.foot) {

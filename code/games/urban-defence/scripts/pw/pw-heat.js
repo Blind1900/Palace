@@ -190,7 +190,13 @@
         charGround(x, y + 1);
         return;
       }
-      if (b.rubble) { if (woodRubble(i)) PW.set(world, x, y, M.ASH | (PW.hash2(x, y) & 3) << 6); return; }
+      // (burnt-out wood rubble goes up as smoke and heat, a pinch of ash left - an eighth of it,
+      // about what a burning plant's twigs leave: a burnt heap sinks to a grey drift, it does not
+      // stay as high, N85)
+      if (b.rubble) {
+        if (woodRubble(i)) PW.set(world, x, y, (PW.hash2(x, y) & 15) < 2 ? M.ASH | (PW.hash2(x, y) >> 4 & 3) << 6 : M.SMOKE | 1 << 6);
+        return;
+      }
       const id = mat[i] & ID_MASK;
       const to = burnsTo[id];
       if (to === M.ASH) {

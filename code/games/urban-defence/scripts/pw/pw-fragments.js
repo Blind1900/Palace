@@ -177,12 +177,15 @@
       if (spec.flora) {
         // (a twig with its leaves is too slight to fall as one piece: it comes apart as it falls,
         // leaves fluttering down, splinters dropping)
-        if (mass < FLORA_MIN && PW.flora && PW.flora.shed) {
-          const at = here();
-          for (let k = 0; k < at.x.length; k += 1) PW.flora.shed(particles, at.x[k], at.y[k], at.color[k], (spec.vx || 0) * 0.5, (spec.vy || 0) * 0.5, false, world);
+        // (and so does one with no room left for it among the pieces in flight: laid down where it
+        // is, in the air, it would hang there - and be let go again, and laid down again, for ever)
+        if ((mass < FLORA_MIN || list.length >= MAX_PIECES) && PW.flora && PW.flora.shed) {
+          // (its wood told from its leaves by their colours - the world under it is not the plant -
+          // and each cell's splinter by the girth it had)
+          const at = here(), g = data.girth;
+          for (let k = 0; k < at.x.length; k += 1) PW.flora.shed(particles, at.x[k], at.y[k], at.color[k], (spec.vx || 0) * 0.5, (spec.vy || 0) * 0.5, false, null, g ? g[k] || 1 : 0);
           return null;
         }
-        if (list.length >= MAX_PIECES) { if (PW.flora) PW.flora.land(world, particles, here(), null); return null; }
       } else {
         // (too little frame to hold together - a scrap, or a panel of back wall with nothing
         // round it: it comes apart where it is)

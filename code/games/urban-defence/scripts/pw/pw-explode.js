@@ -81,6 +81,43 @@
     return job.part >= 4;
   }
 
+  // The plants in the heart of a blast, torn apart once it has been through - each cell's wood
+  // weighed by how thick it is there, measured with the whole plant still standing (N85): a twig
+  // drawn a cell wide is mostly air, a bough partly, a trunk solid, so its splinters are a few of
+  // its twigs' cells, a quarter of its boughs', three of each four of a trunk's (see PW.flora.shed).
+  // A trunk only the very heart of the blast shatters: one further out stands, stripped of its
+  // crown, or comes down whole after it as logs (see PW.flora.afterBlast) - never a heap of chips.
+  const LOG = 6;                // cells across: wood this thick is a trunk's, a bough's at the foot
+  const SHATTER = 0.05;         // the heart that shatters even a trunk (the blast's measure s, ~0.47 of its radius)
+  function tear(world, particles, torn, layer, fling, power, cx) {
+    const DECO = world.deco, FLAGS = world.flags, { FLORA, WOOD, CHARRED } = PW.FLAG;
+    const woody = (x, y) => layer(DECO, x, y) !== 0 && (layer(FLAGS, x, y) & FLORA) !== 0 && (layer(FLAGS, x, y) & (WOOD | CHARRED)) !== 0;
+    // (how thick its wood is through (x, y): the shorter of its runs across and up, to LOG)
+    const acrossAt = (x, y) => {
+      let h = 1, v = 1;
+      for (let d = -1; d <= 1; d += 2) {
+        for (let k = 1; k < LOG && woody(x + d * k, y); k += 1) h += 1;
+        for (let k = 1; k < LOG && woody(x, y + d * k); k += 1) v += 1;
+      }
+      return Math.min(h, v);
+    };
+    const n = torn.length / 3, across = new Uint8Array(n);
+    for (let q = 0; q < n; q += 1) if (woody(torn[q * 3], torn[q * 3 + 1])) across[q] = acrossAt(torn[q * 3], torn[q * 3 + 1]);
+    for (let q = 0; q < n; q += 1) {
+      const x = torn[q * 3], y = torn[q * 3 + 1], s = torn[q * 3 + 2];
+      if (across[q] >= LOG && s > SHATTER) continue;
+      const deco = layer(DECO, x, y);
+      if (!deco) continue;
+      PW.setLayer(world, 'deco', x, y, 0);
+      // (thrown out sideways too, even under the blast: what it drives straight down at the foot of a
+      // trunk is spread over the ground round it, not piled there)
+      const [vx, vy] = fling(x, y, 220 * power, 140 * power), h = PW.hash2(x, y);
+      const out = Math.sign(x + 0.5 - cx) || ((h & 1) ? 1 : -1);
+      PW.flora.shed(particles, x, y, deco, vx + out * 90 * power * (0.4 + (h >>> 1 & 255) / 255), vy, true, world, across[q]);
+      PW.setFlag(world, x, y, FLORA | CHARRED | WOOD, false);
+    }
+  }
+
   function explode(world, particles, spec) {
     const { x: cx, y: cy, radius: r, power = 1, owner = 0 } = spec;
     const random = world.random || PW.createRandom(PW.hash2(cx | 0, cy | 0));
@@ -133,6 +170,7 @@
     const { CHUNK_SHIFT: CS, CHUNK_MASK: CM } = PW, CX = world.chunksX;
     const layer = (L, x, y) => { const ch = L[(y >> CS) * CX + (x >> CS)]; return ch ? ch[(y & CM) << CS | x & CM] : 0; };
     const DECO = world.deco, BACK = world.back, PIPE = world.pipe, PAINT = world.paint, OWNER = world.owner;
+    const torn = [];   // (plant cells in the heart of it: x, y, s - torn off after it, see tear)
     for (let y = y0; y <= y1; y += 1) {
       for (let x = x0; x <= x1; x += 1) {
         const nx = (x - cx) / r, ny = (y - cy) / (y > cy ? below : r);
@@ -150,18 +188,19 @@
           if (plant) plant.blasted = true;
         }
         if (deco && s <= (flora ? 0.45 * Math.min(1.2, power) : 1.1)) {
-          PW.setLayer(world, 'deco', x, y, 0);
           const decoOwner = PW.getOwner(world, x, y);
           if (decoOwner > 0 && decoOwner < 50000) damaged.set(decoOwner, damaged.get(decoOwner) || 0);
           if (flora) {
             const plant = PW.flora.recordAt(world, x, y);
             if (plant) plant.hit = true;
-            const [vx, vy] = fling(x, y, 220 * power, 140 * power);
-            PW.flora.shed(particles, x, y, deco, vx, vy, true, world);
-            PW.setFlag(world, x, y, PW.FLAG.FLORA | PW.FLAG.CHARRED | PW.FLAG.WOOD, false);
-          } else if (random() < 0.08) {
-            const [vx, vy] = fling(x, y, 140 * power, 80);
-            particles.spawn(x + 0.5, y + 0.5, vx, vy, 0, deco, F.LEAF, 2 + random() * 2);
+            // (torn off once the blast has been through: see below)
+            torn.push(x, y, s);
+          } else {
+            PW.setLayer(world, 'deco', x, y, 0);
+            if (random() < 0.08) {
+              const [vx, vy] = fling(x, y, 140 * power, 80);
+              particles.spawn(x + 0.5, y + 0.5, vx, vy, 0, deco, F.LEAF, 2 + random() * 2);
+            }
           }
         }
         if (s > 1) {
@@ -232,6 +271,7 @@
         if (PW.mat.terrain[id] && random() < DUST_SHARE) PW.set(world, x, y, M.DUST | (1 + (random() < 0.5 ? 1 : 0)) << 6, { quiet: true });
       }
     }
+    if (torn.length) tear(world, particles, torn, layer, fling, power, cx);
     scorchBuildings(world, cx, cy, r, power);
     // The fireball, its sparks and shrapnel, and its smoke (see fireball); its heat is real, so it
     // can scorch and ignite.

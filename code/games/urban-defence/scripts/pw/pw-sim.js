@@ -22,6 +22,7 @@
   const DISPERSE = 8;            // cells pressurised water squirts sideways per tick
   const PUSH_REACH = 48;         // how far a surge carries through standing water
   const COMPACT_TICKS = 600;     // 10 s at 60 Hz
+  const WOOD_CHIPS = PW.M.DEBRIS | PW.DEBRIS_KIND.WOOD << 6;   // (wood debris, whole byte)
   const { slide: SLIDE, reposeRise: REPOSE_RISE, reposeRun: REPOSE_RUN, settlesTo: COMPACTS_TO, buoyancy: RISE, fade: FADE } = PW.mat;
 
   function createSim(world) {
@@ -890,6 +891,8 @@
           const y = baseY + ly, i = y * W + x;
           const id = mat[i] & ID_MASK;
           if (COMPACTS_TO[id] < 0) continue;
+          // (wood splinters do not pack into rubble: they lie loose and rot away - see pw-life, N85)
+          if (mat[i] === WOOD_CHIPS) continue;
           // Find what the powder column below rests on.
           let j = i + W, depth = 0;
           while (j < W * H && COMPACTS_TO[mat[j] & ID_MASK] >= 0 && depth < 512) { j += W; depth += 1; }

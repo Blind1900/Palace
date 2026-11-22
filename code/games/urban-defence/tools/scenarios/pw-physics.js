@@ -231,6 +231,76 @@ check(stability.stats.broken === before, `ground nobody disturbed stands (${stab
   }
 }
 
+// 4b. Tree debris (N85, the user's: heaps of it piled too high). A big blast in a stand of trees
+// leaves a litter, not a heap: a cell of a tree's wood leaves a splinter by how thick it is there (a
+// twig drawn a cell wide is mostly air), a trunk outside the blast's very heart comes down as logs -
+// so the splinters on the ground are a few for each hundred cells of wood lost, lying low. A heap of
+// splinters set alight burns down to a drift of ash; a litter of them lying out on the ground rots
+// away, a cell at a time.
+{
+  const chipsAt = (x, y) => { const b = PW.get(world, x, y); return (b & 63) === M.DEBRIS && (b >> 6) === PW.DEBRIS_KIND.WOOD; };
+  const woodAt = (x, y) => { const f = PW.getFlags(world, x, y); return PW.getLayer(world, 'deco', x, y) && (f & PW.FLAG.FLORA) && (f & (PW.FLAG.WOOD | PW.FLAG.CHARRED)); };
+  const surf = (x, top) => { let y = top; while (y < top + 300 && PW.mat.phase[id(x, y)] < PW.PHASE.POWDER) y += 1; return y; };
+  // (the densest stand of standing trees left in the wilds)
+  const standing = (world.flora || []).filter((r) => r.kind === 'tree' && !r.fallen && layout.wilds.some((z) => r.anchorX > z.x0 + 300 && r.anchorX < z.x1 - 300));
+  let stand = null;
+  // (the most tree in it - big trees, by their size - not the most saplings)
+  for (const r of standing) {
+    const near = standing.filter((o) => Math.abs(o.anchorX - r.anchorX) < 150), size = near.reduce((s, o) => s + (o.size || 0), 0);
+    if (!stand || size > stand.size) stand = { n: near.length, size, x: r.anchorX, g: world.groundTop[r.anchorX] };
+  }
+  // (two flat stretches of open ground, away from the stand, for the burning heap and the litter)
+  const flats = [];
+  for (const z of layout.wilds) for (let x = z.x0 + 100; x + 80 < z.x1 - 100 && flats.length < 2; x += 40) {
+    if (stand && Math.abs(x - stand.x) < 500) continue;
+    if (flats.some((f) => Math.abs(f - x) < 300)) continue;
+    let ok = true;
+    for (let d = 0; d <= 80 && ok; d += 4) ok = Math.abs(world.groundTop[x + d] - world.groundTop[x]) <= 1 && PW.mat.terrain[id(x + d, world.groundTop[x + d])];
+    if (ok) flats.push(x);
+  }
+  if (!stand || stand.n < 4 || flats.length < 2) check(false, `a stand of trees and two flats for the tree debris (${stand ? stand.n : 0} trees, ${flats.length} flats)`);
+  else {
+    const L = stand.x - 200, R = stand.x + 200, top = stand.g - 300;
+    let wood0 = 0;
+    for (let y = top; y < stand.g + 5; y += 1) for (let x = L; x <= R; x += 1) if (woodAt(x, y)) wood0 += 1;
+    const s0 = []; for (let x = L; x <= R; x += 1) s0.push(surf(x, top));
+    pwApp.explode(stand.x, stand.g - 70, 90, 1.35);
+    // (the heap of splinters set alight; the litter lying out)
+    const [hx, lx] = flats, hg = world.groundTop[hx + 40], lg = world.groundTop[lx + 40];
+    let heap0 = 0, litter0 = 0;
+    // (the heap on bare rock, nothing round it to burn but itself)
+    for (let d = -40; d <= 40; d += 1) {
+      for (let y = hg - 30; y < hg; y += 1) { PW.setLayer(world, 'deco', hx + 40 + d, y, 0); PW.setFlag(world, hx + 40 + d, y, PW.FLAG.FLORA | PW.FLAG.WOOD, false); }
+      for (let y = hg; y <= hg + 3; y += 1) PW.set(world, hx + 40 + d, y, M.STONE, { quiet: true });
+    }
+    for (let d = -30; d <= 30; d += 1) for (let y = hg - 1; y >= hg - 15 + Math.round(Math.abs(d) / 2); y -= 1) { PW.set(world, hx + 40 + d, y, M.DEBRIS | PW.DEBRIS_KIND.WOOD << 6); heap0 += 1; }
+    for (let d = -20; d <= 20; d += 1) for (let y = lg - 1; y >= lg - 3; y -= 1) { PW.set(world, lx + 40 + d, y, M.DEBRIS | PW.DEBRIS_KIND.WOOD << 6); litter0 += 1; }
+    if (world.heatSystem) world.heatSystem.heatDisc(hx + 40, hg - 8, 22, 900);
+    pwApp.stepWorld(60 * 25);
+    // (the splinters lying, and the deepest they lie in any column - the blast's thrown earth aside)
+    let wood1 = 0, splinters = 0, peak = 0, pile = 0;
+    for (let y = top; y < stand.g + 5; y += 1) for (let x = L; x <= R; x += 1) if (woodAt(x, y)) wood1 += 1;
+    for (let x = L; x <= R; x += 1) {
+      const y0 = s0[x - L], y1 = surf(x, top);
+      let here = 0;
+      for (let y = y1; y < y0 + 30; y += 1) { const b = PW.get(world, x, y); if (((b & 63) === M.DEBRIS || (b & 63) === M.RUBBLE) && (b >> 6) === PW.DEBRIS_KIND.WOOD) here += 1; }
+      splinters += here;
+      peak = Math.max(peak, here);
+      if (Math.abs(y0 - stand.g) < 40) pile = Math.max(pile, y0 - y1);
+    }
+    let heap1 = 0, ash = 0, litter1 = 0;
+    for (let y = hg - 40; y < hg + 3; y += 1) for (let x = hx; x <= hx + 80; x += 1) { if (chipsAt(x, y)) heap1 += 1; if (id(x, y) === M.ASH) ash += 1; }
+    for (let y = lg - 6; y < lg + 2; y += 1) for (let x = lx; x <= lx + 80; x += 1) if (chipsAt(x, y)) litter1 += 1;
+    await view('tree-litter', stand.x, stand.g - 40, 5);
+    const lost = wood0 - wood1;
+    check(lost > 4000 && splinters < lost * 0.08 && peak <= 16,
+      `a big blast in a stand of ${stand.n} trees (at ${stand.x}, ${wood0} cells of wood) leaves a litter, not a heap: ${lost} cells of their wood gone, ${splinters} splinters lying (${(splinters / Math.max(1, lost) * 100).toFixed(1)} for each hundred), ${peak} deep at the deepest (all that lies over the old ground, the blast's earth too: ${pile} cells high at most)`);
+    const burnt = heap0 - heap1;
+    check(burnt >= 40 && ash <= burnt * 0.25 && litter1 < litter0,
+      `a heap of ${heap0} splinters set alight burns down, layer by layer: ${burnt} of it burnt in 25 s, leaving ${ash} cells of ash (not a cell of ash for each); a litter of ${litter0} lying out rots away a cell at a time (${litter1} left after 25 s)`);
+  }
+}
+
 // 5. Trees felled by small blasts at their feet come down a branch at a time and lie on the ground -
 // on slopes too - never sinking into it (none of their wood two cells or more under its surface),
 // each falling piece one body of wood; their limbs bend where they strike the ground, and the
