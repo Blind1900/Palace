@@ -86,13 +86,19 @@
 
   // ---- A trooper -----------------------------------------------------------------------------------
   // spec: { x, y (its feet's row; the ground under it if left out), side, style (its faction's
-  // dress), facing }
+  // dress), facing, unit ('trooper', 'guard' - in lavender, holding its post - or 'miner' - in its
+  // hi-vis kit, a drill in hand, no grenades), post (a guard's: where it stands) }
+  const UNITS = { trooper: { look: 'trooper', grenades: GRENADES, drill: 0 }, guard: { look: 'guard', grenades: GRENADES, drill: 0 }, miner: { look: 'miner', grenades: 0, drill: 1 } };
   function create(world, spec) {
-    const x = spec.x, gy = spec.y ?? groundUnder(world, Math.round(x), 0);
-    const t = { kind: 'trooper', x, y: gy, vx: 0, vy: 0, facing: spec.facing || 1, side: spec.side || null, style: spec.style || '',
+    const x = spec.x, gy = spec.y ?? groundUnder(world, Math.round(x), 0), U = UNITS[spec.unit] || UNITS.trooper;
+    const t = { kind: 'trooper', unit: UNITS[spec.unit] ? spec.unit : 'trooper', look: U.look, x, y: gy, vx: 0, vy: 0, facing: spec.facing || 1, side: spec.side || null, style: spec.style || '',
       hp: HP, dead: false, deadFor: 0, onGround: true, crouch: false, climbing: false, dropping: false, swim: false, wet: 0, flow: 0,
       breath: BREATH, buried: false, digDir: 0, digT: 0, walk: 0, wantUp: 0, travel: 0, lift: 0,
-      mag: MAG, ammo: MAG * 4, reload: 0, cooldown: 0, grenades: GRENADES, aim: null, hurtBy: '', fallFrom: gy, seed: ++seq };
+      mag: MAG, ammo: MAG * 4, reload: 0, cooldown: 0, grenades: U.grenades, drill: U.drill, slot: U.drill ? 'drill' : 'rifle', drilling: null, drillT: 0,
+      post: spec.post || (spec.unit === 'guard' ? { x, y: gy } : null), working: null,
+      // (its orders - see PW.units: a guard holds its post, firing at what comes into its sights)
+      order: spec.order || (spec.unit === 'guard' ? { type: 'hold', at: 0 } : null),
+      aim: null, hurtBy: '', fallFrom: gy, seed: ++seq };
     (world.troops || (world.troops = [])).push(t);
     current = world;
     stats.created += 1;
@@ -112,6 +118,9 @@
     wade(world, t);
     if (t.buried || buriedNow(world, t)) { dig(world, t, dt); return; }
     if (t.route) follow(world, t, dt);
+    if (t.working) workStep(world, t, dt);
+    if (t.drilling) drillStep(world, t, dt);
+    if (!t.drill && world.pickups && world.pickups.length) pickUp(world, t);
     const h = heightOf(t), g = G();
     // On a ladder: up or down it as it is told, gravity held off; off its top or foot it stands.
     const onLadder = ladderAt(world, Math.floor(t.x), t.y - 4) || ladderAt(world, Math.floor(t.x), t.y + 1);
@@ -451,6 +460,194 @@
     if (on && t.onGround) { t.walk = 0; t.vx = 0; t.climbing = true; t.wantUp = up ? 1 : -1; t.crouch = false; return; }
     t.walk = Math.sign(w.x + 0.5 - t.x) || 1;
   }
+  // ---- The drill: hand-drilled dirt tunnels (N5) -----------------------------------------------------------
+  // A trooper with a drill (a miner, or one who picked one up in the tunnels) drills its own way, any
+  // of eight ways, through what the drill cuts - fast through soil and sand, slowly through stone, not
+  // at all through bedrock, ore (the miners' seams), a core's bed or another side's lining - and
+  // walks on into what it drilled: along or slanting, a bore it stands up in (DRILL_H); straight down
+  // or up, a shaft as wide as a ladder, the ladder fixed in it as it goes. What it drills is a rough
+  // dirt tunnel, its spoil thrown back behind it, a secret from the enemy (FLAG.BORE: they see a man
+  // in it only close to - see PW.units); once it reaches the open - the surface, a cave - and its
+  // side's tunnels both, it is taken into them, and lined in its turn like the rest.
+  const DRILL_H = 28;           // cells: a bore a man walks upright in
+  const SHAFT_W = 14;           // cells: a shaft, a ladder's width and a cell either side
+  const DRILL_FAST = 50.7, DRILL_K = 3.52;   // cells/s along, by what it cuts: about 21 through soil (1.5 m/s), 4.3 through stone (0.3 m/s)
+  const BORE_TONES = [[46, 37, 29], [38, 31, 24], [54, 43, 33]];
+  const DIRS8 = [[1, 0], [1, -1], [0, -1], [-1, -1], [-1, 0], [-1, 1], [0, 1], [1, 1]];
+  function cuts(world, t, x, y) {
+    const id = world.mat[y * world.width + x] & ID_MASK;
+    if (id === M.BEDROCK || id === M.CORE || id === M.ORE || id === M.FOUNDATION) return false;
+    if (id === M.REINFORCED || id === M.LINING) {
+      const net = PW.tunnels && PW.tunnels.networkOfOwner(world, PW.getOwner(world, x, y));
+      return !!net && net.side === t.side;
+    }
+    return true;
+  }
+  // (which way of the eight it aims: at the spot clicked, or on ahead)
+  function drillWay(t) {
+    if (!t.aim) return [t.facing, 0];
+    const a = Math.atan2(-(t.aim.y - (t.y - heightOf(t) / 2)), t.aim.x - t.x), k = ((Math.round(a / (Math.PI / 4)) % 8) + 8) % 8;
+    return DIRS8[k];
+  }
+  // F with the drill in hand: drill on the way it aims - or, drilling, stop.
+  function drill(world, t, way) {
+    if (!t || t.dead || !t.drill) return false;
+    if (t.drilling && !way) { stopDrill(t); return false; }
+    const [dx, dy] = way || drillWay(t);
+    t.drilling = { dx, dy, bore: newBore(world, t) };
+    t.route = null; t.drillT = 0;
+    if (dx) t.facing = dx;
+    stats.drilling = (stats.drilling || 0) + 1;
+    return true;
+  }
+  function stopDrill(t) {
+    if (!t.drilling) return;
+    const b = t.drilling.bore;
+    t.drilling = null; t.walk = 0; t.wantUp = 0;
+    // (a bore that joined its side's tunnels while it was drilled is taken into them now it is done:
+    // not before - their lining would be cast across the face it is still cutting)
+    if (b && b.joined && !b.taken && current) takeIn(current, b);
+  }
+  function newBore(world, t) {
+    const b = { side: t.side, cells: [], net: null, open: false, joined: false };
+    (world.bores || (world.bores = [])).push(b);
+    return b;
+  }
+  // The cells it must cut to go on a step: the bore's face.
+  function face(world, t, d) {
+    const cx = Math.floor(t.x), out = [];
+    if (d.dx) {
+      const nx = cx + d.dx, ny = t.y + d.dy;
+      for (let y = ny - DRILL_H + 1; y <= ny; y += 1) for (let x = nx - HALF; x < nx + HALF; x += 1) if (blocks(world, x, y)) out.push(x, y);
+    } else {
+      // (down: the first row from its head down with anything in it to cut - a lip of the ground it
+      // stands half on, the row under it, or, that cut, the next it is still dropping onto; up:
+      // the first over its head. Nothing near enough, and it has drilled out into the open)
+      const band = (row) => { for (let x = cx - (SHAFT_W >> 1); x < cx + (SHAFT_W >> 1); x += 1) if (blocks(world, x, row)) out.push(x, row); return out.length > 0; };
+      if (d.dy > 0) for (let row = t.y - heightOf(t) + 1; row < t.y + 1 + DRILL_H && row < world.height - 1 && !band(row); row += 1);
+      else for (let row = t.y - heightOf(t); row > t.y - heightOf(t) - DRILL_H && row > 1 && !band(row); row -= 1);
+    }
+    return out;
+  }
+  function drillStep(world, t, dt) {
+    const d = t.drilling;
+    if (t.dead || t.buried || t.swim) { stopDrill(t); return; }
+    const f = face(world, t, d);
+    // (what it cannot cut ends the drilling there; a shaft that has broken out into the open, too)
+    for (let k = 0; k < f.length; k += 2) if (!cuts(world, t, f[k], f[k + 1])) { stopDrill(t); t.drillStopped = 'hard'; return; }
+    if (!d.dx && !f.length) { stopDrill(t); t.drillStopped = 'open'; return; }
+    if (f.length) {
+      let h = 0;
+      for (let k = 0; k < f.length; k += 2) h += hardness[world.mat[f[k + 1] * world.width + f[k]] & ID_MASK];
+      h /= f.length / 2;
+      t.drillT += dt;
+      if (t.drillT >= 1 / (DRILL_FAST * Math.exp(-DRILL_K * h))) { t.drillT = 0; carveBore(world, t, d, f); }
+    }
+    // (on into what it has drilled: walking along or slanting; up the shaft's ladder - going down,
+    // it stands on the bottom of the shaft, and sinks with it)
+    if (d.dx) { t.walk = d.dx; t.crouch = false; }
+    else { t.walk = 0; t.vx = 0; if (d.dy < 0 && ladderAt(world, Math.floor(t.x), t.y)) { t.climbing = true; t.wantUp = 1; } }
+  }
+  function carveBore(world, t, d, f) {
+    const particles = world.particles, F = PW.PARTICLE, b = d.bore, FLAGS = PW.FLAG.BORE | PW.FLAG.CARVED;
+    for (let k = 0; k < f.length; k += 2) {
+      const x = f[k], y = f[k + 1], m = world.mat[y * world.width + x];
+      PW.set(world, x, y, M.AIR);
+      PW.setLayer(world, 'deco', x, y, 0);
+      PW.setFlag(world, x, y, FLAGS);
+      const c = BORE_TONES[PW.hash3(x >> 1, y >> 1, 41) % 3];
+      PW.setLayer(world, 'back', x, y, PW.abgr(c[0], c[1], c[2]));
+      b.cells.push(y * world.width + x);
+      // (its spoil thrown back behind it - or, sinking a shaft, hauled up out of it: thrown, it would
+      // fall back in under its feet)
+      if (particles && F && !(d.dy > 0 && !d.dx) && (PW.hash3(x, y, t.seed) & 7) === 0) particles.spawn(x + 0.5, y + 0.5, -(d.dx || t.facing) * (30 + (PW.hash2(x, y) & 31)), -15, (PW.mat.breaksTo[m & ID_MASK] || m) & 0xff, 0, F.LAND, 4);
+    }
+    // (a shaft: the ladder fixed in it, as it goes - from its feet to the row it cut)
+    if (!d.dx && PW.settlementTools) {
+      const cx = Math.floor(t.x), row = f[1];
+      PW.settlementTools.ladder(world, cx - 6, Math.min(row, t.y), Math.max(row, t.y));
+      if (d.dy > 0) t.climbing = false;
+    }
+    stats.drilled = (stats.drilled || 0) + f.length / 2;
+    joinBore(world, b, f);
+  }
+  // (has the bore reached the open - the surface or a cave - and its side's tunnels? Then it is
+  // theirs: taken into the network it meets, its cells to be lined in their turn - no secret now)
+  function joinBore(world, b, f) {
+    if (!PW.tunnels || b.joined) return;
+    const W = world.width, T = PW.tunnels.state(world);
+    for (let k = 0; k < f.length; k += 2) {
+      const x = f[k], y = f[k + 1];
+      for (const [ox, oy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const nx = x + ox, ny = y + oy;
+        if (nx < 1 || ny < 1 || nx >= W - 1 || ny >= world.height - 1) continue;
+        const net = PW.tunnels.netAt(world, nx, ny);
+        if (net) { const n = T.networks[net - 1]; if (n && n.side === b.side) b.net = n; continue; }
+        if (!PW.mat.open[world.mat[ny * W + nx] & ID_MASK] || (PW.getFlags(world, nx, ny) & PW.FLAG.BORE)) continue;
+        // (open air out of the ground - the sky over the surface - or a cave's)
+        b.open = true;
+      }
+    }
+    if (!b.net || !b.open) return;
+    b.joined = true;
+    stats.boresJoined = (stats.boresJoined || 0) + 1;
+  }
+  function takeIn(world, b) {
+    b.taken = true;
+    const W = world.width;
+    // (one segment for the whole bore: a cell of it, carved already, claimed as a box)
+    const i0 = b.cells[0], seg = PW.tunnels.digBox(world, b.net, i0 % W, (i0 / W) | 0, i0 % W, (i0 / W) | 0, { kind: 'drift' }).segment;
+    for (const i of b.cells) {
+      const x = i % W, y = (i / W) | 0;
+      PW.setFlag(world, x, y, PW.FLAG.BORE, false);
+      if (seg && PW.mat.open[world.mat[i] & ID_MASK]) PW.tunnels.claimCell(world, b.net, seg, x, y);
+    }
+    stats.boresTaken = (stats.boresTaken || 0) + 1;
+  }
+  // (in a hand-drilled dirt tunnel its side has not taken in yet: a secret)
+  const inBore = (world, t) => (PW.getFlags(world, Math.floor(t.x), t.y - 4) & PW.FLAG.BORE) !== 0;
+
+  // ---- Picking up, the item bar -----------------------------------------------------------------------------
+  // A trooper walking over a drill lying in the tunnels picks it up. Its items: its rifle, its
+  // grenades, its drill (if it has one); keys 1 2 3 take one in hand, F uses it.
+  function pickUp(world, t) {
+    for (const p of world.pickups) {
+      if (p.kind !== 'drill' || t.y < p.y || t.y > p.y + p.h + 2 || t.x < p.x - HALF || t.x > p.x + p.w + HALF) continue;
+      if (PW.pickups && !PW.pickups.present(world, p)) continue;
+      if (PW.pickups) PW.pickups.take(world, p);
+      t.drill = 1;
+      stats.pickedUp = (stats.pickedUp || 0) + 1;
+      return true;
+    }
+    return false;
+  }
+  const SLOTS = ['rifle', 'grenade', 'drill'];
+  function items(t) {
+    return [{ slot: 'rifle', have: true, count: `${t.mag}/${t.ammo}`, busy: t.reload > 0 },
+      { slot: 'grenade', have: t.grenades > 0, count: `${t.grenades}` },
+      { slot: 'drill', have: !!t.drill, count: t.drilling ? 'ON' : t.drill ? '' : '-' }];
+  }
+  function select(t, slot) { if (slot === 'drill' && !t.drill) return false; if (slot === 'grenade' && t.grenades <= 0) return false; t.slot = slot; return true; }
+  function use(world, t) {
+    if (t.slot === 'grenade') return throwGrenade(world, t);
+    if (t.slot === 'drill') return drill(world, t);
+    return fire(world, t);
+  }
+
+  // ---- At work: a trooper working a panel (WGM's hack clock runs while it does) -----------------------------
+  function work(t, panel) {
+    if (!t || t.dead || t.buried) return false;
+    t.working = { panel, at: 0 };
+    t.route = null; t.walk = 0; stopDrill(t);
+    if (panel && Number.isFinite(panel.x)) t.facing = Math.sign(panel.x - t.x) || t.facing;
+    return true;
+  }
+  function workStep(world, t, dt) {
+    // (it stops working when it moves - told to, or thrown - or is taken in hand to walk)
+    if (t.walk || t.route || t.climbing || !t.onGround || Math.abs(t.vx) > 4) { t.working = null; return; }
+    t.working.at += dt;
+  }
+
   // (under cover of the ground: its head under the surface over it - in a tunnel, a cave, a cellar)
   const underground = (world, t) => t.y - heightOf(t) > world.groundTop[Math.max(0, Math.min(world.width - 1, Math.floor(t.x)))] + 4;
 
@@ -459,6 +656,8 @@
     if (t.dead || !(amount > 0)) return;
     t.hp -= amount;
     t.hurtBy = cause;
+    t.working = null;
+    t.hitAt = world.tick || 0;
     if (t.hp <= 0) { t.hp = 0; t.dead = true; t.deadFor = 0; t.climbing = false; stats.killed += 1; if (held === t) held = null; }
   }
   // A blast (PW.explode) throws the troopers in its reach - by how near and hard, less for the cover
@@ -551,7 +750,7 @@
     let dx = t.facing, dy = 0;
     if (t.aim) { dx = t.aim.x - m.x; dy = t.aim.y - m.y; if (Math.sign(dx) && Math.sign(dx) !== t.facing) t.facing = Math.sign(dx); }
     const shot = PW.shots.fire(world, { kind: 'bullet', x: m.x, y: m.y, dx, dy, side: t.side, from: t, spread: t.crouch ? 0.01 : 0.025 });
-    t.mag -= 1; t.cooldown = ROF;
+    t.mag -= 1; t.cooldown = ROF; t.firedAt = world.tick || 0;
     stats.fired += 1;
     if (PW.shots.report) PW.shots.report(world, m.x, m.y, Math.sign(dx) || t.facing, 0, 1);
     if (t.mag <= 0) reload(t);
@@ -602,6 +801,8 @@
   function frameOf(t) {
     const A = PW.unitArt;
     if (t.dead || t.buried) return ['crouch', 0];
+    // (at a panel: crouched at it, working - its hands busy, the frame turning over)
+    if (t.working) return ['crouch', Math.floor(t.working.at * 3) % A.frameCount('crouch')];
     if (!t.onGround && !t.climbing && !t.swim) return ['jump', Math.min(A.frameCount('jump') - 1, Math.max(0, Math.floor((t.vy + JUMP) / (2 * JUMP) * A.frameCount('jump'))))];
     const moving = Math.abs(t.vx) > 2 || t.climbing;
     const clip = t.crouch ? (moving ? 'crouchWalk' : 'crouch') : 'walk';
@@ -617,9 +818,13 @@
       const { ctx, camera } = renderer, z = camera.zoom;
       for (const t of list) {
         if (t.buried && !t.dead) continue;
-        const [clip, frame] = frameOf(t), s = A.sprite('trooper', clip, frame, t.style);
+        const [clip, frame] = frameOf(t), s = A.sprite(t.look || 'trooper', clip, frame, t.style);
         if (!s) continue;
-        if (!t.dead) { A.draw(renderer, s, t.x, t.y, t.facing); continue; }
+        if (!t.dead) {
+          A.draw(renderer, s, t.x, t.y, t.facing);
+          if (t.drilling || t.working) busy(renderer, t);
+          continue;
+        }
         // (dead: on its side, fading at the end)
         ctx.save();
         ctx.globalAlpha = t.deadFor > CORPSE - 3 ? Math.max(0, (CORPSE - t.deadFor) / 3) : 1;
@@ -636,6 +841,49 @@
       ctx.fillStyle = 'rgb(46,52,40)';
       for (const g of gl) ctx.fillRect(Math.round((g.x - 1 - camera.x) * z), Math.round((g.y - 1 - camera.y) * z), Math.max(1, 2 * z), Math.max(1, 2 * z));
     }
+    if (held && !held.dead && (world.troops || []).includes(held)) itemBar(renderer, held);
+  }
+  // (busy hands: the drill's bit at the face it cuts, flickering grit; at a panel, its screen's light)
+  function busy(renderer, t) {
+    const { ctx, camera } = renderer, z = camera.zoom, flick = (PW.hash2(Math.floor(performance.now() / 70), t.seed) & 3);
+    const px = (x, y, w, h, c) => { ctx.fillStyle = c; ctx.fillRect(Math.round((x - camera.x) * z), Math.round((y - camera.y) * z), Math.max(1, Math.round(w * z)), Math.max(1, Math.round(h * z))); };
+    const hy = t.y - heightOf(t) + 11;
+    if (t.drilling) {
+      const d = t.drilling, bx = t.x + (d.dx ? d.dx * (HALF + 1) : 0), by = d.dx ? hy : d.dy > 0 ? t.y - 6 : t.y - heightOf(t) - 1;
+      px(bx - 1, by - 1, 3, 2, 'rgb(222,168,38)');   // (its yellow body)
+      px(bx + (d.dx || 0) * 3, by + (d.dx ? 0 : d.dy * 3), 1, 1, 'rgb(190,196,204)');   // (the bit)
+      if (flick) px(bx + (d.dx || 0) * 4 + (flick - 2), by + (d.dx ? flick - 2 : d.dy * 4), 1, 1, 'rgb(150,124,90)');   // (grit)
+    } else {
+      px(t.x + t.facing * (HALF + 1), hy + 3, 2, 2, flick & 1 ? 'rgb(120,220,180)' : 'rgb(70,150,120)');
+    }
+  }
+  // The item bar of the trooper in hand, at the foot of the view: its rifle (rounds in it and
+  // carried), its grenades, its drill - the one in hand marked; pixels on the world's grid.
+  const ICONS = {
+    rifle: ['.......g....', 'GGGGGGGGGGGG', '.GGg.G......', '.G..........'],
+    grenade: ['.gg.', 'GGGG', 'GgGG', '.GG.'],
+    drill: ['.gGG........', 'G..GyyyyM...', 'G..GYYYYMssT', 'GGGGDDDDM...', '..GG........'],
+  };
+  const ICON_COLORS = { G: '#3a4030', g: '#5c6448', Y: '#dea826', y: '#f6ce62', D: '#a8761a', M: '#3e4046', s: '#bec4cc', T: '#747880' };
+  function itemBar(renderer, t) {
+    const { ctx, view } = renderer, dpr = view.dpr || 1, s = Math.max(2, Math.round(3 * dpr)), slotW = 18 * s, gap = 3 * s;
+    const list = items(t), x0 = Math.round(view.width / 2 - (list.length * slotW + (list.length - 1) * gap) / 2), y0 = Math.round(view.height - slotW - 14 * s);
+    ctx.save();
+    ctx.font = `${Math.round(5 * s)}px Ithaca, Consolas, monospace`;
+    ctx.textAlign = 'center';
+    list.forEach((it, k) => {
+      const x = x0 + k * (slotW + gap), on = t.slot === it.slot;
+      ctx.fillStyle = on ? 'rgba(60,90,64,0.92)' : 'rgba(10,18,14,0.85)'; ctx.fillRect(x, y0, slotW, slotW);
+      ctx.fillStyle = on ? '#c8b040' : '#3c5a40';
+      ctx.fillRect(x, y0, slotW, s); ctx.fillRect(x, y0 + slotW - s, slotW, s); ctx.fillRect(x, y0, s, slotW); ctx.fillRect(x + slotW - s, y0, s, slotW);
+      const icon = ICONS[it.slot], iw = icon[0].length, ih = icon.length, ix = x + Math.round((slotW - iw * s) / 2), iy = y0 + Math.round((slotW - ih * s) / 2) - s;
+      ctx.globalAlpha = it.have ? 1 : 0.3;
+      for (let r = 0; r < ih; r += 1) for (let c = 0; c < iw; c += 1) { const ch = icon[r][c]; if (ch === '.') continue; ctx.fillStyle = ICON_COLORS[ch]; ctx.fillRect(ix + c * s, iy + r * s, s, s); }
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = it.busy ? '#ffc8b8' : '#e8f0d8';
+      ctx.fillText(`${k + 1} ${it.count}`, x + slotW / 2, y0 + slotW + 6 * s);
+    });
+    ctx.restore();
   }
   const before = PW.drawUnitsHook;
   PW.drawUnitsHook = (renderer) => { if (before) before(renderer); draw(renderer); };
@@ -669,7 +917,9 @@
     if (!held || held.dead || event.repeat) return false;
     const t = held, world = current || (window.pwApp && window.pwApp.world), k = event.code;
     // (taken in hand, it does as it is told, not where it was going)
-    if (['KeyA', 'ArrowLeft', 'KeyD', 'ArrowRight', 'KeyW', 'ArrowUp', 'KeyS', 'ArrowDown'].includes(k)) t.route = null;
+    if (['KeyA', 'ArrowLeft', 'KeyD', 'ArrowRight', 'KeyW', 'ArrowUp', 'KeyS', 'ArrowDown'].includes(k)) { t.route = null; stopDrill(t); }
+    // (1 2 3: its rifle, a grenade, its drill in hand; F uses what it has in hand)
+    if (k === 'Digit1' || k === 'Digit2' || k === 'Digit3') { select(t, SLOTS[+k[5] - 1]); return true; }
     if (k === 'KeyA' || k === 'ArrowLeft') { t.walk = -1; t.climbing = false; t.wantUp = 0; }
     else if (k === 'KeyD' || k === 'ArrowRight') { t.walk = 1; t.climbing = false; t.wantUp = 0; }
     else if (k === 'KeyW' || k === 'ArrowUp') t.wantUp = 1;
@@ -679,15 +929,15 @@
       else if (t.walk) t.walk = 0;
       else if (t.crouch && isPlatform(world, Math.floor(t.x), t.y + 1)) t.dropping = true;
       else t.crouch = !t.crouch && clear(world, t.x, t.y, CROUCH) ? true : !clear(world, t.x, t.y, HEIGHT);
-    } else if (k === 'KeyF') fire(world, t);
+    } else if (k === 'KeyF') use(world, t);
     else if (k === 'KeyG') throwGrenade(world, t);
     else if (k === 'KeyR') reload(t);
     else return false;
     return true;
   }
   // (driving it by code, as the keys do: walk -1 / 0 / +1)
-  function walk(t, dir) { t.route = null; t.walk = Math.sign(dir); if (dir) { t.climbing = false; t.wantUp = 0; } }
+  function walk(t, dir) { t.route = null; stopDrill(t); t.walk = Math.sign(dir); if (dir) { t.climbing = false; t.wantUp = 0; } }
 
-  PW.troops = { create, step, draw, walk, goTo, plan, underground, fire, throwGrenade, reload, hurt, blast, touches, struck, target, tool, key, hold, held: () => held, stats,
-    clear, blocks, HEIGHT, CROUCH, HALF, WALK, STEP_UP, STEP_DOWN, FALL_SAFE, SAFE_DROP, HP, MAG, GRENADES, DIG_HARD };
+  PW.troops = { create, step, draw, walk, goTo, plan, underground, inBore, fire, throwGrenade, reload, drill, stopDrill, items, select, use, work, hurt, blast, touches, struck, target, tool, key, hold, held: () => held, stats,
+    clear, blocks, HEIGHT, CROUCH, HALF, WALK, STEP_UP, STEP_DOWN, FALL_SAFE, SAFE_DROP, HP, MAG, GRENADES, DIG_HARD, DRILL_H, SHAFT_W, UNITS };
 })();

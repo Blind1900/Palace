@@ -32,6 +32,8 @@ const SUITES = [
   // the computer play itself (the person takes a chair and hands it back)
   { name: 'pw-game', params: 'mode=game&start=versus&side=left&det=1' },
   { name: 'pw-game-menu', scenario: 'pw-game', ready: "!!document.getElementById('gm-menu')", params: 'mode=game&det=1' },
+  // N5: the item bar, drills and dirt tunnels, guards, turrets, orders, the sentry, a skirmish
+  { name: 'pw-units', page: 'pw-unit-lab.html', ready: 'window.pwLab && pwLab.ready', params: 'det=1&go=0' },
 ].filter((s) => !args.only || args.only.split(',').includes(s.name));
 const root = path.resolve(__dirname, '..');
 const out = path.join(os.tmpdir(), 'claude-scratch', 'shots');

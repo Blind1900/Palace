@@ -194,24 +194,21 @@
   }
   function onDug() {
     timings.dug = world.tick || 0;
+    // (drills left lying in the tunnels, for a trooper to pick up - as the world's are)
+    if (PW.pickups) PW.pickups.placeDrills(world, PW.createRandom(seed + 727));
     if (params.get('go') !== '0') { sentAt = world.tick || 0; send(marks.exit.x, marks.exit.y); }
   }
-  // (the far side's sentries: each fires at the nearest trooper of ours it has in its sights, level
-  // with it and in reach - a lab's stand-in for their orders)
-  const SENTRY_REACH = 420, SENTRY_EVERY = 0.35;
-  function sentries(dt) {
-    for (const e of world.troops || []) {
-      if (e.dead || e.side !== 'right') continue;
-      e.lab = (e.lab || 0) - dt;
-      if (e.lab > 0) continue;
-      let best = null, bd = SENTRY_REACH;
-      for (const t of world.troops) if (!t.dead && t.side === 'left' && Math.abs(t.y - e.y) < 30 && Math.abs(t.x - e.x) < bd) { bd = Math.abs(t.x - e.x); best = t; }
-      if (!best) continue;
-      e.lab = SENTRY_EVERY;
-      // (at his middle crouched; standing, at his upper chest - over whatever he stands behind)
-      e.aim = { x: best.x, y: best.y - (best.crouch ? 10 : 19) };
-      PW.troops.fire(world, e);
+  // A skirmish: a squad of ours and one of theirs meet down the long hallway, each fighting on its
+  // own (PW.units' sentry): spotting, firing, getting down behind the bumps, a grenade round a corner.
+  // (theirs come from the crawl's end; ours from the room)
+  function skirmish(n = 4) {
+    const made = { ours: [], theirs: [] };
+    for (let k = 0; k < n; k += 1) {
+      const a = PW.troops.create(world, { x: marks.cover.x - 120 - k * 12 + 0.5, y: marks.cover.y, side: 'left', style: 'modern', facing: 1, order: { type: 'auto', at: 0 } });
+      const b = PW.troops.create(world, { x: marks.cover.x + 110 + k * 12 + 0.5, y: marks.cover.y, side: 'right', style: 'gothic', facing: -1, order: { type: 'auto', at: 0 } });
+      made.ours.push(a); made.theirs.push(b);
     }
+    return made;
   }
 
   // ---- Tools -------------------------------------------------------------------------------------------------------
@@ -228,6 +225,7 @@
     if (a === 'routes') { showRoutes = !showRoutes; b.classList.toggle('on', showRoutes); }
     if (a === 'reset') window.location.reload();
     if (a === 'send') send(marks.exit.x, marks.exit.y);
+    if (a === 'skirmish') { skirmish(); renderer.focus(marks.cover.x, marks.cover.y - 10, 4); }
   });
   window.addEventListener('keydown', (event) => {
     if (event.target.closest?.('input, textarea, select')) return;
@@ -248,7 +246,9 @@
       const n = send(p.x, p.y);
       if (PW.notify) PW.notify.flash(n ? `${n} troopers on their way` : 'No way there', n ? 'good' : 'bad', 2);
     } else if (tool === 'troop') PW.troops.tool(world, p.x, p.y, event.shiftKey);
-    else if (tool === 'enemy') { const t = PW.troops.tool(world, p.x, p.y, true); if (t) { t.side = 'right'; t.facing = -1; t.style = 'gothic'; PW.troops.hold(null); } }
+    // (a sentry of theirs: holding where it stands, firing at ours it sees - see PW.units)
+    else if (tool === 'enemy') { const t = PW.troops.tool(world, p.x, p.y, true); if (t) { t.side = 'right'; t.facing = -1; t.style = 'gothic'; PW.troops.hold(null); PW.units.order(world, t, { type: 'hold' }); } }
+    else if (tool === 'miner') { const t = PW.troops.tool(world, p.x, p.y, true); if (t) { t.unit = 'miner'; t.look = 'miner'; t.drill = 1; t.grenades = 0; t.slot = 'drill'; t.side = 'left'; } }
     else if (tool === 'water') { for (let y = Math.round(p.y) - 10; y <= Math.round(p.y) + 10; y += 1) for (let x = Math.round(p.x) - 10; x <= Math.round(p.x) + 10; x += 1) if ((PW.get(world, x, y) & PW.ID_MASK) === M.AIR) PW.set(world, x, y, M.WATER); }
     else if (tool === 'blast') explode(p.x, p.y, 12, 0.9);
   });
@@ -284,7 +284,6 @@
       particles.step(DT);
       heat.step(1);
       if (fragments) fragments.step(DT);
-      sentries(DT);
       PW.tanks.step(world, DT);   // (the units and their rounds step inside it - see pw-tank)
       if (stability) stability.step();
       if (air) air.step();
@@ -339,6 +338,6 @@
   renderer.focus(marks.start.x + 400, 880, 2);
 
   window.pwLab = { world, renderer, sim, particles, seed, timings, ready: true, net, steps, marks, squad, CAVE,
-    stepWorld, explode, send, sentAt: () => sentAt, dug: () => dug, digAll: () => { while (dug < steps.length) digNext(); },
+    stepWorld, explode, send, skirmish, sentAt: () => sentAt, dug: () => dug, digAll: () => { while (dug < steps.length) digNext(); },
     setSpeed: (k) => { speed = k; }, setPaused: (v) => { paused = v; }, focus: (x, y, zoomIndex) => renderer.focus(x, y, zoomIndex) };
 })();

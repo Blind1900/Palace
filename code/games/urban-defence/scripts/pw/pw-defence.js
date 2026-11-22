@@ -26,6 +26,9 @@
     launcher: { length: 104, ammo: 12, kind: 'rocket', hp: 60 },
     dome: { length: 90, ammo: 20, kind: 'interceptor', hp: 60, range: 4000, perThreat: 2, protect: true },
     patriot: { length: 110, ammo: 8, kind: 'patriot', hp: 70, range: 4500, perThreat: 2, protect: false, jets: true },
+    // a fixed autocannon seated on its mount on a military building's roof or wall (N6's devices):
+    // bursts at the enemy units it sees in its arc (see PW.units' sight) - facing 0, both ways
+    turret: { length: 12, ammo: 600, kind: 'cannon', hp: 30, burst: 6, rof: 1 / 9, rest: 1.4, fixed: true },
   };
   const RIPPLE = 0.15;          // s between a salvo's rockets
   const LAUNCH_GAP = 0.2;       // s between a battery's interceptors
@@ -53,12 +56,13 @@
   }
 
   // ---- A unit ----------------------------------------------------------------------------------------
-  // (x: its middle; y: the row its wheels stand on)
+  // (x: its middle; y: the row its wheels stand on - a turret's: its mount, the device cell)
   function create(world, spec) {
     const type = TYPES[spec.type] ? spec.type : 'launcher', T = TYPES[type];
     const x = Math.round(spec.x), y = spec.y ?? groundUnder(world, x, 0);
-    const u = { kind: 'defence', type, x, y, facing: spec.facing || 1, side: spec.side || null, style: STYLES[spec.style] ? spec.style : 'modern',
-      hp: T.hp, dead: false, ammo: T.ammo, salvo: 0, salvoT: 0, aim: null, gap: 0, look: 0, hold: false, engaged: new Map(), hurtBy: '', seed: ++seq };
+    const u = { kind: 'defence', type, x, y, facing: T.fixed ? (spec.facing ?? 1) : spec.facing || 1, side: spec.side || null, style: STYLES[spec.style] ? spec.style : 'modern',
+      hp: T.hp, dead: false, ammo: T.ammo, salvo: 0, salvoT: 0, aim: null, gap: 0, look: 0, hold: false, engaged: new Map(), hurtBy: '',
+      building: spec.building || 0, burst: 0, burstT: 0, rest: 0, aimA: 0, seed: ++seq };
     (world.defence || (world.defence = [])).push(u);
     current = world;
     return u;
@@ -216,7 +220,8 @@
     u.dead = true;
     stats.destroyed += 1;
     if (held === u) held = null;
-    // (its ammunition goes up)
+    // (its ammunition goes up - a turret's a little, where it sits)
+    if (TYPES[u.type].fixed) { if (PW.explode) PW.explode(world, world.particles, { x: u.x, y: u.y - 4, radius: 5, power: 0.4 }); return; }
     if (PW.explode) PW.explode(world, world.particles, { x: u.x, y: u.y - 14, radius: 10, power: 0.8 });
     if (PW.addSmoulder) PW.addSmoulder(world, u.x, u.y, 30, 60);
   }
@@ -227,7 +232,8 @@
       if (d < reach) hurt(world, u, 80 * power * (1 - d / reach) ** 2, 'blast');
     }
   }
-  const boxOf = (u) => ({ x0: u.x - TYPES[u.type].length / 2, x1: u.x + TYPES[u.type].length / 2, y0: u.y - 30, y1: u.y });
+  const boxOf = (u) => (TYPES[u.type].fixed ? { x0: u.x - 6, x1: u.x + 6, y0: u.y - 8, y1: u.y }
+    : { x0: u.x - TYPES[u.type].length / 2, x1: u.x + TYPES[u.type].length / 2, y0: u.y - 30, y1: u.y });
   const target = {
     hit(world, s, x0, y0, x1, y1) {
       let best = null;
@@ -257,11 +263,40 @@
     if (!list || !list.length || !PW.shots) return;
     current = world;
     for (const u of list) {
-      if (u.dead) continue;
+      // (put out of action a while - a hack: see PW.units.disable)
+      if (u.dead || (u.disabledUntil || 0) > (world.tick || 0)) continue;
+      if (u.type === 'turret') { turretStep(world, u, dt); continue; }
       if (u.salvo > 0) stepSalvo(world, u, dt);
       if (u.type !== 'launcher') watch(world, u, dt);
     }
     for (let q = list.length - 1; q >= 0; q -= 1) if (list[q].dead) list.splice(q, 1);
+  }
+  // A turret: a look round its arc now and then for an enemy it sees (PW.units' sight); one seen, a
+  // burst at it - each round led where it will be - then a moment's rest.
+  function turretStep(world, u, dt) {
+    const T = TYPES.turret;
+    if (u.burst > 0) {
+      u.burstT -= dt;
+      while (u.burst > 0 && u.burstT <= 0) {
+        const f = u.foe;
+        if (!f || f.dead || u.ammo <= 0) { u.burst = 0; break; }
+        const p = PW.units.body(f), mx = u.x + Math.cos(u.aimA) * 7, my = u.y - 4 - Math.sin(u.aimA) * 7;
+        const d = Math.hypot(p.x - mx, p.y - my), tau = d / PW.shots.KINDS.cannon.speed, vx = f.vx || 0, vy = f.vy || 0;
+        const tx = p.x + vx * tau, ty = p.y + vy * tau;
+        u.aimA = Math.atan2(-(ty - my), tx - mx);
+        PW.shots.fire(world, { kind: T.kind, x: mx, y: my, dx: tx - mx, dy: ty - my, side: u.side, from: u, spread: 0.015 });
+        if (PW.shots.report) PW.shots.report(world, mx, my, Math.cos(u.aimA), -Math.sin(u.aimA), 1);
+        u.burst -= 1; u.ammo -= 1; u.burstT += T.rof;
+      }
+      return;
+    }
+    if ((u.rest -= dt) > 0 || ++u.look < LOOK_EVERY || !PW.units) return;
+    u.look = 0;
+    const foe = PW.units.spot(world, u);
+    if (!foe) return;
+    const p = PW.units.body(foe);
+    u.foe = foe; u.aimA = Math.atan2(-(p.y - (u.y - 4)), p.x - u.x);
+    u.burst = T.burst; u.burstT = 0; u.rest = T.rest;
   }
 
   // ---- Drawn: a truck, its cab at the front, its launcher on the bed - tubes raised ----------------------------
@@ -274,6 +309,15 @@
     for (const u of list) {
       if (u.dead) continue;
       const T = TYPES[u.type], st = STYLES[u.style], L = T.length, f = u.facing, x0 = u.x - L / 2, y = u.y;
+      if (T.fixed) {
+        // (a turret on its mount: a low armoured box, its mantlet, the barrel the way it last laid -
+        // out of action, its barrel down)
+        const off = (u.disabledUntil || 0) > (world.tick || 0), a = off ? -0.5 * (f || 1) : u.aimA || (f < 0 ? Math.PI : 0);
+        cell(u.x - 6, y - 5, 12, 5, col(st.dark)); cell(u.x - 6, y - 5, 12, 1, col(st.light));
+        cell(u.x - 3, y - 8, 6, 3, col(st.body));
+        for (let k = 2; k <= 9; k += 1) cell(u.x + Math.cos(a) * k - 0.5, y - 6 - Math.sin(a) * k - 0.5, 1.4, 1.4, 'rgb(46,48,50)');
+        continue;
+      }
       // (chassis and wheels)
       cell(x0, y - 12, L, 5, col(st.body)); cell(x0, y - 12, L, 1, col(st.light));
       for (let k = 0; k < 4; k += 1) { const wx = u.x + f * (L / 2 - 12 - k * (L - 24) / 3); cell(wx - 5, y - 9, 10, 10, 'rgb(34,34,36)'); cell(wx - 2, y - 6, 4, 4, 'rgb(96,96,92)'); }
@@ -320,5 +364,7 @@
     return false;
   }
 
-  PW.defence = { create, step, draw, fire, hurt, blast, target, tool, hold, held: () => held, key, laying, impactOf, impactAt, ownGround, skyClear, stats, TYPES };
+  // (silenced a while - a hack on its base: see PW.units.disable)
+  const disable = (u, seconds) => (PW.units ? PW.units.disable(u, seconds) : false);
+  PW.defence = { create, step, draw, fire, hurt, blast, target, tool, hold, held: () => held, key, disable, laying, impactOf, impactAt, ownGround, skyClear, stats, TYPES };
 })();

@@ -254,7 +254,7 @@
   function create(world, spec) {
     const art = artOf(spec.style || 'modern'), facing = spec.facing || 1;
     const x = spec.x, y = spec.y ?? world.groundTop[Math.round(x)];
-    const t = { art, style: art.style, side: spec.side || null, x, y, facing, angle: 0, spin: 0,
+    const t = { kind: 'tank', art, style: art.style, side: spec.side || null, x, y, facing, angle: 0, spin: 0,
       v: 0, vy: 0, drive: 0, travel: 0, falling: false, tipping: false, blocked: '', dead: false,
       springs: new Float32Array(art.wheels.length), contact: new Uint8Array(art.wheels.length),
       target: null, elevation: 0, turning: 0,
@@ -536,6 +536,8 @@
     if (PW.jets && !PW.jets.looped) PW.jets.step(world, dt);
     if (PW.defence && !PW.defence.looped) PW.defence.step(world, dt);
     if (PW.mechs && !PW.mechs.looped) PW.mechs.step(world, dt);
+    // (and what each does on its own - its orders, its sentry: see pw-units)
+    if (PW.units && !PW.units.looped) PW.units.step(world, dt);
     if (world.wrecks && world.wrecks.length) stepWrecks(world, dt);
     const list = world.tanks;
     if (!list) return;

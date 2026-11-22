@@ -747,7 +747,10 @@
     // HOLLOW: this cell is the inside of a supply line's bore (N17F) - carved to open air, with
     // the lane's colour behind it (PW.PIPE_CAVITY, N38). The line's own bookkeeping, set and cleared
     // with the bore by pw-pipes (its take-up and repair): the physics sees only the open cells.
-    HOLLOW: 262144 });
+    HOLLOW: 262144,
+    // BORE: this cell was drilled out by hand - a trooper's or a miner's dirt tunnel (N5): rough, a
+    // secret from the enemy until it joins its side's tunnels (see pw-troops' drill).
+    BORE: 524288 });
   // Does a pipe fixed to the wall show at open cell (x, y)? Over the wall face (a finished
   // tunnel's too, clamped to it), or across a cave's rock; not behind a fitting, a ladder's rails
   // and rungs, a rail or a belt - but between a ladder's rungs, yes.
