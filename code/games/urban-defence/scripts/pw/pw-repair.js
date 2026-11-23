@@ -269,7 +269,7 @@
       // the record, at its new place (the blueprint the same, its rows dy lower)
       const fresh = PW.buildingRecord(world, { canvas: c, x: b.ox, y: b.oy + dy }, {});
       if (b.y === b.oy) b.y += dy;
-      for (const key of ['oy', 'ground', 'body', 'floors', 'stairs', 'doors', 'slots', 'panels', 'devices', 'windows', 'storage', 'hatches', 'gates', 'hangar', 'floating', 'runway', 'shaft']) b[key] = fresh[key];
+      for (const key of ['oy', 'ground', 'body', 'floors', 'stairs', 'doors', 'slots', 'panels', 'devices', 'windows', 'storage', 'hatches', 'gates', 'hangar', 'pad', 'floating', 'runway', 'shaft']) b[key] = fresh[key];
       (b.cores || []).forEach((core, i) => {
         const f = fresh.cores[i];
         if (!f) return;

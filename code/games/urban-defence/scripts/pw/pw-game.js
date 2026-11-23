@@ -424,7 +424,8 @@
     tank: { label: 'TANK', hm: 80, pop: 3, level: 2, list: 'tanks' },
     launcher: { label: 'ROCKETS', hm: 70, pop: 2, level: 2, list: 'defence' },
     dome: { label: 'IRON DOME', hm: 90, pop: 2, level: 3, list: 'defence' },
-    jet: { label: 'JET', hm: 140, pop: 2, level: 3, list: 'jets', runway: true },
+    // (N111: the jets give way to PS's avenger drones - kind 'jet' and world.jets kept, the drone's name shown)
+    jet: { label: 'DRONE', hm: 140, pop: 2, level: 3, list: 'jets', runway: true },
     patriot: { label: 'PATRIOT', hm: 120, pop: 2, level: 4, list: 'defence' },
     mech: { label: 'MECH', hm: 240, pop: 4, level: 5, list: 'mechs', most: 2 },
   };
@@ -474,24 +475,33 @@
     if (p.hm < K.hm) return { ok: false, note: `needs ${K.hm} HM` };
     if (fielded(match, side) + K.pop > armyCap(match, side)) return { ok: false, note: 'the army is as big as the population' };
     if (K.most && unitsOf(match, side).filter((u) => kindOf(u) === kind).length >= K.most) return { ok: false, note: `${K.most} at most` };
-    if (K.runway && !runwayOf(match, side)) return { ok: false, note: 'no runway' };
+    // (a drone off a pad once PS's drones lift off one, else off a runway)
+    if (K.runway && !(padJets() && able.some((q) => q.pad)) && !runwayOf(match, side)) return { ok: false, note: padJets() ? 'no spawn pad' : 'no runway' };
     return { ok: true, from: able };
   }
   function runwayOf(match, side) {
     const s = (match.world.settlements || []).find((q) => q.side === side && q.runway);
     return s ? s.runway : null;
   }
-  // Where a unit leaves its base: the ground door (a trooper) or the hangar's apron, else the open
-  // ground just past the building on the enemy's side.
+  // N111: the kinds that come up on a base's spawn pad - the batteries are set down outside, and
+  // the drones (PS's N106, replacing the jets) once they lift off a pad instead of a runway.
+  const padJets = () => !!(PW.jets && PW.jets.padLaunch);
+  const onPad = (kind) => kind === 'trooper' || kind === 'tank' || kind === 'mech' || (kind === 'jet' && padJets());
+  // Where a unit leaves its base: up on the spawn pad in its hangar floor (N111), else the ground
+  // door (a trooper) or the hangar's apron, else the open ground just past the building on the
+  // enemy's side.
   function exitOf(match, b, kind) {
     const world = match.world, dir = match.sides[ownerOf(b)].dir;
     // (a town's base sends its units out at the town's gate - the end of its street towards the
-    // enemy - not into the lanes between its towers)
+    // enemy - not into the lanes between its towers: from the pad it is their first leg)
     const town = (world.settlements || []).find((s) => (s.buildings || []).includes(b));
+    let gate = null;
     if (town && kind !== 'guard') {
       const x = Math.round(dir > 0 ? town.streetRight + 60 : town.streetLeft - 60);
-      if (x > 40 && x < world.width - 40) return { x, y: world.groundTop[x] };
+      if (x > 40 && x < world.width - 40) gate = x;
     }
+    if (b.pad && onPad(kind)) return { x: Math.round((b.pad.x0 + b.pad.x1) / 2), y: b.pad.y, pad: b.pad, gate };
+    if (gate !== null) return { x: gate, y: world.groundTop[gate] };
     if (kind === 'trooper' || kind === 'guard') {
       const door = (b.doors || []).filter((d) => Math.abs(d.bottom - b.ground) < 6).sort((p, q) => (q.x - p.x) * dir)[0];
       if (door) return { x: door.x, y: b.ground };
@@ -509,22 +519,47 @@
     if (!can.ok) return can;
     const K = UNIT_KINDS[kind], st = match.sides[side], style = st.style, dir = st.dir;
     const low = can.from.filter((q) => !perched(world, q));
-    const base = (low.length ? low : can.from).sort((p, q) => ((q.body.left + q.body.right) - (p.body.left + p.body.right)) * dir)[0];
+    const pool = low.length ? low : can.from;
+    // (N111: a base with a spawn pad first - where there is one, every unit comes up on it)
+    const padded = onPad(kind) ? pool.filter((q) => q.pad) : [];
+    const base = (padded.length ? padded : pool).sort((p, q) => ((q.body.left + q.body.right) - (p.body.left + p.body.right)) * dir)[0];
     const at = exitOf(match, base, kind);
+    // (on the pad: a man's, a mech's or a drone's feet on its deck, a tank's wheels; elsewhere
+    // each finds its ground as before)
+    const feet = at.pad ? at.y - 1 : at.y;
     let u = null;
-    if (kind === 'trooper' && PW.troops) u = PW.troops.create(world, { x: at.x + 0.5, y: at.y, side, style, facing: dir });
-    else if (kind === 'tank' && PW.tanks) u = PW.tanks.create(world, { x: at.x, side, style, facing: dir });
-    else if (kind === 'mech' && PW.mechs) u = PW.mechs.create(world, { x: at.x, side, style, facing: dir });
-    else if (kind === 'jet' && PW.jets) u = PW.jets.takeOff(world, runwayOf(match, side), style, side);
-    else if (PW.defence && (kind === 'launcher' || kind === 'dome' || kind === 'patriot')) u = PW.defence.create(world, { type: kind, x: at.x, side, style, facing: dir });
+    if (kind === 'trooper' && PW.troops) u = PW.troops.create(world, { x: at.x + 0.5, y: feet, side, style, facing: dir });
+    else if (kind === 'tank' && PW.tanks) u = PW.tanks.create(world, { x: at.x, y: at.pad ? at.y : undefined, side, style, facing: dir });
+    else if (kind === 'mech' && PW.mechs) u = PW.mechs.create(world, { x: at.x, y: at.pad ? feet : undefined, side, style, facing: dir });
+    else if (kind === 'jet' && PW.jets) {
+      u = at.pad ? PW.jets.create(world, { x: at.x, y: feet, side, style, facing: dir, pad: at.pad })
+        : PW.jets.takeOff(world, runwayOf(match, side), style, side);
+    } else if (PW.defence && (kind === 'launcher' || kind === 'dome' || kind === 'patriot')) u = PW.defence.create(world, { type: kind, x: at.x, side, style, facing: dir });
     if (!u) return { ok: false, note: `${kind}: no room to deploy` };
     world.stock[side].hm -= K.hm;
-    // (batteries stand and fight where they are put; the rest go their own way at the next look)
+    // (batteries stand and fight where they are put; the rest go their own way at the next look -
+    // one up on a town base's pad by way of the town's gate)
     const battery = kind === 'launcher' || kind === 'dome' || kind === 'patriot';
-    u.game = { side, kind, base: base.id, order: { type: battery ? 'hold' : 'auto' }, goal: null, born: match.clock };
-    if (battery) carry(world, u, { type: 'hold' }); else match.autoClock = Math.min(match.autoClock || 0, 0.1);
+    const via = at.pad && at.gate !== null && kind !== 'jet' ? at.gate : undefined;
+    u.game = { side, kind, base: base.id, order: { type: battery ? 'hold' : 'auto' }, goal: null, born: match.clock, via };
+    if (battery) carry(world, u, { type: 'hold' });
+    else if (via !== undefined) carry(world, u, { type: 'move', x: via });
+    else match.autoClock = Math.min(match.autoClock || 0, 0.1);
+    if (at.pad) padLift(match, at.pad, at.x);
     alert(match, side, `${K.label} deployed`, '', at.x);
     return { ok: true, unit: u };
+  }
+  // (N111: the lift brings it up - white flecks off the core's vault below, the pad's marker
+  // lights flashing down its length)
+  function padLift(match, pad, x) {
+    const P = match.world.particles, F = PW.PARTICLE;
+    if (!P || !F) return;
+    const t = Math.round(match.clock * 60);
+    for (let k = 0; k < 28; k += 1) {
+      const h = PW.hash2(k * 31 + x, t);
+      P.spawn(x + ((h & 31) - 16) + 0.5, pad.y - 1, ((h >>> 5 & 63) - 32) * 0.8, -50 - (h >>> 11 & 63), 0, PW.abgr(238, 242, 246), F.GLOW, 0.3 + (h >>> 17 & 7) * 0.05);
+    }
+    for (let lx = pad.x0 + 6; lx <= pad.x1 - 6; lx += 12) P.spawn(lx + 0.5, pad.y - 1, 0, -10, 0, PW.abgr(118, 214, 232), F.GLOW, 0.5);
   }
 
   // ---- Turrets (N103) -------------------------------------------------------------------------------
@@ -654,6 +689,12 @@
         // map at once is more than a man's way-finding should be asked; one that has stood still
         // since the last look tries a shorter stretch)
         const g = u.game;
+        // (N111: one up on a town base's pad makes for the town's gate first - there, or given
+        // time, it goes its own way)
+        if (g.via !== undefined) {
+          if (Math.abs(u.x - g.via) < 40 || match.clock - g.born > 45) delete g.via;
+          else continue;
+        }
         // (a tank stopped by ground no tank takes - too steep, a drop, deep water - holds there and
         // fights from where it stands; it has no way round)
         if (u.kind === 'tank' && u.stopAt && IMPASSABLE[u.stopAt[2]] && (u.stopAt[0] - u.x) * dir >= -40) {

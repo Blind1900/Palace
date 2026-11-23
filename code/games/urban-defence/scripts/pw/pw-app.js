@@ -338,7 +338,7 @@
     { kind: 'mech', list: () => world.mechs, mod: () => PW.mechs,
       box: (m) => [m.x - 18, m.y - ((PW.mechs && PW.mechs.HEIGHT) || 74) - (m.lift || 0), m.x + 18, m.y + 3] },
     { kind: 'jet', list: () => world.jets, mod: () => PW.jets,
-      box: (j) => [j.x - 98, j.y - 22, j.x + 98, j.y + 20] },
+      box: (j) => { const half = ((PW.jets && PW.jets.LENGTH) || 150) / 2 + 3; return [j.x - half, j.y - 22, j.x + half, j.y + 20]; } },
     { kind: 'defence', list: () => world.defence, mod: () => PW.defence,
       box: (u) => { const [x0, y0, x1, y1] = defenceBox(u); return [x0 - 2, y0 - 20, x1 + 2, y1 + 3]; } },
     { kind: 'tank', list: () => world.tanks, mod: () => PW.tanks,
@@ -409,7 +409,7 @@
       const j = selected.t, hp = Math.max(0, Math.round(j.hp ?? 100));
       const tone = hp < 30 ? 'grave' : hp < 60 ? 'hurt' : '';
       const state = j.down ? 'going down' : j.onGround ? `rolling ${Math.round(j.v)}` : `${Math.round(j.v)} cells/s`;
-      unitPanel.innerHTML = `<h3>JET — ${(j.style || '').toUpperCase()} ${(j.side || '').toUpperCase()}</h3>` +
+      unitPanel.innerHTML = `<h3>DRONE — ${(j.style || '').toUpperCase()} ${(j.side || '').toUpperCase()}</h3>` +
         `<div>airframe ${hp}/100 · ${state}</div><div class="bar"><i class="${tone}" style="width:${hp}%"></i></div>` +
         `<div>missiles <kbd>${j.missiles ?? 0}</kbd></div>` +
         `<div class="keys">` +

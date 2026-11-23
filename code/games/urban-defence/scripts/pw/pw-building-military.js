@@ -42,6 +42,42 @@
   }
   const MIL_AMBER = [235, 182, 52], MIL_CYAN = [118, 214, 232];
 
+  // N111: the spawn pad, the user's 140 wide - a tank (128 long), a mech, a drone or a squad
+  // comes up on it.
+  const PAD_W = 140;
+  // The pad (logical columns p0..p1): a steel lift deck flush with the hangar floor - diamond
+  // plate, cyan marker lights, hazard chevrons at its ends - the lift's rams under it in their
+  // housing; on the back wall behind it its bay: guide-light columns at its ends, the lift's
+  // clearance line, chevrons pointing out to the door. (The core's vault in the middle is
+  // already drawn: the deck goes round its mouth.)
+  function spawnPad(c, X, p0, p1, ground) {
+    for (let lx = p0; lx <= p1; lx += 1) {
+      const x = X(lx), along = lx - p0, end = along < 6 || p1 - lx < 6;
+      const marker = !end && along % 12 === 6;
+      K.solidIfEmpty(c, x, ground, M.STEEL, end ? (((along >> 1) & 1) ? MIL_AMBER : [36, 36, 40])
+        : marker ? MIL_CYAN : ((x + (x >> 2)) & 3) === 0 ? [150, 156, 164] : [118, 124, 132], ROLE.CRADLE);
+      K.solidIfEmpty(c, x, ground + 1, M.STEEL, [62, 66, 74], ROLE.CRADLE);
+      if (marker) c.lamps.push({ x, y: ground - 1, radius: 10, strength: 0.35, color: MIL_CYAN });
+      for (let y = ground + 2; y <= ground + 8; y += 1) {
+        const ram = along % 20 === 9 || along % 20 === 10;
+        K.solidIfEmpty(c, x, y, ram ? M.STEEL : M.FOUNDATION, ram ? ((y & 1) ? [168, 172, 180] : [128, 132, 140])
+          : tone([46, 48, 54], y === ground + 8 ? 0.8 : 1), ram ? ROLE.CRADLE : ROLE.VAULT);
+      }
+      // the bay on the back wall: the clearance line over the deck
+      K.back(c, x, ground - 56, tone(MIL_CYAN, 0.55));
+    }
+    for (const lx of [p0, p0 + 1, p1 - 1, p1]) {
+      for (let rise = 3; rise <= 56; rise += 1) K.back(c, X(lx), ground - rise, rise % 6 < 3 ? tone(MIL_AMBER, 0.85) : [30, 30, 34]);
+    }
+    for (const lx of [p0 + 1, p1 - 1]) c.lamps.push({ x: X(lx), y: ground - 4, radius: 22, strength: 0.45, color: MIL_AMBER });
+    const mid = Math.round((p0 + p1) / 2);
+    for (const k of [-18, 0, 18]) {
+      for (let r = -5; r <= 5; r += 1) for (let t = 0; t < 3; t += 1) {
+        K.back(c, X(mid + k + 5 - Math.abs(r) - t), ground - 30 + r, tone(MIL_AMBER, 0.8));
+      }
+    }
+  }
+
   function militaryBase(options) {
     const style = options.style, level = options.level || 3, variant = options.variant || 'compound';
     const facing = options.facing || 1;   // +1: hangar door faces right (towards the enemy)
@@ -234,10 +270,16 @@
           if ((lx - hx0) % 16 < 8) for (let dy = 1; dy <= 8; dy += 1) K.solid(c, X(lx), roofRow - dy, M.MASONRY, tone(P.frame, 1.05), ROLE.ORNAMENT);
         }
       }
-      // Primary core standing on the hangar floor at its back.
-      K.core(c, X(hangarLeft + 34), ground, { standing: true });
+      // N111: the spawn pad - a lift deck PAD_W wide set flush in the hangar floor, every unit the
+      // base deploys coming up on it - over the base's core in its armoured vault below (the
+      // core column that stood on the floor at the back is gone).
+      const pcx = Math.round((hangarLeft + HANGAR.wall + hangarRight - HANGAR.wall) / 2);
+      const p0 = pcx - PAD_W / 2, p1 = pcx + PAD_W / 2 - 1;
+      K.core(c, X(pcx), ground, { military: true, seed });
+      spawnPad(c, X, p0, p1, ground);
+      c.pad = { x0: Math.min(X(p0), X(p1)), x1: Math.max(X(p0), X(p1)), y: ground };
       c.hangar = { left: Math.min(X(hx0), X(hx1)), right: Math.max(X(hx0), X(hx1)), top: wallTop, bottom: ground - 1,
-        door: { x: X(hangarRight), top: ground - HANGAR.door, bottom: ground - 1 }, spawn: { x: X(hangarLeft + 80), y: ground } };
+        door: { x: X(hangarRight), top: ground - HANGAR.door, bottom: ground - 1 }, spawn: { x: X(pcx), y: ground } };
     }
     // The hackable control panel is on the top floor of the rear block.
     const topFloor = rearFloors[rearStoreys - 1];
@@ -267,7 +309,7 @@
       }
       // N59: the base dresses for where it stands - its detail joins the land's own.
       if (setting === 'farm' && hangar) {
-        for (const [bx, bw] of [[hangarLeft + 54, 11], [hangarLeft + 68, 9]]) {    // hay bales by the door wall
+        for (const [bx, bw] of [[hangarLeft + 10, 11], [hangarLeft + 24, 9]]) {    // hay bales by the rear wall, off the pad
           for (let dx = 0; dx < bw; dx += 1) for (let dy = 1; dy <= 6 - Math.abs(dx - (bw >> 1)) / 2; dy += 1) {
             K.solidIfEmpty(c, X(bx + dx), ground - dy, M.COVER_WOOD, tone([188, 160, 92], (dx + dy) % 3 ? 1 : 0.86), ROLE.ORNAMENT);
           }
@@ -285,7 +327,7 @@
             if (c.role[i] === ROLE.WALL) c.paint[i] = K.pack(tone([128, 126, 120], (wx + (dy >> 1)) % 5 === 0 ? 0.78 : 1 - d * 0.05));
           }
         }
-        if (hangar) for (const [rx, rw] of [[hangarLeft + 46, 8], [hangarLeft + 60, 5]]) {   // fallen rock kept in the bay
+        if (hangar) for (const [rx, rw] of [[hangarLeft + 12, 8], [hangarLeft + 24, 5]]) {   // fallen rock kept in the bay, off the pad
           for (let dx = 0; dx < rw; dx += 1) for (let dy = 1; dy <= 4 - Math.abs(dx - (rw >> 1)); dy += 1) {
             K.solidIfEmpty(c, X(rx + dx), ground - dy, M.COVER_ROCK, tone([118, 116, 110], (dx ^ dy) & 1 ? 1 : 0.85), ROLE.ORNAMENT);
           }
@@ -396,8 +438,12 @@
     }
     // Extra cores in vaults under the floor.
     const extraCores = level >= 4 ? 3 : 2;
-    // N35: a base's service cores are SUBS - the smallest tier; its heart is the orb above.
-    for (let i = 0; i < extraCores; i += 1) K.core(c, X(30 + i * Math.round((bodyWidth - 80) / Math.max(1, extraCores - 1))), ground, { tier: 'sub' });
+    // N35: a base's service cores are SUBS - the smallest tier; its heart is the core above.
+    // (N111: with a hangar, they keep clear of the pad - under the rear block, behind the pad and
+    // by the door)
+    const subs = hangar ? (extraCores === 3 ? [30, hangarLeft + 20, hangarRight - 20] : [30, hangarRight - 20])
+      : Array.from({ length: extraCores }, (_, i) => 30 + i * Math.round((bodyWidth - 80) / Math.max(1, extraCores - 1)));
+    for (const lx of subs) K.core(c, X(lx), ground, { tier: 'sub' });
     K.corePillars(c, style);
     if (!PW.NO_UNDERCROFT) K.undercroft(c, style, margin, margin + bodyWidth - 1);   // N3 vehicle rule: armour rolls through the base
     K.bakeLights(c, style);

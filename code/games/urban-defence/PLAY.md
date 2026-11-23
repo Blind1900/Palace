@@ -23,7 +23,7 @@ The game runs straight from its files. There's no server or install, and it does
   - **A group**: right-click the ground to send it there; right-click an enemy unit or building to attack it. H holds it, Q lets it go its own way again, Esc deselects.
   - **One unit is in your hands** as soon as you select it. It drops what it was doing and stands still until you press a key. Its panel shows its keys, and the view follows it as it moves.
     - **Move**: hold A/D or the left/right arrows. It moves only while the key is held.
-    - **Jump**: Space, W or the up arrow. A jet climbs instead, and S or the down arrow dives it.
+    - **Jump**: Space, W or the up arrow. A drone climbs instead, and S or the down arrow dives it.
     - **Aim**: it aims wherever the mouse is.
     - **Fire**: left-click fires its weapon at the spot. Right-click fires its second weapon: a grenade, the other shell, or a missile.
     - **Trooper**: S or the down arrow crouches, 1 2 3 pick its item, F uses it, R reloads.
@@ -33,6 +33,8 @@ The game runs straight from its files. There's no server or install, and it does
 - **Pause**: P (or PAUSE on the top bar).
 - **Build**: SEED CAPITAL, SEED FARM and SEED MILITARY plant seeds, only where your side can see. Cities, farms and bases grow from them by themselves.
 - **Deploy**: the unit buttons on the bottom bar deploy from your front base, or from the base you've selected. A base's level decides what it can deploy. Each unit costs HM, and your army can't outgrow your population.
+  - A base with a hangar has a **spawn pad** in its floor, over its armoured core. Troopers, tanks and mechs come up on it and leave by the hangar door. In a town, they head for the town's gate first. Batteries (rockets, Iron Dome, Patriot) don't use the pad: they're set down where they always were, since they can't drive out.
+  - The jets are being replaced by smaller **avenger drones** (the DRONE button). Until the drones are in, they still take off from the runway.
 - **Turrets**: TURRET (60 HM), then click flat ground your side can see, or the floor of a tunnel room. A turret base is laid there and a turret seated on it. You can have 3 per level of your military bases. Turrets don't take population.
   - **Building turrets**: military buildings and big towers have turret bases on their roofs.
   - **Losing one**: if a base is blown, its turret is lost. A building's base comes back with the building, and its turret returns a little later.

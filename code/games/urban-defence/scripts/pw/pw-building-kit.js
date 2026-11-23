@@ -617,6 +617,75 @@
     // vault records its own extents, so the sizes read off every placement.
     c.cores.push({ x: cx, y: oy, kind: tier, tier,
       vault: { x0: cx - half, x1: cx + half, top, bottom, lid: floor } });
+    if (options.military) militaryCasing(c, cx, floor, T, options.seed || 1);
+  }
+  // N111: the militarised core - a base's heart under its spawn pad, its vault in an armoured
+  // casing: riveted plate shoulders either side (inside the bundle's span, so the bundle sleeves
+  // through them), a hazard collar round the mouth, coolant and power conduits down the casing,
+  // red and amber status lamps, a stencilled number; inside, gunmetal, the conduits up its walls.
+  const STENCIL = ['111101101101111', '010110010010111', '111001111100111', '111001111001111', '101101111001001',
+    '111100111001111', '111100111101111', '111001001001001', '111101111101111', '111101111001111'];
+  const MIL_GUN = [70, 74, 82], MIL_SEAM = [42, 44, 50], MIL_RIVET = [140, 146, 154];
+  const COOLANT = [72, 178, 206], POWER = [214, 150, 40], LAMP_RED = [236, 64, 48], LAMP_AMBER = [246, 186, 52];
+  function militaryCasing(c, cx, floor, T, seed) {
+    const { height, wall, lid } = VAULT;
+    const half = T.half, top = floor + lid, bottom = top + height - 1, foot = bottom + wall;
+    const SH = 5, in0 = half + wall + 1;   // the shoulders: 5 columns of plate either side of the walls
+    const number = String(10 + (seed % 89));
+    for (const side of [-1, 1]) {
+      for (let d = 0; d < SH; d += 1) {
+        const x = cx + side * (in0 + d);
+        for (let y = floor; y <= foot; y += 1) {
+          if (!inside(c, x, y)) continue;
+          const rise = y - floor;
+          // (the collar: the vault's hazard rim carried out over the shoulders, a step down at the edge)
+          const collar = rise <= 2 && !(d === SH - 1 && rise === 0);
+          const seam = rise % 8 === 7 || d === SH - 1;
+          const rivet = rise % 8 === 3 && (d === 1 || d === 3);
+          const color = collar ? (((x + y) >> 1 & 1) === 0 ? HAZARD : [40, 40, 44])
+            : seam ? MIL_SEAM : rivet ? MIL_RIVET : tone(MIL_GUN, d === 0 ? 1.12 : 1 - d * 0.03);
+          solid(c, x, y, M.STEEL, color, ROLE.CRADLE);
+        }
+      }
+      // the conduits down the casing: coolant against the vault wall, power down the outer edge,
+      // each turning in to the vault at its foot
+      for (const [d, col] of [[0, COOLANT], [SH - 1, POWER]]) {
+        const x = cx + side * (in0 + d);
+        for (let y = floor + 3; y <= foot - 2; y += 1) {
+          if (inside(c, x, y)) c.paint[y * c.width + x] = pack(tone(col, (y & 3) === 0 ? 1.25 : 0.95));
+        }
+        for (let k = 0; k <= d; k += 1) {
+          const xx = cx + side * (in0 + k);
+          if (inside(c, xx, foot - 2)) c.paint[(foot - 2) * c.width + xx] = pack(col);
+        }
+      }
+      // the status lamps: red over amber, near the collar, glowing out of the casing
+      for (const [ly, col] of [[floor + 5, LAMP_RED], [floor + 9, LAMP_AMBER]]) {
+        for (let dy = 0; dy < 2; dy += 1) for (let k = 2; k <= 3; k += 1) {
+          const x = cx + side * (in0 + k - 1);
+          if (inside(c, x, ly + dy)) c.paint[(ly + dy) * c.width + x] = pack(dy === 0 ? tone(col, 1.1) : col);
+        }
+      }
+      // the stencil, one digit a shoulder, under the lamps
+      const digit = STENCIL[+number[side < 0 ? 0 : 1]];
+      for (let r = 0; r < 5; r += 1) for (let k = 0; k < 3; k += 1) {
+        if (digit[r * 3 + k] !== '1') continue;
+        const x = cx + side * in0 + (side < 0 ? -3 + k : 1 + k), y = floor + 14 + r;
+        if (inside(c, x, y)) c.paint[y * c.width + x] = pack([214, 210, 196]);
+      }
+    }
+    // inside: gunmetal, a hazard band over the bed's nozzle, the conduits up the walls
+    for (let y = top; y <= bottom; y += 1) {
+      for (let x = cx - half; x <= cx + half; x += 1) {
+        const i = y * c.width + x;
+        if (!inside(c, x, y) || c.mat[i]) continue;
+        const wallCol = Math.abs(x - cx) === half;
+        const band = y - top < 3;
+        c.back[i] = pack(band ? (((x + y) >> 1 & 1) === 0 ? tone(HAZARD, 0.7) : [30, 30, 34])
+          : wallCol ? tone(x < cx ? COOLANT : POWER, (y & 3) === 0 ? 0.9 : 0.62)
+          : tone(MIL_GUN, (x - cx + half) % 6 === 0 ? 0.62 : 0.48));
+      }
+    }
   }
 
   // F2 (the user's support hierarchy): each core's translator grows the building's MAIN PILLAR -

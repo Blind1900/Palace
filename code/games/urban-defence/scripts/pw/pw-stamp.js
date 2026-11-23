@@ -76,6 +76,8 @@
       gates: (canvas.gates || []).map((q) => ({ x: q.x + ox, y0: q.y0 + oy, y1: q.y1 + oy })),
       hangar: canvas.hangar && { ...box(canvas.hangar), door: { x: canvas.hangar.door.x + ox, top: canvas.hangar.door.top + oy, bottom: canvas.hangar.door.bottom + oy },
         spawn: pt(canvas.hangar.spawn) },
+      // (N111: the spawn pad in the hangar floor - y its deck row; every unit the base deploys comes up on it)
+      pad: canvas.pad && { x0: canvas.pad.x0 + ox, x1: canvas.pad.x1 + ox, y: canvas.pad.y + oy },
       runway: canvas.runway && { ...canvas.runway, from: canvas.runway.from + ox, y: canvas.runway.y + oy },
       shaft: canvas.shaft && { x: canvas.shaft.x + ox, top: canvas.shaft.top + oy },
       pit: canvas.pit && { left: canvas.pit.left + ox, right: canvas.pit.right + ox, depth: canvas.pit.depth },
