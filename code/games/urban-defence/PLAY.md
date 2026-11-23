@@ -22,7 +22,8 @@ The game runs straight from its files. There's no server or install, and it does
   - **Select**: click a unit. Shift+click adds or removes one. Shift+drag a box selects many.
   - **Orders**: right-click the ground to send the selection there. Right-click an enemy unit or building to attack it.
   - **Hold or release**: H holds the selection, Q lets it go its own way again, Esc deselects.
-  - **Direct control**: with one unit selected, its own keys drive it (shown in its panel). Let go for a few seconds and it carries on alone.
+  - **Direct control**: with one unit selected, its own keys drive it (shown in its panel): A/D move while held, Space or W jumps (a jet climbs), and the number keys pick a trooper's item. While you drive it, left-click fires at the spot and right-click fires its second weapon (a grenade, the other shell, a missile). Let go for a few seconds and it carries on alone.
+- **Pause**: P (or PAUSE on the top bar).
 - **Build**: SEED CAPITAL, SEED FARM and SEED MILITARY plant seeds, only where your side can see. Cities, farms and bases grow from them by themselves.
 - **Deploy**: the unit buttons on the bottom bar deploy from your front base, or from the base you've selected. A base's level decides what it can deploy. Each unit costs HM, and your army can't outgrow your population.
 - **Hack**: select one trooper and right-click an enemy base or tower. It goes up to the control panel on the top floor, and hacks it if it stays there 15 seconds. (You can also drive it there yourself.)

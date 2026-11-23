@@ -13,7 +13,8 @@
   // picked), as the unit panel's.
   const KINDS = [
     { list: 'troops', box: (t) => [t.x - 6, t.y - (t.crouch ? 19 : 27), t.x + 6, t.y + 3] },
-    { list: 'mechs', box: (m) => [m.x - 15, m.y - 74, m.x + 15, m.y + 3] },
+    // (a mech's height from its module - the hopper is lower since N101 - and its body's lift off its soles)
+    { list: 'mechs', box: (m) => [m.x - 18, m.y - ((PW.mechs && PW.mechs.HEIGHT) || 74) - (m.lift || 0), m.x + 18, m.y + 3] },
     { list: 'jets', box: (j) => [j.x - 98, j.y - 22, j.x + 98, j.y + 20] },
     { list: 'defence', box: (u) => { const half = ((PW.defence && PW.defence.TYPES[u.type]) || { length: 100 }).length / 2; return [u.x - half - 2, u.y - 50, u.x + half + 2, u.y + 3]; } },
     { list: 'tanks', box: (t) => [t.x - 64, t.y - 50, t.x + 64, t.y + 8] },

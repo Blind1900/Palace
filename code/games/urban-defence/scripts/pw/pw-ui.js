@@ -138,10 +138,11 @@
     { id: 'seed:military', label: 'SEED MILITARY', tip: 'Plant a military seed in your vision' },
   ];
 
-  let cmd = null;
+  let cmd = null, attachedAt = 0, slowTold = false, fpsSum = 0, fpsN = 0;
   function attach(m, a) {
     style();
     match = m; app = a;
+    attachedAt = performance.now();
     cmd = PW.command.create({ world: m.world, side: () => match.human, order: (units, ord) => PW.game.order(match, units, ord) });
     selEl = make('aside', { id: 'gm-sel', class: 'gm' });
     selEl.addEventListener('click', onSelClick);
@@ -204,6 +205,14 @@
     const lines = match.log.filter((l) => (l.side === null || l.side === side || match.view === 'both') && match.clock - l.t < 14).slice(-5);
     alerts.innerHTML = lines.map((l) => `<div class="${l.tone}">${l.text}</div>`).join('');
     if (match.over && !endEl) showEnd();
+    // (a slow machine - a laptop on the full map - is told once what to do about it)
+    if (!slowTold && now - attachedAt > 12000 && app.fps() > 0) {
+      fpsSum += app.fps(); fpsN += 1;
+      if (fpsN >= 20) {
+        slowTold = true;
+        if (fpsSum / fpsN < 40 && app.world.width > MAPS.laptop) PW.game.alert(match, null, `Running at ${Math.round(fpsSum / fpsN)} fps here: for a smoother game start a new match on the LAPTOP (SMALLER) map`, 'bad');
+      }
+    }
     // (the seed and deploy tools are for the side a person plays)
     bar.querySelectorAll('[data-tool^="seed:"], [data-deploy]').forEach((b) => { if (!match.human) b.disabled = true; else if (b.dataset.tool) b.disabled = false; });
     refreshDeploys();
@@ -280,6 +289,11 @@
       if (r.ok) setTool('select');
       return true;
     }
+    // (a unit the person drives by its keys fires where they click - left its weapon, right its
+    // second (N102, the design doc's direct control); a unit left to orders is sent by a right click)
+    const held = app.selected && app.selected();
+    if (held && held.t.game && held.t.game.order.type === 'manual' && (event.button === 0 || event.button === 2)
+      && !cmd.unitAt(p.x, p.y) && app.clickUnit(held, p, event.button)) { tookControl(); return true; }
     if (event.button === 2) {
       if (!cmd.sel.some(cmd.mine)) return false;   // (nothing to send: a right drag pans)
       const n = cmd.command(p);

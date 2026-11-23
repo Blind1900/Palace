@@ -696,7 +696,8 @@
     }
     PW.setFlag(world, x, y, FLAG.RAW | FLAG.FITTING, false);
     PW.setFlag(world, x, y, FLAG.DEVELOPED);
-    if (!(flags & FLAG.FIXTURE)) PW.setLayer(world, 'back', x, y, rgb(devBack(net, seg, x, y)));
+    // (N88: a hall's or room's type worked into the faction's back wall)
+    if (!(flags & FLAG.FIXTURE)) PW.setLayer(world, 'back', x, y, rgb(seg.span ? typeBack(net, seg, x, y, devBack(net, seg, x, y)) : devBack(net, seg, x, y)));
     net.developed += 1;
     // Only cells at the tunnel's edge line the rock around them.
     let edge = false;
@@ -912,6 +913,198 @@
     return record;
   }
 
+  // ---- Halls and rooms (N88, the user's tunnel and room-type photos) ---------------------------------
+  // A tunnel laid out as the user's references show them: narrow hallways that open, through a door
+  // frame, into bigger rooms with higher roofs - rooms of every size - and on into the next hallway.
+  //   hallways: 'corridor' (cast concrete, a chequer-plate walkway, ducts and pipes - T2, T7, T9),
+  //             'gallery' (sprayed concrete, strip lights in the wall, a gutter grating - T3),
+  //             'drift' (a mine drift: timber sets, rails underfoot - R1), 'tube' (a bored tube of
+  //             concrete segment rings, rails - R5);
+  //   rooms:    'cavern' (raw rock with blockhouses built inside - T6), 'vault' (a ribbed vaulted hall
+  //             - R2), 'canal' (a canal hall, the water along its quay - R3, R4), 'hub' (arched side
+  //             passages opening off it - R6), 'hangar' (the great vault, off a vehicle drive - T8);
+  //   doors:    'blast' (a steel blast door's frame, hazard striped - T5), 'steel' (a heavy steel
+  //             frame - T7), 'gate' (an arched grille gate - T6), 'timber' (a timber set - R1).
+  // Each faction still lines and fits its tunnels its own way when they develop; the types are worked
+  // into its back wall (and the door frames stand in front of it, as fixtures).
+  const HALLS = ['corridor', 'gallery', 'drift', 'tube'];
+  const ROOMS = ['cavern', 'vault', 'canal', 'hub'];
+  const DOOR_FOR = { corridor: 'steel', gallery: 'blast', drift: 'timber', tube: 'gate' };
+  // planTunnel(world, { x, floor, dir, length, seed, vehicle }) -> { sections, doors }
+  //   sections: [{ kind: 'hall' | 'room', type, x0, x1, floor, top }] - floor the row the floor is
+  //   under (a man stands on floor); doors: [{ x, type, floor, top }] where a hall meets a room.
+  function planTunnel(world, opts) {
+    const random = PW.createRandom((opts.seed || 1) * 977 + 13);
+    const between = (a, b) => Math.round(a + random() * (b - a));
+    const dir = opts.dir < 0 ? -1 : 1, floor = Math.round(opts.floor), vehicle = !!opts.vehicle;
+    const sections = [], doors = [];
+    let at = Math.round(opts.x), left = opts.length || 1200, hall = true, nh = 0, nr = 0;
+    while (left > 60) {
+      let kind, type, len, height;
+      if (hall) {
+        kind = 'hall';
+        type = opts.halls ? opts.halls[nh % opts.halls.length] : HALLS[(between(0, 99) + nh) % HALLS.length];
+        nh += 1;
+        len = Math.min(left, between(70, 240));
+        height = vehicle ? between(46, 52) : between(34, 42);
+      } else {
+        kind = 'room';
+        const big = vehicle && random() < 0.3;
+        type = big ? 'hangar' : opts.rooms ? opts.rooms[nr % opts.rooms.length] : ROOMS[between(0, ROOMS.length - 1)];
+        nr += 1;
+        // (rooms vary in size: the user's) - a guard post's chamber to a hall the length of a street
+        len = Math.min(left, big ? between(360, 560) : between(100, 520));
+        height = big ? between(130, 160) : between(60, 140);
+      }
+      const x0 = dir > 0 ? at : at - len, x1 = dir > 0 ? at + len : at;
+      sections.push({ kind, type, x0, x1, floor, top: floor - height });
+      if (sections.length > 1) {
+        const a = sections[sections.length - 2], b = sections[sections.length - 1];
+        const h = a.kind === 'hall' ? a : b;
+        doors.push({ x: dir > 0 ? b.x0 : b.x1, type: DOOR_FOR[h.type] || 'steel', floor, top: h.top });
+      }
+      at += dir * len; left -= len; hall = !hall;
+    }
+    return { sections, doors, dir, floor };
+  }
+  // Dig the plan for the network: each hall one box, each room a vault - its middle at full height,
+  // its shoulders lower, so the roof steps down to its walls - then the door frames.
+  function carveTunnel(world, net, plan) {
+    const T = state(world), cells0 = net.cells;
+    for (const s of plan.sections) {
+      const span = { x0: s.x0, x1: s.x1, top: s.top, floor: s.floor, kind: s.kind, type: s.type };
+      const boxes = [];
+      if (s.kind === 'hall') boxes.push([s.x0, s.top, s.x1, s.floor - 1]);
+      else {
+        const w = s.x1 - s.x0, h = s.floor - s.top, shoulder = Math.min(48, Math.round(w * 0.18)), low = Math.round(h * 0.72);
+        boxes.push([s.x0, s.floor - low, s.x0 + shoulder, s.floor - 1]);
+        boxes.push([s.x0 + shoulder, s.top, s.x1 - shoulder, s.floor - 1]);
+        boxes.push([s.x1 - shoulder, s.floor - low, s.x1, s.floor - 1]);
+      }
+      for (const [x0, y0, x1, y1] of boxes) {
+        const r = digBox(world, net, x0, y0, x1, y1, { kind: s.kind === 'hall' ? 'drift' : 'room' });
+        if (r.ok) { r.segment.type = s.type; r.segment.span = span; }
+      }
+    }
+    for (const d of plan.doors) doorFrame(world, net, d);
+    return { cells: net.cells - cells0, segments: T.segments.length };
+  }
+  // A door frame where a hall meets a room: two posts and a lintel at the hall's roof, drawn as a
+  // fixture over the back wall (development paints round it).
+  const DOOR = { blast: { post: [62, 66, 72], lit: [96, 102, 110], stripe: [191, 123, 25], dark: [38, 36, 32] },
+    steel: { post: [48, 50, 56], lit: [84, 88, 96], stripe: [70, 74, 80], dark: [30, 32, 36] },
+    gate: { post: [56, 58, 64], lit: [92, 96, 104], stripe: [40, 42, 48], dark: [24, 26, 30] },
+    timber: { post: RAW.post, lit: RAW.postLight, stripe: RAW.postDark, dark: RAW.postDark } };
+  function doorFrame(world, net, d) {
+    const P = DOOR[d.type] || DOOR.steel, h = d.floor - d.top;
+    const put = (x, y, c) => {
+      if (!netAt(world, x, y)) return;
+      PW.setLayer(world, 'back', x, y, rgb(c));
+      PW.setFlag(world, x, y, FLAG.FIXTURE);
+    };
+    for (let y = d.top; y < d.floor; y += 1) {
+      const rise = d.floor - 1 - y;
+      for (let k = -4; k <= 4; k += 1) {
+        const x = d.x + k, post = Math.abs(k) >= 2;
+        if (!post && y > d.top + 3) continue;
+        let c = Math.abs(k) === 4 ? P.dark : k === -3 || k === 2 ? P.lit : P.post;
+        // (a blast door's frame is hazard striped up its jambs; a gate's arch closes over the top)
+        if (d.type === 'blast' && post && mod(rise + k, 8) < 4) c = P.stripe;
+        if (d.type === 'gate' && y <= d.top + 6 && Math.abs(k) <= 1) c = P.lit;
+        put(x, y, c);
+      }
+    }
+    if (d.type === 'gate') {
+      // (the grille: bars across the arch's upper part, in front of the room's dark)
+      for (let y = d.top; y < d.top + Math.round(h * 0.28); y += 1) for (let k = -14; k <= 14; k += 3) put(d.x + k, y, P.post);
+    }
+  }
+  // The room or hall type worked into a developed back wall cell (over the faction's own).
+  function typeBack(net, seg, x, y, c) {
+    const s = seg.span;
+    if (!s) return c;
+    const rise = s.floor - 1 - y, fromTop = y - s.top, along = x - s.x0, w = s.x1 - s.x0;
+    const dim = (k) => tone(c, k);
+    switch (s.type) {
+      case 'corridor':
+        if (rise <= 1) return mod(x + y, 3) === 0 ? [150, 154, 158] : [118, 122, 126];                    // chequer plate
+        return c;
+      case 'gallery': {
+        if (rise <= 1) return mod(x, 4) === 0 ? [40, 42, 46] : [76, 80, 84];                                // gutter grating
+        if (mod(along, 64) === 32 && rise > 8 && rise < 20) return [236, 246, 250];                          // strip lights
+        const g = PW.hash2(x >> 1, y >> 1) & 15;
+        return g < 3 ? dim(0.86) : g > 13 ? dim(1.1) : c;                                                    // shotcrete
+      }
+      case 'drift': {
+        const u = mod(along, SET_PITCH);
+        if (rise <= 2 && rise >= 1 && mod(along, 9) < 2) return RAW.postDark;                                // sleepers
+        if (rise === 2) return [60, 62, 66];                                                                 // rail
+        if (u <= 2 && fromTop > 2) return u === 1 ? RAW.post : RAW.postDark;                                 // timber set
+        if (fromTop <= 2) return RAW.plank;
+        return c;
+      }
+      case 'tube': {
+        const ring = mod(along, RING);
+        if (rise === 2) return [70, 72, 78];
+        if (rise <= 1 && mod(along, 8) < 2) return [56, 50, 44];
+        if (ring === 0) return [70, 74, 80];
+        if (ring === 1) return [150, 156, 162];
+        if (fromTop >= 4 && fromTop <= 8 && mod(fromTop, 2) === 0) return [52, 56, 62];                     // cable racks
+        return c;
+      }
+      case 'cavern': {
+        // (raw rock left as found, a blockhouse or two built against it)
+        const cab = cabinAt(s, x, rise);
+        if (cab) return cab;
+        const g = PW.hash2(x >> 2, y >> 2) & 15;
+        return g < 4 ? [58, 52, 46] : g > 12 ? [92, 84, 74] : [74, 67, 59];
+      }
+      case 'vault': {
+        if (mod(along, 28) <= 1 && rise > 4) return mod(along, 28) === 0 ? dim(1.3) : dim(1.1);             // the ribs
+        if (rise <= 2 && (PW.hash2(x, y) & 7) === 0) return [104, 100, 94];                                  // rubble
+        return fromTop < 10 ? dim(0.7 + fromTop * 0.03) : c;
+      }
+      case 'canal': {
+        // (the canal runs along the hall, behind its quay: dark water below the quay's edge)
+        if (rise === 4) return [150, 150, 144];
+        if (rise >= 5 && rise <= 18) return mod(x + (y >> 1) * 3, 23) === 0 ? [70, 110, 140] : [22, 40, 56];
+        if (rise === 19 && mod(along, 60) < 3) return [40, 40, 44];                                          // bollards
+        return c;
+      }
+      case 'hub': {
+        // (arched passages off the hall, one every 90 cells, tiled round their mouths)
+        const a = mod(along - 45, 90) - 45;
+        const ah = Math.round((s.floor - s.top) * 0.62), half = 15;
+        if (Math.abs(a) <= half + 2 && rise < ah + 2) {
+          const inArch = Math.abs(a) <= half && (rise < ah - half || Math.hypot(a, rise - (ah - half)) <= half);
+          if (inArch) return [14, 16, 20];
+          return [40, 60, 120];                                                                               // blue tile trim
+        }
+        return c;
+      }
+      case 'hangar':
+        if (rise <= 1 && mod(along, 40) < 24) return [214, 180, 56];                                         // guide lines
+        if (mod(along, 40) <= 1 && rise > 6) return dim(1.25);
+        return c;
+      default: return c;
+    }
+  }
+  // (a cavern's blockhouses: small rendered huts against the rock, a door and a stencilled number)
+  function cabinAt(s, x, rise) {
+    const w = s.x1 - s.x0;
+    for (const at of [0.22, 0.68]) {
+      const cx = s.x0 + Math.round(w * at);
+      if (w < 160 && at > 0.5) continue;
+      const dx = x - cx;
+      if (Math.abs(dx) > 22 || rise > 30) continue;
+      if (rise === 30 || Math.abs(dx) === 22) return [176, 196, 186];
+      if (dx >= -6 && dx <= 3 && rise < 22) return [40, 44, 46];                                             // door
+      if (dx >= 8 && dx <= 18 && rise >= 12 && rise <= 20) return [34, 50, 52];                              // window
+      return [150, 178, 168];
+    }
+    return null;
+  }
+
   PW.tunnels = { RATE, LINE, SET_PITCH, RIB_PITCH, PROFILES, createNetwork, digBox, claimCell, step, advanceTo, networkAt, networkOfOwner, stats, state, damaged,
-    netAt, devAtOf, rawBack, devBack, caveBase };
+    netAt, devAtOf, rawBack, devBack, caveBase, planTunnel, carveTunnel, HALLS, ROOMS };
 })();

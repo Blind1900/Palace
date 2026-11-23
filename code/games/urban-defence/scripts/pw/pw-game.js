@@ -43,6 +43,7 @@
     }
     for (const side of SIDES) if (match.sides[side].controller === 'ai' && PW.ai) match.sides[side].ai = PW.ai.create(match, side);
     armDevices(match);
+    passes(match);
     current = match;
     alert(match, null, mode === 'watch' ? 'The computer plays both sides. Take either chair from the top bar.'
       : `You hold the ${human} capital. Destroy the enemy, then raise your capital over their ruins.`, '');
@@ -76,6 +77,47 @@
           if (PW.units && PW.units.order) PW.units.order(world, u, { type: 'hold' });
         }
       }
+    }
+  }
+
+  // The passes: a mountain between the capitals is too steep for an army over its top - its flanks,
+  // and the stepped terraces of a post on its summit, are more than a man climbs and a tank takes -
+  // so each is pierced at its foot by a road tunnel, dug raw as the match opens and lined by the
+  // crews as it goes on. From dry ground at one foot to dry ground at the other, high enough for a
+  // tank.
+  const PASS_HEIGHT = 50, PASS_STEP = 16;
+  function passes(match) {
+    const world = match.world, T = PW.tunnels, L = world.layout;
+    if (!T || !L || !L.mountains) return;
+    const lo = Math.min(match.sides.left.home, match.sides.right.home), hi = Math.max(match.sides.left.home, match.sides.right.home);
+    match.passes = [];
+    // (a range of humps one against the other is one mountain to an army: one pass under it all)
+    const ranges = [];
+    for (const mt of L.mountains.map((t) => [t.x - t.half, t.x + t.half]).sort((p, q) => p[0] - q[0])) {
+      const last = ranges[ranges.length - 1];
+      if (last && mt[0] < last[1] + 200) last[1] = Math.max(last[1], mt[1]); else ranges.push([mt[0], mt[1]]);
+    }
+    for (const [m0, m1] of ranges) {
+      // (the portals on the mountain's own dry foot: a lake against its flank stays a lake - the men
+      // swim it - and the way starts on the far side of it, never across it)
+      const a = dryAhead(world, Math.round(m0 - 30), 1), b = dryAhead(world, Math.round(m1 + 30), -1);
+      if (b - a < 200) continue;
+      if (a < lo || b > hi || b - a > 5000) continue;
+      const ya = world.groundTop[a], yb = world.groundTop[b];
+      const net = T.createNetwork(world, { side: 'neutral', style: 'modern', use: 'civic', x: a, y: ya });
+      const floorAt = (x) => Math.round(ya + (yb - ya) * (x - a) / (b - a));
+      // (where the way runs over a valley between two humps it is carried on an embankment of made
+      // ground - the valley's own flanks are as steep as the mountain's)
+      for (let x = a; x <= b; x += 1) {
+        const f = floorAt(x);
+        for (let y = f; y < world.groundTop[x]; y += 1) if ((PW.get(world, x, y) & PW.ID_MASK) === PW.M.AIR) PW.set(world, x, y, PW.M.FILL);
+        PW.refreshGroundTop(world, x);
+      }
+      for (let x = a; x < b; x += PASS_STEP) {
+        const floor = floorAt(x);
+        T.digBox(world, net, x, floor - PASS_HEIGHT, Math.min(b, x + PASS_STEP + 2), floor - 1, { kind: 'drift' });
+      }
+      match.passes.push({ x0: a, x1: b, net: net.id });
     }
   }
 
@@ -134,6 +176,20 @@
     hacks(match, ids);
     recover(match);
     ruins(match, ids);
+  }
+
+  // ---- The capitals' levy: each standing capital pays its side HM by its level, a second at a
+  // time - the war's purse beside what the mines bring in (they alone fielded a trooper or two a
+  // minute: a match would last an afternoon)
+  const LEVY = 0.5;            // HM a second per level of a standing capital
+  function levy(match) {
+    const eng = match.world.capitalGrowth;
+    if (!eng) return;
+    for (const c of eng.cities) {
+      if (c.kind !== 'capital' || c.fallen || !match.sides[c.faction]) continue;
+      const purse = match.world.stock[c.faction];
+      if (purse) purse.hm = (purse.hm || 0) + LEVY * (c.level || 1);
+    }
   }
 
   // ---- Hacking (the user's: military - its defences go silent for a while; population - its
@@ -293,7 +349,7 @@
     match.autoClock = (match.autoClock || 0) - dt;
     if (match.autoClock <= 0) { match.autoClock = AUTO_EVERY; advance(match); }
     match.ruleClock = (match.ruleClock || 0) - dt;
-    if (match.ruleClock <= 0) { match.ruleClock = 1; rules(match); }
+    if (match.ruleClock <= 0) { match.ruleClock = 1; rules(match); levy(match); }
     if (!PW.units || !PW.units.order) {
       for (const list of ['tanks', 'mechs']) for (const u of match.world[list] || []) if (u.game && u.game.goal != null) towards(u);
     }
@@ -326,15 +382,17 @@
     return { hm: st ? st.hm || 0 : 0, sm: st ? st.sm || 0 : 0, water: st ? st.water || 0 : 0,
       pop: st ? st.pop || 0 : 0, workers: st ? st.workers || 0 : 0 };
   }
-  // How far a side's own ground runs towards the enemy: the front edge of its cities and buildings.
-  function frontOf(match, side) {
+  // How far a side's own ground runs towards the enemy: the front edge of its cities and buildings
+  // (towns: its cities only - not the posts out on the mountains).
+  function frontOf(match, side, towns = false) {
     const world = match.world, dir = match.sides[side].dir;
     let front = match.sides[side].home;
     const reach = (x) => { if ((x - front) * dir > 0) front = x; };
     for (const c of (world.capitalGrowth && world.capitalGrowth.cities) || []) {
-      if (c.faction !== side) continue;
+      if (c.faction !== side || c.fallen) continue;
       reach(dir > 0 ? c.edge.right : c.edge.left);
     }
+    if (towns) return front;
     for (const b of world.buildings || []) {
       if (!b || !b.body || ownerOf(b) !== side) continue;
       reach(dir > 0 ? b.body.right : b.body.left);
@@ -380,6 +438,14 @@
     for (const u of unitsOf(match, side)) if (!u.building) pop += (UNIT_KINDS[kindOf(u)] || { pop: 1 }).pop;
     return pop;
   }
+  // How big an army the side's people stand behind: its population - and while its towers are
+  // being raised anew at a level-up (their people out of the count till they stand) most of the
+  // most it has had, so a growing city does not ground its army.
+  function armyCap(match, side) {
+    const p = purse(match, side), st = match.sides[side];
+    st.popPeak = Math.max(st.popPeak || 0, p.pop);
+    return Math.max(8, p.pop, Math.round(st.popPeak * 0.8));
+  }
   // Whether this side may deploy this kind (from this base, or from any of its bases), and why not.
   function canDeploy(match, side, kind, b = null) {
     const K = UNIT_KINDS[kind];
@@ -390,7 +456,7 @@
     if (!able.length) return { ok: false, note: b ? `needs a level ${K.level} base` : `no base of level ${K.level}` };
     const p = purse(match, side);
     if (p.hm < K.hm) return { ok: false, note: `needs ${K.hm} HM` };
-    if (fielded(match, side) + K.pop > Math.max(4, p.pop)) return { ok: false, note: 'the army is as big as the population' };
+    if (fielded(match, side) + K.pop > armyCap(match, side)) return { ok: false, note: 'the army is as big as the population' };
     if (K.most && unitsOf(match, side).filter((u) => kindOf(u) === kind).length >= K.most) return { ok: false, note: `${K.most} at most` };
     if (K.runway && !runwayOf(match, side)) return { ok: false, note: 'no runway' };
     return { ok: true, from: able };
@@ -463,10 +529,10 @@
   }
   function carry(world, u, o) {
     if (o.type === 'manual') return;
-    // (a hacker walks to the panel's floor, high in the building: a move with its height; any other
-    // spot is on the ground there)
+    // (a hacker sneaks to the panel's floor, high in the building - crouched, never firing, unseen
+    // by the computer's eyes: PS's quiet move; any other spot is on the ground there)
     if (PW.units && PW.units.order) {
-      const q = o.type === 'hack' ? { type: 'move', x: o.x, y: o.y - 1 } : o.type === 'gather' ? { ...o, type: 'move' } : { ...o };
+      const q = o.type === 'hack' ? { type: 'move', x: o.x, y: o.y - 1, quiet: true } : o.type === 'gather' ? { ...o, type: 'move' } : { ...o };
       if (Number.isFinite(q.x) && !Number.isFinite(q.y)) q.y = world.groundTop[Math.max(0, Math.min(world.width - 1, Math.round(q.x)))];
       PW.units.order(world, u, q);
       return;
@@ -491,6 +557,13 @@
     const go = (dir) => (mech ? PW.mechs.walk(u, dir) : PW.tanks.drive(u, dir));
     if (Math.abs(d) < 30) { go(0); u.game.goal = null; return; }
     if ((mech ? u.walk : u.drive) !== Math.sign(d)) go(Math.sign(d));
+  }
+  // The first dry ground at or past x going dir (a lake's far shore), within reach.
+  function dryAhead(world, x, dir) {
+    const wet = (gx) => (PW.get(world, gx, world.groundTop[gx]) & PW.ID_MASK) === PW.M.WATER;
+    let gx = Math.max(8, Math.min(world.width - 8, x));
+    for (let k = 0; k < 300 && wet(gx); k += 1) gx = Math.max(8, Math.min(world.width - 8, gx + dir * 10));
+    return wet(gx) ? x : gx + dir * 30;
   }
   // The units on their own ('auto'): every few seconds each heads for the nearest thing of the
   // enemy's its side can see ahead of it - a unit, then a building - or else the enemy's front.
@@ -535,6 +608,8 @@
         let x = best ? best.t.x - dir * (best.t.building ? 160 : 90)
           : (front - u.x) * dir > leg + 300 ? u.x + dir * leg : front - dir * 300;
         if (stalled && best) x = u.x + dir * leg;   // (no way to the target from here: closer first)
+        // (a leg ending in a lake goes on to its far shore: men swim across, nobody stands on water)
+        x = dryAhead(world, Math.round(x), dir);
         if (!stalled && g.heading !== undefined && Math.abs(g.heading - x) < 60 && Math.abs(u.x - g.heading) > 80) continue;   // (on its way)
         g.heading = x;
         // (a unit it goes for as its target; a building as a place to take under fire)
@@ -592,6 +667,6 @@
   }
 
   PW.game = { create, step, alert, takeOver, handBack, purse, frontOf, seed, ownerOf, other, SIDES,
-    UNIT_KINDS, bases, unitsOf, kindOf, fielded, canDeploy, deploy, order, standing, ruinsAt, buildingsOf, livingCore,
+    UNIT_KINDS, bases, unitsOf, kindOf, fielded, armyCap, canDeploy, deploy, order, standing, ruinsAt, buildingsOf, livingCore,
     HACK_TIME, rules, cover, standAt };
 })();

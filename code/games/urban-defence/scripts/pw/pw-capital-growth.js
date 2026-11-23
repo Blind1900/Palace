@@ -298,7 +298,11 @@
       if (lot.weldL) clearWeld(lot, 'weldL');
       if (lot.weldR) clearWeld(lot, 'weldR');
       const x0 = p.worksL - 8, x1 = p.worksR + 8;
-      const y0 = Math.max(2, p.y0 - 4), y1 = Math.min(world.height - 30, p.y1 + 150);
+      // (from the top of its canvas: a tower's crown stands well over its body's top - left behind,
+      // it floated in the sky over the new tower, the seed-11 re-seat)
+      const rec = world.buildings[lot.owner - 1];
+      const canvasTop = rec && Number.isFinite(rec.oy) ? rec.oy : p.y0 - 220;
+      const y0 = Math.max(2, Math.min(p.y0 - 4, canvasTop - 2)), y1 = Math.min(world.height - 30, p.y1 + 150);
       for (let y = y0; y <= y1; y += 1) for (let x = x0; x <= x1; x += 1) {
         if (PW.getOwner(world, x, y) !== lot.owner) continue;
         PW.set(world, x, y, M.AIR, Q);

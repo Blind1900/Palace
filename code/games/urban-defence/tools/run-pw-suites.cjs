@@ -38,6 +38,8 @@ const SUITES = [
   // N8: the game is the main page, opened from disk as a downloaded copy is; the old beta still loads
   { name: 'pw-main-page', page: 'index.html', file: true, alone: true, ready: "!!document.getElementById('gm-menu')" },
   { name: 'pw-beta-legacy', page: 'beta-legacy.html' },
+  // N88: halls and rooms - hallways opening through door frames into rooms of every size
+  { name: 'pw-tunnel-rooms', params: 'det=1' },
   // N5: the item bar, drills and dirt tunnels, guards, turrets, orders, the sentry, a skirmish
   { name: 'pw-units', page: 'pw-unit-lab.html', ready: 'window.pwLab && pwLab.ready', params: 'det=1&go=0' },
   // N99: roofs come down with their buildings - the works hold up only what they put up

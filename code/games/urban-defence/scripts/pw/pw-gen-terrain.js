@@ -246,6 +246,13 @@
     }
     const rowValues = new Float32Array(cols);
     let cachedRow = -1;
+    // (N8: each column's lattice cell and smoothed weight worked out once, not per sample - the
+    // strata fill samples every cell of the map; the same numbers, so the same world)
+    const colIndex = new Int32Array(world.width), colWeight = new Float64Array(world.width);
+    for (let x = 0; x < world.width; x += 1) {
+      const fx = x / 16, ix = fx | 0, t = fx - ix;
+      colIndex[x] = ix; colWeight[x] = t * t * (3 - 2 * t);
+    }
     return {
       // Prepare interpolation along a row, then sample(x) is cheap.
       row(y) {
@@ -256,8 +263,8 @@
         for (let i = 0; i < cols; i += 1) rowValues[i] = field[a + i] + (field[b + i] - field[a + i]) * s;
       },
       sample(x) {
-        const fx = x / 16, ix = fx | 0, t = fx - ix, s = t * t * (3 - 2 * t);
-        return rowValues[ix] + (rowValues[ix + 1] - rowValues[ix]) * s;
+        const ix = colIndex[x];
+        return rowValues[ix] + (rowValues[ix + 1] - rowValues[ix]) * colWeight[x];
       },
     };
   }

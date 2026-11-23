@@ -28,8 +28,8 @@ check(!G.canDeploy(m, 'left', 'trooper').ok, 'with no HM nothing deploys');
 world.stock.left.hm = 5000;
 let n = 0;
 for (let i = 0; i < 200 && G.deploy(m, 'left', 'trooper').ok; i += 1) n += 1;
-check(G.fielded(m, 'left') <= Math.max(4, G.purse(m, 'left').pop) && n > 0,
-  `the army stops at the population (${G.fielded(m, 'left')} fielded of POP ${G.purse(m, 'left').pop})`);
+check(G.fielded(m, 'left') <= G.armyCap(m, 'left') && n > 0 && !G.canDeploy(m, 'left', 'trooper').ok,
+  `the army stops at the population (${G.fielded(m, 'left')} fielded, cap ${G.armyCap(m, 'left')} for POP ${G.purse(m, 'left').pop})`);
 const army = G.unitsOf(m, 'left').filter((u) => !u.building);
 const troopers = army.filter((u) => u.kind === 'trooper');
 check(troopers.length >= 2, `troopers to work with (${troopers.length})`);
@@ -89,15 +89,12 @@ for (const u of army) if (!u.dead && u !== h2) { u.x = m.sides.left.home; u.y = 
 step(1);
 const sawBefore = PW.vision.sees(world, 'left', farX);
 checks.push(`INFO tower at ${tower.body.left}, far right post at ${farX}`);
-// (the right side's guns are held for this part: what is tested is the panel's rule, and a turret
-// firing at the man up there would hole the floor under him - until its rounds pass their own
-// buildings, PW.game.cover in PW.shots)
+// (the right side's guns are held for this part: what is tested is the panel's rule, not a fight;
+// the hacker goes quietly - PS's quiet order: crouched, never firing)
 for (const u of world.defence || []) if (u.side === 'right' && !u.dead && PW.units) PW.units.disable(u, 30);
 for (const t of world.troops || []) if (t.side === 'right' && !t.dead && PW.units) PW.units.disable(t, 30);
 hackAt(h2, tower.panels[0]);
-// (and the hacker holds its own: firing down at the guards below it holes the floor it stands on -
-// a quiet order for hackers is PS's next)
-h2.mag = 0; h2.ammo = 0; h2.grenades = 0;
+check(!!h2.sneak, 'a hacker goes quietly (crouched, holding its fire)');
 for (let s = 0; s < 17; s += 1) { put(h2, tower.panels[0]); step(1); }
 eng.step = engStep;
 const sawAfter = PW.vision.sees(world, 'left', farX);

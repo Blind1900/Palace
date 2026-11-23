@@ -20,7 +20,7 @@
   const KEEP_HM = 300;          // HM it keeps back for war and repair
   const SEED_ORDER = ['farm', 'capital', 'military'];
   const DEPLOY_EVERY = [3, 6];  // s between deployments
-  const ARM_KEEP = 180;         // HM it keeps back from the army once it has a few units
+  const ARM_KEEP = 120;         // HM it keeps back from the army once it has a few units
   const BOMBARD_EVERY = [18, 30]; // s between its launchers' and jets' strikes
   const SALVO_REACH = 2400;     // cells a launcher is sent to lay a salvo at most
   const WAVE = 6;               // gathered units that make a wave
@@ -42,8 +42,9 @@
       if (match.clock < brain.seedAt) return false;
       const purse = G.purse(match, side);
       if (purse.hm < KEEP_HM) { brain.seedAt = match.clock + 6; return false; }
-      const front = G.frontOf(match, side);
+      // (out from its towns' front - a military seed may go on to the posts' ground, the others not)
       const kind = SEED_ORDER[brain.seedN % SEED_ORDER.length];
+      const front = G.frontOf(match, side, kind !== 'military');
       // (a few spots out from the front - the first the rules take; a person tries a few too)
       for (let k = 0; k < 6; k += 1) {
         const x = front + dir() * (160 + k * 110 + random() * 80);
@@ -135,8 +136,11 @@
       for (const u of shooters) {
         let best = null;
         for (const b of world.buildings || []) {
-          if (!G.standing(b) || G.ownerOf(b) !== foe) continue;
+          // (the enemy's - and a neutral town standing in its way, ahead of its army)
+          const owner = G.ownerOf(b);
+          if (!G.standing(b) || (owner !== foe && owner !== 'neutral')) continue;
           const bx = (b.body.left + b.body.right) / 2;
+          if (owner === 'neutral' && (bx - G.frontOf(match, side)) * dir() < 0) continue;
           if (PW.vision && !PW.vision.sees(world, side, bx)) continue;
           const d = Math.abs(bx - u.x);
           if (u.kind !== 'jet' && d > SALVO_REACH) continue;

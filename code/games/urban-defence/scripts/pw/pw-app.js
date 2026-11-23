@@ -272,33 +272,43 @@
     const size = toolbar.querySelector('#brush-size');
     if (size) size.addEventListener('input', () => { brush = Number(size.value); });
   }
-  // Space pauses and resumes, as the PAUSE button does (not while typing into a field).
+  // The held unit's keys, pressed and let go (N102: a unit moves only while its key is held - so
+  // its module hears the key come up as well as go down). The drive keys follow the SELECTED tank
+  // too, not only the tank tool (N78); the troops', jets', batteries' and mechs' modules each
+  // answer only for the unit they hold, and selection holds one at a time.
+  function unitKey(event) {
+    if ((tool === 'tank' || (selected && selected.kind === 'tank'))
+      && PW.tanks && PW.tanks.key && PW.tanks.key(event)) return true;   // (N10 drive keys)
+    for (const mod of [PW.troops, PW.jets, PW.defence, PW.mechs]) {
+      if (mod && mod.key && mod.key(event)) return true;
+    }
+    return false;
+  }
+  // P pauses and resumes, as the PAUSE button does (Space is a unit's jump since N102).
   window.addEventListener('keydown', (event) => {
     if (!world) return;   // (the game page's menu and loading screen come first)
     if (event.code === 'F3') { event.preventDefault(); togglePerf(); return; }   // N8: the costs
     if (event.code === 'Escape' && selected) { select(null); return; }   // N78
-    // N78: the drive keys follow the SELECTED tank too, not only the tank tool - key()
-    // drives the held one, and selecting holds (PS's hold()).
     if (event.target.closest?.('input, textarea, select')) return;
     // (N6: a key a held unit takes puts it in the person's hands - off its own way for a while)
-    const took = () => { event.preventDefault(); if (match && PW.gameUI) PW.gameUI.tookControl(); };
-    if ((tool === 'tank' || (selected && selected.kind === 'tank'))
-      && PW.tanks && PW.tanks.key && PW.tanks.key(event)) { took(); return; }   // (N10 drive keys)
-    // The troops', jets' and batteries' keys (PS's modules): each answers only for the unit
-    // it holds, and selection holds one at a time - the first that takes the key keeps it.
-    for (const mod of [PW.troops, PW.jets, PW.defence, PW.mechs]) {
-      if (mod && mod.key && mod.key(event)) { took(); return; }
-    }
+    if (unitKey(event)) { event.preventDefault(); if (match && PW.gameUI) PW.gameUI.tookControl(); return; }
     // N6: the game's own keys (pan the view, put the selection down)
     if (match && PW.gameUI && PW.gameUI.key(event)) { event.preventDefault(); return; }
-    if (event.code !== 'Space' || event.repeat || event.target.closest?.('input, textarea, select')) return;
+    if (event.code === 'Space') { event.preventDefault(); return; }   // (never a focused button's press)
+    if (event.code !== 'KeyP' || event.repeat) return;
     event.preventDefault();
     paused = !paused;
     const button = toolbar && toolbar.querySelector('[data-action="pause"]');
     if (button) button.classList.toggle('on', paused);
   });
-  // (and a toolbar button that has the focus is not pressed by it as well)
-  window.addEventListener('keyup', (event) => { if (event.code === 'Space' && !event.target.closest?.('input, textarea, select')) event.preventDefault(); });
+  window.addEventListener('keyup', (event) => {
+    if (!world || event.target.closest?.('input, textarea, select')) return;
+    if (unitKey(event) || event.code === 'Space') event.preventDefault();
+  });
+  // (a key let go outside the window would leave a unit walking: on losing the focus, let go)
+  window.addEventListener('blur', () => {
+    for (const mod of [PW.troops, PW.tanks, PW.mechs, PW.jets]) if (mod && mod.release) mod.release();
+  });
 
   // ---- N78: unit selection --------------------------------------------------------------------
   // Click a unit to select it: a pulsing bracket marks it in the world, and the side panel
@@ -321,7 +331,7 @@
     { kind: 'troop', list: () => world.troops, mod: () => PW.troops,
       box: (t) => [t.x - 6, t.y - (t.crouch ? 19 : 27), t.x + 6, t.y + 3] },
     { kind: 'mech', list: () => world.mechs, mod: () => PW.mechs,
-      box: (m) => [m.x - 15, m.y - 74, m.x + 15, m.y + 3] },
+      box: (m) => [m.x - 18, m.y - ((PW.mechs && PW.mechs.HEIGHT) || 74) - (m.lift || 0), m.x + 18, m.y + 3] },
     { kind: 'jet', list: () => world.jets, mod: () => PW.jets,
       box: (j) => [j.x - 98, j.y - 22, j.x + 98, j.y + 20] },
     { kind: 'defence', list: () => world.defence, mod: () => PW.defence,
@@ -412,6 +422,12 @@
         `<div><kbd>Esc</kbd> free</div>` +
         `</div>`;
     }
+  }
+  // A click for the unit in hand (N102): its module fires at the spot - true if it took the click.
+  const MODULE_OF = { troop: () => PW.troops, tank: () => PW.tanks, mech: () => PW.mechs, jet: () => PW.jets, defence: () => PW.defence };
+  function clickUnit(sel, p, button) {
+    const mod = sel && MODULE_OF[sel.kind] && MODULE_OF[sel.kind]();
+    return !!(mod && mod.click && mod.click(world, p.x, p.y, button));
   }
   // Selecting takes the unit in hand in its own module (PS's hold()), and lets go of
   // whatever any other module held - so the keys follow exactly one unit.
@@ -517,6 +533,12 @@
       drag.active = true; drag.pan = true; drag.x = event.clientX; drag.y = event.clientY;
       canvas.setPointerCapture(event.pointerId);
       return;
+    }
+    // N102: with a unit in hand and the hand empty (PAN), a click that lands on no other unit is
+    // the unit's - left its weapon at the spot, right its second (PS's module.click)
+    if (selected && tool === 'pan' && (event.button === 0 || event.button === 2)) {
+      const p = toWorld(event);
+      if (!unitAt(p.x, p.y) && clickUnit(selected, p, event.button)) return;
     }
     drag.active = true; drag.x = event.clientX; drag.y = event.clientY;
     drag.pan = event.button !== 0 || tool === 'pan';
@@ -741,7 +763,7 @@
       explode, dig, planDig, preview, pipes, setDevelopSpeed: (k) => { devSpeed = k; }, heat, life, structure, fragments, cores, stability, air,
       dropSeed: (which, x) => { dropSeed(which, { x }); return lastDig; },   // N2: the hand's seed path (vision-gated)
       selectAt: (x, y) => { const hit = unitAt(x, y); select(hit); return hit; },   // N78
-      selected: () => selected, clearSelection: () => select(null), select,
+      selected: () => selected, clearSelection: () => select(null), select, clickUnit,
       setBrush: (b) => { brush = b; },
       paint: (x, y, radius, material) => paint(x, y, radius, () => material),
       stepWorld, countWater: () => sim.countWater(), simTimes,
