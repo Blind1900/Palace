@@ -222,6 +222,12 @@
       if (PW.mat.open[id] && y < world.groundTop[x] && !isTunnel(x, y) && !buildingOwned(x, y) && !PW.getLayer(world, 'back', x, y)) return true;
       return buildingOwned(x, y) && !isTunnel(x, y) && !terrain[id];
     }
+    // The row a road tunnel's bundle runs at in column x (its rows under the road), or -1.
+    function roadRow(x) {
+      const RT = PW.roadTunnels;
+      for (const t of world.roadTunnels || []) if (t.floorAt && x >= t.a && x <= t.b) return t.floorAt(x) + ((RT && RT.PIPE_UNDER) || 18);
+      return -1;
+    }
     // Pipe top row per column: cover depth under the ground, then below anything in the way.
     function contour(x0, x1, depth) {
       // A reversed span must never ask for a negative array: under the adoption era's
@@ -265,7 +271,10 @@
           if (PW.mat.open[id] && !isTunnel(x, y) && !buildingOwned(x, y) && !PW.getLayer(world, 'back', x, y)) ground = own;
         }
         grounds[x - x0] = ground;
-        ys[x - x0] = clear(x, ground, ground + depthAt(x));
+        // (N104: under a mountain's road the bundle runs below the road's bed - its cover read off
+        // the mountainside over the bore laid it in the tunnel's headroom, across the army's way,
+        // wherever a town's growth re-laid it; every pass after only deepens)
+        ys[x - x0] = Math.max(clear(x, ground, ground + depthAt(x)), roadRow(x));
       }
       // The passes and the slope clamps run to a fixed point TOGETHER: the clamps alone could
       // lift a column back into what clear() had dodged (seed 7's climb to the mining riser
@@ -1545,7 +1554,10 @@
           const into = Math.min(x - X0 + ramp, X1 + ramp - x);
           let near = Infinity;
           for (const c of line.cores) near = Math.min(near, Math.abs(x - c.x));
-          const t = ease(Math.max(0, Math.min(1, into / ramp))) * ease(Math.max(0, Math.min(1, (near - SPAN - 2) / ramp)));
+          // (the cores' keep-out is short - the long ease is for climbing in and out of the span; used
+          // round a town's beds by the portal it left the line where it was for hundreds of columns
+          // into the tunnel, across the road)
+          const t = ease(Math.max(0, Math.min(1, into / ramp))) * ease(Math.max(0, Math.min(1, (near - SPAN - 2) / (RAMP * 2))));
           const target = rowAt(Math.max(X0, Math.min(X1, x)));
           const ny = Math.round(old + (target - old) * t);
           if (ny === old) continue;

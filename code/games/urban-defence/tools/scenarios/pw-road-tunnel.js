@@ -52,6 +52,20 @@ for (let x = t.a + 20; x <= t.b - 20; x += 8) {
 }
 check(bored > 10 && low >= RT.CLEAR, `tall enough for the whole army: ${low === Infinity ? '-' : low} rows clear over the road at its lowest (${bored} bored columns; a tank 58, a mech 48)`);
 check(roadOk >= cols * 0.95, `a paved road all the way, the only tunnel floor marked a road (${roadOk} of ${cols} columns)`);
+// (the bundle goes through under the road - never across the way the army drives - as bored, and
+// after the city has grown on and re-laid it)
+const pipeOver = (when) => {
+  let piped = 0;
+  const pipedAt = [];
+  for (let x = t.a; x <= t.b; x += 1) {
+    const f = t.floorAt(x);
+    for (let y = f - RT.CLEAR; y < f; y += 1) {
+      if (id(x, y) === M.PIPE || (PW.getFlags(world, x, y) & PW.FLAG.HOLLOW)) { piped += 1; if (pipedAt.length < 4) pipedAt.push(`${x},${y}`); break; }
+    }
+  }
+  check(piped === 0, `the supply line runs under the road, not across its way, ${when} (${piped} columns with pipe over the road${pipedAt.length ? `: ${pipedAt.join(' ')}` : ''})`);
+};
+pipeOver('as bored');
 const bars = (world.barricades || []).filter((b) => b.tunnel === t.id);
 check(bars.length >= 2 && bars.every((b) => b.side === t.side && b.laid > 20), `barricades of the boring side in it (${bars.length}: ${bars.map((b) => `${b.x0}..${b.x1} ${b.side}`).join(', ')})`);
 await view('n104-portal-a', t.a + 60, t.floorAt(t.a + 60) - 60, 4);
@@ -66,6 +80,7 @@ check(city.edge.left < t.a, `the city carries on past the far portal (its left e
 for (const b of bars) { for (const i of b.cells) { const x = i % world.width, y = (i / world.width) | 0; if (id(x, y) === M.CONCRETE || id(x, y) === M.STEEL) PW.set(world, x, y, M.AIR); } b.laid = 0; }
 // (developed: lined, its road walls in - as the side's crews would, given time)
 PW.tunnels.advanceTo(world, (PW.tunnels.state(world).time || 0) + 1e6);
+pipeOver('with the city grown on past it');
 await view('n104-bore-developed', Math.round((t.a + t.b) / 2), t.floorAt(Math.round((t.a + t.b) / 2)) - 50, 5);
 // (each set down on the road just inside the far portal from the city - the city's own streets are
 // another matter)

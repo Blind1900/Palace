@@ -310,5 +310,5 @@
     return null;
   }
 
-  PW.roadTunnels = { plan, build, forMountain, step, onRoad, footOf, CLEAR, GRADE, MAX_LEN, BARRICADE_W };
+  PW.roadTunnels = { plan, build, forMountain, step, onRoad, footOf, CLEAR, GRADE, MAX_LEN, BARRICADE_W, PIPE_UNDER };
 })();
