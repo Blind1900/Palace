@@ -36,6 +36,8 @@ const SUITES = [
   // N6: the rules - deploying, hacking, cover - and the ruins and the win
   { name: 'pw-game-rules', alone: true, limit: 420, params: 'mode=game&start=versus&side=left&det=1' },
   { name: 'pw-game-win', params: 'mode=game&start=versus&side=left&det=1' },
+  // N102: the unit in hand - stands unless its keys are held, jumps, fires where the mouse is
+  { name: 'pw-game-hand', params: 'mode=game&start=versus&side=left&det=1' },
   // N8: the game is the main page, opened from disk as a downloaded copy is; the old beta still loads
   { name: 'pw-main-page', page: 'index.html', file: true, alone: true, ready: "!!document.getElementById('gm-menu')" },
   // (the old beta makes its world from Math.random: seeded, the same world each run - unseeded it

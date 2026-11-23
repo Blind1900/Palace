@@ -90,7 +90,8 @@
       <div class="row"><span>MAP</span><button data-map="standard" class="on">STANDARD</button><button data-map="laptop">LAPTOP (SMALLER)</button></div>
       <div class="row"><span>SEED</span><input id="gm-seed" value="${seed}"><button data-act="reroll">NEW</button></div>
       <button class="go" data-act="start">START</button>
-      <div class="sub" style="margin:14px 0 0;font-size:14px">Click selects · Shift+drag boxes · right-click sends · WASD pans · F3 costs ·
+      <div class="sub" style="margin:14px 0 0;font-size:14px">Click selects · one unit: A/D move, Space jumps, clicks fire at the mouse ·
+        Shift+drag boxes · right-click sends a group · P pauses · F3 costs ·
         <a href="beta-legacy.html" style="color:#7e9a70">old beta</a> · <a href="pixel-world.html" style="color:#7e9a70">sandbox</a></div>
     </div>`;
     document.body.appendChild(root);
@@ -277,7 +278,8 @@
 
   // ---- The hand: selection, orders, the tools in hand ----------------------------------------------
   // A plain left click (one that does not drag) selects; a left drag pans; Shift+drag draws a box;
-  // a right click sends the selection. With a seed in hand a left click plants it.
+  // a right click sends the selection (a unit in hand fires instead - N102). With a seed in hand a
+  // left click plants it.
   const down = { x: 0, y: 0, on: false, box: false };
   function pointerDown(event, p) {
     if (!match) return false;
@@ -289,11 +291,17 @@
       if (r.ok) setTool('select');
       return true;
     }
-    // (a unit the person drives by its keys fires where they click - left its weapon, right its
-    // second (N102, the design doc's direct control); a unit left to orders is sent by a right click)
-    const held = app.selected && app.selected();
-    if (held && held.t.game && held.t.game.order.type === 'manual' && (event.button === 0 || event.button === 2)
-      && !cmd.unitAt(p.x, p.y) && app.clickUnit(held, p, event.button)) { tookControl(); return true; }
+    // N102: the unit in hand fires where the person clicks - left its weapon, right its second (a
+    // grenade, the other round, a missile); a click on an enemy is a shot at it, on another unit of
+    // one's own takes that one instead. Shift keeps the hand's other ways: Shift+click and
+    // Shift+drag select, Shift+right-click sends it on an order (go, attack, hack).
+    const held = inHand();
+    if (held && !event.shiftKey && (event.button === 0 || event.button === 2)) {
+      const other = cmd.unitAt(p.x, p.y);
+      const friend = other && other !== held.t && cmd.mine(other);
+      if (!friend) { if (other !== held.t) app.clickUnit(held, p, event.button); return true; }
+      if (event.button === 2) return true;   // (never a shot at one's own)
+    }
     if (event.button === 2) {
       if (!cmd.sel.some(cmd.mine)) return false;   // (nothing to send: a right drag pans)
       const n = cmd.command(p);
@@ -322,32 +330,50 @@
     cmd.click(p, event.shiftKey);
     selectionChanged();
   }
-  // One unit of one's own selected is also held - its keys drive it and its panel shows (N78);
-  // a group or a building gets the selection panel.
+  // One unit of one's own selected is also held - its keys drive it and its panel shows (N78) - and
+  // it is in the person's hands at once (N102): it drops whatever it was doing and stands, moving
+  // only while its keys are held. A group or a building gets the selection panel.
   const N78_KIND = { trooper: 'troop', mech: 'mech', jet: 'jet', defence: 'defence' };
   function selectionChanged() {
     const own = cmd.sel.filter(cmd.mine);
-    if (own.length === 1 && cmd.sel.length === 1) app.select({ kind: N78_KIND[own[0].kind] || 'tank', t: own[0] });
+    const one = own.length === 1 && cmd.sel.length === 1 ? own[0] : null;
+    const was = app.selected && app.selected();
+    if (one) app.select({ kind: N78_KIND[one.kind] || 'tank', t: one });
     else app.select(null);
+    if (one && (!was || was.t !== one)) {
+      tookControl();
+      // (a jet cannot stand - it flies on; the batteries' guns are their own)
+      if (one.kind !== 'jet' && one.kind !== 'defence' && PW.units && PW.units.order) PW.units.order(match.world, one, { type: 'hold' });
+    }
     selKey = '';
     renderSel();
   }
-  // (a key a held unit took: it is the person's now, off its own way until they leave it be)
+  // The unit in hand: the one unit of one's own selected (null: none, a group, a building).
+  function inHand() {
+    const s = app.selected && app.selected();
+    return s && cmd.sel.length === 1 && cmd.sel[0] === s.t && cmd.mine(s.t) && !s.t.dead ? s : null;
+  }
+  // (in hand, or a key a held unit took: it is the person's now, off its own way until they leave it be)
   function tookControl() {
     const u = cmd.sel.length === 1 ? cmd.sel[0] : null;
     if (!u || !u.game || !cmd.mine(u)) return;
     u.game.order = { type: 'manual' };
     u.game.manualAt = match.clock;
   }
-  // The game's keys: WASD and the arrows pan the view (a held unit takes them first), Esc lets the
-  // selection go, H holds the selection where it stands and Q sends it on its own way again.
+  // The game's keys: WASD and the arrows pan the view (the unit in hand takes them first), Esc lets
+  // the selection go, H holds the selection where it stands and Q sends it on its own way again - a
+  // unit in hand let go of with it (in hand, it would only stand).
   const PAN_KEYS = { KeyA: [-1, 0], ArrowLeft: [-1, 0], KeyD: [1, 0], ArrowRight: [1, 0], KeyW: [0, -1], ArrowUp: [0, -1], KeyS: [0, 1], ArrowDown: [0, 1] };
   function key(event) {
     if (!match) return false;
     if (event.code === 'Escape') { cmd.clear(); setTool('select'); selectionChanged(); return true; }
     const own = cmd.sel.filter(cmd.mine);
     if (event.code === 'KeyH' && own.length) { PW.game.order(match, own, { type: 'hold' }); return true; }
-    if (event.code === 'KeyQ' && own.length) { PW.game.order(match, own, { type: 'auto' }); return true; }
+    if (event.code === 'KeyQ' && own.length) {
+      if (inHand()) { cmd.clear(); selectionChanged(); }
+      PW.game.order(match, own, { type: 'auto' });
+      return true;
+    }
     const pan = PAN_KEYS[event.code];
     if (pan) { app.renderer.panByDevice(-pan[0] * 90 * app.renderer.view.dpr, -pan[1] * 90 * app.renderer.view.dpr); return true; }
     return false;
@@ -453,9 +479,26 @@
   }
 
   // ---- Over the world: the fog, the selection, where a seed in hand would land ---------------------
+  // N102: the view keeps the unit in hand in sight while it moves - its keys are its own now, not the
+  // view's: walked out of the middle of the screen, the view comes after it. (Standing, it is left
+  // be: the person may be looking about with a drag.)
+  let followAt = null;
+  function follow(renderer) {
+    const s = inHand();
+    if (!s) { followAt = null; return; }
+    const u = s.t, moved = followAt && Math.abs(u.x - followAt.x) + Math.abs(u.y - followAt.y) > 0.05;
+    followAt = { x: u.x, y: u.y };
+    if (!moved) return;
+    const d = renderer.worldToDevice(u.x, u.y - 20), W = renderer.view.width, H = renderer.view.height;
+    const mx = W * 0.3, my = H * 0.3;
+    const dx = d.x < mx ? mx - d.x : d.x > W - mx ? W - mx - d.x : 0;
+    const dy = d.y < my ? my - d.y : d.y > H - my ? H - my - d.y : 0;
+    if (dx || dy) renderer.panByDevice(dx * 0.2, dy * 0.2);
+  }
   function drawWorld(renderer, now) {
     refresh(now);
     if (!match) return;
+    follow(renderer);
     const { ctx, camera, view } = renderer, z = camera.zoom, world = match.world;
     // The fog: the ground the side does not see is veiled (the other side's units in it are not its
     // to see - PS's draws skip them as the fog query lands there).

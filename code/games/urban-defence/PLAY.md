@@ -17,16 +17,23 @@ The game runs straight from its files. There's no server or install, and it does
   - **COMPUTER vs COMPUTER**: watch two computer players. **PLAY LEFT** or **PLAY RIGHT** takes over a side at any moment, and **HAND BACK** gives it back.
   - **LAPTOP (SMALLER)**: a smaller map for slower machines.
 - **Goal**: destroy every core of the enemy's capitals, then plant your own capital over their ruins. You win when its first tower rises.
-- **Camera**: drag to pan, or use WASD and the arrow keys. The mouse wheel zooms. Click the minimap (bottom right) to jump there.
+- **Camera**: drag to pan, or use WASD and the arrow keys (while no unit is in your hands). The mouse wheel zooms. Click the minimap (bottom right) to jump there.
 - **Units**:
   - **Select**: click a unit. Shift+click adds or removes one. Shift+drag a box selects many.
-  - **Orders**: right-click the ground to send the selection there. Right-click an enemy unit or building to attack it.
-  - **Hold or release**: H holds the selection, Q lets it go its own way again, Esc deselects.
-  - **Direct control**: with one unit selected, its own keys drive it (shown in its panel): A/D move while held, Space or W jumps (a jet climbs), and the number keys pick a trooper's item. While you drive it, left-click fires at the spot and right-click fires its second weapon (a grenade, the other shell, a missile). Let go for a few seconds and it carries on alone.
+  - **A group**: right-click the ground to send it there; right-click an enemy unit or building to attack it. H holds it, Q lets it go its own way again, Esc deselects.
+  - **One unit is in your hands** as soon as you select it. It drops what it was doing and stands still until you press a key. Its panel shows its keys, and the view follows it as it moves.
+    - **Move**: hold A/D or the left/right arrows. It moves only while the key is held.
+    - **Jump**: Space, W or the up arrow. A jet climbs instead, and S or the down arrow dives it.
+    - **Aim**: it aims wherever the mouse is.
+    - **Fire**: left-click fires its weapon at the spot. Right-click fires its second weapon: a grenade, the other shell, or a missile.
+    - **Trooper**: S or the down arrow crouches, 1 2 3 pick its item, F uses it, R reloads.
+    - **Clicking other units**: clicking an enemy shoots at it; clicking another of your own units takes that one instead.
+    - **Orders**: Shift+right-click still sends it on an order (go, attack, or hack an enemy building).
+    - **Letting go**: Q lets it go its own way, and Esc lets it go. Left alone for a few seconds, it carries on with its orders.
 - **Pause**: P (or PAUSE on the top bar).
 - **Build**: SEED CAPITAL, SEED FARM and SEED MILITARY plant seeds, only where your side can see. Cities, farms and bases grow from them by themselves.
 - **Deploy**: the unit buttons on the bottom bar deploy from your front base, or from the base you've selected. A base's level decides what it can deploy. Each unit costs HM, and your army can't outgrow your population.
-- **Hack**: select one trooper and right-click an enemy base or tower. It goes up to the control panel on the top floor, and hacks it if it stays there 15 seconds. (You can also drive it there yourself.)
+- **Hack**: select one trooper and Shift+right-click an enemy base or tower. It goes up to the control panel on the top floor, and hacks it if it stays there 15 seconds. (You can also drive it there yourself.)
   - A military base: some of its defences go silent for a while.
   - A tower: you see what the enemy sees for a while.
 - **F3** shows what each part of the game costs per frame.
