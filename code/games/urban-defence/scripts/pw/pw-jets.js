@@ -17,8 +17,8 @@
 // left burning on the ground (see pw-fragments' wreck pieces, as a tank's).
 // Every jet can be taken in hand (the user's - N102's controls, see key and click): A / D fly left
 // or right (turning round over the top), Space, W or Up climbs while held and S or Down dives (let
-// go, it levels out); a left click fires a cannon burst, a right click a missile at the unit nearest
-// the spot; a click on a runway puts a jet on it and it takes off.
+// go, it levels out); a left click fires a cannon burst at the spot, a right click a missile at the
+// unit nearest it; a click on a runway puts a jet on it and it takes off.
 // Our own code throughout.
 (function () {
   const PW = window.PW;
@@ -238,11 +238,22 @@
     j.burstT -= dt;
     while (j.burst > 0 && j.burstT <= 0) {
       const m = muzzle(j);
-      PW.shots.fire(world, { kind: 'cannon', x: m.x, y: m.y, dx: m.dx, dy: m.dy, side: j.side, from: j, spread: 0.012 });
+      let { dx, dy } = m;
+      // (a burst clicked at a spot - see click: at it, as far round from its nose as its gun swings)
+      if (j.burstAt) {
+        const hd = Math.atan2(-m.dy, m.dx), want = Math.atan2(-(j.burstAt.y - m.y), j.burstAt.x - m.x);
+        let off = want - hd;
+        off = Math.atan2(Math.sin(off), Math.cos(off));
+        const a = hd + Math.max(-GUN_SWING, Math.min(GUN_SWING, off));
+        dx = Math.cos(a); dy = -Math.sin(a);
+      }
+      PW.shots.fire(world, { kind: 'cannon', x: m.x, y: m.y, dx, dy, side: j.side, from: j, spread: 0.012 });
       j.burst -= 1; j.burstT += ROF;
       stats.fired += 1;
     }
+    if (!j.burst) j.burstAt = null;
   }
+  const GUN_SWING = 35 * Math.PI / 180;   // its gun's swing either side of its nose, fired at a spot
   // G: a missile at the unit nearest where it is aimed (or on ahead).
   function launch(world, j) {
     if (!j || j.dead || j.down || j.onGround || j.missiles <= 0 || !PW.shots) return null;
@@ -451,15 +462,15 @@
     else return false;
     return true;
   }
-  // The mouse (N102): a left click fires its cannon (along its nose: it is its nose that aims it); a
-  // right click is its other fire, a missile at the unit nearest the spot. (True when the one in hand
-  // took it.)
+  // The mouse (N102, the user's: fire at the mouse): a left click fires its cannon at the spot - its
+  // gun swinging to it as far as GUN_SWING from its nose; a right click is its other fire, a missile
+  // at the unit nearest the spot. (True when the one in hand took it.)
   function click(world, x, y, button = 0) {
     const j = held;
     if (!j || j.dead || j.down) return false;
     j.aim = { x, y };
     if (button === 2) launch(world, j);
-    else fire(world, j);
+    else if (fire(world, j)) j.burstAt = { x, y };
     return true;
   }
 
