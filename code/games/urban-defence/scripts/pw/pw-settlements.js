@@ -628,7 +628,7 @@
       storage: { x0: Math.min(r0, sx), x1: Math.max(r1, sx), top: driftTop - 8, bottom: driftBottom }, node };
   }
   // N11F: the miners push on from every mine - hallways of varying height and look that SERVE
-  // as rooms (storage, pipe control, an armoury, trash, and the subliminal room), dug just
+  // as rooms (storage, pipe control, processing, an armoury, a mossy room, trash), dug just
   // beside the workings but always heading toward ore, and using caves as highways: break in
   // at the nearest reach, carry on from the cave's point nearest the next vein. N12F keeps the
   // headings honest: a body already worked sends the heading on to the next, or to a cave.
@@ -636,14 +636,19 @@
   // its own look (the user's subway / underground / mine-banner references).
   const HALL_ROOMS = [
     { kind: 'storage', h: 44, w: 130 }, { kind: 'pipes', h: 36, w: 100 }, { kind: 'processing', h: 42, w: 120 },
-    { kind: 'armoury', h: 36, w: 110 }, { kind: 'mossy', h: 32, w: 95 },
-    { kind: 'trash', h: 26, w: 90 }, { kind: 'subliminal', h: 22, w: 70 },
+    // (N103: the armoury stands tall enough for a turret on its base - plate, head and a margin)
+    { kind: 'armoury', h: 48, w: 110 }, { kind: 'mossy', h: 32, w: 95 },
+    { kind: 'trash', h: 26, w: 90 },
+    // (N108: the 'subliminal' room - its walls inked black round one white point - is gone: the user
+    // kept meeting it as a black box with a white dot in the tunnels. A small pipe-control room takes
+    // its turn, the same size - the workings' layout, and the world laid out after them, unchanged)
+    { kind: 'pipes', h: 22, w: 70 },
   ];
-  function furnishHallRoom(world, kind, x0, x1, floor, h, random) {
+  function furnishHallRoom(world, kind, x0, x1, floor, h, random, side = null, dir = 1) {
     const deco = (x, y, c) => { if ((PW.get(world, x, y) & 63) === M.AIR) PW.setLayer(world, 'deco', x, y, rgb(c)); };
     // Arch ribs up the walls and across the roof every so often (the underground-railroad and
     // Euston references): a darker band in the back wall that reads as the room's framing.
-    if (kind !== 'subliminal') {
+    {
       for (let x = x0 + 7; x < x1 - 4; x += 14) {
         for (let y = floor - h + 1; y <= floor; y += 1) {
           const nearRoof = y < floor - h + 4;
@@ -716,6 +721,9 @@
         for (let dy = 0; dy < 16; dy += 1) deco(ax, floor - 1 - dy, dy === 15 || dy === 0 ? [96, 100, 108] : [48, 50, 56]);
         deco(ax + 1, floor - 16, [96, 100, 108]);
       }
+      // N103: a turret on its base in the armoury, at its far end, guarding the way in
+      if (PW.mounts) PW.mounts.room(world, x0, x1, floor + 1, h, { side: side || 'neutral', style: (world.styles && world.styles[side]) || undefined,
+        facing: -dir, near: dir > 0 ? x1 - 30 : x0 + 30 });
     } else if (kind === 'trash') {
       // (drawn junk, not loose cells: real debris in a raw tunnel would sit in cells the
       // development can never line, and the network would never count as whole)
@@ -726,13 +734,6 @@
           deco(tx + dx, floor - 1 - dy, (dx + dy) % 3 ? [74, 68, 58] : [96, 86, 66]);
         }
       }
-    } else if (kind === 'subliminal') {
-      // The god's room: ink to every wall, one white point, nothing else. Subtle; it watches.
-      for (let y = floor - h + 1; y <= floor; y += 1) for (let x = x0 + 1; x < x1; x += 1) {
-        if (PW.getLayer(world, 'back', x, y)) PW.setLayer(world, 'back', x, y, rgb([6, 6, 8]));
-      }
-      const mx = Math.round((x0 + x1) / 2), my = floor - Math.round(h / 2);
-      for (const [dx, dy] of [[0, 0], [1, 0], [0, 1], [1, 1]]) PW.setLayer(world, 'back', mx + dx, my + dy, rgb([238, 242, 246]));
     }
   }
   // N36/N31, from the mine cross-section references: levels connect by INCLINED galleries
@@ -882,7 +883,7 @@
                 for (let x = corridor[0]; x <= corridor[1]; x += 10) gt = Math.min(gt, world.groundTop[Math.max(0, Math.min(world.width - 1, x))]);
                 if (roomY - spec.h < gt + 36) return;
                 const room = digLeg(corridor[0], roomY, corridor[1], spec.h, 'room');
-                if (room) furnishHallRoom(world, spec.kind, room[0], room[1], roomY, spec.h, random);
+                if (room) furnishHallRoom(world, spec.kind, room[0], room[1], roomY, spec.h, random, side, roomDir);
               } });
               planAt += 18;
               wayX = dir > 0 ? corridor[1] : corridor[0];

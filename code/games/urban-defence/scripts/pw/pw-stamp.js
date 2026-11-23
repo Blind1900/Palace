@@ -67,7 +67,9 @@
       doors: canvas.doors.map((d) => ({ ...d, x: d.x + ox, top: d.top + oy, bottom: d.bottom + oy })),
       slots: canvas.slots.map(pt), panels: canvas.panels.map(pt),
       cores: canvas.cores.map((c) => ({ ...pt(c), vault: c.vault && { x0: c.vault.x0 + ox, x1: c.vault.x1 + ox, top: c.vault.top + oy, bottom: c.vault.bottom + oy, lid: c.vault.lid + oy } })),
-      devices: canvas.devices.map(pt), windows: canvas.windows.map(pt), storage: (canvas.storage || []).map(pt),
+      // (a turret's base plate, N103, at its place in the world too)
+      devices: canvas.devices.map((d) => ({ ...pt(d), base: d.base && { ...d.base, x0: d.base.x0 + ox, x1: d.base.x1 + ox, y: d.base.y + oy } })),
+      windows: canvas.windows.map(pt), storage: (canvas.storage || []).map(pt),
       hatches: (canvas.hatches || []).map((h) => ({ x0: h.x0 + ox, x1: h.x1 + ox, y0: h.y0 + oy, y1: h.y1 + oy })),
       // N3 vehicle rule: the gate piers at grade (kept structure a friendly hull may pass;
       // the pass-through physics is the tanks' half, keyed off these spans)

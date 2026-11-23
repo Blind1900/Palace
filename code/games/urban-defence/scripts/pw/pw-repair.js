@@ -278,7 +278,7 @@
         core.y += dy;
       });
       // (its mounted guns come down on their mounts; the batteries on the ground stay where they are)
-      for (const u of world.defence || []) if (u.building === b.id && u.type === 'turret' && !u.dead) u.y += dy;
+      for (const u of world.defence || []) if (u.building === b.id && u.type === 'turret' && !u.dead) { u.y += dy; if (u.base) u.base = { ...u.base, y: u.base.y + dy }; }
       if (b.base) {
         if (b.base.G !== undefined) b.base.G += dy;
         if (b.base.cores) b.base.cores = b.base.cores.map((q) => ({ x: q.x, y: q.y + dy }));

@@ -76,7 +76,8 @@ for (const code of ['Space', 'KeyW', 'ArrowUp']) {
 
 // 4. A left click fires at the spot, a right click throws a grenade; a click on an enemy is a shot.
 pwApp.stepWorld(120);
-const ahead = Math.round(u.x + 80 * dir);
+let ahead = Math.round(u.x + 80 * dir);
+for (let k = 0; k < 20 && PW.gameUI.command().unitAt(ahead, u.y - 14); k += 1) ahead += dir * 24;   // (clear of one's own units)
 const shots0 = (u.mag ?? 0) + (u.ammo ?? 0), g0 = u.grenades ?? 0;
 clickAt(ahead, u.y - 14, 0);
 pwApp.stepWorld(30);
@@ -84,7 +85,12 @@ check((u.mag ?? 0) + (u.ammo ?? 0) < shots0, `a left click fires its rifle at th
 clickAt(ahead, u.y - 14, 2);
 pwApp.stepWorld(30);
 check((u.grenades ?? 0) === g0 - 1, `a right click throws a grenade there (${g0} -> ${u.grenades})`);
-const foe = PW.troops.create(world, { x: Math.round(u.x + 120 * dir) + 0.5, y: world.groundTop[Math.round(u.x + 120 * dir)], side: 'right', style: 'modern', facing: -dir });
+// (the enemy set down where no unit of one's own stands to take the click - a turret on its base, N103 -
+// and the turrets round about told to hold their fire, so it stands to be shot by the one in hand)
+for (const t of world.defence || []) if (t.type === 'turret' && Math.abs(t.x - u.x) < 1200) t.hold = true;
+let fx = Math.round(u.x + 120 * dir);
+for (let k = 0; k < 20 && PW.gameUI.command().unitAt(fx, world.groundTop[fx] - 12); k += 1) fx += dir * 24;
+const foe = PW.troops.create(world, { x: fx + 0.5, y: world.groundTop[fx], side: 'right', style: 'modern', facing: -dir });
 pwApp.stepWorld(90);
 const r0 = (u.mag ?? 0) + (u.ammo ?? 0);
 clickAt(foe.x, foe.y - 12, 0);
@@ -105,7 +111,8 @@ tap('KeyF', 20);
 check((u.mag ?? 0) + (u.ammo ?? 0) < r1 && Math.sign(u.facing) === -dir, 'F fires at the mouse - it turns to it');
 
 // 5. Shift+right-click still sends it on an order.
-const goal = Math.round(u.x + 200 * dir);
+let goal = Math.round(u.x + 200 * dir);
+for (let k = 0; k < 20 && PW.gameUI.command().unitAt(goal, world.groundTop[goal] - 4); k += 1) goal += dir * 24;
 clickAt(goal, world.groundTop[goal] - 4, 2, { shiftKey: true });
 check(u.game.order.type === 'move' && Math.abs(u.game.order.x - goal) < 40, `Shift+right-click sends it there (${u.game.order.type})`);
 

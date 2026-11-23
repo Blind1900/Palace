@@ -87,8 +87,20 @@
       if (match.clock < brain.deployAt) return false;
       brain.deployAt = match.clock + between(DEPLOY_EVERY);
       // (a small army is built whatever it costs; past that it keeps HM back for its growth)
-      const army = G.unitsOf(match, side).filter((u) => !u.building).length;
+      const army = G.unitsOf(match, side).filter((u) => !u.building && !u.mount).length;
       const keep = army < 6 ? 20 : ARM_KEEP;
+      // (N103: now and then a turret on its base at its front, where the enemy will come - once it
+      // has a few men out)
+      if (army >= 4 && match.clock >= (brain.turretAt || 0) && G.canTurret && G.canTurret(match, side).ok
+        && G.purse(match, side).hm >= G.TURRET.hm + keep) {
+        brain.turretAt = match.clock + 50 + random() * 40;
+        const front = G.frontOf(match, side, true);
+        for (let k = 0; k < 5; k += 1) {
+          const r = G.placeTurret(match, side, front + dir() * (40 + k * 70 + random() * 30));
+          if (r.ok) { brain.turrets = (brain.turrets || 0) + 1; brain.last = `turret at ${r.mount.x}`; return true; }
+          brain.last = `turret: ${r.note}`;
+        }
+      }
       for (let k = 0; k < MIX.length; k += 1) {
         const kind = MIX[(brain.mixN + k) % MIX.length];
         const K = G.UNIT_KINDS[kind];
@@ -130,7 +142,7 @@
       if (match.clock < brain.bombardAt) return false;
       brain.bombardAt = match.clock + between(BOMBARD_EVERY);
       const foe = G.other(side);
-      const shooters = G.unitsOf(match, side).filter((u) => (u.kind === 'jet' || (u.kind === 'defence' && u.type === 'launcher')) && !u.building);
+      const shooters = G.unitsOf(match, side).filter((u) => (u.kind === 'jet' || (u.kind === 'defence' && u.type === 'launcher')) && !u.building && !u.mount);
       if (!shooters.length) return false;
       let fired = 0;
       for (const u of shooters) {

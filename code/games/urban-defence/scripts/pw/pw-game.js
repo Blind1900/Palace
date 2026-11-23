@@ -45,6 +45,13 @@
     armDevices(match);
     passes(match);
     current = match;
+    // N103: every turret base that stands takes its turret now, in the match's hands (one already
+    // seated, silent, before the match - freed)
+    if (PW.mounts) {
+      for (const u of world.defence || []) if (u.mount && !u.dead) { u.hold = false; adopt(u); }
+      PW.mounts.relay(world);   // (a plate the passes just dug through is laid again by it)
+      PW.mounts.sweep(world, { armed: true });
+    }
     alert(match, null, mode === 'watch' ? 'The computer plays both sides. Take either chair from the top bar.'
       : `You hold the ${human} capital. Destroy the enemy, then raise your capital over their ruins.`, '');
     return match;
@@ -62,8 +69,8 @@
       let ground = 0;
       for (const d of b.devices) {
         let u = null;
-        if (d.kind === 'turret' && D.TYPES.turret) u = D.create(world, { type: 'turret', x: d.x, y: d.y, facing: d.facing || 0, side, style, building: b.id });
-        else if (d.kind === 'interceptor' || d.kind === 'launcher') {
+        // (N103: the turrets are seated on their bases by the mounts sweep - below, and as bases rise)
+        if (d.kind === 'interceptor' || d.kind === 'launcher') {
           // (wheeled batteries stand on the ground by the building, the side towards the enemy)
           const dir = d.facing || (match.sides[side] ? match.sides[side].dir : 1);
           const x = Math.round(dir > 0 ? b.body.right + 60 + ground * 120 : b.body.left - 60 - ground * 120);
@@ -98,6 +105,14 @@
       if (last && mt[0] < last[1] + 200) last[1] = Math.max(last[1], mt[1]); else ranges.push([mt[0], mt[1]]);
     }
     for (const [m0, m1] of ranges) {
+      // N104: the mountain road tunnel (pw-road-tunnels) - portals on the flats at each foot, tall
+      // enough for the whole army, the road its vehicles' only way underground - bored at once, no
+      // side's (no barricades: it is the match's own way through)
+      if (PW.roadTunnels) {
+        if (m0 < lo || m1 > hi) continue;
+        const r = PW.roadTunnels.forMountain(world, m0, m1, { side: 'neutral', instant: true, barricades: false });
+        if (r.ok) { match.passes.push({ x0: r.tunnel.a, x1: r.tunnel.b, net: r.tunnel.net, road: r.tunnel.id }); continue; }
+      }
       // (the portals on the mountain's own dry foot: a lake against its flank stays a lake - the men
       // swim it - and the way starts on the far side of it, never across it)
       const a = dryAhead(world, Math.round(m0 - 30), 1), b = dryAhead(world, Math.round(m1 + 30), -1);
@@ -432,10 +447,11 @@
     for (const list of UNIT_LISTS) for (const u of match.world[list] || []) if (!u.dead && u.side === side) out.push(u);
     return out;
   }
-  // The POP a side's living army takes up (a building's own defences are the building's, not the army's).
+  // The POP a side's living army takes up (a building's own defences are the building's, not the
+  // army's; a turret on its base is a work, not a man - N103).
   function fielded(match, side) {
     let pop = 0;
-    for (const u of unitsOf(match, side)) if (!u.building) pop += (UNIT_KINDS[kindOf(u)] || { pop: 1 }).pop;
+    for (const u of unitsOf(match, side)) if (!u.building && !u.mount) pop += (UNIT_KINDS[kindOf(u)] || { pop: 1 }).pop;
     return pop;
   }
   // How big an army the side's people stand behind: its population - and while its towers are
@@ -509,6 +525,49 @@
     if (battery) carry(world, u, { type: 'hold' }); else match.autoClock = Math.min(match.autoClock || 0, 0.1);
     alert(match, side, `${K.label} deployed`, '', at.x);
     return { ok: true, unit: u };
+  }
+
+  // ---- Turrets (N103) -------------------------------------------------------------------------------
+  // A turret is set down on any flat ground the side can see - on the land, or on a tunnel room's
+  // floor: a base laid there (PW.mounts) and the turret seated on it. It costs HM, and a side keeps
+  // as many as its military bases' levels allow; it is a work, not a man - it takes no POP.
+  const TURRET = { label: 'TURRET', hm: 60, per: 3 };
+  const turretsOf = (match, side) => (match.world.mounts || []).filter((m) => m.placedBy === side && !m.spent).length;
+  const turretCap = (match, side) => Math.max(2, TURRET.per * bases(match, side).reduce((n, b) => n + (b.level || 1), 0));
+  function canTurret(match, side) {
+    if (match.over) return { ok: false, note: 'the match is over' };
+    if (!bases(match, side).length) return { ok: false, note: 'needs a military base' };
+    if (purse(match, side).hm < TURRET.hm) return { ok: false, note: `needs ${TURRET.hm} HM` };
+    const cap = turretCap(match, side);
+    if (turretsOf(match, side) >= cap) return { ok: false, note: `${cap} at most: more bases, more turrets` };
+    return { ok: true };
+  }
+  function placeTurret(match, side, x, y) {
+    const can = canTurret(match, side);
+    if (!can.ok) return can;
+    const world = match.world, M = PW.mounts;
+    if (!M) return { ok: false, note: 'no turret bases' };
+    x = Math.round(x);
+    if (x < 60 || x > world.width - 60) return { ok: false, note: 'off the map' };
+    if (PW.vision && !PW.vision.sees(world, side, x)) return { ok: false, note: 'beyond your vision' };
+    const st = match.sides[side], info = { near: x, side, style: st.style, facing: st.dir, road: true };
+    // (clicked under the ground - in a tunnel's room: its floor; else the land there)
+    const under = Number.isFinite(y) && y > world.groundTop[x] + 8;
+    const m = under ? M.place(world, x - 80, x + 80, { ...info, room: true, top: Math.round(y) - 12, bottom: Math.round(y) + 70, at: 'room' })
+      : M.place(world, x - 80, x + 80, { ...info, at: 'land' });
+    if (!m) return { ok: false, note: 'no flat ground there' };
+    m.placedBy = side;
+    world.stock[side].hm -= TURRET.hm;
+    M.sweep(world, { armed: true });
+    alert(match, side, 'TURRET set on its base', '', m.x);
+    return { ok: true, mount: m };
+  }
+  // (a turret seated by the mounts sweep joins the match: its side's, holding where it stands)
+  function adopt(u) {
+    const match = current;
+    if (!match || !u) return;
+    u.game = { side: u.side, kind: 'turret', base: u.building || 0, order: { type: 'hold' }, goal: null, born: match.clock };
+    if (PW.units && PW.units.order) PW.units.order(match.world, u, { type: 'hold' });
   }
 
   // Orders: move to a spot, attack a spot or a target, hold where it stands, or 'auto' - on its own
@@ -668,5 +727,5 @@
 
   PW.game = { create, step, alert, takeOver, handBack, purse, frontOf, seed, ownerOf, other, SIDES,
     UNIT_KINDS, bases, unitsOf, kindOf, fielded, armyCap, canDeploy, deploy, order, standing, ruinsAt, buildingsOf, livingCore,
-    HACK_TIME, rules, cover, standAt };
+    HACK_TIME, rules, cover, standAt, TURRET, canTurret, placeTurret, turretCap, adopt, current: () => current };
 })();

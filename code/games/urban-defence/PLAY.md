@@ -33,6 +33,9 @@ The game runs straight from its files. There's no server or install, and it does
 - **Pause**: P (or PAUSE on the top bar).
 - **Build**: SEED CAPITAL, SEED FARM and SEED MILITARY plant seeds, only where your side can see. Cities, farms and bases grow from them by themselves.
 - **Deploy**: the unit buttons on the bottom bar deploy from your front base, or from the base you've selected. A base's level decides what it can deploy. Each unit costs HM, and your army can't outgrow your population.
+- **Turrets**: TURRET (60 HM), then click flat ground your side can see, or the floor of a tunnel room. A turret base is laid there and a turret seated on it. You can have 3 per level of your military bases. Turrets don't take population.
+  - **Building turrets**: military buildings and big towers have turret bases on their roofs.
+  - **Losing one**: if a base is blown, its turret is lost. A building's base comes back with the building, and its turret returns a little later.
 - **Hack**: select one trooper and Shift+right-click an enemy base or tower. It goes up to the control panel on the top floor, and hacks it if it stays there 15 seconds. (You can also drive it there yourself.)
   - A military base: some of its defences go silent for a while.
   - A tower: you see what the enemy sees for a while.

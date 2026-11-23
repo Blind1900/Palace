@@ -143,6 +143,10 @@
     // releaseBuilding lays the leaving bed's span, connectCore clears its window; the frozen
     // pool of ~350 breaks drained to ~13 on the seed-7 probe). flags=STANDING_TOWNS turns it off.
     if (capital && PW.ADOPT_TOWNS !== false && !PW.STANDING_TOWNS) capital.adoptSettlements();
+    // N103: the world's own turret bases - before its military on the land, in its bases' rooms
+    // (laid once the towns have joined the growth: their grading would take a plate laid before).
+    // The game's world only: the sandbox is the physics' bench, its ground as it was made.
+    if (PW.mounts && !gallery && gameMode) world.mountsSeeded = PW.mounts.seed(world);
     // Ground that loses its footing breaks loose: cave-ins, landslides and avalanches.
     stability = world.stability = PW.createStability ? PW.createStability(world, particles) : null;
     // Air pressure and wind, worked only where a blast has stirred it.
@@ -674,6 +678,11 @@
       if (PW.mining) PW.mining.step(world, DT);
       if (pipes) pipes.step();
       if (repair) repair.step(DT);
+      // N103: a turret on every base that stands - in the game (the sandbox's roofs keep their bases
+      // bare: it is the physics' bench; the capital lab shows them, silent)
+      if (PW.mounts && gameMode) PW.mounts.step(world, { armed: !!match });
+      // N104: the mountain road tunnels' bores go on; their barricades are kept
+      if (PW.roadTunnels) PW.roadTunnels.step(world, DT * devSpeed);
       if (growth) growth.step(DT);
       // (seed cities grow at the dev speed, like the lab's controllable speeds)
       if (capital) capital.step(DT * devSpeed);

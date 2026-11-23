@@ -118,8 +118,8 @@
           if (PW.mat.phase[PW.get(world, x, y) & ID_MASK] < PW.PHASE.SOLID || own(x, y)) continue;
           const m = PW.get(world, x, y), id = m & ID_MASK;
           // (a remnant of the fallen building - still its own, or come to rest as a ruin or
-          // packed rubble - is shattered by the core's field)
-          if ((PW.getOwner(world, x, y) === b.id && PW.mat.structural[id] && PW.mat.breaksTo[id]) || id === M.RUIN || id === M.RUBBLE) {
+          // packed rubble, or the burnt head of its roof turret, N103 - is shattered by the core's field)
+          if ((PW.getOwner(world, x, y) === b.id && PW.mat.structural[id] && PW.mat.breaksTo[id]) || id === M.RUIN || id === M.RUBBLE || (M.WRECK && id === M.WRECK)) {
             PW.set(world, x, y, PW.mat.breaksTo[id] || M.DEBRIS);
             PW.setOwner(world, x, y, 0);
             continue;

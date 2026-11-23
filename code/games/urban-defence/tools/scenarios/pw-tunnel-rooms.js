@@ -25,11 +25,31 @@ check(rooms.every((r) => halls.every((h) => r.floor - r.top > h.floor - h.top)),
 check(plan.doors.length === plan.sections.length - 1, `a door frame at every meeting (${plan.doors.map((d) => d.type).join(', ')})`);
 const dug = T.carveTunnel(world, net, plan);
 check(dug.cells > 50000, `dug (${dug.cells} cells)`);
+// N109: every roof stands 1.5% higher than laid out (in whole rows) - read as dug, before the lining
+// casts the overbreak back to the profile
+const segs = T.state(world).segments.filter((s) => s.net === net.id);
+const raised = plan.sections.map((s) => {
+  const h = s.floor - s.top, want = Math.ceil(h * 0.015);
+  const mid = Math.round((s.x0 + s.x1) / 2), seg = segs.find((g) => mid >= g.x0 && mid <= g.x1 && g.y1 >= s.floor - 2);
+  return { s, h, want, got: seg ? s.top - seg.y0 : -1 };
+});
+check(raised.every((r) => r.got >= r.want), `N109: each hall and room roof is raised 1.5% (${raised.map((r) => `${r.s.type} ${r.h}+${r.got}`).join(', ')})`);
 // (developed: lined and fitted in the faction's look, the types worked in)
 T.advanceTo(world, (T.state(world).time || 0) + 1e6);
 const open = (px, py) => (PW.get(world, px, py) & PW.ID_MASK) === PW.M.AIR;
-check(plan.sections.every((s) => open(Math.round((s.x0 + s.x1) / 2), s.floor - 5) && open(Math.round((s.x0 + s.x1) / 2), s.top + 3)),
+// (read clear of a room's turret base, N103 - it stands on the floor, 6 rows tall)
+const clearCol = (s) => {
+  const mid = Math.round((s.x0 + s.x1) / 2);
+  const plated = (x) => (world.mounts || []).some((m) => x >= m.base.x0 - 2 && x <= m.base.x1 + 2 && m.base.y + PW.mounts.BASE_H >= s.floor - 1 && m.base.y < s.floor);
+  // (within the room's full-height middle - its shoulders stand lower)
+  const sh = s.kind === 'room' ? Math.min(48, Math.round((s.x1 - s.x0) * 0.18)) + 2 : 2;
+  for (let x = mid, k = 1; x >= s.x0 + sh && x <= s.x1 - sh; x = mid + (k % 2 ? 1 : -1) * Math.ceil(k / 2) * 6, k += 1) if (!plated(x)) return x;
+  return mid;
+};
+check(plan.sections.every((s) => open(clearCol(s), s.floor - 5) && open(clearCol(s), s.top + 3)),
   'each hall and room is open from its floor to its roof');
+const roomBases = (world.mounts || []).filter((m) => m.network === net.id);
+check(roomBases.length >= 1, `the rooms house turret bases (N103: ${roomBases.length})`);
 const framed = plan.doors.every((d) => (PW.getFlags(world, d.x - 3, d.floor - 10) & PW.FLAG.FIXTURE) !== 0);
 check(framed, 'the door frames stand at the meetings');
 // A trooper walks it end to end.

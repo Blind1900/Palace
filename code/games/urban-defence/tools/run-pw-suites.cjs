@@ -38,6 +38,8 @@ const SUITES = [
   { name: 'pw-game-win', params: 'mode=game&start=versus&side=left&det=1' },
   // N102: the unit in hand - stands unless its keys are held, jumps, fires where the mouse is
   { name: 'pw-game-hand', params: 'mode=game&start=versus&side=left&det=1' },
+  // N103: turrets on their bases - on the roofs, the land and the tunnel rooms; set down by a click
+  { name: 'pw-turret-mounts', params: 'mode=game&start=versus&side=left&det=1' },
   // N8: the game is the main page, opened from disk as a downloaded copy is; the old beta still loads
   { name: 'pw-main-page', page: 'index.html', file: true, alone: true, ready: "!!document.getElementById('gm-menu')" },
   // (the old beta makes its world from Math.random: seeded, the same world each run - unseeded it
@@ -45,6 +47,9 @@ const SUITES = [
   { name: 'pw-beta-legacy', page: 'beta-legacy.html', mathSeed: true },
   // N97: a sloped tower and its military wing, and the wing and its neighbour, meet with no gap
   { name: 'pw-mil-join', alone: true, page: 'capital-lab.html', ready: 'window.pwLab && pwLab.ready', params: 'det=1' },
+  // N104: a road through the mountain - portals on the flats, tall enough for the army, barricaded
+  { name: 'pw-road-tunnel', alone: true, page: 'capital-lab.html', ready: 'window.pwLab && pwLab.ready', params: 'det=1' },
+  { name: 'pw-road-tunnel-base', page: 'capital-lab.html', ready: 'window.pwLab && pwLab.ready', params: 'det=1' },
   // N88: halls and rooms - hallways opening through door frames into rooms of every size
   { name: 'pw-tunnel-rooms', params: 'det=1' },
   // N5: the item bar, drills and dirt tunnels, guards, turrets, orders, the sentry, a skirmish

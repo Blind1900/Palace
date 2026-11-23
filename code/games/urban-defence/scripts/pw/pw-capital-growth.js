@@ -138,6 +138,20 @@
       return land;
     }
     const barriers = computeBarriers();
+    // N104: the whole massif a mountain barrier belongs to - its flanks, the shelves and saddles
+    // between them (pieces within RANGE_GAP of each other are one mountain to a road through it)
+    const RANGE_GAP = 260;
+    function mountainRange(b) {
+      const ms = barriers.filter((q) => q.kind === 'mountain');
+      let x0 = b.x0, x1 = b.x1, grew = true;
+      while (grew) {
+        grew = false;
+        for (const q of ms) {
+          if (q.x1 >= x0 - RANGE_GAP && q.x0 <= x1 + RANGE_GAP && (q.x0 < x0 || q.x1 > x1)) { x0 = Math.min(x0, q.x0); x1 = Math.max(x1, q.x1); grew = true; }
+        }
+      }
+      return [x0, x1];
+    }
     function barrierIn(xa, xb) {
       const x0 = Math.min(xa, xb), x1 = Math.max(xa, xb);
       let hit = null;
@@ -898,7 +912,30 @@
       let far = cursor + dir * (w + 6);
       if (far < 80 || far > world.width - 80) { city.blocked[side] = 'edge'; return false; }
       const b = barrierIn(cursor, far);
-      if (b) {
+      // N104 (the user's): a mountain is no wall to wait at for a population or military city - the
+      // one that reaches its foot bores a road through it (pw-road-tunnels: portals on the flats at
+      // each foot, tall enough for the whole army). The spread waits while the bore goes on and carries
+      // on past the far portal once it is through. (Water still waits for the level.)
+      // (a city grown from a seed - the world's own standing towns, adopted, keep to their old ways:
+      // the match's passes give the armies a road through the ranges between the capitals)
+      if (b && b.kind === 'mountain' && PW.roadTunnels && !city.adopted && (city.kind === 'capital' || city.kind === 'military')) {
+        const [m0, m1] = mountainRange(b);
+        const r = PW.roadTunnels.forMountain(world, m0, m1, { side: city.faction || 'neutral', style: city.style, by: city.id, from: dir > 0 ? 'a' : 'b' });
+        if (!r.ok) { city.blocked[side] = 'mountain'; if (city.roadWhy !== r.note) { city.roadWhy = r.note; note(city, `the mountain: ${r.note}`); } return false; }
+        const t = r.tunnel;
+        if (!(city.tunnels || []).some((q) => q.road === t.id)) {
+          (city.tunnels = city.tunnels || []).push({ road: t.id, x0: m0, x1: m1, nearX: dir > 0 ? t.a : t.b, farX: dir > 0 ? t.b : t.a });
+          note(city, 'a road is bored through the mountain');
+        }
+        if (!t.done) { city.blocked[side] = 'boring'; return false; }
+        // (the next lot seats clear of the far portal's approach)
+        cursor = dir > 0 ? Math.max(cursor, t.b + 40) : Math.min(cursor, t.a - 40);
+        lot.massEdge = cursor;                      // born on the far side: it stays there (N43)
+        far = cursor + dir * (w + 6);
+        if (far < 80 || far > world.width - 80) { city.blocked[side] = 'edge'; return false; }
+        if (barrierIn(cursor, far)) { city.blocked[side] = 'mountain'; return false; }
+        city.blocked[side] = null;
+      } else if (b) {
         if (city.level < UNLOCK) { city.blocked[side] = b.kind; return false; }
         if (b.kind === 'water') {
           if (b.x1 - b.x0 > CAPITAL_BRIDGE_MAX) { city.blocked[side] = 'water-wide'; return false; }
@@ -1200,7 +1237,24 @@
       }
       paveSegment(city, city.edge.left, city.edge.right);
       note(city, `level ${city.level}: the centre tightens`);
+      mountainRoad(city);
       return true;
+    }
+    // N104 (the user's): a mountain base come to half its height of levels (a base's top is MIL_TOP)
+    // bores a road through its mountain - portals on the flats at each foot (pw-road-tunnels), once;
+    // one already through it, anyone's, is the one it uses
+    const MIL_TOP = 6;
+    function mountainRoad(city) {
+      if (city.kind !== 'military' || city.setting !== 'mountain' || !PW.roadTunnels) return;
+      if (city.level < Math.ceil(MIL_TOP / 2) || (city.tunnels || []).some((q) => q.road)) return;
+      const b = barrierIn(city.x - 400, city.x + 400);
+      if (!b || b.kind !== 'mountain') return;
+      const [m0, m1] = mountainRange(b);
+      const r = PW.roadTunnels.forMountain(world, m0, m1, { side: city.faction || 'neutral', style: city.style, by: city.id, from: city.x < (m0 + m1) / 2 ? 'a' : 'b' });
+      if (r.ok) {
+        (city.tunnels = city.tunnels || []).push({ road: r.tunnel.id, x0: m0, x1: m1 });
+        note(city, r.tunnel.by === city.id ? 'the base bores a road through its mountain' : 'the base takes the road through its mountain');
+      } else if (city.roadWhy !== r.note) { city.roadWhy = r.note; note(city, `the mountain: ${r.note}`); }
     }
 
     // ---- Farms (N46): fields first, outbuildings sometimes -----------------------------------
@@ -1636,7 +1690,7 @@
     // ---- Military ----------------------------------------------------------------------------
     const MIL_MAIN = ['compound', 'fortress', 'command', 'bastion'];
     function militaryAct(city) {
-      if (city.actions % 3 === 2 && city.level < 6 && !nearBlast(city.capEdge.left, city.capEdge.right)) {
+      if (city.actions % 3 === 2 && city.level < MIL_TOP && !nearBlast(city.capEdge.left, city.capEdge.right)) {
         city.level += 1;
         eraseLot(city.main);
         city.main.level = city.level;
@@ -1648,6 +1702,7 @@
         layRunway(city);          // N57: the door moved with the bigger base - the strip follows
         adaptNeighbours(city);    // N57: the neighbours' bases adapt to the reshaped ground
         note(city, `dug in deeper: level ${city.level}`);
+        mountainRoad(city);
         return true;
       }
       const side = city.actions % 2 ? 'left' : 'right';
@@ -2182,7 +2237,8 @@
     }
 
     const api = { cities, barriers, drop, adoptSettlements, step, draw, describe, dbg, regrades: () => regradeCount,
-      _adapt: adaptNeighbours };   // (test hook: the N57 neighbour re-seat, called by the harness)
+      _adapt: adaptNeighbours,     // (test hook: the N57 neighbour re-seat, called by the harness)
+      _levelUp: levelUp, mountainRange };   // (N104: a level-up by hand for the suites; the massif a barrier is part of)
     world.capitalGrowth = api;     // N2: vision reads the engine's cities off the world
     return api;
   }

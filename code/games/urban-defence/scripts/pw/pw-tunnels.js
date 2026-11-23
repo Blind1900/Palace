@@ -23,6 +23,9 @@
   const SET_PITCH = 36;    // timber sets 2.5 m apart
   const RIB_PITCH = 40;    // steel ribs 2.8 m apart
   const LAMP_PITCH = 64;
+  const ROOF_RAISE = 0.015;  // N109: roofs 1.5% higher than laid out, in whole rows (more head room)
+  const ROOF_COVER = 6;      // ...but never within this many rows of the surface
+  const ROAD_CLEAR = 96;     // N104: a road tunnel's open rows over its road (pw-road-tunnels' CLEAR)
   const OWNER_BASE = 50000;
 
   const rgb = (c) => PW.abgr(c[0] | 0, c[1] | 0, c[2] | 0);
@@ -516,16 +519,27 @@
     const { mat, width: W, height: H } = world;
     [x0, x1] = [Math.max(1, Math.round(Math.min(x0, x1))), Math.min(W - 2, Math.round(Math.max(x0, x1)))];
     [y0, y1] = [Math.max(1, Math.round(Math.min(y0, y1))), Math.min(H - 2, Math.round(Math.max(y0, y1)))];
+    const kind = options.kind || (y1 - y0 > (x1 - x0) * 1.5 ? 'shaft' : x1 - x0 > 120 && y1 - y0 > 40 ? 'room' : 'drift');
+    // N109 (the user's): every roof stands ROOF_RAISE higher than it was laid out - more head room,
+    // in whole rows (a row for a hallway, two or three for the great rooms) - unless that would
+    // bring it within ROOF_COVER of the surface (a shallow drive keeps its roof). A shaft is a
+    // shaft: no roof to raise.
+    if (kind !== 'shaft' && !options.exact) {
+      const raise = Math.ceil((y1 - y0 + 1) * ROOF_RAISE);
+      let cover = Infinity;
+      for (let x = x0; x <= x1; x += 4) cover = Math.min(cover, y0 - raise - world.groundTop[x]);
+      if (cover >= ROOF_COVER) y0 = Math.max(1, y0 - raise);
+    }
     for (let y = y0; y <= y1; y += 1) {
       for (let x = x0; x <= x1; x += 1) {
         const id = mat[y * W + x] & ID_MASK;
         if (id !== M.REINFORCED) continue;
         const other = networkOfOwner(world, PW.getOwner(world, x, y));
-        if (other && other.side !== net.side) return { ok: false, blocked: true, at: { x, y }, by: other.id, cells: 0 };
+        // (a mountain road tunnel's lining stops no one: the miners' drifts cross it as they go - N104)
+        if (other && other.side !== net.side && other.use !== 'road') return { ok: false, blocked: true, at: { x, y }, by: other.id, cells: 0 };
       }
     }
-    const seg = { id: T.segments.length + 1, net: net.id, x0, y0, x1, y1,
-      kind: options.kind || (y1 - y0 > (x1 - x0) * 1.5 ? 'shaft' : x1 - x0 > 120 && y1 - y0 > 40 ? 'room' : 'drift') };
+    const seg = { id: T.segments.length + 1, net: net.id, x0, y0, x1, y1, kind };
     T.segments.push(seg);
     const fresh = [];
     const breached = new Set();
@@ -870,10 +884,10 @@
     const mid0 = Math.round((x0 * 2 + x1) / 3), mid1 = Math.round((x0 + x1 * 2) / 3);
     let padCells = 0;
     for (let x = x0; x <= x1; x += 1) {
-      // The middle third is cleared to head height (formations there give way to the pad; the
-      // ones either side stay as the cave's own decoration).
+      // The middle third is cleared to head height - a turret's on its base, N103 (formations there
+      // give way to the pad; the ones either side stay as the cave's own decoration).
       if (x >= mid0 && x <= mid1) {
-        for (let y = floorY - 40; y < floorY; y += 1) if (solidAt(world, x, y)) { PW.set(world, x, y, M.AIR, { quiet: true }); PW.setLayer(world, 'deco', x, y, 0); }
+        for (let y = floorY - 48; y < floorY; y += 1) if (solidAt(world, x, y)) { PW.set(world, x, y, M.AIR, { quiet: true }); PW.setLayer(world, 'deco', x, y, 0); }
       }
       // The floor: filled up from the bowl's rock in solid courses, flagged on top.
       let depth = 0;
@@ -969,7 +983,7 @@
   }
   // Dig the plan for the network: each hall one box, each room a vault - its middle at full height,
   // its shoulders lower, so the roof steps down to its walls - then the door frames.
-  function carveTunnel(world, net, plan) {
+  function carveTunnel(world, net, plan, opts = {}) {
     const T = state(world), cells0 = net.cells;
     for (const s of plan.sections) {
       const span = { x0: s.x0, x1: s.x1, top: s.top, floor: s.floor, kind: s.kind, type: s.type };
@@ -983,11 +997,22 @@
       }
       for (const [x0, y0, x1, y1] of boxes) {
         const r = digBox(world, net, x0, y0, x1, y1, { kind: s.kind === 'hall' ? 'drift' : 'room' });
-        if (r.ok) { r.segment.type = s.type; r.segment.span = span; }
+        // (the type's art reads from the roof as dug - raised a row or so, N109)
+        if (r.ok) { r.segment.type = s.type; r.segment.span = span; span.top = Math.min(span.top, r.segment.y0); }
       }
     }
     for (const d of plan.doors) doorFrame(world, net, d);
-    return { cells: net.cells - cells0, segments: T.segments.length };
+    // N103: a turret on its base in each room (60 rows and more: room for it), set back from the door
+    // it guards - the one it was come at by, along the way the tunnel runs
+    let turrets = 0;
+    if (PW.mounts && opts.turrets !== false) for (const s of plan.sections) {
+      if (s.kind !== 'room') continue;
+      const door = plan.dir > 0 ? s.x0 : s.x1;
+      const m = PW.mounts.room(world, s.x0, s.x1, s.floor, s.floor - s.top, { side: net.side || 'neutral', style: net.style,
+        facing: -plan.dir, near: door + plan.dir * 70 });
+      if (m) { m.network = net.id; turrets += 1; }
+    }
+    return { cells: net.cells - cells0, segments: T.segments.length, turrets };
   }
   // A door frame where a hall meets a room: two posts and a lintel at the hall's roof, drawn as a
   // fixture over the back wall (development paints round it).
@@ -1086,6 +1111,31 @@
         if (rise <= 1 && mod(along, 40) < 24) return [214, 180, 56];                                         // guide lines
         if (mod(along, 40) <= 1 && rise > 6) return dim(1.25);
         return c;
+      case 'road': {
+        // N104: a mountain road tunnel's walls, after the motorway bores: the walkway's kerb low on
+        // the wall, pale tiles to door height under an amber band, strip lights along the wall, jet
+        // fans hung under the crown every 220 cells, an emergency niche - its green sign - every 250
+        // (its floor slopes portal to portal: rows are read from the road under this column)
+        const f = s.floorAt ? s.floorAt(x) : s.floor, r = f - 1 - y, top = f - ROAD_CLEAR, ft = y - top;
+        if (r < 0) return c;
+        const niche = mod(along, 250);
+        if (niche >= 200 && niche < 230 && r >= 6 && r < 44) {
+          if (r >= 38) return niche >= 206 && niche < 224 ? [46, 168, 92] : [36, 40, 38];                       // the green sign
+          return niche === 200 || niche === 229 || r === 37 ? [70, 74, 72] : [28, 32, 30];                       // the niche
+        }
+        if (r <= 5) return r === 5 ? [198, 198, 190] : mod(x, 12) === 0 ? [104, 104, 98] : [132, 132, 126];      // walkway kerb
+        if (r < 34) return mod(x, 10) === 0 || mod(r, 9) === 0 ? [150, 156, 152] : [206, 212, 206];              // tiles
+        if (r === 34 || r === 35) return [204, 152, 40];                                                       // amber band
+        const fan = mod(along, 220);
+        if (ft >= 6 && ft <= 18 && fan >= 100 && fan < 140) {                                                    // jet fan
+          if (ft === 6 || ft === 18) return [58, 60, 64];
+          return mod(fan, 5) === 0 ? [40, 42, 46] : fan < 104 || fan > 135 ? [70, 72, 78] : [96, 100, 106];
+        }
+        if (ft >= 1 && ft < 6 && (fan === 108 || fan === 131)) return [70, 72, 76];                            // its hangers
+        if (r === 52 && mod(along, 24) < 14) return [242, 246, 236];                                           // strip lights
+        if (r === 51 || r === 53) return mod(along, 24) < 14 ? [180, 186, 176] : c;
+        return ft < 10 ? dim(0.7 + ft * 0.03) : c;
+      }
       default: return c;
     }
   }

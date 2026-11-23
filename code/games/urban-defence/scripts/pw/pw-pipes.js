@@ -1522,6 +1522,50 @@
       for (let k = a; k <= bk; k += 1) if (line.broken[k] && intactAt(line, line.x0 + k)) clearBroken(line, k);
       return core;
     }
+    // N104: a road bored through a mountain carries the bundle with it - every line crossing [x0, x1]
+    // is taken up and laid again on rowAt(x) (under the road's bed), easing back to its own run over
+    // RAMP columns either side - the splice above, along a given line instead of the ground's.
+    function relayAlong(x0, x1, rowAt) {
+      let moved = 0;
+      const X0 = Math.round(x0), X1 = Math.round(x1);
+      for (const line of lines) {
+        if (X1 < line.x0 || X0 > line.x1) continue;
+        // (the ease is long enough that the line never climbs more than its grade allows on the way
+        // in or out - a short ease stepped it storeys a column, and the lanes could not pass)
+        const at = (x) => line.ys[Math.max(0, Math.min(line.ys.length - 1, x - line.x0))];
+        const ramp = Math.max(RAMP, Math.ceil(Math.max(Math.abs(rowAt(X0) - at(X0)), Math.abs(rowAt(X1) - at(X1))) / 1.4));
+        const a = Math.max(0, X0 - ramp - line.x0), bk = Math.min(line.ys.length - 1, X1 + ramp - line.x0);
+        if (bk - a < 2) continue;
+        const rsnap = snapRisers(line);
+        const ease = (t) => t * t * (3 - 2 * t);
+        for (let k = a; k <= bk; k += 1) {
+          const x = line.x0 + k, old = line.ys[k];
+          // (full depth inside the span, eased in over the ramp at either end - and never moved at a
+          // core's connectors: a town's beds by the portal keep the line where it plugs in)
+          const into = Math.min(x - X0 + ramp, X1 + ramp - x);
+          let near = Infinity;
+          for (const c of line.cores) near = Math.min(near, Math.abs(x - c.x));
+          const t = ease(Math.max(0, Math.min(1, into / ramp))) * ease(Math.max(0, Math.min(1, (near - SPAN - 2) / ramp)));
+          const target = rowAt(Math.max(X0, Math.min(X1, x)));
+          const ny = Math.round(old + (target - old) * t);
+          if (ny === old) continue;
+          for (let r = -1; r <= BORE; r += 1) {
+            takeUp(line, x, old + r);
+            if (r >= 0 && r < BORE) PW.setLayer(world, 'pipe', x, old + r, 0);
+          }
+          line.ys[k] = ny;
+          moved += 1;
+        }
+        if (!moved) continue;
+        for (let k = a; k <= bk; k += 1) layColumn(line, line.x0 + k);
+        layWells(line, Math.max(1, a - FIT_RELAY), Math.min(line.ys.length - 1, bk + FIT_RELAY));
+        relayMovedRisers(line, rsnap);
+        enforceGrade(line, a, bk);
+        for (let k = a; k <= bk; k += 1) if (line.broken[k] && intactAt(line, line.x0 + k)) clearBroken(line, k);
+      }
+      return moved;
+    }
+    const FIT_RELAY = 5;
     // Is the line carrying from (x) to the core? (no break between them)
     function flowing(line, x) {
       const a = Math.min(x, line.coreX), b = Math.max(x, line.coreX);
@@ -1962,7 +2006,7 @@
       }
     }
 
-    const api = { build, step, draw, attach, carry, connectCore, releaseBuilding, releaseSeedCore, notifyDamage, openEnds, unite, lines, stats, flowing, lineFor, contour, BORE, BED, LANES, TAPS };
+    const api = { build, step, draw, attach, carry, connectCore, releaseBuilding, releaseSeedCore, notifyDamage, openEnds, unite, lines, stats, flowing, lineFor, contour, relayAlong, BORE, BED, LANES, TAPS };
     return api;
   }
 

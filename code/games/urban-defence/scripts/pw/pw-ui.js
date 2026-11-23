@@ -137,6 +137,8 @@
     { id: 'seed:capital', label: 'SEED CAPITAL', tip: 'Plant a capital seed in your vision' },
     { id: 'seed:farm', label: 'SEED FARM', tip: 'Plant a farm seed in your vision' },
     { id: 'seed:military', label: 'SEED MILITARY', tip: 'Plant a military seed in your vision' },
+    // N103: a turret set on its base on flat ground (or a tunnel room's floor) in your vision
+    { id: 'turret', label: 'TURRET 60', tip: 'Set a turret on its base on flat ground in your vision (60 HM)' },
   ];
 
   let cmd = null, attachedAt = 0, slowTold = false, fpsSum = 0, fpsN = 0;
@@ -215,7 +217,7 @@
       }
     }
     // (the seed and deploy tools are for the side a person plays)
-    bar.querySelectorAll('[data-tool^="seed:"], [data-deploy]').forEach((b) => { if (!match.human) b.disabled = true; else if (b.dataset.tool) b.disabled = false; });
+    bar.querySelectorAll('[data-tool^="seed:"], [data-tool="turret"], [data-deploy]').forEach((b) => { if (!match.human) b.disabled = true; else if (b.dataset.tool) b.disabled = false; });
     refreshDeploys();
     renderSel();
   }
@@ -291,6 +293,13 @@
       if (r.ok) setTool('select');
       return true;
     }
+    if (event.button === 0 && gameTool === 'turret') {
+      if (!match.human) return true;
+      const r = PW.game.placeTurret(match, match.human, p.x, p.y);
+      if (PW.notify) PW.notify.flash(r.ok ? 'Turret set on its base' : `Turret: ${r.note}`, r.ok ? 'good' : 'bad', 2.5);
+      if (r.ok) setTool('select');
+      return true;
+    }
     // N102: the unit in hand fires where the person clicks - left its weapon, right its second (a
     // grenade, the other round, a missile); a click on an enemy is a shot at it, on another unit of
     // one's own takes that one instead. Shift keeps the hand's other ways: Shift+click and
@@ -317,6 +326,12 @@
     cursor = p;
     if (!match) return;
     if (down.box) cmd.boxMove(p);
+    if (gameTool === 'turret' && match.human) {
+      const sees = !PW.vision || PW.vision.sees(match.world, match.human, Math.round(p.x));
+      const can = PW.game.canTurret(match, match.human);
+      if (PW.notify) PW.notify.cursor(!sees ? 'Beyond your vision' : can.ok ? 'Set a turret here (flat ground)' : `Turret: ${can.note}`, sees && can.ok ? '' : 'bad');
+      return;
+    }
     if (!gameTool.startsWith('seed:') || !match.human) return;
     const sees = !PW.vision || PW.vision.sees(match.world, match.human, Math.round(p.x));
     if (PW.notify) PW.notify.cursor(sees ? `Plant a ${gameTool.slice(5)} seed here` : 'Beyond your vision', sees ? '' : 'bad');

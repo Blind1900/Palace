@@ -351,22 +351,30 @@
   // ---- Rooftop devices ----------------------------------------------------------------------------------
   const DEVICE_STEEL = [70, 78, 86];
   const ROLE_ACCENT = { turret: [239, 173, 103], launcher: [241, 126, 120], interceptor: [139, 217, 238] };
+  // N103 (the user's turret redesign): the turret is no longer built into the roof - it stands on a
+  // turret base, a low steel plate set on the flat of the roof (or of the land, or a tunnel room's
+  // floor: pw-mounts lays those), its traversing ring on top. The turret itself is PS's (pw-defence):
+  // seated on the plate's top row, drawn over the world, coming off when the plate under it goes.
+  // This plate is the building's own - the crews rebuild it with the rest.
+  const BASE_W = 32, BASE_H = 6;
+  // The plate's colour at (dx, dy) - dy up from its foot: a dark flange, the bolted body, a hazard
+  // band, and the ring on top (the bearing dark in the middle, its lip lit at the ends).
+  function plateColor(dx, dy, tint = null) {
+    const end = dx === 0 || dx === BASE_W - 1;
+    let c;
+    if (dy === 0) c = [52, 56, 62];
+    else if (dy === BASE_H - 1) c = dx >= 6 && dx < BASE_W - 6 ? [70, 74, 80] : [124, 130, 138];
+    else if (dy === 3) c = ((dx + 64) >> 2) % 2 === 0 ? [214, 164, 40] : [40, 40, 44];
+    else if (dy === 2 && dx % 6 === 3) c = [150, 156, 162];
+    else c = dy === 4 ? [108, 114, 122] : [92, 98, 106];
+    if (tint) c = mix(c, tint, 0.18);
+    return end && dy !== 3 ? tone(c, 0.8) : c;
+  }
   function turret(c, P, x0, base, facing) {
-    const body = tone(P.frame, 0.8), w = 30;
-    for (let dy = 0; dy < 12; dy += 1) for (let dx = 0; dx < w; dx += 1) {
-      const slope = dy > 8 ? Math.max(0, dy - 8) : 0;
-      if (dx < slope || dx > w - 1 - slope) continue;
-      orn(c, x0 + dx, base - dy, dy === 0 ? tone(body, 0.7) : dy === 6 ? P.ornament : lit(body, dx - w / 2, w / 2), ROLE.DEVICE);
-    }
-    const hx = x0 + 6;
-    for (let dy = 12; dy < 21; dy += 1) for (let dx = 0; dx < 18; dx += 1) {
-      if (dy > 18 && (dx < 2 || dx > 15)) continue;
-      orn(c, hx + dx, base - dy, dy === 15 ? ROLE_ACCENT.turret : lit(body, dx - 9, 9), ROLE.DEVICE);
-    }
-    const muzzle = facing > 0 ? hx + 18 : hx - 1;
-    for (let k = 0; k < 18; k += 1) for (let t = 0; t < 3; t += 1) orn(c, muzzle + facing * k, base - 15 - t, t === 0 ? [96, 104, 112] : DEVICE_STEEL, ROLE.DEVICE);
-    c.devices.push({ kind: 'turret', x: x0 + w / 2, y: base - 16, facing });
-    return w;
+    for (let dy = 0; dy < BASE_H; dy += 1) for (let dx = 0; dx < BASE_W; dx += 1) orn(c, x0 + dx, base - dy, plateColor(dx, dy, P.ornament), ROLE.DEVICE);
+    const top = base - BASE_H + 1;
+    c.devices.push({ kind: 'turret', x: x0 + BASE_W / 2, y: top, facing, normal: [0, -1], base: { x0, x1: x0 + BASE_W - 1, y: top } });
+    return BASE_W;
   }
   function launcher(c, P, x0, base, facing) {
     const body = tone(P.frame, 0.8), w = 28;
@@ -402,7 +410,7 @@
     return w;
   }
   const DEVICE_DRAW = { turret, launcher, interceptor };
-  const DEVICE_WIDTH = { turret: 30, launcher: 28, interceptor: 22 };
+  const DEVICE_WIDTH = { turret: BASE_W, launcher: 28, interceptor: 22 };
   // Place devices on the highest, widest roofs, from the front edge, clear of crowns and each other.
   // facing 0 (neutral buildings) alternates the devices to cover both directions, starting with
   // `startFacing`.
@@ -422,6 +430,8 @@
           if (x < roof.left + 2 || x + w > roof.right - 2) break;
           if (crownHalf && x < mid + crownHalf && x + w > mid - crownHalf) continue;
           if (used.some((u) => u.y === roof.y && x < u.x + u.w + 3 && x + w + 3 > u.x)) continue;
+          // (never over a roof's drain hatch, N64 - nor hard by it: the rain must reach it - N103)
+          if ((c.hatches || []).some((h) => roof.y >= h.y0 - 2 && roof.y <= h.y1 + 2 && x < h.x1 + 8 && x + w + 8 > h.x0)) continue;
           DEVICE_DRAW[kind](c, P, x, roof.y - 1, facing);
           used.push({ x, w, y: roof.y });
           placed = true;
@@ -431,5 +441,6 @@
     }
   }
 
-  PW.buildingOrnaments = { roof, crown, crownFor, devices, CROWNS, angel, lotus, sorin, dragonBody, DEVICE_DRAW, gothicPinnacle, asianEave };
+  PW.buildingOrnaments = { roof, crown, crownFor, devices, CROWNS, angel, lotus, sorin, dragonBody, DEVICE_DRAW, gothicPinnacle, asianEave,
+    plateColor, BASE_W, BASE_H };
 })();

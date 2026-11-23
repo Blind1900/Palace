@@ -219,6 +219,10 @@
       // (repair and the pipeline ride the lab's speed, in step with the growth clock)
       if (repair) repair.step(DT * speed);
       if (pipes) pipes.step(DT * speed);
+      // N103: the lab's buildings' turrets on their bases (silent: the lab has no match)
+      if (PW.mounts) PW.mounts.step(world, { armed: false });
+      // N104: the mountain road tunnels' bores go on at the lab's growth speed
+      if (PW.roadTunnels) PW.roadTunnels.step(world, DT * speed);
       if (PW.tanks) PW.tanks.step(world, DT);   // (N3 vehicle rule: tanks test the lab's streets;
       // N77 rounds step inside it - the lab stays the suites' bench, so no looped flag here)
       if (stability) stability.step();

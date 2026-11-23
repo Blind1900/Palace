@@ -380,15 +380,15 @@
       const pair = !deviceFacing && c.devices.length === before;
       if (hangar && !vault) ornament.devices(c, style, [hangarRoof], pair ? ['turret', 'turret'] : ['turret'], deviceFacing || (pair ? 0 : facing), random, facing);
       else if (hangar) {
-        // Turrets on the vault: logical span [tx - 15, tx + 14], mirrored by X, at the crest's
-        // height on a steel mount built down to the curve of the roof.
+        // Turret bases on the vault (N103): logical span [tx - 16, tx + 15], mirrored by X, at the
+        // crest's height on a steel mount built down to the curve of the roof.
         const crest = wallTop - HANGAR.vaultRise;
         const mount = (tx, turretFacing) => {
-          for (let lx = tx - 15; lx <= tx + 14; lx += 1) {
+          for (let lx = tx - 16; lx <= tx + 15; lx += 1) {
             const u = (lx - hcx) / half, roof = wallTop - Math.round(HANGAR.vaultRise * Math.sqrt(Math.max(0, 1 - u * u)));
             for (let y = crest + 1; y < roof; y += 1) K.solid(c, X(lx), y, M.STEEL, tone(P.frame, 0.7), ROLE.DEVICE);
           }
-          ornament.DEVICE_DRAW.turret(c, P, Math.min(X(tx - 15), X(tx + 14)), crest, turretFacing);
+          ornament.DEVICE_DRAW.turret(c, P, Math.min(X(tx - 16), X(tx + 15)), crest, turretFacing);
         };
         mount(Math.round(hcx) + 10, deviceFacing || facing);
         if (pair) mount(Math.round(hcx) - 34, -facing);
@@ -668,7 +668,8 @@
     c.stairs = src.stairs.map((s) => ({ ...s, from: s.from + padL, to: s.to + padL }));
     c.hatches = (src.hatches || []).map((h) => ({ ...h, x0: h.x0 + padL, x1: h.x1 + padL }));
     c.doors = src.doors.map((d) => ({ ...d, x: d.x + padL }));
-    c.slots = src.slots.map(sx); c.panels = src.panels.map(sx); c.devices = src.devices.map(sx);
+    c.slots = src.slots.map(sx); c.panels = src.panels.map(sx);
+    c.devices = src.devices.map((d) => ({ ...sx(d), base: d.base && { ...d.base, x0: d.base.x0 + padL, x1: d.base.x1 + padL } }));
     c.windows = src.windows.map(sx); c.storage = (src.storage || []).map(sx);
     c.lamps = (src.lamps || []).map(sx);
     c.cores = src.cores.map((k) => ({ ...k, x: k.x + padL, vault: k.vault && { ...k.vault, x0: k.vault.x0 + padL, x1: k.vault.x1 + padL } }));
