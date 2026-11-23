@@ -53,6 +53,8 @@ const SUITES = [
   { name: 'pw-roofs', params: 'det=1' },
   // N100: rubble out on the land weathers into dirt - not on streets, rebuilt lots or the pipes
   { name: 'pw-weather', params: 'det=1' },
+  // N103: the turret - on the ground and on a wall, firing on its own; its base gone, it falls
+  { name: 'pw-turrets', params: 'det=1' },
 ].filter((s) => !args.only || args.only.split(',').includes(s.name));
 const root = path.resolve(__dirname, '..');
 const out = path.join(os.tmpdir(), 'claude-scratch', 'shots');

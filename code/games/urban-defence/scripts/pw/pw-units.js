@@ -28,7 +28,7 @@
     tank: { reach: 900, arc: 1.4, near: 80, every: 12 },
     mech: { reach: 700, arc: 1.4, near: 60, every: 10 },
     jet: { reach: 1400, arc: 0.9, near: 120, every: 8 },
-    turret: { reach: 520, arc: 1.31, near: 30, every: 10 },
+    turret: { reach: 720, arc: 1.31, near: 30, every: 10 },   // (an autocannon on its mount, its sensor head: N103)
   };
   const BORE_SEEN = 120;        // cells: a man in a secret dirt tunnel is seen no further off than this
   const REMEMBER = 3 * 60;      // ticks it keeps after an enemy it saw (where it went round a corner)
@@ -60,7 +60,8 @@
       case 'tank': return { x: u.x, y: u.y - 30 };
       case 'mech': return { x: u.x + u.facing * 14, y: u.y - (u.lift ?? 30) - 2 };   // (its head, forward of its body)
       case 'jet': return { x: u.x, y: u.y };
-      default: return { x: u.x, y: u.y - (u.type === 'turret' ? 4 : 30) };
+      // (a turret's: its sensor, on its head - see PW.defence's turrets, which keep it as u.eye)
+      default: return u.type === 'turret' && u.eye ? u.eye : { x: u.x, y: u.y - (u.type === 'turret' ? 4 : 30) };
     }
   }
   function body(u) {
@@ -69,7 +70,7 @@
       case 'tank': return { x: u.x, y: u.y - 14 };
       case 'mech': return { x: u.x, y: u.y - (u.lift ?? 30) };
       case 'jet': return { x: u.x, y: u.y };
-      default: return { x: u.x, y: u.y - (u.type === 'turret' ? 4 : 16) };
+      default: return u.type === 'turret' && u.pivot ? u.pivot : { x: u.x, y: u.y - (u.type === 'turret' ? 4 : 16) };
     }
   }
   const facingOf = (u) => (u.kind === 'defence' ? u.facing : u.facing || 1);

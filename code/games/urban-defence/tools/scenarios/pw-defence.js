@@ -112,7 +112,8 @@ const along = (x0, step, n) => Array.from({ length: n }, (_, k) => x0 + step * k
   const right = D.click(world, x + 1500, gy, 2);
   const left = D.click(world, x + 1500, gy, 0);
   D.hold(Tu);
-  const spot = { x: x + 500, y: world.groundTop[x + 500] - 30 };
+  // (within its gun's swing: a floor turret lays no lower than a little below level)
+  const spot = { x: x + 500, y: Math.min(world.groundTop[x + 500] - 30, Tu.pivot.y - 10) };
   D.click(world, spot.x, spot.y, 0);
   steps(1.5);
   S.fire = fireWas;

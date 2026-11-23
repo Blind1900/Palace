@@ -11,7 +11,9 @@
 //   proximity fuse's chance of destroying it (PW.shots' interceptor); one coming down on open
 //   ground it lets fall. A salvo bigger than its load gets partly through;
 // - a Patriot battery: further and higher, two to a threat as well - rockets, missiles, and the
-//   other side's jets (PW.shots' patriot).
+//   other side's jets (PW.shots' patriot);
+// - and a turret (N103): an autocannon on its base on a roof, the ground or a wall, firing on its own
+//   at the hostile units near it (see the turrets, below).
 // Each can be taken in hand (the user's: every unit can be controlled): a click aims a launcher, F
 // fires its salvo; a battery fights on its own - F holds or frees its fire. What strikes them comes
 // off their armour; destroyed, their ammunition goes up.
@@ -26,9 +28,9 @@
     launcher: { length: 104, ammo: 12, kind: 'rocket', hp: 60 },
     dome: { length: 90, ammo: 20, kind: 'interceptor', hp: 60, range: 4000, perThreat: 2, protect: true },
     patriot: { length: 110, ammo: 8, kind: 'patriot', hp: 70, range: 4500, perThreat: 2, protect: false, jets: true },
-    // a fixed autocannon seated on its mount on a military building's roof or wall (N6's devices):
-    // bursts at the enemy units it sees in its arc (see PW.units' sight) - facing 0, both ways
-    turret: { length: 12, ammo: 600, kind: 'cannon', hp: 30, burst: 6, rof: 1 / 9, rest: 1.4, fixed: true },
+    // an autocannon turret on its base on a roof, the ground, a tunnel room's floor or a wall (N103:
+    // see the turrets below) - bursts at the hostile units it sees; a box of rounds, reloaded
+    turret: { length: 26, ammo: 120, kind: 'cannon', hp: 45, burst: 5, rof: 1 / 7, rest: 0.9, reload: 4, fixed: true },
   };
   const RIPPLE = 0.15;          // s between a salvo's rockets
   const LAUNCH_GAP = 0.2;       // s between a battery's interceptors
@@ -61,10 +63,13 @@
     const type = TYPES[spec.type] ? spec.type : 'launcher', T = TYPES[type];
     const x = Math.round(spec.x), y = spec.y ?? groundUnder(world, x, 0);
     const u = { kind: 'defence', type, x, y, facing: T.fixed ? (spec.facing ?? 1) : spec.facing || 1, side: spec.side || null, style: STYLES[spec.style] ? spec.style : 'modern',
-      hp: T.hp, dead: false, ammo: T.ammo, salvo: 0, salvoT: 0, aim: null, gap: 0, look: 0, hold: false, engaged: new Map(), hurtBy: '',
+      hp: T.hp, dead: false, ammo: T.ammo, salvo: 0, salvoT: 0, aim: null, gap: 0, look: 0, hold: !!spec.hold, engaged: new Map(), hurtBy: '',
       building: spec.building || 0, burst: 0, burstT: 0, rest: 0, aimA: 0, seed: ++seq };
+    current = world;
+    if (type === 'turret') mountTurret(u, spec);
     (world.defence || (world.defence = [])).push(u);
     current = world;
+    if (type === 'turret') turretPose(u);
     return u;
   }
   // (where its tubes are, and which way they point: a Dome's near straight up - its interceptors
@@ -220,25 +225,43 @@
     u.dead = true;
     stats.destroyed += 1;
     if (held === u) held = null;
-    // (its ammunition goes up - a turret's a little, where it sits)
-    if (TYPES[u.type].fixed) { if (PW.explode) PW.explode(world, world.particles, { x: u.x, y: u.y - 4, radius: 5, power: 0.4 }); return; }
+    // (its ammunition goes up - a turret's a little, where it sits - and its head falls, burnt)
+    if (TYPES[u.type].fixed) {
+      const p = u.pivot || { x: u.x, y: u.y - 4 };
+      if (PW.explode) PW.explode(world, world.particles, { x: p.x, y: p.y, radius: 5, power: 0.4 });
+      if (u.ras) fallOff(world, u, true);
+      return;
+    }
     if (PW.explode) PW.explode(world, world.particles, { x: u.x, y: u.y - 14, radius: 10, power: 0.8 });
     if (PW.addSmoulder) PW.addSmoulder(world, u.x, u.y, 30, 60);
   }
   function blast(world, cx, cy, r, power = 1) {
     for (const u of world.defence || []) {
       if (u.dead) continue;
-      const d = Math.max(0, Math.hypot(u.x - cx, u.y - 14 - cy) - TYPES[u.type].length / 2), reach = r * 1.6 + 6;
+      const c = u.type === 'turret' && u.pivot ? u.pivot : { x: u.x, y: u.y - 14 };
+      const d = Math.max(0, Math.hypot(c.x - cx, c.y - cy) - TYPES[u.type].length / 2), reach = r * 1.6 + 6;
       if (d < reach) hurt(world, u, 80 * power * (1 - d / reach) ** 2, 'blast');
     }
   }
-  const boxOf = (u) => (TYPES[u.type].fixed ? { x0: u.x - 6, x1: u.x + 6, y0: u.y - 8, y1: u.y }
+  const boxOf = (u) => (u.type === 'turret' && u.ras ? { x0: u.ras.x0, x1: u.ras.x0 + u.ras.w, y0: u.ras.y0, y1: u.ras.y0 + u.ras.w }
     : { x0: u.x - TYPES[u.type].length / 2, x1: u.x + TYPES[u.type].length / 2, y0: u.y - 30, y1: u.y });
   const target = {
     hit(world, s, x0, y0, x1, y1) {
       let best = null;
       for (const u of world.defence || []) {
         if (u.dead || u === s.from) continue;
+        // (a turret: its own pixels as drawn, along the round's way)
+        if (u.type === 'turret' && u.ras) {
+          const b = u.ras;
+          if (Math.max(x0, x1) < b.x0 || Math.min(x0, x1) > b.x0 + b.w || Math.max(y0, y1) < b.y0 || Math.min(y0, y1) > b.y0 + b.w) continue;
+          const n = Math.max(1, Math.ceil(Math.hypot(x1 - x0, y1 - y0)));
+          for (let q = 0; q <= n; q += 1) {
+            const f = q / n;
+            if (best && f >= best.f) break;
+            if (turretPixel(u, x0 + (x1 - x0) * f, y0 + (y1 - y0) * f)) { best = { f, x: x0 + (x1 - x0) * f, y: y0 + (y1 - y0) * f, ref: u, part: 1 }; break; }
+          }
+          continue;
+        }
         const b = boxOf(u);
         let f0 = 0, f1 = 1;
         for (const [p0, d, lo, hi] of [[x0, x1 - x0, b.x0, b.x1], [y0, y1 - y0, b.y0, b.y1]]) {
@@ -263,41 +286,229 @@
     if (!list || !list.length || !PW.shots) return;
     current = world;
     for (const u of list) {
-      // (put out of action a while - a hack: see PW.units.disable)
-      if (u.dead || (u.disabledUntil || 0) > (world.tick || 0)) continue;
+      if (u.dead) continue;
+      // (a turret: still on its base? - looked at every few ticks, put out of action or not)
+      if (u.type === 'turret' && ((world.tick || 0) + u.seed) % 10 === 0 && !onBase(world, u)) { fallOff(world, u); continue; }
+      // (put out of action a while - a hack: see PW.units.disable - a turret's gun drooping)
+      if ((u.disabledUntil || 0) > (world.tick || 0)) {
+        if (u.type === 'turret') { u.burst = 0; u.foe = null; u.e = Math.max(MOUNTS[u.face].lo, u.e - SLEW * 0.3 * dt); turretPose(u); }
+        continue;
+      }
       if (u.type === 'turret') { turretStep(world, u, dt); continue; }
       if (u.salvo > 0) stepSalvo(world, u, dt);
       if (u.type !== 'launcher') watch(world, u, dt);
     }
     for (let q = list.length - 1; q >= 0; q -= 1) if (list[q].dead) list.splice(q, 1);
   }
-  // A turret: a look round its arc now and then for an enemy it sees (PW.units' sight); one seen, a
-  // burst at it - each round led where it will be - then a moment's rest.
+  // ---- Turrets (N103, the user's: an autocannon turret, its head after the RCWS and armoured-turret
+  // refs, sized between a trooper and a tank) ---------------------------------------------------------
+  // Its mount: (x, y), the cell of its base's face the head's ring sits on, and `normal`, the way that
+  // face looks out ([0, -1] a roof, the ground or a room's floor; [±1, 0] a wall; [0, 1] a ceiling);
+  // its base (WGM's, stamped into the building or the ground) base: { x0, x1, y0, y1 }. The head
+  // stands out along the normal; its gun swings over what the face opens on: on a floor from a little
+  // below level on either side up to near overhead - the head turning round over TURN_HEAD to change
+  // sides; on a wall out from it, as far as 80 degrees up or down; under a ceiling, a floor's turned
+  // over. It looks about for the hostile units it sees (PW.units' sight - a man crouched creeping up,
+  // or in a secret bore, as any sentry sees him), the nearest - men before mechs and jets, armour
+  // last (its rounds do little to a tank) - lays its gun on it at its slew, leading it, and fires its
+  // bursts once laid; never with a unit of its own side in the line of fire. Held (u.hold - a quiet
+  // world, a battery held by hand) it neither looks nor fires. Its base broken away from under it, it
+  // comes off and falls, a wreck; destroyed, its rounds go up a little and its wreck falls.
+  const D2R = Math.PI / 180;
+  const MOUNTS = {
+    floor: { lo: -10 * D2R, hi: 85 * D2R, turns: true },
+    ceiling: { lo: -85 * D2R, hi: 10 * D2R, turns: true },
+    wall: { lo: -80 * D2R, hi: 80 * D2R, turns: false },
+  };
+  const SLEW = 2.2;             // rad/s its gun swings at
+  const TURN_HEAD = 0.5;        // s its head turns round to the other side (a floor's, a ceiling's)
+  const LAID = 0.035;           // rad: laid on its mark - it fires
+  const BARREL = 18;            // cells of autocannon barrel from its trunnion
+  const REACH_HEAD = 36;        // cells round its mount the head and gun can reach
+  const WEIGHT = { trooper: 1, mech: 1.4, jet: 1.6, defence: 1.8, tank: 3 };   // (how far off a kind of target counts as)
+  const BASE_HOLDS = 0.4;       // share of its base's cells that must stand for it to stay on
+  function mountTurret(u, spec) {
+    const n = spec.normal || [0, -1];
+    u.N = [Math.sign(n[0]) * (Math.abs(n[0]) >= Math.abs(n[1]) ? 1 : 0), Math.sign(n[1]) * (Math.abs(n[1]) > Math.abs(n[0]) ? 1 : 0)];
+    u.face = u.N[1] < 0 ? 'floor' : u.N[1] > 0 ? 'ceiling' : 'wall';
+    u.headF = u.face === 'wall' ? u.N[0] : (spec.facing || 1) < 0 ? -1 : 1;
+    u.e = u.face === 'ceiling' ? -20 * D2R : u.face === 'floor' ? 5 * D2R : 0;
+    u.turnT = 0; u.base = spec.base || null; u.foe = null; u.reloadT = 0; u.manualT = 0;
+    // (no base given - set down by hand, or on the old devices: its mount the face it is on, found
+    // a few cells back from where it was put if that was open air)
+    if (!u.base && current) {
+      const w = current, open = (x, y) => x < 0 || y < 0 || x >= w.width || y >= w.height || PW.mat.phase[w.mat[y * w.width + x] & ID_MASK] !== PW.PHASE.SOLID;
+      for (let k = 0; k < 4 && open(u.x, u.y); k += 1) { u.x -= u.N[0]; u.y -= u.N[1]; }
+    }
+    // (it sees both ways from its head - its arc is its mount's: see aimable)
+    u.facing = 0;
+  }
+  // (the head's frame: `up` out of its mount's face, `side` the way it faces along it)
+  function frameOf(u) {
+    if (u.face === 'wall') return { U: [u.N[0], 0], S: [0, -1] };
+    return { U: [0, u.N[1]], S: [u.headF, 0] };
+  }
+  // (a world angle for the gun - radians, up from rightwards - and back: which side it faces, its
+  // elevation from level that way)
+  const angleOf = (f, e) => (f > 0 ? e : Math.PI - e);
+  const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+  function aimable(u, a) {
+    const M = MOUNTS[u.face];
+    const f = u.face === 'wall' ? u.headF : Math.abs(Math.cos(a)) < 0.05 ? u.headF : Math.cos(a) > 0 ? 1 : -1;
+    const e = wrap(f > 0 ? a : Math.PI - a);
+    return e >= M.lo && e <= M.hi ? { f, e } : null;
+  }
+  // Its pose: where its trunnion, its sensor and its muzzle are, and its drawing (laid over
+  // REACH_HEAD round its mount, kept until the pose changes).
+  function turretPose(u) {
+    const { U, S } = frameOf(u), k = u.turnT > 0 ? Math.max(0.3, Math.abs(Math.cos(Math.PI * (1 - u.turnT / TURN_HEAD)))) : 1;
+    const at = (s, h) => [u.x + 0.5 + s * k * S[0] + h * U[0], u.y + 0.5 + s * k * S[1] + h * U[1]];
+    const [ts, th] = u.face === 'wall' ? [0, 17] : [4, 13];
+    const [px, py] = at(ts, th), a = angleOf(u.headF, u.e), dx = Math.cos(a), dy = -Math.sin(a);
+    u.pivot = { x: px, y: py }; u.eye = { x: at(-6, 21)[0], y: at(-6, 21)[1] };
+    u.muzzle = { x: px + dx * BARREL, y: py + dy * BARREL, dx, dy };
+    u.aimA = a;
+    const key = `${u.x},${u.y},${u.headF},${Math.round(u.e * 60)},${Math.round(k * 20)},${u.off ? 1 : 0},${u.style}`;
+    if (u.ras && u.ras.key === key) return;
+    const R = REACH_HEAD, w = 2 * R + 1, px32 = new Uint32Array(w * w), st = STYLES[u.style] || STYLES.modern;
+    const rgb = (c, f = 1) => PW.abgr(Math.min(255, c[0] * f) | 0, Math.min(255, c[1] * f) | 0, Math.min(255, c[2] * f) | 0);
+    const C = { body: rgb(st.body), light: rgb(st.light), dark: rgb(st.dark), plate: rgb(st.dark, 0.85), steel: PW.abgr(58, 60, 62), gun: PW.abgr(46, 48, 50),
+      brake: PW.abgr(30, 32, 34), lens: PW.abgr(36, 70, 84), glint: PW.abgr(150, 210, 220), ring: PW.abgr(70, 72, 70) };
+    for (let j = 0; j < w; j += 1) for (let i = 0; i < w; i += 1) {
+      const rx = i - R, ry = j - R, wx = u.x + rx + 0.5, wy = u.y + ry + 0.5;
+      // (the head's own cells, in its frame: s along it, h out of its mount)
+      const s = (rx * S[0] + ry * S[1]) / k, h = rx * U[0] + ry * U[1];
+      let c = 0;
+      // the barrel and its muzzle brake, the cradle at its trunnion
+      const qx = wx - px, qy = wy - py, along = qx * dx + qy * dy, across = Math.abs(-qx * dy + qy * dx);
+      if (along >= 0 && along <= BARREL && across <= (along > BARREL - 3 ? 1.6 : 1.05)) c = along > BARREL - 3 ? C.brake : C.gun;
+      else if (qx * qx + qy * qy <= 7) c = C.steel;
+      else if (h >= 1 && h <= 4 && Math.abs(s) <= 6) c = C.ring;                                  // its ring
+      else if (h > 4 && h <= 18 && s >= -11 && s <= 11 && !(h > 14 && Math.abs(s) > 11 - (h - 14))) {
+        // its armoured body: the plate over its front, the ammunition box at its side, lit along its top
+        if (s >= 9) c = C.plate;
+        else if (s <= -6 && h >= 6 && h <= 12) c = C.dark;
+        else c = h > 16 || (h > 14 && Math.abs(s) > 11 - (h - 14) - 1.5) ? C.light : C.body;
+      } else if (s >= -10 && s <= -3 && h > 18 && h <= 24) {
+        // its sensor box on top, the lens looking the way it faces
+        c = s >= -4 && h >= 20 && h <= 22 ? (h === 20 ? C.glint : C.lens) : h > 23 ? C.light : C.body;
+      }
+      px32[j * w + i] = c;
+    }
+    u.ras = { key, x0: u.x - R, y0: u.y - R, w, px: px32 };
+  }
+  // (what of it is at world point (x, y): its colour as drawn, or 0)
+  function turretPixel(u, x, y) {
+    const r = u.ras;
+    if (!r) return 0;
+    const i = Math.floor(x) - r.x0, j = Math.floor(y) - r.y0;
+    return i < 0 || j < 0 || i >= r.w || j >= r.w ? 0 : r.px[j * r.w + i];
+  }
+  // (still on its base: enough of the base's cells standing - or, with no base given, of the face
+  // under its ring)
+  function onBase(world, u) {
+    const solid = (x, y) => x >= 0 && y >= 0 && x < world.width && y < world.height && PW.mat.phase[world.mat[y * world.width + x] & ID_MASK] === PW.PHASE.SOLID;
+    let n = 0, all = 0;
+    if (u.base) {
+      const b = u.base, y0 = b.y0 ?? b.y, y1 = b.y1 ?? (u.face === 'wall' ? b.y + 6 : b.y), ya = u.face === 'wall' && b.y0 === undefined ? b.y - 6 : y0;
+      for (let y = ya; y <= y1; y += 1) for (let x = b.x0; x <= b.x1; x += 1) { all += 1; if (solid(x, y)) n += 1; }
+    } else {
+      const { S } = frameOf(u);
+      for (let s = -5; s <= 5; s += 1) { all += 1; if (solid(Math.round(u.x + s * Math.abs(S[0])), Math.round(u.y + s * Math.abs(S[1])))) n += 1; }
+    }
+    return n >= all * BASE_HOLDS;
+  }
+  // (come off its base: its head falls, a wreck)
+  function fallOff(world, u, burnt = false) {
+    u.dead = true;
+    if (held === u) held = null;
+    const r = u.ras, fr = world.fragments;
+    if (!r || !fr) return;
+    const xs = [], ys = [], cs = [];
+    for (let j = 0; j < r.w; j += 1) for (let i = 0; i < r.w; i += 1) {
+      const c = r.px[j * r.w + i], x = r.x0 + i, y = r.y0 + j;
+      if (!c || x < 1 || y < 1 || x >= world.width - 1 || y >= world.height - 1 || !PW.mat.open[world.mat[y * world.width + x] & ID_MASK]) continue;
+      const k = burnt ? 0.4 : 1;
+      xs.push(x); ys.push(y); cs.push(burnt ? PW.abgr((c & 255) * k | 0, (c >>> 8 & 255) * k | 0, (c >>> 16 & 255) * k | 0) : c);
+    }
+    if (xs.length) fr.spawn({ data: { x: Int32Array.from(xs), y: Int32Array.from(ys), color: Uint32Array.from(cs), byte: new Uint8Array(xs.length).fill(M.STEEL), solid: new Uint8Array(xs.length).fill(1) },
+      vx: u.N ? u.N[0] * 20 : 0, vy: -10, omega: (PW.hash2(u.x, u.y) & 1 ? 1 : -1) * 0.6, wreck: true });
+    stats.cameOff = (stats.cameOff || 0) + (burnt ? 0 : 1);
+  }
+  // (what it looks for: the hostile unit it sees that counts nearest - see WEIGHT - its gun can be
+  // laid on)
+  function pickFoe(world, u) {
+    if (!PW.units) return null;
+    let best = null, bs = Infinity;
+    const reach = PW.units.SIGHT.turret.reach;
+    for (const b of PW.units.all(world)) {
+      if (!b.side || b.side === u.side || b === u) continue;
+      const p = PW.units.body(b), d = Math.hypot(p.x - u.pivot.x, p.y - u.pivot.y);
+      if (d > reach) continue;
+      const score = d * (WEIGHT[b.kind] || 1.5);
+      if (score >= bs || !aimable(u, Math.atan2(-(p.y - u.pivot.y), p.x - u.pivot.x)) || !PW.units.sees(world, u, b)) continue;
+      bs = score; best = b;
+    }
+    return best;
+  }
+  // (a unit of its own side on the line of fire to (x, y), short of it)
+  function friendInLine(world, u, x, y) {
+    const m = u.muzzle, lx = x - m.x, ly = y - m.y, L = Math.hypot(lx, ly) || 1;
+    for (const v of PW.units ? PW.units.all(world) : []) {
+      if (v === u || !v.side || v.side !== u.side) continue;
+      const p = PW.units.body(v), t = ((p.x - m.x) * lx + (p.y - m.y) * ly) / L;
+      if (t <= 0 || t >= L - 4) continue;
+      if (Math.abs(-(p.x - m.x) * ly + (p.y - m.y) * lx) / L < (v.kind === 'tank' ? 18 : 10)) return true;
+    }
+    return false;
+  }
   function turretStep(world, u, dt) {
     const T = TYPES.turret;
+    // its head turning round to the other side (half way round, it faces it)
+    if (u.turnT > 0) { u.turnT = Math.max(0, u.turnT - dt); if (u.turnT <= TURN_HEAD / 2 && !u.turned) { u.headF = -u.headF; u.turned = true; } if (!u.turnT) u.turned = false; }
+    if (u.reloadT > 0 && (u.reloadT -= dt) <= 0) u.ammo = T.ammo;
+    if (u.manualT > 0) u.manualT -= dt;
+    if (u.rest > 0) u.rest -= dt;
+    if (u.hold && !(u.manualT > 0)) { u.foe = null; u.burst = 0; turretPose(u); return; }
+    // what it is on: looked for now and then (a spot clicked by hand, kept a while)
+    if (++u.look >= LOOK_EVERY) {
+      u.look = 0;
+      if (!(u.foe && u.foe.spot && u.manualT > 0)) u.foe = pickFoe(world, u);
+    }
+    const f = u.foe && !u.foe.dead ? u.foe : null;
+    let laid = false, mark = null;
+    if (f) {
+      // (where to lay on: its body, led by the round's time of flight)
+      const p = f.spot ? f : PW.units.body(f), sp = PW.shots.KINDS[T.kind].speed;
+      const tau = Math.hypot(p.x - u.pivot.x, p.y - u.pivot.y) / sp;
+      const vx = f.vx ?? (f.kind === 'tank' ? (f.v || 0) * Math.cos(f.angle || 0) : 0), vy = f.vy || 0;
+      mark = { x: p.x + vx * tau, y: p.y + vy * tau };
+      const want = aimable(u, Math.atan2(-(mark.y - u.pivot.y), mark.x - u.pivot.x));
+      if (!want) u.foe = null;
+      else if (want.f !== u.headF) { if (!u.turnT && MOUNTS[u.face].turns) u.turnT = TURN_HEAD; }
+      else if (!u.turnT) {
+        const d = want.e - u.e, s = SLEW * dt;
+        u.e += Math.abs(d) <= s ? d : Math.sign(d) * s;
+        laid = Math.abs(want.e - u.e) < LAID;
+      }
+    }
+    turretPose(u);
+    // Firing: a burst, laid, loaded, rested, nothing of its own in the way - each round along its gun
     if (u.burst > 0) {
       u.burstT -= dt;
       while (u.burst > 0 && u.burstT <= 0) {
-        const f = u.foe;
-        if (!f || f.dead || u.ammo <= 0) { u.burst = 0; break; }
-        // (a burst at a spot clicked - see click - or at an enemy's body)
-        const p = f.spot ? f : PW.units.body(f), mx = u.x + Math.cos(u.aimA) * 7, my = u.y - 4 - Math.sin(u.aimA) * 7;
-        const d = Math.hypot(p.x - mx, p.y - my), tau = d / PW.shots.KINDS.cannon.speed, vx = f.vx || 0, vy = f.vy || 0;
-        const tx = p.x + vx * tau, ty = p.y + vy * tau;
-        u.aimA = Math.atan2(-(ty - my), tx - mx);
-        PW.shots.fire(world, { kind: T.kind, x: mx, y: my, dx: tx - mx, dy: ty - my, side: u.side, from: u, spread: 0.015 });
-        if (PW.shots.report) PW.shots.report(world, mx, my, Math.cos(u.aimA), -Math.sin(u.aimA), 1);
+        if (u.ammo <= 0 || u.turnT) { u.burst = 0; break; }
+        const m = u.muzzle;
+        PW.shots.fire(world, { kind: T.kind, x: m.x, y: m.y, dx: m.dx, dy: m.dy, side: u.side, from: u, spread: 0.015 });
+        if (PW.shots.report) PW.shots.report(world, m.x, m.y, m.dx, m.dy, 1);
         u.burst -= 1; u.ammo -= 1; u.burstT += T.rof;
+        stats.turretRounds = (stats.turretRounds || 0) + 1;
       }
-      return;
+      if (u.ammo <= 0 && !(u.reloadT > 0)) u.reloadT = T.reload;
+    } else if (laid && mark && u.rest <= 0 && u.ammo > 0 && !friendInLine(world, u, mark.x, mark.y)) {
+      u.burst = T.burst; u.burstT = 0; u.rest = T.rest;
+      if (u.foe && u.foe.spot) u.manualT = 0;
     }
-    if ((u.rest -= dt) > 0 || ++u.look < LOOK_EVERY || !PW.units) return;
-    u.look = 0;
-    const foe = PW.units.spot(world, u);
-    if (!foe) return;
-    const p = PW.units.body(foe);
-    u.foe = foe; u.aimA = Math.atan2(-(p.y - (u.y - 4)), p.x - u.x);
-    u.burst = T.burst; u.burstT = 0; u.rest = T.rest;
   }
 
   // ---- Drawn: a truck, its cab at the front, its launcher on the bed - tubes raised ----------------------------
@@ -310,15 +521,7 @@
     for (const u of list) {
       if (u.dead) continue;
       const T = TYPES[u.type], st = STYLES[u.style], L = T.length, f = u.facing, x0 = u.x - L / 2, y = u.y;
-      if (T.fixed) {
-        // (a turret on its mount: a low armoured box, its mantlet, the barrel the way it last laid -
-        // out of action, its barrel down)
-        const off = (u.disabledUntil || 0) > (world.tick || 0), a = off ? -0.5 * (f || 1) : u.aimA || (f < 0 ? Math.PI : 0);
-        cell(u.x - 6, y - 5, 12, 5, col(st.dark)); cell(u.x - 6, y - 5, 12, 1, col(st.light));
-        cell(u.x - 3, y - 8, 6, 3, col(st.body));
-        for (let k = 2; k <= 9; k += 1) cell(u.x + Math.cos(a) * k - 0.5, y - 6 - Math.sin(a) * k - 0.5, 1.4, 1.4, 'rgb(46,48,50)');
-        continue;
-      }
+      if (T.fixed) { drawTurret(renderer, u); continue; }
       // (chassis and wheels)
       cell(x0, y - 12, L, 5, col(st.body)); cell(x0, y - 12, L, 1, col(st.light));
       for (let k = 0; k < 4; k += 1) { const wx = u.x + f * (L / 2 - 12 - k * (L - 24) / 3); cell(wx - 5, y - 9, 10, 10, 'rgb(34,34,36)'); cell(wx - 2, y - 6, 4, 4, 'rgb(96,96,92)'); }
@@ -340,6 +543,25 @@
       if (u.type !== 'launcher') { cell(u.x + f * 6 - 5, y - 40, 10, 12, col(st.light, 0.9)); cell(u.x + f * 6 - 1, y - 28, 2, 16, col(st.dark)); }   // (its radar)
     }
   }
+  // (a turret: its drawing laid into the view, a cell to a pixel of its own - see turretPose)
+  let tCanvas = null, tCtx = null, tImage = null, tPx = null;
+  function drawTurret(renderer, u) {
+    const r = u.ras;
+    if (!r) return;
+    const { ctx, camera, view } = renderer, z = camera.zoom, skip = Math.max(1, Math.floor(1 / z));
+    const vx1 = camera.x + view.width / z, vy1 = camera.y + view.height / z;
+    if (r.x0 + r.w < camera.x || r.x0 > vx1 || r.y0 + r.w < camera.y || r.y0 > vy1) return;
+    const n = Math.ceil(r.w / skip);
+    if (!tCanvas || tCanvas.width < n) {
+      tCanvas = document.createElement('canvas'); tCanvas.width = tCanvas.height = Math.max(80, n);
+      tCtx = tCanvas.getContext('2d'); tImage = tCtx.createImageData(tCanvas.width, tCanvas.height); tPx = new Uint32Array(tImage.data.buffer);
+    }
+    const stride = tCanvas.width;
+    for (let j = 0; j < n; j += 1) for (let i = 0; i < n; i += 1) tPx[j * stride + i] = r.px[(j * skip) * r.w + i * skip];
+    tCtx.putImageData(tImage, 0, 0, 0, 0, n, n);
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(tCanvas, 0, 0, n, n, Math.round((r.x0 - camera.x) * z), Math.round((r.y0 - camera.y) * z), Math.round(n * skip * z), Math.round(n * skip * z));
+  }
   const before = PW.drawUnitsHook;
   PW.drawUnitsHook = (renderer) => { if (before) before(renderer); draw(renderer); };
 
@@ -353,6 +575,25 @@
     if (held) { held.aim = { x, y }; return held; }
     const gx = Math.round(x);
     if (gx < 80 || gx > world.width - 80) return null;
+    // (a turret set down by hand: on the face of a wall beside the click, if one is nearer than the
+    // ground under it - a cliff, a building's side - else on the ground)
+    if (type === 'turret') {
+      const gy = Math.round(y), solid = (xx, yy) => blocks(world, xx, yy);
+      const down = groundUnder(world, gx, Math.max(0, gy));
+      let wall = null;
+      for (let d = 1; d <= 30 && !wall; d += 1) for (const s of [-1, 1]) {
+        const xx = gx + s * d;
+        if (!solid(xx, gy) || solid(xx - s, gy)) continue;
+        let tall = 0;
+        for (let yy = gy - 8; yy <= gy + 8; yy += 1) if (solid(xx, yy) && !solid(xx - s, yy)) tall += 1;
+        if (tall >= 13) { wall = { x: xx, normal: [-s, 0], d }; break; }
+      }
+      const spec = wall && wall.d < down - gy
+        ? { type, x: wall.x, y: gy, normal: wall.normal, side }
+        : { type, x: gx, y: down + 1, normal: [0, -1], side, facing: gx < world.width / 2 ? 1 : -1 };
+      held = create(world, spec);
+      return held;
+    }
     const gy = groundUnder(world, gx, Math.max(0, Math.round(y) - 40));
     held = create(world, { type, x: gx, y: gy, side, facing: gx < world.width / 2 ? 1 : -1 });
     return held;
@@ -372,10 +613,10 @@
     const u = held;
     if (!u || u.dead || button !== 0 || (PW.units && PW.units.disabled && PW.units.disabled(world, u))) return false;
     if (u.type === 'launcher') { u.aim = { x, y }; fire(world, u); return true; }
-    if (u.type === 'turret' && !(u.burst > 0) && u.ammo > 0) {
+    // (a turret: its gun laid on the spot - as far as its mount lets it - and a burst once laid)
+    if (u.type === 'turret' && u.pivot && aimable(u, Math.atan2(-(y - u.pivot.y), x - u.pivot.x))) {
       u.foe = { spot: true, x, y, dead: false };
-      u.aimA = Math.atan2(-(y - (u.y - 4)), x - u.x);
-      u.burst = TYPES.turret.burst; u.burstT = 0; u.rest = TYPES.turret.rest;
+      u.manualT = 2.5; u.rest = 0;
       return true;
     }
     return false;
@@ -383,5 +624,6 @@
 
   // (silenced a while - a hack on its base: see PW.units.disable)
   const disable = (u, seconds) => (PW.units ? PW.units.disable(u, seconds) : false);
-  PW.defence = { create, step, draw, fire, hurt, blast, target, tool, hold, held: () => held, key, click, disable, laying, impactOf, impactAt, ownGround, skyClear, stats, TYPES };
+  PW.defence = { create, step, draw, fire, hurt, blast, target, tool, hold, held: () => held, key, click, disable, laying, impactOf, impactAt, ownGround, skyClear, stats, TYPES,
+    pixel: turretPixel, aimable, MOUNTS, BARREL, TURN_HEAD };
 })();
