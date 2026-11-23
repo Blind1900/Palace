@@ -40,8 +40,8 @@ const fresh = () => { world.mechs = []; world.tanks = []; world.troops = []; wor
 // (the cells of it drawn this tick, about its body point, as the drawing faces - left)
 const drawnCells = (m) => { const P = m.P, out = new Set(); for (let y = P.box.y0; y < P.box.y1; y += 1) for (let x = P.box.x0; x < P.box.x1; x += 1) if (X.pixel(m, x + 0.5, y + 0.5)) out.add(`${(x - P.hx) * -m.facing},${y - P.hy}`); return out; };
 
-// 1. As drawn: standing, it is the user's crouching drawing (the idle clip's first frame), cell for
-// cell - facing right as left, mirrored.
+// 1. As drawn: standing, it is the user's idle pose (the idle clip's first frame), cell for cell -
+// facing right as left, mirrored - and stays so, where it stands, for as long as it stands.
 {
   const S = site(400);
   if (!S) check(false, 'a stretch of the wilds to stand it in');
@@ -51,12 +51,14 @@ const drawnCells = (m) => { const P = m.P, out = new Set(); for (let y = P.box.y
     const frames = X.frames(), crouch = frames[X.clips().idle[0]];
     const want = new Set(); for (let i = 0; i < crouch.n; i += 1) want.add(`${crouch.xs[i]},${crouch.ys[i]}`);
     const a = X.create(world, { x: x0 + 120, side: 'left', facing: -1 }), b = X.create(world, { x: x0 + 280, side: 'left', facing: 1, style: 'asian' });
-    run(0.2);
     const same = (m) => { const got = drawnCells(m); let both = 0; for (const k of got) if (want.has(k)) both += 1; return both / (got.size + want.size - both); };
+    const ax = a.x, bx = b.x;
+    let least = 1;
+    run(4, () => { least = Math.min(least, same(a), same(b)); });
     const ja = same(a), jb = same(b);
     await view('mech-as-drawn', x0 + 200, a.y - 30, 7);
-    check(ja === 1 && jb === 1 && crouch.n > 400,
-      `standing, the hopper is the user's crouching drawing cell for cell (${crouch.n} cells; facing left ${(ja * 100).toFixed(1)}% the same, facing right, mirrored, ${(jb * 100).toFixed(1)}%)`);
+    check(ja === 1 && jb === 1 && least === 1 && a.x === ax && b.x === bx && crouch.n > 400,
+      `standing, the hopper is the user's idle pose cell for cell (${crouch.n} cells; facing left ${(ja * 100).toFixed(1)}% the same, facing right, mirrored, ${(jb * 100).toFixed(1)}%) - and stays so, where it stands, 4 s (${(least * 100).toFixed(1)}% at the least)`);
   }
 }
 

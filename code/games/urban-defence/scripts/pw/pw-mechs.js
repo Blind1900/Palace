@@ -5,9 +5,9 @@
 // and rocket jets at its ankles. It is drawn from the user's own drawings, pixel for pixel, at one
 // cell to a drawn pixel (as the troopers are) - about 40 cells to the top of its folded wings,
 // 60 to their tips spread - in its side's colours; and it moves as they move:
-// - on the ground it hops - the idle clip, crouch, rise, kick, land - its body carried as far each
-//   frame as the drawings carry it (their feet stay where they are planted); standing, it rises and
-//   settles where it stands now and then;
+// - standing, it is the idle clip's first drawing - its idle pose (the user's); going along the
+//   ground it hops - the whole clip is its walk: crouch, rise, kick, land - its body carried as far
+//   each frame as the drawings carry it (their feet stay where they are planted);
 // - a leap is the jump clip - the crouch, the spring - and in the air it hangs on its spread wings
 //   (the glide clip): they hold its fall to a glide while they are whole enough (torn to tatters -
 //   its armour low - it drops);
@@ -93,8 +93,6 @@
   const HEIGHT = 48;            // cells: soles to the top of its folded wings - the room it needs
   const HALF = 12;              // cells either side of its middle its body takes (its horns and wings reach past)
   const FRAME_T = 0.08;         // s a drawing shows - the user's clips' own pace
-  const IDLE_T = 0.16;          // ... standing, rising and settling where it stands, at half that
-  const IDLE_REST = 1.6;        // s it stands still between
   const STEP_UP = 18;           // cells it hops up without a leap - a kerb, a rubble heap, a stair
   const STEP_DOWN = 10;
   const JUMP = 300;             // cells/s up: a leap of about 170 cells
@@ -205,7 +203,7 @@
       hp: ARMOUR, dead: false, onGround: true, walk: 0, travel: 0, charge: 0, landT: 0, boosting: false, fuel: FUEL, dodgeT: 0, jetT: 0,
       mag: MAG, ammo: MAG * 3, reload: 0, burst: 0, burstT: 0, missiles: MISSILES, aim: null, hurtBy: '', smoke: 0, P: null, seed: ++seq,
       // (its drawing: going from frame a to frame b, t of the way; its body this high over its soles)
-      an: { a: crouch, b: crouch, t: 0, mode: 'idle', dir: 1, rest: IDLE_REST }, lift: FR[crouch].lift };
+      an: { a: crouch, b: crouch, t: 0, mode: 'idle' }, lift: FR[crouch].lift };
     (world.mechs || (world.mechs = [])).push(m);
     current = world;
     stats.created += 1;
@@ -224,17 +222,12 @@
   // (the drawing after frame b, going on as `mode` - the crouch is the idle clip's first drawing, the
   // jump's and the boost's too)
   function nextFrame(m, b, mode) {
-    const I = CLIP.idle, J = CLIP.jump, B = CLIP.boost, Gl = CLIP.glide, an = m.an;
+    const I = CLIP.idle, J = CLIP.jump, B = CLIP.boost, Gl = CLIP.glide;
     const inI = I.indexOf(b), inJ = J.indexOf(b), inB = B.indexOf(b), inG = Gl.indexOf(b);
     switch (mode) {
       case 'hop': return inI >= 0 ? I[(inI + 1) % I.length] : I[0];
-      case 'idle':
-        // (rising and settling where it stands: crouch, up, up, down, crouch - a rest between)
-        if (inI === 0) { if (an.rest > 0) return I[0]; an.dir = 1; an.rest = IDLE_REST; return I[1]; }
-        if (inI === 1) return an.dir > 0 ? I[2] : I[0];
-        if (inI === 2) { an.dir = -1; return I[1]; }
-        if (inI >= 3) return I[(inI + 1) % I.length];   // (finishing a hop)
-        return I[0];
+      // (standing: its idle pose, the first drawing - a hop under way finished first)
+      case 'idle': return inI > 0 ? I[(inI + 1) % I.length] : I[0];
       case 'windup': return J[1];
       case 'rise':
         if (inJ === 1) return J[2];
@@ -260,14 +253,13 @@
       default: return I[0];
     }
   }
-  // (how long a drawing shows going as `mode`)
-  const paceOf = (mode) => (mode === 'idle' ? IDLE_T : FRAME_T);
+  // (how long a drawing shows)
+  const paceOf = () => FRAME_T;
   // (how far forward the body goes between frames a and b on the ground: the clips' own going)
   function going(a, b) {
     const I = CLIP.idle, B = CLIP.boost;
     const ia = I.indexOf(a), ib = I.indexOf(b);
     if (ia >= 0 && ib === (ia + 1) % I.length) return -TRACK.idle[ia];
-    if (ib >= 0 && ia === (ib + 1) % I.length) return TRACK.idle[ib];
     const ba = B.indexOf(a), bb = B.indexOf(b);
     if (ba >= 0 && bb >= 0) { if (ba === 0 && bb === 1) return -TRACK.boost[0]; if (bb === ba + 1) return -TRACK.boost[ba]; if (ba === 3 && bb === 1) return -TRACK.boost[3]; }
     return 0;
@@ -275,7 +267,6 @@
   function animate(world, m, dt) {
     const an = m.an, mode = modeOf(m);
     an.mode = mode;
-    if (mode === 'idle' && an.a === CLIP.idle[0] && an.b === CLIP.idle[0]) an.rest -= dt;
     an.t += dt / paceOf(mode);
     for (let guard = 0; an.t >= 1 && guard < 4; guard += 1) {
       an.t -= 1;
