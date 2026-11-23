@@ -42,6 +42,8 @@ const SUITES = [
   { name: 'pw-units', page: 'pw-unit-lab.html', ready: 'window.pwLab && pwLab.ready', params: 'det=1&go=0' },
   // N99: roofs come down with their buildings - the works hold up only what they put up
   { name: 'pw-roofs', params: 'det=1' },
+  // N100: rubble out on the land weathers into dirt - not on streets, rebuilt lots or the pipes
+  { name: 'pw-weather', params: 'det=1' },
 ].filter((s) => !args.only || args.only.split(',').includes(s.name));
 const root = path.resolve(__dirname, '..');
 const out = path.join(os.tmpdir(), 'claude-scratch', 'shots');

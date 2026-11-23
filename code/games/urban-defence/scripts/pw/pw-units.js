@@ -58,7 +58,7 @@
     switch (u.kind) {
       case 'trooper': return { x: u.x + u.facing * 2, y: u.y - (u.crouch ? PW.troops.CROUCH : PW.troops.HEIGHT) + 4 };
       case 'tank': return { x: u.x, y: u.y - 30 };
-      case 'mech': return { x: u.x + u.facing * 24, y: u.y - (PW.mechs ? PW.mechs.HIP : 44) - 12 };
+      case 'mech': return { x: u.x + u.facing * 14, y: u.y - (u.lift ?? 30) - 2 };   // (its head, forward of its body)
       case 'jet': return { x: u.x, y: u.y };
       default: return { x: u.x, y: u.y - (u.type === 'turret' ? 4 : 30) };
     }
@@ -67,7 +67,7 @@
     switch (u.kind) {
       case 'trooper': return { x: u.x, y: u.y - (u.crouch ? 10 : 16) };
       case 'tank': return { x: u.x, y: u.y - 14 };
-      case 'mech': return { x: u.x, y: u.y - 40 };
+      case 'mech': return { x: u.x, y: u.y - (u.lift ?? 30) };
       case 'jet': return { x: u.x, y: u.y };
       default: return { x: u.x, y: u.y - (u.type === 'turret' ? 4 : 16) };
     }

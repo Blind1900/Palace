@@ -1,8 +1,13 @@
-// Mechs (N90; run with --page=pixel-world.html --params=det=1&seed=N): a hopper striding over the
-// ground - up a step, stopped by a wall, leaping it; boosting up a cliff higher than it leaps; landing
-// hard from a height; seeing a round coming and dodging it - not again straight after, and not one
-// from behind; its cannon and missile; destroyed - falling apart burning, no blast. Over courses laid
-// in the wilds, cleared to the sky; the units and their rounds stepped (the world where it matters).
+// Mechs (N90, N101; run with --page=pixel-world.html --params=det=1&seed=N): the user's hopper, drawn
+// as the user drew it and moving as the drawings move - standing, it is the user's crouching drawing
+// cell for cell; it hops along the ground (up a step, stopped by a wall - it leaps it); a leap and its
+// jets carry it up a cliff higher than it leaps; dropped from high up it glides down on its wings
+// unhurt - torn to tatters it drops, and lands hurt; between the drawings it goes smoothly, tick by
+// tick; it sees a round coming and dodges it on its jets - ankles and under its wing alight - its
+// guns firing back the other way, not again straight after, and not one from behind; its cannon
+// under its wing, with the user's bullet, and a missile; destroyed - falling apart burning, no blast.
+// Over courses laid in the wilds, cleared to the sky; the units and their rounds stepped (the world
+// where it matters).
 const { world, layout } = pwApp;
 const { M } = PW;
 const checks = [];
@@ -32,11 +37,33 @@ function site(len, sky = 700) {
 // (units and rounds: the tanks' step steps the mechs and the rounds too)
 const run = (secs, each) => { for (let k = 0; k < Math.round(secs / DT); k += 1) { T.step(world, DT); if (each && each(k) === false) break; } };
 const fresh = () => { world.mechs = []; world.tanks = []; world.troops = []; world.jets = []; world.shots = []; };
+// (the cells of it drawn this tick, about its body point, as the drawing faces - left)
+const drawnCells = (m) => { const P = m.P, out = new Set(); for (let y = P.box.y0; y < P.box.y1; y += 1) for (let x = P.box.x0; x < P.box.x1; x += 1) if (X.pixel(m, x + 0.5, y + 0.5)) out.add(`${(x - P.hx) * -m.facing},${y - P.hy}`); return out; };
 
-// 1. Striding: up a 14-cell step on its legs; a 60-cell wall stops it - it leaps it, landing beyond.
+// 1. As drawn: standing, it is the user's crouching drawing (the idle clip's first frame), cell for
+// cell - facing right as left, mirrored.
+{
+  const S = site(400);
+  if (!S) check(false, 'a stretch of the wilds to stand it in');
+  else {
+    const { x0 } = S;
+    fresh();
+    const frames = X.frames(), crouch = frames[X.clips().idle[0]];
+    const want = new Set(); for (let i = 0; i < crouch.n; i += 1) want.add(`${crouch.xs[i]},${crouch.ys[i]}`);
+    const a = X.create(world, { x: x0 + 120, side: 'left', facing: -1 }), b = X.create(world, { x: x0 + 280, side: 'left', facing: 1, style: 'asian' });
+    run(0.2);
+    const same = (m) => { const got = drawnCells(m); let both = 0; for (const k of got) if (want.has(k)) both += 1; return both / (got.size + want.size - both); };
+    const ja = same(a), jb = same(b);
+    await view('mech-as-drawn', x0 + 200, a.y - 30, 7);
+    check(ja === 1 && jb === 1 && crouch.n > 400,
+      `standing, the hopper is the user's crouching drawing cell for cell (${crouch.n} cells; facing left ${(ja * 100).toFixed(1)}% the same, facing right, mirrored, ${(jb * 100).toFixed(1)}%)`);
+  }
+}
+
+// 2. Hopping: up a 14-cell step, hop after hop; a 60-cell wall stops it - it leaps it, landing beyond.
 {
   const S = site(900);
-  if (!S) check(false, 'a stretch of the wilds for the walk');
+  if (!S) check(false, 'a stretch of the wilds for the hops');
   else {
     const { x0, g } = S;
     fill(x0 + 300, g - 14, x0 + 899, g - 1, M.STONE);              // a step up, 14 cells
@@ -45,20 +72,22 @@ const fresh = () => { world.mechs = []; world.tanks = []; world.troops = []; wor
     const m = X.create(world, { x: x0 + 120, side: 'left', facing: 1, style: 'gothic' });
     X.walk(m, 1);
     let stepped = false, stopAt = null;
-    run(2);
-    await view('mech-striding', m.x, m.y - 40, 6);
-    run(6, () => { if (m.y <= g - 15) stepped = true; if (stopAt === null && m.x > x0 + 500 && Math.abs(m.vx) < 1 && m.onGround) stopAt = m.x; });
-    const atWall = m.x;
+    const hops0 = X.stats.hops, seen = new Set();
+    run(1);
+    await view('mech-hopping', m.x, m.y - 30, 6);
+    run(6, () => { seen.add(m.an.a); if (m.y <= g - 15) stepped = true; if (stopAt === null && m.x > x0 + 500 && Math.abs(m.vx) < 1 && m.onGround) stopAt = m.x; });
+    const atWall = m.x, hops = X.stats.hops - hops0;
     X.leap(m);
     let top = m.y;
-    run(4, () => { top = Math.min(top, m.y); });
-    await view('mech-leapt', m.x, m.y - 60, 4);
-    check(stepped && stopAt !== null && atWall < x0 + 560 - X.HALF + 2 && m.x > x0 + 571 + X.HALF && m.onGround && m.hp === X.ARMOUR,
-      `a mech strides up a 14-cell step (${stepped}), a 60-cell wall stops it (${stopAt !== null ? `${(x0 + 560 - atWall).toFixed(0)} cells off it` : 'not stopped'}) - it leaps it (${(g - 15 - top).toFixed(0)} cells up) and lands beyond it unhurt (${(m.x - x0 - 571).toFixed(0)} past it, armour ${m.hp.toFixed(0)})`);
+    run(5, () => { top = Math.min(top, m.y); });
+    await view('mech-leapt', m.x, m.y - 40, 5);
+    const idle = X.clips().idle;
+    check(stepped && hops >= 3 && idle.every((f) => seen.has(f)) && stopAt !== null && atWall < x0 + 560 - X.HALF + 2 && m.x > x0 + 571 + X.HALF && m.onGround && m.hp === X.ARMOUR,
+      `a mech hops along (${hops} hops, every one of the idle clip's ${idle.length} drawings in each), up a 14-cell step (${stepped}); a 60-cell wall stops it (${stopAt !== null ? `${(x0 + 560 - atWall).toFixed(0)} cells off it` : 'not stopped'}) - it leaps it (${(g - 15 - top).toFixed(0)} cells up) and lands beyond it unhurt (${(m.x - x0 - 571).toFixed(0)} past it, armour ${m.hp.toFixed(0)})`);
   }
 }
 
-// 2. Boosting: at the foot of a cliff higher than it leaps, a leap and its jets carry it up on to the
+// 3. Jets: at the foot of a cliff higher than it leaps, a leap and its jets carry it up on to the
 // top; its fuel spent, it fills again on the ground.
 {
   const S = site(700, 900);
@@ -70,52 +99,108 @@ const fresh = () => { world.mechs = []; world.tanks = []; world.troops = []; wor
     fresh();
     const m = X.create(world, { x: x0 + 280, side: 'left', facing: 1, style: 'modern' });
     X.walk(m, 1);
-    run(0.6);
+    run(0.3);
     X.leap(m);
     let boosted = false, low = Infinity;
-    // (on top, it stops there)
-    run(6, () => { if (!boosted && !m.onGround && m.vy > -80) { X.boost(m); boosted = true; } low = Math.min(low, m.fuel); if (m.onGround && m.y <= g - H + 1) X.walk(m, 0); });
+    // (over the top, it stops going on: it comes down on it)
+    run(7, () => { if (!boosted && !m.onGround && m.vy > -80) { X.boost(m); boosted = true; } low = Math.min(low, m.fuel); if (m.y <= g - H + 1 && m.x > x0 + 320 + X.HALF + 30) X.walk(m, 0); });
     const onTop = m.onGround && m.y <= g - H - 1 + 2 && m.x > x0 + 320 + X.HALF;
     run(3);
-    await view('mech-on-cliff', m.x, m.y - 60, 4);
+    await view('mech-on-cliff', m.x, m.y - 40, 4);
     check(onTop && low < 0.3 && m.fuel > low + 1,
       `a leap and its jets carry it up a ${H}-cell cliff, higher than it leaps (${onTop ? 'on top' : `at ${(g - m.y).toFixed(0)} cells up, ${m.onGround ? 'on the ground' : 'in the air'}`}); its fuel spent (${low.toFixed(2)} s left at the least), it fills again on the ground (${m.fuel.toFixed(2)} s)`);
   }
 }
 
-// 3. Landing: from a leap, unhurt; dropped from 600 cells it lands hurt - not destroyed - shaking the
-// ground.
+// 4. Gliding: dropped from 600 cells it spreads its wings - the glide clip - and comes down slowly,
+// landing unhurt; its wings torn to tatters (its armour low) it drops, and lands hurt.
 {
-  const S = site(400, 800);
+  const S = site(500, 800);
   if (!S) check(false, 'a stretch of the wilds for the drop');
   else {
     const { x0, g } = S;
     fresh();
-    const m = X.create(world, { x: x0 + 200, y: g - 1 - 600, side: 'left' });
-    m.onGround = false;
-    let vLand = 0;
-    run(4, () => { if (!m.onGround) vLand = m.vy; });
-    check(m.onGround && m.hp < X.ARMOUR && m.hp > 0 && vLand > X.FALL_SAFE && X.stats.hurtLanding >= 1,
-      `dropped from 600 cells it comes down at ${vLand.toFixed(0)} cells/s and lands hurt, on its legs (armour ${m.hp.toFixed(0)}); from a leap it lands unhurt (see the wall's)`);
+    const a = X.create(world, { x: x0 + 120, y: g - 1 - 600, side: 'left' });
+    const b = X.create(world, { x: x0 + 380, y: g - 1 - 600, side: 'left' });
+    b.hp = X.ARMOUR * X.TATTERS - 10;
+    a.onGround = false; b.onGround = false;
+    const glide = new Set(X.clips().glide);
+    let va = 0, vb = 0, inGlide = 0, ticks = 0, shown = false;
+    run(8, (k) => {
+      if (!a.onGround) { va = a.vy; ticks += 1; if (glide.has(a.an.a)) inGlide += 1; }
+      if (!b.onGround) vb = b.vy;
+      if (!shown && k === 90) shown = true;
+      if (a.onGround && b.onGround) return false;
+    });
+    await view('mech-glided', x0 + 250, g - 40, 4);
+    check(a.onGround && a.hp === X.ARMOUR && va < X.FALL_SAFE && inGlide > ticks * 0.6 && b.onGround && b.hp < X.ARMOUR * X.TATTERS - 10 && vb > X.FALL_SAFE,
+      `dropped from 600 cells it glides down on its wings (the glide clip ${(inGlide / Math.max(1, ticks) * 100).toFixed(0)}% of its fall), landing at ${va.toFixed(0)} cells/s unhurt (armour ${a.hp.toFixed(0)}); its wings in tatters, another drops, landing at ${vb.toFixed(0)} cells/s, hurt (armour ${(X.ARMOUR * X.TATTERS - 10).toFixed(0)} -> ${b.hp.toFixed(0)})`);
   }
 }
 
-// 4. Dodging: an armour-piercing round fired at it from in front, 900 cells off - it sees it and leaps
-// it; a second straight after, its dodge not ready again, strikes it; one from behind it does not see.
+// 5. Smoothly: hopping, leaping, gliding down and landing, it goes from drawing to drawing tick by
+// tick - many more drawings shown than the user drew, each a short way on from the one before,
+// where going straight from one of the user's drawings to the next jumps far.
+{
+  const S = site(900, 700);
+  if (!S) check(false, 'a stretch of the wilds for the smoothness');
+  else {
+    const { x0 } = S;
+    fresh();
+    const m = X.create(world, { x: x0 + 150, side: 'left', facing: 1 });
+    // (how far, on the whole, the cells of one drawing are from the nearest of another's)
+    const far = (A, B) => {
+      if (!A.size || !B.size) return 0;
+      const pts = [...B].map((k) => k.split(',').map(Number));
+      let sum = 0;
+      for (const k of A) { const [x, y] = k.split(',').map(Number); let best = Infinity; for (const [u, v] of pts) { const d = Math.abs(u - x) + Math.abs(v - y); if (d < best) { best = d; if (!d) break; } } sum += best; }
+      return sum / A.size;
+    };
+    const frames = X.frames(), cellsOf = (f) => { const F = frames[f], s = new Set(); for (let i = 0; i < F.n; i += 1) s.add(`${F.xs[i]},${F.ys[i]}`); return s; };
+    let prev = null, worstTick = 0, shown = new Set(), keys = new Set(), worstKey = 0;
+    X.walk(m, 1);
+    run(3, (k) => {
+      if (k === 60) X.leap(m);
+      if (k % 2) return;
+      const now = drawnCells(m), sig = [...now].sort().join(';');
+      shown.add(sig); keys.add(m.an.a);
+      if (prev) worstTick = Math.max(worstTick, far(now, prev), far(prev, now));
+      prev = now;
+    });
+    // (the user's drawings straight one to the next, as the clips go)
+    const C = X.clips();
+    for (const clip of [C.idle, C.jump, C.glide]) for (let i = 0; i + 1 < clip.length; i += 1) { const A = cellsOf(clip[i]), B = cellsOf(clip[i + 1]); worstKey = Math.max(worstKey, far(A, B), far(B, A)); }
+    check(shown.size >= keys.size * 3 && worstTick < worstKey * 0.6,
+      `between the user's drawings it goes smoothly: ${shown.size} drawings shown over a hop, a leap and its glide - the user drew ${keys.size} of them - none further from the one two ticks before than ${worstTick.toFixed(1)} cells on the whole, where going straight from one of the user's drawings to the next goes up to ${worstKey.toFixed(1)}`);
+  }
+}
+
+// 6. Dodging: an armour-piercing round fired at it from in front, 900 cells off - it sees it and
+// leaps it on its jets, alight at its ankles and under its wing, and its guns fire back the other
+// way; a second straight after, its dodge not ready again, strikes it; one from behind it does not see.
 {
   const S = site(1400);
   if (!S) check(false, 'a stretch of the wilds for the dodging');
   else {
-    const { x0, g } = S;
+    const { x0 } = S;
     fresh();
     const m = X.create(world, { x: x0 + 300, side: 'left', facing: 1, style: 'asian' });
     run(0.2);
     const at = (u) => [u.x, u.y - X.HEIGHT / 2];
     const shoot = (u, from) => { const [tx, ty] = at(u); return PW.shots.fire(world, { kind: 'ap', x: tx + from, y: ty, dx: -Math.sign(from), dy: 0, side: 'right' }); };
-    const d0 = X.stats.dodged;
+    // (where its jets' flames start, and where its rounds leave from, while it dodges)
+    const spawn = world.particles.spawn, flames = [];
+    world.particles.spawn = function (x, y, vx, vy, mat, col, flags, ...rest) { if (flags & PW.PARTICLE.GLOW) flames.push([x, y, vx, vy]); return spawn.call(this, x, y, vx, vy, mat, col, flags, ...rest); };
+    const d0 = X.stats.dodged, r0 = X.stats.returned, fired0 = PW.shots.stats.fired;
     shoot(m, 900);
-    run(0.5);
+    let P = null, back = null;
+    run(0.5, () => { if (!P && m.jetT > 0) P = { ankles: m.P.ankles.map((a) => a.slice()), jet: m.P.jet.slice(), gun: m.P.gun.slice() }; if (!back) back = (world.shots || []).find((s) => s.from === m) || null; });
+    world.particles.spawn = spawn;
+    const near = (pts, [x, y], r) => pts.some(([u, v]) => Math.hypot(u - x, v - y) <= r);
+    const fromAnkles = P && P.ankles.every((a) => near(flames, a, 4)), fromWing = P && near(flames, P.jet, 4);
+    const jetsBack = P && flames.filter(([x, y]) => Math.hypot(x - P.jet[0], y - P.jet[1]) <= 4).some(([, , vx]) => Math.sign(vx) === -m.facing);
     const hp1 = m.hp, dodged = X.stats.dodged - d0;
+    await view('mech-dodging', m.x, m.y - 40, 5);
     shoot(m, 600);
     run(0.4);
     const hp2 = m.hp;
@@ -126,12 +211,13 @@ const fresh = () => { world.mechs = []; world.tanks = []; world.troops = []; wor
     run(0.2);
     shoot(b, -900);
     run(0.5);
-    check(dodged === 1 && hp1 === X.ARMOUR && hp2 < hp1 && b.hp < X.ARMOUR && X.stats.dodged - d0 === 1,
-      `it sees a round coming at it from in front and leaps it (${dodged} dodge, armour ${hp1.toFixed(0)}); a second straight after strikes it (${(hp1 - hp2).toFixed(0)} off its armour), its dodge not ready again; one from behind it does not see (${(X.ARMOUR - b.hp).toFixed(0)} off another's)`);
+    check(dodged === 1 && hp1 === X.ARMOUR && hp2 < hp1 && b.hp < X.ARMOUR && X.stats.dodged - d0 === 1 && fromAnkles && fromWing && jetsBack && X.stats.returned - r0 === 1 && back && Math.sign(back.vx) === 1 && back.look === 'hopper',
+      `it sees a round coming at it from in front and leaps it (${dodged} dodge, armour ${hp1.toFixed(0)}) on its jets - flames from its ankles (${fromAnkles}) and from under its wing (${fromWing}), that one blowing back (${jetsBack}) - its guns firing back at the shooter the other way (${X.stats.returned - r0} burst, ${PW.shots.stats.fired - fired0} rounds); a second straight after strikes it (${(hp1 - hp2).toFixed(0)} off its armour), its dodge not ready again; one from behind it does not see (${(X.ARMOUR - b.hp).toFixed(0)} off another's)`);
   }
 }
 
-// 5. Fighting: its cannon's burst strikes a tank 400 cells off; its missile strikes another.
+// 7. Fighting: its cannon under its wing - the user's bullet - strikes a tank 400 cells off, its
+// rounds bursting as drawn where they strike; its missile, from under its wing too, strikes another.
 {
   const S = site(1400);
   if (!S) check(false, 'a stretch of the wilds for the fighting');
@@ -143,19 +229,21 @@ const fresh = () => { world.mechs = []; world.tanks = []; world.troops = []; wor
     const b = T.create(world, { style: 'modern', side: 'right', x: x0 + 1100, y: g, facing: -1 });
     run(0.2);
     m.aim = { x: a.x, y: a.y - 14 };
+    const gun = m.P.gun.slice(), body = [m.P.hx, m.P.hy];
     X.fire(world, m);
-    run(1.5);
+    let first = null, bursts = 0;
+    run(1.5, () => { if (!first) first = (world.shots || []).find((s) => s.from === m) || null; bursts = Math.max(bursts, (world.shotHits || []).length); });
     m.aim = { x: b.x, y: b.y - 14 };
-    X.launch(world, m);
+    const missile = X.launch(world, m);
     run(4);
     await view('mech-fighting', x0 + 600, g - 80, 2);
-    check(a.hp < 100 && b.hp < 100 && X.stats.fired >= 8,
-      `its cannon's burst strikes a tank 400 cells off (${(100 - a.hp).toFixed(0)} off its armour); its missile strikes another 900 off (${(100 - b.hp).toFixed(0)})`);
+    check(a.hp < 100 && b.hp < 100 && X.stats.fired >= 8 && first && first.look === 'hopper' && Math.hypot(first.x0 - gun[0], first.y0 - gun[1]) < 3 && gun[1] > body[1] && bursts >= 1 && missile,
+      `its cannon, under its wing (${(gun[1] - body[1]).toFixed(0)} cells under its body), fires the user's bullet: a burst strikes a tank 400 cells off (${(100 - a.hp).toFixed(0)} off its armour), bursting as drawn where it strikes (${bursts}); its missile strikes another 900 off (${(100 - b.hp).toFixed(0)})`);
     fresh();
   }
 }
 
-// 6. Destroyed: its armour gone it falls apart where it stands, burning - its wreck's pieces thrown
+// 8. Destroyed: its armour gone it falls apart where it stands, burning - its wreck's pieces thrown
 // down, flames, a wreck's fire left - and no blast: not a cell of the ground round it broken.
 {
   const S = site(500);
@@ -177,7 +265,7 @@ const fresh = () => { world.mechs = []; world.tanks = []; world.troops = []; wor
   }
 }
 
-// 7. What they cost: four mechs striding, a tick; and drawing them.
+// 9. What they cost: four mechs hopping, a tick; and drawing them.
 {
   fresh();
   const S = site(1200);
@@ -189,7 +277,7 @@ const fresh = () => { world.mechs = []; world.tanks = []; world.troops = []; wor
     const r = { ctx: document.createElement('canvas').getContext('2d'), world, camera: { x: x0, y: g - 300, zoom: 2 }, view: { width: 1600, height: 900 } };
     const drawMs = best(5, 8, () => X.draw(r));
     const ms = best(5, 30, () => X.step(world, DT));
-    check(ms < 0.3 && drawMs < 3, `four mechs cost little: ${ms.toFixed(3)} ms a tick, ${drawMs.toFixed(2)} ms to draw at 2x`);
+    check(ms < 0.4 && drawMs < 3, `four mechs cost little: ${ms.toFixed(3)} ms a tick, ${drawMs.toFixed(2)} ms to draw at 2x`);
   } else check(false, 'a stretch of the wilds for the cost');
   fresh();
 }

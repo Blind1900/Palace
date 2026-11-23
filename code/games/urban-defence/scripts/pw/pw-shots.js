@@ -89,7 +89,7 @@
     const speed = spec.speed ?? (k.missile ? k.launch : k.speed);
     const shot = { kind, k, x: spec.x, y: spec.y, vx: dx * speed + (spec.vx0 || 0), vy: dy * speed + (spec.vy0 || 0),
       e: k.punch || 0, side: spec.side || null, from: spec.from || null, target: spec.target || null, aimDy: spec.aimDy || 0,
-      age: 0, fuel: k.burn || 0, run: 0, wet: false, done: false, n: seq };
+      age: 0, fuel: k.burn || 0, run: 0, wet: false, done: false, n: seq, look: spec.look || null, x0: spec.x, y0: spec.y };
     (world.shots || (world.shots = [])).push(shot);
     stats.fired += 1;
     return shot;
@@ -98,13 +98,24 @@
   // ---- Flight -------------------------------------------------------------------------------------
   let stepping = null;
   function step(world, dt) {
+    // (the bursts of drawn rounds where they struck: see draw)
+    if (world.shotHits && world.shotHits.length) { for (const h of world.shotHits) h.age += dt; while (world.shotHits.length && world.shotHits[0].age > HIT_FOR) world.shotHits.shift(); }
     const list = world.shots;
     if (!list || !list.length) { stats.flying = 0; return; }
     stepping = world;
     let w = 0;
     for (let q = 0; q < list.length; q += 1) {
       const s = list[q];
-      if (!s.done) fly(world, s, dt);
+      if (!s.done) {
+        const gone = stats.gone;
+        fly(world, s, dt);
+        // (a round drawn as the user drew it bursts as drawn where it struck - not gone off the world)
+        if (s.done && s.look && stats.gone === gone) {
+          const sp = Math.hypot(s.vx, s.vy) || 1;
+          (world.shotHits || (world.shotHits = [])).push({ x: s.x, y: s.y, ux: s.vx / sp, uy: s.vy / sp, look: s.look, age: 0 });
+          if (world.shotHits.length > 96) world.shotHits.shift();
+        }
+      }
       if (!s.done) list[w++] = s;
     }
     list.length = w;
@@ -440,16 +451,60 @@
   // A round in flight is drawn as its tracer: a streak back along its path from where it is, bright
   // at its head, over what it has flown this frame and the last (never back past its muzzle); a
   // missile as its body, its flame bright at its tail while its motor burns.
+  // A round with a look of its own - the hopper's cannon's, the user's Bullet.gif - is drawn as drawn:
+  // its head and its trail growing behind it as it flies (the drawing's first frames, by how far it
+  // has flown), turned the way it flies; where it strikes, the drawing's burst plays out.
+  const HIT_FOR = 0.48;
+  let looks = null;
+  function lookOf(name) {
+    if (!looks) {
+      looks = {};
+      const B = PW.mechs && PW.mechs.bullet && PW.mechs.bullet();
+      if (B) {
+        const frames = B.frames.map((b64) => {
+          const bin = atob(b64), cells = [];
+          for (let i = 0; i + 2 < bin.length; i += 3) { const c = B.colours[bin.charCodeAt(i + 2)]; cells.push([bin.charCodeAt(i), bin.charCodeAt(i + 1), `rgb(${c[0]},${c[1]},${c[2]})`]); }
+          return cells;
+        });
+        // (in flight: about its head - its leftmost cell, as it flies left; struck: about where it struck)
+        const [, hy] = B.head, firstHit = frames.findIndex((f, i) => i > 0 && f.length && Math.min(...f.map((q) => q[0])) === 0 && i >= 7) + 1;
+        const fly = frames.slice(0, firstHit).map((f) => { const hx = Math.min(...f.map((q) => q[0])); return { len: Math.max(...f.map((q) => q[0])) - hx, cells: f.map(([x, y, c]) => [x - hx, y - hy, c]) }; });
+        const burst = frames.slice(firstHit).map((f) => f.map(([x, y, c]) => [x, y - hy, c]));
+        looks.hopper = { fly, burst };
+      }
+    }
+    return looks[name] || null;
+  }
+  // (cells of a drawing facing left, about (0, 0), laid at (x, y) going (ux, uy))
+  function drawn(ctx, cells, x, y, ux, uy, cell) {
+    for (const [dx, dy, col] of cells) {
+      ctx.fillStyle = col;
+      ctx.beginPath(); cell(x - ux * dx + uy * dy, y - uy * dx - ux * dy); ctx.fill();
+    }
+  }
   function draw(renderer, world) {
     world = world || renderer.world || (window.pwApp && window.pwApp.world);
-    const list = world && world.shots;
-    if (!list || !list.length) return;
+    const list = world && world.shots, hits = world && world.shotHits;
+    if ((!list || !list.length) && (!hits || !hits.length)) return;
     const { ctx, camera, view } = renderer, z = camera.zoom, size = Math.max(1, Math.round(z));
     const vx0 = camera.x - 40, vy0 = camera.y - 40, vx1 = camera.x + view.width / z + 40, vy1 = camera.y + view.height / z + 40;
     const cell = (x, y) => ctx.rect(Math.round((Math.floor(x) - camera.x) * z), Math.round((Math.floor(y) - camera.y) * z), size, size);
-    for (const s of list) {
+    for (const h of hits || []) {
+      const L = lookOf(h.look);
+      if (!L || h.x < vx0 || h.x > vx1 || h.y < vy0 || h.y > vy1) continue;
+      const f = L.burst[Math.min(L.burst.length - 1, Math.floor(h.age / HIT_FOR * L.burst.length))];
+      if (f) drawn(ctx, f, h.x, h.y, h.ux, h.uy, cell);
+    }
+    for (const s of list || []) {
       if (s.done || s.x < vx0 || s.x > vx1 || s.y < vy0 || s.y > vy1) continue;
       const sp = Math.hypot(s.vx, s.vy) || 1, ux = s.vx / sp, uy = s.vy / sp;
+      const L = s.look && lookOf(s.look);
+      if (L) {
+        let f = L.fly[0];
+        for (const q of L.fly) if (q.len <= s.run + 1) f = q;
+        drawn(ctx, f.cells, s.x, s.y, ux, uy, cell);
+        continue;
+      }
       if (s.k.missile) {
         ctx.fillStyle = 'rgb(84,88,86)';
         ctx.beginPath();

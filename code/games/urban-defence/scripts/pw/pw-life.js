@@ -21,6 +21,13 @@
   const COLUMNS_PER_TICK = 32;
   const TUFT = 0.05, SCORCH_FADE = 0.06, ASH_WEATHERS = 0.2;
   const CHIPS_ROT = 0.3;          // chance a visit (each column about every 9 s) the top of a litter of splinters rots a cell
+  // Rubble lying out on the land weathers into it (N100): a cell of the heap a visit, now and then,
+  // from its surface down, turns to dirt - one in WEATHER_KEEP stays, a lump of what it was, gone
+  // dark with the dirt round it - down to WEATHER_DEPTH under the surface (what is buried deeper
+  // stays). A heap is ground in some minutes, a mound of dirt with the ruin showing through it.
+  const WEATHER = 0.25, WEATHER_DEPTH = 8, WEATHER_KEEP = 4;
+  const WEATHER_TINT = [70, 58, 46];   // what a lump left in the dirt goes dark towards
+  const WEATHER_FENCE = 96, WEATHER_FENCE_DOWN = 120;   // cells round a building being rebuilt it is left for the crews
   // The Game of Life.
   const LIFE_EVERY = 8;           // ticks per generation (7.5 a second)
   const GREEN = 1, WHITE = 2;     // the two kinds: regrowth, and the sandbox's
@@ -127,6 +134,65 @@
       if (under === M.TOPSOIL || under === M.SOIL || under === M.GRASS) PW.set(world, x, ty, M.TOPSOIL | (PW.hash2(x, ty) & 3) << 6, { quiet: true });
       else PW.set(world, x, ty, M.AIR, { quiet: true });
       stats.rotted = (stats.rotted || 0) + 1;
+      return true;
+    }
+    // Rubble out on the land weathers into it (see WEATHER): in column x, ground's top at y, the
+    // first cell of rubble from the surface down - under dirt it made, or lumps it left - turns to
+    // dirt (topsoil at the surface), unless it is one of those it leaves; the lumps left over it go
+    // dark as the dirt closes round them. Only rubble lying on the land itself - not on made ground
+    // (a street, a pad, a bridge, the fill over the pipes), not in water, never against a supply
+    // line's bore - and never where a ruined building is being rebuilt or re-founded (its crews
+    // take the rubble for its stuff, and a core coming up shoulders rubble aside where dirt would
+    // hold it - see fences).
+    const NATURAL = new Uint8Array(64);
+    for (const id of [M.GRASS, M.TOPSOIL, M.SOIL, M.CLAY, M.GRAVEL, M.STONE, M.BEDROCK, M.SAND, M.LOOSE_SOIL, M.LOOSE_STONE]) NATURAL[id] = 1;
+    const kept = (x, y) => (PW.hash3(x, y, 0x3a7) % WEATHER_KEEP) === 0;
+    let fences = [], fencedAt = -1e9;
+    function fenced(x, y) {
+      if (tick - fencedAt >= 60) {
+        fencedAt = tick; fences = [];
+        const jobs = world.repair && world.repair.jobs;
+        for (const b of world.buildings || []) {
+          if (!b || !b.body) continue;
+          if (!(b.ruined || b.underConstruction || b.coresOpen || b.refoundPending || (jobs && jobs.has && jobs.has(b.id)))) continue;
+          fences.push([b.body.left - WEATHER_FENCE, b.body.right + WEATHER_FENCE, b.body.top, (b.ground ?? b.body.bottom) + WEATHER_FENCE_DOWN]);
+        }
+      }
+      for (const [x0, x1, y0, y1] of fences) if (x >= x0 && x <= x1 && y >= y0 && y <= y1) return true;
+      return false;
+    }
+    // (a supply line's bore beside it: its pipe, its hollow, or a cell of the line)
+    function byBore(x, y) {
+      for (let dy = -1; dy <= 1; dy += 1) for (let dx = -1; dx <= 1; dx += 1) {
+        const id = PW.get(world, x + dx, y + dy) & ID_MASK;
+        if (id === M.PIPE || (PW.getFlags(world, x + dx, y + dy) & FLAG.HOLLOW) || PW.getOwner(world, x + dx, y + dy) >= 60000) return true;
+      }
+      return false;
+    }
+    function weather(x, y) {
+      let yc = -1;
+      for (let d = 0; d < WEATHER_DEPTH; d += 1) {
+        const b = PW.get(world, x, y + d), id = b & ID_MASK;
+        if (id === M.RUBBLE && b !== PACKED_CHIPS && !kept(x, y + d)) { yc = y + d; break; }
+        if (id !== M.RUBBLE && !NATURAL[id]) return false;   // (dirt it made, or lumps it left, over it - nothing else)
+      }
+      if (yc < 0) return false;
+      // (what the heap lies on: the land - not made ground, not water)
+      let by = yc + 1;
+      while (by < world.height - 1 && by - yc < 64 && (PW.get(world, x, by) & ID_MASK) === M.RUBBLE) by += 1;
+      if (!NATURAL[PW.get(world, x, by) & ID_MASK]) return true;
+      if (PW.getOwner(world, x, yc) || fenced(x, yc) || byBore(x, yc)) return true;
+      if (rnd(x, 17) >= WEATHER) return true;
+      PW.set(world, x, yc, (yc === y ? M.TOPSOIL : M.SOIL) | (PW.hash2(x, yc) & 3) << 6, { quiet: true });
+      PW.setLayer(world, 'paint', x, yc, 0);
+      // (the lumps left just over it, gone dark)
+      for (let yy = yc - 1; yy >= y && (PW.get(world, x, yy) & ID_MASK) === M.RUBBLE; yy -= 1) {
+        const p = PW.getLayer(world, 'paint', x, yy);
+        if (!p) continue;
+        const r = p & 255, g = (p >>> 8) & 255, bl = (p >>> 16) & 255;
+        PW.setLayer(world, 'paint', x, yy, PW.abgr(Math.round(r * 0.55 + WEATHER_TINT[0] * 0.45), Math.round(g * 0.55 + WEATHER_TINT[1] * 0.45), Math.round(bl * 0.55 + WEATHER_TINT[2] * 0.45), (p >>> 24) & 255));
+      }
+      stats.weatheredRubble = (stats.weatheredRubble || 0) + 1;
       return true;
     }
     // ---- The Game of Life -----------------------------------------------------------------------------
@@ -342,6 +408,8 @@
       // cell at a visit now and then - to nothing, or, the last of it lying on soil, into the soil,
       // making it rich - until the ground shows again and the green comes back over it.
       if (rot(x, y)) return;
+      // Rubble lying out on the land weathers into it (N100).
+      if (weather(x, y)) return;
       // Ash left by a fire weathers into the soil under it, and makes it rich.
       if (id === M.ASH) {
         const under = PW.get(world, x, y + 1) & ID_MASK;
