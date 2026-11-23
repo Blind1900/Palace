@@ -420,7 +420,8 @@
     return true;
   }
   function watchRounds(world, m) {
-    if (m.dodgeT > 0 || m.charge > 0 || !(m.onGround || m.fuel > 0.3)) return;
+    // (taken in hand, it dodges only as the person does - N102: nothing of its own)
+    if (m === held || m.dodgeT > 0 || m.charge > 0 || !(m.onGround || m.fuel > 0.3)) return;
     const list = world.shots;
     if (!list || !list.length) return;
     const cx = m.x, cy = m.y - HEIGHT / 2;

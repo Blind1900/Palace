@@ -142,9 +142,13 @@
   const disabled = (world, u) => (u.disabledUntil || 0) > (world.tick || 0);
 
   // ---- On its own: the sentry, and carrying out its order -------------------------------------------------
+  // (a unit taken in hand - N102: it does only what the person's keys and clicks tell it, no looking
+  // about, no firing of its own, its aim where the mouse is)
+  const inHand = (u) => (u.kind === 'trooper' && PW.troops && PW.troops.held() === u) || (u.kind === 'tank' && PW.tanks && PW.tanks.held() === u)
+    || (u.kind === 'mech' && PW.mechs && PW.mechs.held() === u) || (u.kind === 'jet' && PW.jets && PW.jets.held() === u);
   function think(world, u, dt) {
     const o = u.order;
-    if (!o || disabled(world, u)) return;
+    if (!o || disabled(world, u) || inHand(u)) return;
     const S = SIGHT[kindOf(u)] || SIGHT.trooper;
     // (a look about it now and then - each in its own tick, so they do not all look at once)
     u.lookIn = (u.lookIn ?? ((u.seed || 0) % S.every)) - 1;

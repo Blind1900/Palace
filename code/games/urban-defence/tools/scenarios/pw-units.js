@@ -244,6 +244,26 @@ const pocket = (x, floor) => {
   kill(t);
 }
 
+// 12b. In hand (N102): a man the person has taken in hand, an enemy in plain sight, does nothing of
+// his own - no aim at it, no round fired - his aim where the person puts it; let go, holding his
+// post, he fires on it.
+{
+  const ours = U.create(world, { x: 4400.5, side: 'left', facing: 1, order: { type: 'hold', at: 0 } });
+  const theirs = U.create(world, { x: 4560.5, side: 'right', facing: -1 });
+  run(0.3);
+  U.hold(ours);
+  ours.aim = { x: ours.x - 200, y: ours.y - 40 };
+  const mag0 = ours.mag;
+  run(3);
+  const quiet = ours.mag === mag0 && ours.aim.x === 4400.5 - 200;
+  U.hold(null);
+  run(3);
+  const fought = ours.mag < mag0 || ours.reload > 0;
+  check(quiet && fought,
+    `taken in hand, a man with an enemy in plain sight does nothing of his own - no round fired, his aim where the person put it (${quiet}); let go, holding his post, he fires on it (${fought})`);
+  kill(ours, theirs);
+}
+
 // 13. Sent quietly: a man told to go past a computer's guard with a quiet order goes crouched all
 // the way and fights no one - the guard, facing him, never sees him; the same man sent the same way
 // on a plain order fires on the guard.
