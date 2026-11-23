@@ -469,11 +469,13 @@
     if (u.reloadT > 0 && (u.reloadT -= dt) <= 0) u.ammo = T.ammo;
     if (u.manualT > 0) u.manualT -= dt;
     if (u.rest > 0) u.rest -= dt;
-    if (u.hold && !(u.manualT > 0)) { u.foe = null; u.burst = 0; turretPose(u); return; }
+    // (by hand: a spot clicked, till its burst is laid on it - and that burst, all of it, held or not)
+    const byHand = u.manualT > 0 || (u.handBurst && u.burst > 0);
+    if (u.hold && !byHand) { u.foe = null; u.burst = 0; u.handBurst = false; turretPose(u); return; }
     // what it is on: looked for now and then (a spot clicked by hand, kept a while)
     if (++u.look >= LOOK_EVERY) {
       u.look = 0;
-      if (!(u.foe && u.foe.spot && u.manualT > 0)) u.foe = pickFoe(world, u);
+      if (!(u.foe && u.foe.spot && byHand)) u.foe = pickFoe(world, u);
     }
     const f = u.foe && !u.foe.dead ? u.foe : null;
     let laid = false, mark = null;
@@ -505,9 +507,11 @@
         stats.turretRounds = (stats.turretRounds || 0) + 1;
       }
       if (u.ammo <= 0 && !(u.reloadT > 0)) u.reloadT = T.reload;
+      // (a click's burst gone: one burst to a click)
+      if (u.burst <= 0 && u.handBurst) { u.handBurst = false; u.manualT = 0; }
     } else if (laid && mark && u.rest <= 0 && u.ammo > 0 && !friendInLine(world, u, mark.x, mark.y)) {
       u.burst = T.burst; u.burstT = 0; u.rest = T.rest;
-      if (u.foe && u.foe.spot) u.manualT = 0;
+      u.handBurst = !!(u.foe && u.foe.spot);
     }
   }
 

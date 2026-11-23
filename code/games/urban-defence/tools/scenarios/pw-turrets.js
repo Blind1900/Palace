@@ -165,8 +165,13 @@ const man = (x, y, side, facing = 1) => { const t = U.create(world, { x: x + 0.5
     const drooped = u.e < e0 || u.e <= -0.15;
     const again = roundsOf(u, () => run(3)).length;
     const heldQuiet = roundsOf(q, () => run(2)).length;
-    check(silent === 0 && drooped && again > 0 && heldQuiet === 0,
-      `put out of action it is silent (${silent} rounds), its gun drooping (${drooped}); then it fires again (${again}); held, another never fires (${heldQuiet})`);
+    // (held, and taken in hand: a click fires its whole burst at the spot - one burst to a click)
+    D.hold(q);
+    D.click(world, q.pivot.x + 150, q.pivot.y - 40, 0);
+    const byHand = roundsOf(q, () => run(2)).length, after = roundsOf(q, () => run(2)).length;
+    D.hold(null);
+    check(silent === 0 && drooped && again > 0 && heldQuiet === 0 && byHand === D.TYPES.turret.burst && after === 0,
+      `put out of action it is silent (${silent} rounds), its gun drooping (${drooped}); then it fires again (${again}); held, another never fires (${heldQuiet}) - but in hand a click fires its whole burst (${byHand} rounds), and only the one (${after} after)`);
   }
 }
 

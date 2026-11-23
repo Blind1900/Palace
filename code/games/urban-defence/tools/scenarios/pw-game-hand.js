@@ -46,7 +46,8 @@ check(!!hand && hand.t === u && PW.gameUI.command().sel.length === 1, 'a click o
 check(u.game.order.type === 'manual', `in hand it is the person's (order ${u.game.order.type})`);
 let x0 = u.x;
 pwApp.stepWorld(120);
-check(Math.abs(u.x - x0) < 1.5, `with no key held it stands, its errand dropped (moved ${(u.x - x0).toFixed(1)} in 2 s)`);
+// (N110: taken in hand at a jog, it brakes to a stop in a cell or two - on its errand it would go 88)
+check(Math.abs(u.x - x0) < 3, `with no key held it stands, its errand dropped (moved ${(u.x - x0).toFixed(1)} in 2 s)`);
 
 // 2. It moves only while A / D or an arrow is held.
 for (const [code, sgn] of [['KeyD', 1], ['ArrowLeft', -1], ['ArrowRight', 1], ['KeyA', -1]]) {

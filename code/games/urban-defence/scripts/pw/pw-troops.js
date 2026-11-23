@@ -31,11 +31,13 @@
   const HEIGHT = 25;            // cells: a trooper standing (the GIF's height)
   const CROUCH = 17;            // ... crouched
   const HALF = 3;               // cells either side of its middle its body takes (6 across: its shoulders)
-  const WALK = 22;              // cells/s (about 1.5 m/s)
-  const CROUCH_WALK = 10;
-  const CLIMB = 14;             // cells/s up or down a ladder
+  // (N110, the user's: twice the pace it had - walking, crouched and climbing alike - and as quick
+  // to it and to a stop)
+  const WALK = 44;              // cells/s (about 3 m/s: a jog)
+  const CROUCH_WALK = 20;
+  const CLIMB = 28;             // cells/s up or down a ladder
   const SWIM = 9;
-  const ACCEL = 160, BRAKE = 220, AIR_ACCEL = 40;   // cells/s^2
+  const ACCEL = 320, BRAKE = 440, AIR_ACCEL = 40;   // cells/s^2
   const JUMP = 64;              // cells/s up: half a metre's jump
   const STEP_UP = 9;            // cells it steps straight up, room for its head over it (a third of its height)
   const STEP_DOWN = 6;          // cells it steps down without leaving the ground
@@ -546,17 +548,23 @@
   function drillStep(world, t, dt) {
     const d = t.drilling;
     if (t.dead || t.buried || t.swim) { stopDrill(t); return; }
-    const f = face(world, t, d);
+    // (up a shaft the drill in its hands cuts over its head: still climbing to the top of what it has
+    // cut, it neither cuts on nor takes the shaft over it for the open)
+    const climbing = !d.dx && d.dy < 0 && d.top !== undefined && t.y - heightOf(t) > d.top + 2;
+    const f = climbing ? [] : face(world, t, d);
     // (what it cannot cut ends the drilling there; a shaft that has broken out into the open, too)
     for (let k = 0; k < f.length; k += 2) if (!cuts(world, t, f[k], f[k + 1])) { stopDrill(t); t.drillStopped = 'hard'; return; }
-    if (!d.dx && !f.length) { stopDrill(t); t.drillStopped = 'open'; return; }
+    if (!d.dx && !f.length && !climbing) { stopDrill(t); t.drillStopped = 'open'; return; }
+    // (the drill cuts at its own pace, not the man's: what it cut while he stepped on into the last of
+    // it counts - up to a cut's worth)
     if (f.length) {
       let h = 0;
       for (let k = 0; k < f.length; k += 2) h += hardness[world.mat[f[k + 1] * world.width + f[k]] & ID_MASK];
       h /= f.length / 2;
+      d.period = 1 / (DRILL_FAST * Math.exp(-DRILL_K * h));
       t.drillT += dt;
-      if (t.drillT >= 1 / (DRILL_FAST * Math.exp(-DRILL_K * h))) { t.drillT = 0; carveBore(world, t, d, f); }
-    }
+      if (t.drillT >= d.period) { t.drillT -= d.period; carveBore(world, t, d, f); }
+    } else t.drillT = Math.min(t.drillT + dt, d.period || 0);
     // (on into what it has drilled: walking along or slanting; up the shaft's ladder - going down,
     // it stands on the bottom of the shaft, and sinks with it)
     if (d.dx) { t.walk = d.dx; t.crouch = false; }
@@ -577,6 +585,7 @@
       if (particles && F && !(d.dy > 0 && !d.dx) && (PW.hash3(x, y, t.seed) & 7) === 0) particles.spawn(x + 0.5, y + 0.5, -(d.dx || t.facing) * (30 + (PW.hash2(x, y) & 31)), -15, (PW.mat.breaksTo[m & ID_MASK] || m) & 0xff, 0, F.LAND, 4);
     }
     // (a shaft: the ladder fixed in it, as it goes - from its feet to the row it cut)
+    if (!d.dx && d.dy < 0) d.top = Math.min(d.top ?? Infinity, f[1]);
     if (!d.dx && PW.settlementTools) {
       const cx = Math.floor(t.x), row = f[1];
       PW.settlementTools.ladder(world, cx - 6, Math.min(row, t.y), Math.max(row, t.y));

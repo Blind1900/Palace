@@ -65,7 +65,7 @@ const fresh = () => { world.troops = []; world.grenades = []; };
     run(3);
     await view('troop-walk', x0 + 260, g - 30, 7);
     check(Math.abs(top - U.WALK) < 0.5 && upStep && offLedge && airTicks <= 2 && stoppedAt < x0 + 330 - 2 && downSlope && slopeAir <= 2 && w.vx === 0 && w.x < x0 + 600 - 2 && w.y === g - 1,
-      `a trooper walks at its pace (${top.toFixed(1)} cells/s, about 1.5 m/s), up a step 8 high (${upStep}) and down off a 5-cell ledge (${offLedge}) without leaving the ground (${airTicks} ticks in the air), stopped by a wall over its step (${(x0 + 330 - stoppedAt).toFixed(0)} cells off it); down a 30-degree slope keeping to the ground (${downSlope}, ${slopeAir} ticks in the air); a wall 12 high stops it (${(x0 + 600 - w.x).toFixed(0)} cells off it)`);
+      `a trooper walks at its pace (${top.toFixed(1)} cells/s, about 3 m/s), up a step 8 high (${upStep}) and down off a 5-cell ledge (${offLedge}) without leaving the ground (${airTicks} ticks in the air), stopped by a wall over its step (${(x0 + 330 - stoppedAt).toFixed(0)} cells off it); down a 30-degree slope keeping to the ground (${downSlope}, ${slopeAir} ticks in the air); a wall 12 high stops it (${(x0 + 600 - w.x).toFixed(0)} cells off it)`);
   }
 }
 

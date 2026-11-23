@@ -106,7 +106,9 @@ const pocket = (x, floor) => {
   U.drill(world, t, [0, -1]);
   run(30, () => !t.drilling ? false : undefined);
   const joined = (U.stats.boresJoined || 0) - joined0;
-  const cell = { x: ax, y: t.y + 10 }, net = PW.tunnels.netAt(world, cell.x, cell.y), secret = (PW.getFlags(world, cell.x, cell.y) & PW.FLAG.BORE) !== 0;
+  // (a cell of the shaft over the tunnel's roof, under the ground it broke out through - the cliff
+  // beside it, in the shaft's width, it drills on through)
+  const cell = { x: ax, y: M.exit.y - 40 }, net = PW.tunnels.netAt(world, cell.x, cell.y), secret = (PW.getFlags(world, cell.x, cell.y) & PW.FLAG.BORE) !== 0;
   run(10);
   await view('bore-joined', ax, M.exit.y - 60, 4);
   const plain = (world.bores || []).filter((b) => !b.joined && b.cells.length);
