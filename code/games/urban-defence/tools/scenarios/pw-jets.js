@@ -69,6 +69,33 @@ const fresh = () => { world.jets = []; world.tanks = []; world.troops = []; };
     await view('jet-turned', j.x, j.y, 2);
     check(turned && (g - 300) - top < 900 && dropped && s.v > J.STALL && !s.dead,
       `told the other way it pulls up over the top (${((g - 300) - top).toFixed(0)} cells up) and rolls upright (${turned ? 'flying left, upright' : `facing ${j.facing}, roll ${j.roll.toFixed(2)}`}); stalled, nose high, its nose drops (${dropped}) and it has its speed again (${s.v.toFixed(0)} cells/s)`);
+    controls(x0, g);
+  }
+}
+
+// 2b. By hand (N102, the user's controls): Space held climbs it, let go it levels out; a left click
+// fires its cannon, a right click a missile. (Over the stretch the turning had.)
+function controls(x0, g) {
+  {
+    fresh();
+    const j = J.create(world, { x: x0 + 300, y: g - 400, facing: 1, style: 'modern', side: 'left' });
+    J.hold(j);
+    J.key({ code: 'Space', type: 'keydown' });
+    run(1.2);
+    const climbing = j.climb, up = j.pitch;
+    J.key({ code: 'Space', type: 'keyup' });
+    run(2);
+    const level = Math.abs(j.climb) < 1e-6 && Math.abs(j.pitch) < 0.05;
+    const f0 = J.stats.fired, m0 = j.missiles;
+    J.click(world, j.x + 600, j.y + 100, 0);
+    run(0.6);
+    J.click(world, j.x + 600, j.y + 100, 2);
+    run(0.2);
+    const fired = J.stats.fired - f0, missiles = m0 - j.missiles;
+    J.hold(null);
+    check(climbing > 40 && up > 0.5 && level && fired >= 4 && missiles === 1,
+      `by hand: Space held climbs it (to ${climbing.toFixed(0)} degrees, its nose ${(up * 57.3).toFixed(0)} up), let go it levels out (${level}); a left click fires its cannon (${fired} rounds), a right click a missile (${missiles})`);
+    fresh();
   }
 }
 

@@ -15,9 +15,10 @@
 // a blast, a missile - comes off its armour; when that is gone it is shot down: burning, trailing
 // smoke, out of control, it goes down nose first and crashes - a fireball of its fuel, its wreck
 // left burning on the ground (see pw-fragments' wreck pieces, as a tank's).
-// Every jet can be taken in hand (the user's): A / D fly left or right (turning round over the top),
-// W / S climb or dive (a notch at a time), F fires a cannon burst, G a missile at the unit nearest
-// the spot last clicked; a click on a runway puts a jet on it and it takes off.
+// Every jet can be taken in hand (the user's - N102's controls, see key and click): A / D fly left
+// or right (turning round over the top), Space, W or Up climbs while held and S or Down dives (let
+// go, it levels out); a left click fires a cannon burst, a right click a missile at the unit nearest
+// the spot; a click on a runway puts a jet on it and it takes off.
 // Our own code throughout.
 (function () {
   const PW = window.PW;
@@ -157,6 +158,11 @@
       trail(world, j, dt, true);
     } else {
       // Its nose: turning round over the top if told the other way; else up or down to the climb asked.
+      // (flown by the keys: the climb steepens while one is held, and levels out when it is let go)
+      if (j.keyed) {
+        const want = (j.climbKey || 0) * CLIMB_MAX, d = want - j.climb, s = CLIMB_RATE * dt;
+        j.climb += Math.abs(d) <= s ? d : Math.sign(d) * s;
+      }
       if (j.want !== j.facing && !j.turning) j.turning = true;
       if (j.turning) {
         j.pitch += PITCH_RATE * dt;
@@ -415,20 +421,48 @@
     if (!s) for (const st of world.settlements || []) if (st.runway === r) s = st.side || null;
     return create(world, { x: r.from + dir * 100, y: r.y - 17, facing: dir, onGround: true, runway: r, style, side: s, speed: 0 });
   }
-  function hold(j) { held = j && !j.dead && j.kind === 'jet' ? j : null; return held; }
+  function hold(j) {
+    if (held && held !== j) release();
+    held = j && !j.dead && j.kind === 'jet' ? j : null;
+    return held;
+  }
+  // The keys (N102, the user's controls - the key layer that hands them on is WGM's): a jet cannot
+  // stand, so A / D or the arrows turn it round to fly that way (it flies on so); Space, W or Up
+  // climbs it while held, S or Down dives it while held - let go, it levels out; F fires its cannon,
+  // G a missile. Each key both ways: pressed (keydown) and let go (keyup).
+  const UP = ['Space', 'KeyW', 'ArrowUp'], DOWN = ['KeyS', 'ArrowDown'];
+  const CLIMB_RATE = 60;        // degrees a second its climb or dive steepens while held, or levels out
+  function release() { if (held) { held.climbKey = 0; held.keyed = false; } }
   function key(event) {
-    if (!held || held.dead || held.down || event.repeat) return false;
-    const j = held, world = current || (window.pwApp && window.pwApp.world), k = event.code;
+    if (!held || held.dead || held.down) return false;
+    const j = held, world = current || (window.pwApp && window.pwApp.world), k = event.code, up = event.type === 'keyup';
+    if (UP.includes(k) || DOWN.includes(k)) {
+      const s = UP.includes(k) ? 1 : -1;
+      j.keyed = true;
+      if (up) { if (j.climbKey === s) j.climbKey = 0; } else j.climbKey = s;
+      return true;
+    }
+    if (up) return k === 'KeyA' || k === 'ArrowLeft' || k === 'KeyD' || k === 'ArrowRight';
+    if (event.repeat) return false;
     if (k === 'KeyA' || k === 'ArrowLeft') j.want = -1;
     else if (k === 'KeyD' || k === 'ArrowRight') j.want = 1;
-    else if (k === 'KeyW' || k === 'ArrowUp') j.climb = Math.min(CLIMB_MAX, j.climb + 15);
-    else if (k === 'KeyS' || k === 'ArrowDown') j.climb = Math.max(-CLIMB_MAX, j.climb - 15);
     else if (k === 'KeyF') fire(world, j);
     else if (k === 'KeyG') launch(world, j);
     else return false;
     return true;
   }
+  // The mouse (N102): a left click fires its cannon (along its nose: it is its nose that aims it); a
+  // right click is its other fire, a missile at the unit nearest the spot. (True when the one in hand
+  // took it.)
+  function click(world, x, y, button = 0) {
+    const j = held;
+    if (!j || j.dead || j.down) return false;
+    j.aim = { x, y };
+    if (button === 2) launch(world, j);
+    else fire(world, j);
+    return true;
+  }
 
-  PW.jets = { create, step, draw, fire, launch, hurt, blast, target, tool, takeOff, hold, held: () => held, key, pixel, heading, stats, runwayNear,
+  PW.jets = { create, step, draw, fire, launch, hurt, blast, target, tool, takeOff, hold, held: () => held, key, click, release, pixel, heading, stats, runwayNear,
     LENGTH, CRUISE, VMAX, STALL, V_ROT, ARMOUR, MISSILES };
 })();

@@ -465,6 +465,29 @@ else {
     T.aimAt(other, other.x - 300, other.y - 100);
     const let_go = T.hold(null) === null && T.held() === null && other.target === null && T.key({ code: 'KeyD' }) === false;
     check(took && keyed && let_go, `a tank selected by another hand (PW.tanks.hold) is the one in hand - the one before it let go, its gun level (${took}), the keys drive it (${keyed}) - and let go, its gun goes level and the keys drive none (${let_go})`);
+    // (N102, the user's controls: it drives while D is held and stops when it is let go; a left
+    // click lays its gun on the spot and fires the round it has up, a right click the other round)
+    world.tanks = world.tanks.filter((q) => q === h);
+    T.hold(h);
+    T.aimAt(h, null);
+    const hx0 = h.x;
+    T.key({ code: 'KeyD', type: 'keydown' });
+    run(h, 1.5);
+    const went = h.x - hx0;
+    T.key({ code: 'KeyD', type: 'keyup' });
+    run(h, 2);
+    const stopped = h.drive === 0 && Math.abs(h.v) < 1;
+    const kinds = [], fireWas = PW.shots.fire;
+    PW.shots.fire = function (w, spec) { if (spec.from === h) kinds.push(spec.kind); return fireWas.call(this, w, spec); };
+    const up = h.ammo, theOther = up === 'he' ? 'ap' : 'he';
+    T.click(world, h.x + 420, h.y - 60, 0);
+    run(h, 2.5);
+    T.click(world, h.x + 420, h.y - 60, 2);
+    run(h, 4.5);
+    PW.shots.fire = fireWas;
+    T.hold(null);
+    check(went > 20 && stopped && kinds.length === 2 && kinds[0] === up && kinds[1] === theOther && h.ammo === up,
+      `by hand: it drives while D is held (${went.toFixed(0)} cells in 1.5 s) and stops when it is let go (${stopped}); a left click lays its gun and fires the round it has up (${kinds[0] || 'none'}), a right click the other round (${kinds[1] || 'none'}), its own still up (${h.ammo})`);
     world.tanks.length = 0;
     const t = T.create(world, { style: 'modern', x: D[0] + 120, y: world.groundTop[D[0] + 120], facing: 1 });
     T.drive(t, 1);

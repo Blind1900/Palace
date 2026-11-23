@@ -227,15 +227,30 @@
     if (a === 'send') send(marks.exit.x, marks.exit.y);
     if (a === 'skirmish') { skirmish(); renderer.focus(marks.cover.x, marks.cover.y - 10, 4); }
   });
+  // (N102, the user's controls, as the game's: P pauses; the trooper in hand walks while A / D or the
+  // arrows are held, jumps on Space, W or Up - its keys both ways, pressed and let go - and fires on
+  // a left click, its other fire on a right click)
   window.addEventListener('keydown', (event) => {
     if (event.target.closest?.('input, textarea, select')) return;
-    if (event.code === 'Space' && !event.repeat) { event.preventDefault(); paused = !paused; const b = toolbar && toolbar.querySelector('[data-action="pause"]'); if (b) b.classList.toggle('on', paused); return; }
+    if (event.code === 'KeyP' && !event.repeat) { event.preventDefault(); paused = !paused; const b = toolbar && toolbar.querySelector('[data-action="pause"]'); if (b) b.classList.toggle('on', paused); return; }
     if (PW.troops.key(event)) event.preventDefault();
   });
+  window.addEventListener('keyup', (event) => { if (!event.target.closest?.('input, textarea, select') && PW.troops.key(event)) event.preventDefault(); });
+  window.addEventListener('blur', () => PW.troops.release());
   const drag = { active: false, pan: false, x: 0, y: 0, at: null };
   const toWorld = (event) => { const r = canvas.getBoundingClientRect(); return renderer.screenToWorld(event.clientX - r.left, event.clientY - r.top); };
   canvas.addEventListener('contextmenu', (event) => event.preventDefault());
   canvas.addEventListener('pointerdown', (event) => {
+    // (a trooper in hand: a click on another takes that one in hand - or lets this one go; any other
+    // left click is its fire, a right click its other fire)
+    const inHand = PW.troops.held();
+    if (inHand && tool !== 'pan' && (event.button === 0 || event.button === 2)) {
+      const p = toWorld(event);
+      const on = (world.troops || []).some((t) => !t.dead && Math.abs(p.x - t.x) <= PW.troops.HALF + 2 && p.y >= t.y - PW.troops.HEIGHT && p.y <= t.y + 2);
+      if (event.button === 0 && on) PW.troops.tool(world, p.x, p.y, false);
+      else PW.troops.click(world, p.x, p.y, event.button);
+      return;
+    }
     drag.active = true; drag.x = event.clientX; drag.y = event.clientY;
     drag.pan = event.button !== 0 || tool === 'pan';
     canvas.setPointerCapture(event.pointerId);

@@ -122,6 +122,8 @@
     if (t.drilling) drillStep(world, t, dt);
     if (!t.drill && world.pickups && world.pickups.length) pickUp(world, t);
     const h = heightOf(t), g = G();
+    // (the jump key held, in hand: up a ladder it stands at, or off the ground again as it lands)
+    if (t.upHeld && t === held && !t.climbing) t.wantUp = 1;
     // On a ladder: up or down it as it is told, gravity held off; off its top or foot it stands.
     const onLadder = ladderAt(world, Math.floor(t.x), t.y - 4) || ladderAt(world, Math.floor(t.x), t.y + 1);
     if (t.wantUp && onLadder) t.climbing = true;
@@ -181,7 +183,8 @@
       t.y += s; t.accY -= s;
     }
     const wasGround = t.onGround;
-    t.onGround = bears(world, t, t.x, t.y);
+    // (going up - a jump not yet a cell off the ground - it is not standing on it)
+    t.onGround = t.vy >= 0 && bears(world, t, t.x, t.y);
     // (off a small ledge or down a slope: it keeps to the ground, a step down, not a jump into the air)
     if (!t.onGround && wasGround && t.vy >= 0 && !t.swim) {
       for (let k = 1; k <= STEP_DOWN; k += 1) {
@@ -923,32 +926,74 @@
     held = create(world, { x: gx + 0.5, y: gy, side, style: STYLES[dropN++ % 3], facing: gx < world.width / 2 ? 1 : -1 });
     return held;
   }
-  function hold(t) { held = t && !t.dead && t.kind === 'trooper' ? t : null; return held; }
+  function hold(t) {
+    if (held && held !== t) release();
+    held = t && !t.dead && t.kind === 'trooper' ? t : null;
+    return held;
+  }
+  // The keys (N102, the user's controls - the key layer that hands them on is WGM's): A / D or the
+  // arrows walk it while held - let go, it stands; Space, W or Up jumps (on a ladder, up it while
+  // held); S or Down crouches or stands again (on a ladder, down it while held; crouched on a
+  // platform, drops through); 1 2 3 take its rifle, a grenade, its drill in hand, F uses what it has
+  // in hand, G throws a grenade, R reloads. Each key both ways: pressed (keydown) and let go (keyup).
+  const LEFT = ['KeyA', 'ArrowLeft'], RIGHT = ['KeyD', 'ArrowRight'], UP = ['Space', 'KeyW', 'ArrowUp'], DOWN = ['KeyS', 'ArrowDown'];
+  let dirs = [];   // (the walking keys held, the last pressed last: it walks the last one's way)
+  const dirOf = () => { const d = dirs[dirs.length - 1]; return d === 'L' ? -1 : d === 'R' ? 1 : 0; };
+  // (the keys all let go - the one in hand changed, the window lost the keys: it stands)
+  function release() {
+    if (held && dirs.length) held.walk = 0;
+    if (held) { held.upHeld = false; if (held.climbing) held.wantUp = 0; }
+    dirs = [];
+  }
   function key(event) {
-    if (!held || held.dead || event.repeat) return false;
-    const t = held, world = current || (window.pwApp && window.pwApp.world), k = event.code;
-    // (taken in hand, it does as it is told, not where it was going)
-    if (['KeyA', 'ArrowLeft', 'KeyD', 'ArrowRight', 'KeyW', 'ArrowUp', 'KeyS', 'ArrowDown'].includes(k)) { t.route = null; stopDrill(t); }
-    // (1 2 3: its rifle, a grenade, its drill in hand; F uses what it has in hand)
-    if (k === 'Digit1' || k === 'Digit2' || k === 'Digit3') { select(t, SLOTS[+k[5] - 1]); return true; }
-    if (k === 'KeyA' || k === 'ArrowLeft') { t.walk = -1; t.climbing = false; t.wantUp = 0; }
-    else if (k === 'KeyD' || k === 'ArrowRight') { t.walk = 1; t.climbing = false; t.wantUp = 0; }
-    else if (k === 'KeyW' || k === 'ArrowUp') t.wantUp = 1;
-    else if (k === 'KeyS' || k === 'ArrowDown') {
-      // (stop; stopped, crouch - or stand again; on a ladder, down it; on a platform, crouched, drop through)
+    if (!held || held.dead) return false;
+    const t = held, world = current || (window.pwApp && window.pwApp.world), k = event.code, up = event.type === 'keyup';
+    const dir = LEFT.includes(k) ? 'L' : RIGHT.includes(k) ? 'R' : null;
+    if (dir) {
+      dirs = dirs.filter((d) => d !== dir);
+      // (taken in hand, it does as it is told, not where it was going)
+      if (!up) { dirs.push(dir); t.route = null; stopDrill(t); t.climbing = false; t.wantUp = 0; }
+      t.walk = dirOf();
+      return true;
+    }
+    if (UP.includes(k)) {
+      if (up) { t.upHeld = false; if (t.climbing && t.wantUp > 0) t.wantUp = 0; return true; }
+      if (!event.repeat) { t.route = null; stopDrill(t); t.upHeld = true; t.wantUp = 1; }
+      return true;
+    }
+    if (DOWN.includes(k)) {
+      if (up) { if (t.climbing && t.wantUp < 0) t.wantUp = 0; return true; }
+      if (event.repeat) return true;
+      t.route = null; stopDrill(t);
+      // (on a ladder, down it; crouched on a platform, drop through; else crouch - or stand again)
       if (t.climbing || ladderAt(world, Math.floor(t.x), t.y + 1)) { t.climbing = true; t.wantUp = -1; }
-      else if (t.walk) t.walk = 0;
       else if (t.crouch && isPlatform(world, Math.floor(t.x), t.y + 1)) t.dropping = true;
       else t.crouch = !t.crouch && clear(world, t.x, t.y, CROUCH) ? true : !clear(world, t.x, t.y, HEIGHT);
-    } else if (k === 'KeyF') use(world, t);
+      return true;
+    }
+    if (up || event.repeat) return false;
+    // (1 2 3: its rifle, a grenade, its drill in hand; F uses what it has in hand)
+    if (k === 'Digit1' || k === 'Digit2' || k === 'Digit3') { select(t, SLOTS[+k[5] - 1]); return true; }
+    if (k === 'KeyF') use(world, t);
     else if (k === 'KeyG') throwGrenade(world, t);
     else if (k === 'KeyR') reload(t);
     else return false;
     return true;
   }
+  // The mouse (N102): a left click at a spot fires what it has in hand at it - its rifle, a grenade,
+  // its drill the way of it; a right click is its other fire, a grenade thrown at it. (True when the
+  // one in hand took it.)
+  function click(world, x, y, button = 0) {
+    const t = held;
+    if (!t || t.dead) return false;
+    t.aim = { x, y };
+    if (button === 2) throwGrenade(world, t);
+    else use(world, t);
+    return true;
+  }
   // (driving it by code, as the keys do: walk -1 / 0 / +1)
   function walk(t, dir) { t.route = null; stopDrill(t); t.walk = Math.sign(dir); if (dir) { t.climbing = false; t.wantUp = 0; } }
 
-  PW.troops = { create, step, draw, walk, goTo, plan, underground, inBore, fire, throwGrenade, reload, drill, stopDrill, items, select, use, work, hurt, blast, touches, struck, target, tool, key, hold, held: () => held, stats,
+  PW.troops = { create, step, draw, walk, goTo, plan, underground, inBore, fire, throwGrenade, reload, drill, stopDrill, items, select, use, work, hurt, blast, touches, struck, target, tool, key, click, release, hold, held: () => held, stats,
     clear, blocks, HEIGHT, CROUCH, HALF, WALK, STEP_UP, STEP_DOWN, FALL_SAFE, SAFE_DROP, HP, MAG, GRENADES, DIG_HARD, DRILL_H, SHAFT_W, UNITS };
 })();

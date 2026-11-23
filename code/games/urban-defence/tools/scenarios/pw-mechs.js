@@ -245,6 +245,48 @@ const drawnCells = (m) => { const P = m.P, out = new Set(); for (let y = P.box.y
   }
 }
 
+// 7b. By hand (N102, the user's controls): it hops along while D is held and stands in its idle pose
+// when it is let go; Space leaps it, and held in the air lights its jets - let go, they go out; a
+// left click fires its cannon, a right click a missile from under its wing.
+{
+  const S = site(900, 900);
+  if (!S) check(false, 'a stretch of the wilds for the controls');
+  else {
+    const { x0 } = S;
+    fresh();
+    const m = X.create(world, { x: x0 + 150, side: 'left', facing: 1 });
+    X.hold(m);
+    run(0.3);
+    const mx0 = m.x;
+    X.key({ code: 'KeyD', type: 'keydown' });
+    run(1.5);
+    const hopped = m.x - mx0;
+    X.key({ code: 'KeyD', type: 'keyup' });
+    run(1);
+    const xs = m.x, crouch = X.clips().idle[0];
+    run(1);
+    const stood = m.walk === 0 && m.x === xs && m.an.a === crouch && m.an.b === crouch;
+    X.key({ code: 'Space', type: 'keydown' });
+    let lit = false, top = m.y;
+    run(1.2, () => { top = Math.min(top, m.y); if (m.boosting) lit = true; });
+    // (still held, in the air: its jets)
+    run(0.3, () => { if (m.boosting) lit = true; });
+    X.key({ code: 'Space', type: 'keyup' });
+    const out = !m.boosting;
+    run(6);
+    const f0 = X.stats.fired, m0 = m.missiles;
+    X.click(world, m.x + 300, m.y - 30, 0);
+    run(1);
+    X.click(world, m.x + 600, m.y - 30, 2);
+    run(0.2);
+    const fired = X.stats.fired - f0, missiles = m0 - m.missiles;
+    X.hold(null);
+    check(hopped > 100 && stood && m.y - top > 100 && lit && out && fired >= 8 && missiles === 1,
+      `by hand: it hops along while D is held (${hopped.toFixed(0)} cells in 1.5 s) and stands in its idle pose, still, when it is let go (${stood}); Space leaps it (${(m.y - top).toFixed(0)} cells up) and held lights its jets (${lit}) - let go, they go out (${out}); a left click fires its cannon (${fired} rounds), a right click a missile (${missiles})`);
+    fresh();
+  }
+}
+
 // 8. Destroyed: its armour gone it falls apart where it stands, burning - its wreck's pieces thrown
 // down, flames, a wreck's fire left - and no blast: not a cell of the ground round it broken.
 {

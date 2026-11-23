@@ -82,11 +82,13 @@ const fresh = () => { world.troops = []; world.grenades = []; };
     const t = U.create(world, { x: x0 + 194.5, y: g - 1, side: 'left' });
     U.key({ code: 'KeyW' });   // (not in hand: ignored)
     U.hold(t);
-    U.key({ code: 'KeyW' });
+    U.key({ code: 'KeyW', type: 'keydown' });
     run(6);
+    U.key({ code: 'KeyW', type: 'keyup' });
     const climbed = t.y <= g - 61;
-    U.key({ code: 'KeyD' });
+    U.key({ code: 'KeyD', type: 'keydown' });
     run(2);
+    U.key({ code: 'KeyD', type: 'keyup' });
     const onTop = t.onGround && t.y === g - 61 && t.x > x0 + 205;
     // (the low roof: a slab 20 cells over the ground, from x0 + 60 to x0 + 120)
     fill(x0 + 60, g - 30, x0 + 120, g - 20, M.STONE);
@@ -224,6 +226,46 @@ const fresh = () => { world.troops = []; world.grenades = []; };
     world.tanks.length = 0;
     check(!own.dead && own.hp === 100 && Math.abs(own.x - x0 - 260.5) < 1 && foe.dead && foe.hurtBy === 'run over',
       `a tank driving on: a trooper of its own side steps aside, unhurt (${own.dead ? 'killed' : `${own.hp} left, ${(own.x - x0 - 260.5).toFixed(0)} cells on`}); one of the other side it runs down (${foe.dead ? foe.hurtBy : `${foe.hp.toFixed(0)} left`})`);
+  }
+}
+
+// 6c. By hand (N102, the user's controls): it walks while D is held and stands when it is let go;
+// with no key held it stands; Space jumps; a left click fires its rifle at the spot, a right click
+// throws a grenade at it.
+{
+  const S = site(500);
+  if (!S) check(false, 'a stretch of the wilds for the controls');
+  else {
+    const { x0, g } = S;
+    fresh();
+    const t = U.create(world, { x: x0 + 100.5, y: g - 1, side: 'left', facing: 1 });
+    U.hold(t);
+    run(0.3);
+    const x0t = t.x;
+    U.key({ code: 'KeyD', type: 'keydown' });
+    run(1);
+    const walked = t.x - x0t;
+    U.key({ code: 'KeyD', type: 'keyup' });
+    run(1);
+    const stood = t.walk === 0 && Math.abs(t.vx) < 0.5;
+    const xIdle = t.x;
+    run(1);
+    const idle = Math.abs(t.x - xIdle) < 0.5;
+    let top = t.y;
+    U.key({ code: 'Space', type: 'keydown' }); U.key({ code: 'Space', type: 'keyup' });
+    run(1, () => { top = Math.min(top, t.y); });
+    const jumped = g - 1 - top;
+    const mag0 = t.mag, g0 = t.grenades;
+    U.click(world, t.x + 200, t.y - 12, 0);
+    run(0.3);
+    const fired = mag0 - t.mag;
+    U.click(world, t.x + 120, t.y - 10, 2);
+    run(0.3);
+    const threw = g0 - t.grenades;
+    U.hold(null);
+    check(walked > 12 && stood && idle && jumped >= 4 && fired === 1 && threw === 1,
+      `by hand: it walks while D is held (${walked.toFixed(0)} cells in 1 s), stands when it is let go (${stood}), and stays standing with no key held (${idle}); Space jumps it (${jumped} cells up); a left click fires its rifle at the spot (${fired} round), a right click throws a grenade at it (${threw})`);
+    fresh();
   }
 }
 

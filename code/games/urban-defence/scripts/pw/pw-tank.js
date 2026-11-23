@@ -603,6 +603,13 @@
       if (Math.abs(t.v) > 0.5) { ram(world, t); flatten(world, t); runOver(world, t); }
     }
     aim(t, dt);
+    // (a click's round - see click: fired once the turret is round to the mark and the gun laid on
+    // it and loaded - or let go, never laid in TRIGGER_FOR)
+    if (t.trigger > 0) {
+      t.trigger -= dt;
+      if (t.laid && t.reload <= 0 && !t.turning) { fire(world, t, t.triggerKind); t.trigger = 0; }
+      else if (t.trigger <= 0) t.trigger = 0;
+    }
     if (t.hp < SMOKES) fume(world, t, dt);
   }
   // (the gun's reach, in the world's frame, facing `side`: GUN_DOWN below the hull's line to
@@ -613,7 +620,7 @@
   // flatter of the two arcs that reach it, or the line itself where none does)
   function lay(t, px, py, x, y) {
     const dx = Math.abs(x - px), up = py - y, line = Math.atan2(up, dx);
-    const k = PW.shots && PW.shots.KINDS[t.ammo];
+    const k = PW.shots && PW.shots.KINDS[(t.trigger > 0 && t.triggerKind) || t.ammo];   // (the round about to go: see click)
     if (!k || dx < 1) return line;
     const v = k.speed, g = G, v2 = v * v, root = v2 * v2 - g * (g * dx * dx + 2 * up * v2);
     return root < 0 ? line : Math.atan((v2 - Math.sqrt(root)) / (g * dx));
@@ -632,11 +639,14 @@
       if (t.turning >= TURN) { t.facing = side; t.turning = 0; }
     } else if (t.turning > 0) t.turning = Math.max(0, t.turning - dt);
     // (while it turns, the gun holds its elevation)
+    t.laid = false;
     if (side === t.facing && !t.turning) {
       const [lo, hi] = reach(t, side);
       want = Math.max(lo, Math.min(hi, want));
       const d = want - t.elevation, s = SLEW * dt;
       t.elevation += Math.abs(d) <= s ? d : Math.sign(d) * s;
+      // (on its mark - or as near as its reach of the hull lets it)
+      t.laid = !!t.target && Math.abs(d) <= s;
     }
     // (and never outside its reach of the hull, however the hull moves)
     const [lo, hi] = reach(t, t.facing);
@@ -1015,10 +1025,11 @@
   // pw-fragments) that come to rest as ruin - part of the ground, its shape and its burnt colours
   // still its own, as a building's ruins are - burning a while, its smoke hanging over the place
   // long after; the town's crews clear it in time, as any ruin.
-  function fire(world, t) {
+  // (`kind`: the round to fire this once, if not the one it has up - see click)
+  function fire(world, t, kind = null) {
     if (!t || t.dead || t.reload > 0 || t.turning || t.falling || !PW.shots) return null;
     const m = muzzle(t);
-    const shot = PW.shots.fire(world, { kind: t.ammo, x: m.x, y: m.y, dx: m.dx, dy: m.dy, side: t.side, from: t, spread: 0.002 });
+    const shot = PW.shots.fire(world, { kind: kind || t.ammo, x: m.x, y: m.y, dx: m.dx, dy: m.dy, side: t.side, from: t, spread: 0.002 });
     t.reload = RELOAD; t.recoil = RECOIL;
     // (its recoil: the round's momentum, the other way - the hull rocks back on its tracks)
     if (!t.tipping) t.v -= t.facing * Math.cos(t.elevation) * 9;
@@ -1378,23 +1389,47 @@
   // (a selection takes a tank in hand - the one the keys drive and a click aims - or, null, lets
   // the one in hand go, its gun back to level ahead)
   function hold(t) {
-    if (held && held !== t) aimAt(held, null);
+    if (held && held !== t) { release(); aimAt(held, null); }
     held = t && !t.dead ? t : null;
     return held;
   }
+  // The keys (N102, the user's controls - the key layer that hands them on is WGM's): A / D or the
+  // arrows drive it while held - let go, it stops; S or Down stops it too; F fires the round it has
+  // up, R swaps HE and AP. Each key both ways: pressed (keydown) and let go (keyup).
+  let dirs = [];   // (the driving keys held, the last pressed last: it drives the last one's way)
+  const keyDir = () => { const d = dirs[dirs.length - 1]; return d === 'L' ? -1 : d === 'R' ? 1 : 0; };
+  function release() { if (held && dirs.length) drive(held, 0); dirs = []; }
   function key(event) {
-    if (!held || held.dead || event.repeat) return false;
-    const k = event.code;
-    if (k === 'KeyA' || k === 'ArrowLeft') drive(held, -1);
-    else if (k === 'KeyD' || k === 'ArrowRight') drive(held, 1);
-    else if (k === 'KeyS' || k === 'ArrowDown') drive(held, 0);
+    if (!held || held.dead) return false;
+    const k = event.code, up = event.type === 'keyup';
+    const dir = k === 'KeyA' || k === 'ArrowLeft' ? 'L' : k === 'KeyD' || k === 'ArrowRight' ? 'R' : null;
+    if (dir) {
+      dirs = dirs.filter((d) => d !== dir);
+      if (!up) dirs.push(dir);
+      drive(held, keyDir());
+      return true;
+    }
+    if (up || event.repeat) return false;
+    if (k === 'KeyS' || k === 'ArrowDown') { dirs = []; drive(held, 0); }
     else if (k === 'KeyF') fire(current || (window.pwApp && window.pwApp.world), held);
     else if (k === 'KeyR') { held.ammo = held.ammo === 'he' ? 'ap' : 'he'; held.reload = Math.max(held.reload, RELOAD / 2); }
     else return false;
     return true;
   }
+  // The mouse (N102): a left click at a spot lays its gun on it and fires the round it has up as
+  // soon as the turret is round and the gun laid; a right click is its other fire - the other round
+  // (AP with HE up, HE with AP), laid and fired the same way. (True when the one in hand took it.)
+  const TRIGGER_FOR = 2.5;      // s a click's round waits to be laid and loaded, at most
+  function click(world, x, y, button = 0) {
+    const t = held;
+    if (!t || t.dead) return false;
+    aimAt(t, x, y);
+    t.trigger = TRIGGER_FOR + t.reload;   // (still loading: the more it waits)
+    t.triggerKind = button === 2 ? (t.ammo === 'he' ? 'ap' : 'he') : null;
+    return true;
+  }
 
-  PW.tanks = { create, step, draw, drive, aimAt, muzzle, settle, ahead, explain, tool, key, hold, held: () => held, reach, gatesOf, STYLES: Object.keys(STYLES),
+  PW.tanks = { create, step, draw, drive, aimAt, muzzle, settle, ahead, explain, tool, key, click, release, hold, held: () => held, reach, gatesOf, STYLES: Object.keys(STYLES),
     fire, hurt, blast, target, stats, poseOf, pixel, part: () => PART, PARTS: { GUN, TURRET, HULL, RUNNING }, touches, struck,
     turretFrame: (style, f) => turnFrame(artOf(style), f), TURN_FRAMES,
     VMAX, ACCEL, GUN_UP, GUN_DOWN, MAX_SLOPE, STEP, SPRING_UP, SPRING_DOWN, TURN, RELOAD, ARMOUR };

@@ -99,6 +99,30 @@ const along = (x0, step, n) => Array.from({ length: n }, (_, k) => x0 + step * k
   }
 }
 
+// 3b. By hand (N102, the user's controls): a left click at a spot - a launcher in hand lays its salvo
+// on it, a turret fires a burst at it; a right click is not theirs.
+{
+  fresh();
+  const zone = layout.wilds[0], x = Math.round((zone.x0 + zone.x1) / 2), gy = world.groundTop[x] - 1;
+  const L = D.create(world, { type: 'launcher', x, y: gy, side: 'left', facing: 1 });
+  const Tu = D.create(world, { type: 'turret', x: x + 200, y: world.groundTop[x + 200] - 1, side: 'left', facing: 1 });
+  const salvos = D.stats.salvos, fired = [], fireWas = S.fire;
+  S.fire = function (w, spec) { if (spec.from === Tu) fired.push(spec); return fireWas.call(this, w, spec); };
+  D.hold(L);
+  const right = D.click(world, x + 1500, gy, 2);
+  const left = D.click(world, x + 1500, gy, 0);
+  D.hold(Tu);
+  const spot = { x: x + 500, y: world.groundTop[x + 500] - 30 };
+  D.click(world, spot.x, spot.y, 0);
+  steps(1.5);
+  S.fire = fireWas;
+  D.hold(null);
+  const atSpot = fired.length && fired.every((s) => Math.abs(Math.atan2(s.dy, s.dx) - Math.atan2(spot.y - s.y, spot.x - s.x)) < 0.05);
+  check(left && !right && D.stats.salvos === salvos + 1 && fired.length >= 4 && atSpot,
+    `by hand: a left click lays a launcher's salvo on the spot (${D.stats.salvos - salvos} salvo), a right click is not its (${!right}); a turret in hand fires a burst at the spot clicked (${fired.length} rounds, ${atSpot ? 'all at it' : 'not at it'})`);
+  fresh();
+}
+
 // 4. What they cost: two batteries watching a sky full of a salvo coming down on them; and drawing
 // three units.
 {

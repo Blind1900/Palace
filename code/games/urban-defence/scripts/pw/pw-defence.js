@@ -280,7 +280,8 @@
       while (u.burst > 0 && u.burstT <= 0) {
         const f = u.foe;
         if (!f || f.dead || u.ammo <= 0) { u.burst = 0; break; }
-        const p = PW.units.body(f), mx = u.x + Math.cos(u.aimA) * 7, my = u.y - 4 - Math.sin(u.aimA) * 7;
+        // (a burst at a spot clicked - see click - or at an enemy's body)
+        const p = f.spot ? f : PW.units.body(f), mx = u.x + Math.cos(u.aimA) * 7, my = u.y - 4 - Math.sin(u.aimA) * 7;
         const d = Math.hypot(p.x - mx, p.y - my), tau = d / PW.shots.KINDS.cannon.speed, vx = f.vx || 0, vy = f.vy || 0;
         const tx = p.x + vx * tau, ty = p.y + vy * tau;
         u.aimA = Math.atan2(-(ty - my), tx - mx);
@@ -358,13 +359,29 @@
   }
   function hold(u) { held = u && !u.dead && u.kind === 'defence' ? u : null; return held; }
   function key(event) {
-    if (!held || held.dead || event.repeat) return false;
+    if (!held || held.dead || event.repeat || event.type === 'keyup') return false;
     const world = current || (window.pwApp && window.pwApp.world);
     if (event.code === 'KeyF') { if (held.type === 'launcher') fire(world, held); else held.hold = !held.hold; return true; }
+    return false;
+  }
+  // The mouse (N102, the user's controls): a left click at a spot - a launcher lays its salvo on it,
+  // a turret fires a burst at it (one that can be put out of action, out of it, does nothing). The
+  // interceptor batteries fire on their own, and none has another fire: a right click is not theirs.
+  // (True when the one in hand took it.)
+  function click(world, x, y, button = 0) {
+    const u = held;
+    if (!u || u.dead || button !== 0 || (PW.units && PW.units.disabled && PW.units.disabled(world, u))) return false;
+    if (u.type === 'launcher') { u.aim = { x, y }; fire(world, u); return true; }
+    if (u.type === 'turret' && !(u.burst > 0) && u.ammo > 0) {
+      u.foe = { spot: true, x, y, dead: false };
+      u.aimA = Math.atan2(-(y - (u.y - 4)), x - u.x);
+      u.burst = TYPES.turret.burst; u.burstT = 0; u.rest = TYPES.turret.rest;
+      return true;
+    }
     return false;
   }
 
   // (silenced a while - a hack on its base: see PW.units.disable)
   const disable = (u, seconds) => (PW.units ? PW.units.disable(u, seconds) : false);
-  PW.defence = { create, step, draw, fire, hurt, blast, target, tool, hold, held: () => held, key, disable, laying, impactOf, impactAt, ownGround, skyClear, stats, TYPES };
+  PW.defence = { create, step, draw, fire, hurt, blast, target, tool, hold, held: () => held, key, click, disable, laying, impactOf, impactAt, ownGround, skyClear, stats, TYPES };
 })();

@@ -23,10 +23,9 @@
 // - a blast throws it a little and hurts it; a hard landing does; what falls on it strikes it; its
 //   armour gone, it falls apart burning - its fuel and power cell in flames, no blast beyond its own
 //   fire (as a tank's, the user's).
-// Every mech can be taken in hand (the user's: every unit can be controlled): A / D hop, S stops; W
-// leaps - and in the air, lights its jets (W again: cuts them); E dashes along the ground on them
-// (E again: stops); F fires a burst of its cannon at the spot last clicked (or ahead), G a missile
-// from under its wing at the unit nearest it, R reloads.
+// Every mech can be taken in hand (the user's: every unit can be controlled - N102's controls, see
+// key and click): A / D hop while held; Space, W or Up leaps, and in the air lights its jets while
+// held; a left click fires its cannon at the spot, a right click a missile from under its wing.
 // Our own code throughout.
 (function () {
   const PW = window.PW;
@@ -296,6 +295,8 @@
       }
     }
     if (m.walk) m.facing = m.walk;
+    // (its jump key held on in hand, past the top of its leap: its jets light, and carry it on up)
+    if (m.jumpHeld && m === held && !m.onGround && m.charge <= 0 && m.vy > -80 && !m.boosting && m.fuel > 0) m.keyJets = boost(m, true);
     m.near = !m.onGround && m.vy >= 0 && heightOver(world, m, 50) <= 50;
     animate(world, m, dt);
     const mode = m.an.mode;
@@ -745,7 +746,11 @@
     held = create(world, { x: gx + 0.5, y: gy, side, style: ['modern', 'asian', 'gothic'][dropN++ % 3], facing: gx < world.width / 2 ? 1 : -1 });
     return held;
   }
-  function hold(m) { held = m && !m.dead && m.kind === 'mech' ? m : null; return held; }
+  function hold(m) {
+    if (held && held !== m) release();
+    held = m && !m.dead && m.kind === 'mech' ? m : null;
+    return held;
+  }
   // (driving it by code, as the keys do)
   function walk(m, dir) { m.walk = Math.sign(dir); }
   function leap(m, power = 1) {
@@ -761,13 +766,41 @@
     if (m.boosting) stats.boosted += 1;
     return m.boosting;
   }
+  // The keys (N102, the user's controls - the key layer that hands them on is WGM's): A / D or the
+  // arrows hop it along while held - let go, it stands; Space, W or Up leaps, and in the air lights
+  // its jets while held; S or Down cuts its jets; E dashes along the ground on them (E again: stops);
+  // F fires its cannon, G a missile from under its wing, R reloads. Each key both ways: pressed
+  // (keydown) and let go (keyup).
+  const UP = ['Space', 'KeyW', 'ArrowUp'];
+  let dirs = [];   // (the hopping keys held, the last pressed last: it hops the last one's way)
+  const dirOf = () => { const d = dirs[dirs.length - 1]; return d === 'L' ? -1 : d === 'R' ? 1 : 0; };
+  function release() {
+    if (held && dirs.length) held.walk = 0;
+    if (held) held.jumpHeld = false;
+    if (held && held.keyJets) { held.boosting = false; held.keyJets = false; }
+    dirs = [];
+  }
   function key(event) {
-    if (!held || held.dead || event.repeat) return false;
-    const m = held, world = current || (window.pwApp && window.pwApp.world), k = event.code;
-    if (k === 'KeyA' || k === 'ArrowLeft') m.walk = -1;
-    else if (k === 'KeyD' || k === 'ArrowRight') m.walk = 1;
-    else if (k === 'KeyW' || k === 'ArrowUp') { if (m.onGround && !m.boosting) leap(m); else boost(m, !m.boosting); }
-    else if (k === 'KeyS' || k === 'ArrowDown') { if (m.boosting) m.boosting = false; else m.walk = 0; }
+    if (!held || held.dead) return false;
+    const m = held, world = current || (window.pwApp && window.pwApp.world), k = event.code, up = event.type === 'keyup';
+    const dir = k === 'KeyA' || k === 'ArrowLeft' ? 'L' : k === 'KeyD' || k === 'ArrowRight' ? 'R' : null;
+    if (dir) {
+      dirs = dirs.filter((d) => d !== dir);
+      if (!up) dirs.push(dir);
+      m.walk = dirOf();
+      return true;
+    }
+    if (UP.includes(k)) {
+      // (let go: the jets it lit by it go out)
+      if (up) { m.jumpHeld = false; if (m.keyJets) { m.boosting = false; m.keyJets = false; } return true; }
+      if (event.repeat) return true;
+      m.jumpHeld = true;
+      if (m.onGround && !m.boosting) leap(m);
+      else if (!m.onGround) m.keyJets = boost(m, true);
+      return true;
+    }
+    if (up || event.repeat) return false;
+    if (k === 'KeyS' || k === 'ArrowDown') { m.boosting = false; m.keyJets = false; }
     else if (k === 'KeyE') { if (m.boosting) m.boosting = false; else if (m.onGround) boost(m, true); }
     else if (k === 'KeyF') fire(world, m);
     else if (k === 'KeyG') launch(world, m);
@@ -775,9 +808,20 @@
     else return false;
     return true;
   }
+  // The mouse (N102): a left click at a spot fires its cannon, under its wing, at it; a right click
+  // is its other fire, a missile from under its wing at the unit nearest it. (True when the one in
+  // hand took it.)
+  function click(world, x, y, button = 0) {
+    const m = held;
+    if (!m || m.dead) return false;
+    m.aim = { x, y };
+    if (button === 2) launch(world, m);
+    else fire(world, m);
+    return true;
+  }
 
   decode();
-  PW.mechs = { create, step, draw, walk, leap, boost, fire, launch, reload, hurt, blast, touches, struck, target, tool, key, hold, held: () => held, pixel, stats, clear,
+  PW.mechs = { create, step, draw, walk, leap, boost, fire, launch, reload, hurt, blast, touches, struck, target, tool, key, click, release, hold, held: () => held, pixel, stats, clear,
     frames: () => FR, clips: () => CLIP, bullet: () => BULLET, linkOf,
     HIP, HEIGHT, HALF, get WALK() { return WALK; }, STEP_UP, JUMP, FUEL, FALL_SAFE, GLIDE_FALL, TATTERS, FRAME_T, ARMOUR, SIGHT, DODGE_COOL, MAG, MISSILES };
 })();
