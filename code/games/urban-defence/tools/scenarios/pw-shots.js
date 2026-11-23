@@ -293,6 +293,37 @@ let duel = null;
   }
 }
 
+// 10. The match's cover rule (N6's hook, PW.game.cover): a side's rounds pass its own buildings
+// untouched - a wall of its own between it and the mark is no wall to it; the other side's rounds
+// chip that wall as any. (The rule stood in for here: its own wall, a building id of 4321.)
+{
+  const C = site(400);
+  if (!C) check(false, 'a stretch of the wilds for the cover rule');
+  else {
+    const { x0, g } = C;
+    world.tanks = [];
+    fill(x0 + 200, g - 60, x0 + 211, g - 21, M.CONCRETE);
+    for (let y = g - 60; y <= g - 21; y += 1) for (let x = x0 + 200; x <= x0 + 211; x += 1) PW.setOwner(world, x, y, 4321);
+    fill(x0 + 300, g - 60, x0 + 302, g - 21, M.STEEL);
+    const game = PW.game || (PW.game = {}), was = game.cover;
+    const asked = [];
+    game.cover = (shot, owner, x, y) => { asked.push(owner); return shot.side === 'left' && owner === 4321; };
+    const holes = () => count(x0 + 200, g - 60, x0 + 211, g - 21, (x, y) => idAt(x, y) !== M.CONCRETE);
+    const before = st0();
+    for (let k = 0; k < 20; k += 1) S.fire(world, { kind: 'bullet', side: 'left', x: x0 + 40, y: g - 55 + k * 1.5, dx: 1, dy: 0 });
+    fly(2);
+    const own = diff(before), ownHoles = holes(), ownAsked = asked.length;
+    const mid = st0();
+    for (let k = 0; k < 20; k += 1) S.fire(world, { kind: 'bullet', side: 'right', x: x0 + 40, y: g - 55 + k * 1.5, dx: 1, dy: 0 });
+    fly(2);
+    const other = diff(mid), otherHoles = holes();
+    if (was) game.cover = was; else delete game.cover;
+    check(ownHoles === 0 && own.covered >= 20 && own.struck >= 18 && ownAsked >= 20 && otherHoles > 0 && !other.covered && !asked.some((o) => o !== 4321),
+      `a side's rounds pass its own wall untouched (${own.covered} cells passed, ${ownHoles} knocked out; ${own.struck} stopped on the steel past it); the other side's chip it (${otherHoles} cells knocked out); the rule asked only of the building's cells (${asked.length} asks)`);
+    fill(x0 + 200, g - 60, x0 + 302, g - 21, M.AIR);
+  }
+}
+
 // (looks: a tank firing, the wreck of the duel burning, a missile's trail)
 {
   const C = site(600);

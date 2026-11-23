@@ -1264,6 +1264,10 @@
         // (a plant's: its limbs are drawn where they have bent to, and the air tears leaves off it -
         // see bendLimb, stripLeaves)
         if (!done && p.limbs) drawLimbs(p);
+        // (a plant never lies sunk in the ground: wood of it two cells or more under the surface -
+        // a thin limb driven in faster than it bends, a piece cut off below the grass - is lifted
+        // out, up to a cell in it at most, and stops going down)
+        if (!done && p.flora && p.mode === 'fly') unbury(p);
         if (!done && p.flora && p.mode === 'fly' && ((world.tick || 0) + k) % SHED_EVERY === 0 && motion(p) > LEAF_TEAR_SPEED) stripLeaves(p, dt * SHED_EVERY);
         // A plant that lost branches is made over at once. A building's piece that has lost cells -
         // shaken loose, ground or crushed off, folded up - has its outline made again from what is
@@ -2111,6 +2115,29 @@
     // at most.
     const DEEP_MAX = 4;
     const REST_DEPTH = 0.75;      // cells: a plant lying no deeper than this in what it touches, on the whole, rests on it
+    // (a plant's wood sunk two cells or more under the solid ground's surface - straight up from it -
+    // lifted back out to a cell under it at most, a few cells a tick, and stopped going down)
+    const UNBURY_MAX = 4;
+    function unbury(p) {
+      const { data } = p, [c, s] = cosSin(p);
+      const groundAt = (x, y) => { if (x < 1 || x >= W - 1 || y < 0 || y >= H - 1) return false; const id = mat[y * W + x] & ID_MASK; return PW.mat.terrain[id] === 1 && phase[id] === PW.PHASE.SOLID; };
+      let need = 0;
+      for (let k = 0; k < data.x.length; k += 1) {
+        if (data.solid[k] !== 1) continue;
+        const g = cellOf(p, data.x[k], data.y[k]);
+        if (g < 0 || p.grid[g] !== k + 1) continue;
+        const u = data.x[k] - p.ox0 + 0.5, v = data.y[k] - p.oy0 + 0.5;
+        const x = Math.floor(p.px + u * c - v * s), y = Math.floor(p.py + u * s + v * c);
+        if (!groundAt(x, y)) continue;
+        let d = 1;
+        while (d <= UNBURY_MAX && groundAt(x, y - d)) d += 1;
+        if (d > need) need = d;
+      }
+      if (need < 2) return;
+      p.py -= Math.min(UNBURY_MAX, need - 1);
+      if (p.vy > 0) p.vy = 0;
+      stats.unburied = (stats.unburied || 0) + 1;
+    }
     function depthAt(wx, wy, nx, ny) {
       let d = 0;
       while (d < DEEP_MAX && blocking(Math.floor(wx + nx * d), Math.floor(wy + ny * d))) d += 0.5;

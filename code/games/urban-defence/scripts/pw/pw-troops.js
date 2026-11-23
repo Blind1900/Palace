@@ -285,8 +285,9 @@
   // ---- Finding the way ------------------------------------------------------------------------------------
   // Told to go somewhere, a trooper finds its way there by the same rules it moves by: over the
   // ground and along tunnels, stepping up and down their stairs and slopes, crouching under a low
-  // roof, up and down ladders, off a ledge no higher than it drops unhurt - never through water over
-  // its head (a flooded tunnel is no way: the user's design). The places it can stand - each column,
+  // roof, up and down ladders, off a ledge no higher than it drops unhurt, swimming across open water
+  // when there is no dry way round - never through water over its head (a flooded tunnel is no way:
+  // the user's design). The places it can stand - each column,
   // each floor in it - are searched outward from where it is, the nearest by its going first (a
   // cell's walk; crouched, more; a rung's climb), to the place under where it was told; then it goes
   // the way, a leg at a time - a walk, a climb - and if it is held up, looks for the way again.
@@ -294,6 +295,7 @@
   const PLAN_NODES = 300000;    // places it looks at, at most
   const SAFE_DROP = 40;         // cells it drops off a ledge unhurt (see FALL_SAFE)
   const FREE_CAP = 40;
+  const SWIM_COST = 4;          // a cell's going in water deeper than its thighs, against a walked one's 1
   const PLAN = { n: 0, free: null, foot: null, cost: null, prev: null, how: null };
   const HOW = { WALK: 1, CROUCH: 2, UP: 3, DOWN: 4 };
   function plan(world, from, to) {
@@ -321,16 +323,24 @@
     const at = (x, y) => (y - y0) * bw + (x - x0);
     const inBox = (x, y) => x - HALF >= x0 && x + HALF - 1 <= x1 && y - HEIGHT >= y0 && y + 1 <= y1;
     const room = (x, y) => { let m = FREE_CAP; for (let xx = x - HALF, i = at(x - HALF, y); xx < x + HALF; xx += 1, i += 1) if (free[i] < m) m = free[i]; return m; };
+    // In water it wades, and deeper it swims, its head kept over the surface (see move) - but never
+    // where the water is over its head: a tunnel flooded to its roof is no way (the user's design),
+    // where a lake out in the open is crossed swimming, slowly, when there is no dry way round.
+    // (its head out of the water standing there; and where it floats - its neck at the surface,
+    // its head over it - water bears it)
+    const WADE = 10;
+    const headOut = (x, y) => !(foot[at(x, y - HEIGHT + 3)] & 4);
+    const floatAt = (x, y) => (foot[at(x, y - HEIGHT + 4)] & 4) !== 0 && headOut(x, y);
     const bearsAt = (x, y) => {
       for (let xx = x - HALF, i = at(x - HALF, y + 1); xx < x + HALF; xx += 1, i += 1) if (foot[i] & 1) return true;
-      return (foot[at(x, y + 1)] & 2) !== 0 && (foot[at(x, y)] & 2) === 0;
+      return ((foot[at(x, y + 1)] & 2) !== 0 && (foot[at(x, y)] & 2) === 0) || floatAt(x, y);
     };
-    // (how tall it can stand there, 0 not at all; it wades no deeper than its thighs - deeper is
-    // flooded, no way)
-    const WADE = 10;
+    // (deeper in the water than its thighs: wading slowly, or swimming)
+    const wet = (x, y) => (foot[at(x, y - WADE)] & 4) !== 0;
+    // (how tall it can stand there, 0 not at all; wet, only standing, its head out of the water)
     const standH = (x, y) => {
       const r = room(x, y), h = r >= HEIGHT ? HEIGHT : r >= CROUCH ? CROUCH : 0;
-      return h && !(foot[at(x, y - WADE)] & 4) ? h : 0;
+      return h && (!wet(x, y) || (h === HEIGHT && headOut(x, y))) ? h : 0;
     };
     // (where it ends up let go at (x, y), h tall: on what bears it, or a drop no deeper than it takes unhurt)
     const landAt = (x, y, h) => {
@@ -367,9 +377,9 @@
       seen += 1;
       if (i === goal) { best = i; break; }
       const x = x0 + i % bw, y = y0 + ((i / bw) | 0);
-      // (the nearest it can get, should there be no way there)
+      // (the nearest it can get, should there be no way there - on dry feet: it is not left in the water)
       const d = Math.hypot(x - gx, y - gy);
-      if (d < bestD) { bestD = d; best = i; }
+      if (d < bestD && !wet(x, y)) { bestD = d; best = i; }
       const hNow = standH(x, y) || CROUCH;
       // Along: a cell each way - standing if there is room, else crouched; up a step its legs take;
       // then down to what bears it.
@@ -386,7 +396,7 @@
         const land = landAt(nx, y2, h);
         if (land < 0 || !standH(nx, land)) continue;
         const crouched = h < HEIGHT || hNow < HEIGHT;
-        relax(i, at(nx, land), c0 + (crouched ? 2.2 : 1) + (land - y2 > STEP_DOWN ? 2 : 0), crouched ? HOW.CROUCH : HOW.WALK);
+        relax(i, at(nx, land), c0 + (crouched ? 2.2 : wet(nx, land) ? SWIM_COST : 1) + (land - y2 > STEP_DOWN ? 2 : 0), crouched ? HOW.CROUCH : HOW.WALK);
       }
       // Up a ladder from its foot, to where it stands at its top; down one, to what bears it at its foot.
       const xi = at(x, y);
@@ -445,7 +455,8 @@
     }
     const cx = Math.floor(t.x);
     if (w.mode === 'walk') {
-      if (w.crouch) t.crouch = true;
+      // (going quietly - see PW.units' order - it keeps crouched)
+      if (w.crouch || (t.sneak && !t.swim)) t.crouch = true;
       else if (t.crouch && clear(world, t.x, t.y, HEIGHT)) t.crouch = false;
       const dx = w.x + 0.5 - t.x;
       if (Math.abs(dx) < 0.8 || Math.sign(dx) !== w.dir) { r.at += 1; if (!r.legs[r.at]) t.walk = 0; return; }

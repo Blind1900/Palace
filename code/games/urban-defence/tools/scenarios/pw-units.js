@@ -4,7 +4,7 @@
 // taken into them; a man in a secret bore seen only close to; a guard holding its post, and a man
 // crouched creeping past it unseen; a turret's arc, and a turret put out of action a while; orders
 // to a trooper, a tank and a mech (over a cliff); a trooper at work at a panel; a skirmish in the
-// tunnels; and what the sentries cost.
+// tunnels; a lake crossed swimming; a man sent quietly past a guard; and what the sentries cost.
 const L = pwLab, { world } = L, U = PW.troops, N = PW.units;
 const checks = [];
 const check = (ok, text) => checks.push(`${ok ? 'PASS' : 'FAIL'} ${text}`);
@@ -222,7 +222,55 @@ const pocket = (x, floor) => {
   kill(...ours, ...theirs);
 }
 
-// 12. What the sentries cost: forty troopers on their own, a tick.
+// 12. A lake across the way, no dry way round it: a trooper told to the far shore finds its way
+// across swimming - wading in, swimming over, its head kept above the water, walking out.
+{
+  const xa = 5760, xb = 6060;
+  let sL = 0;
+  for (let x = xa - 5; x <= xb + 5; x += 1) sL = Math.max(sL, world.groundTop[x]);
+  for (let x = xa; x <= xb; x += 1) {
+    const d = Math.min(50, x - xa, xb - x);
+    for (let y = world.groundTop[x]; y < sL + d; y += 1) PW.set(world, x, y, y < sL ? PW.M.AIR : PW.M.WATER, { quiet: true });
+  }
+  PW.rebuildGroundTop(world);
+  const t = U.create(world, { x: xa - 40 + 0.5, side: 'left' });
+  run(0.5);
+  const r = U.goTo(world, t, xb + 40, world.groundTop[xb + 40] - 1);
+  let swam = false, breath = Infinity, wettest = 0;
+  run(60, () => { swam = swam || t.swim; breath = Math.min(breath, t.breath); wettest = Math.max(wettest, t.wet); if (!t.route && t.x > xb) return false; });
+  await view('swim-across', (xa + xb) / 2, sL - 20, 5);
+  check(r && r.reached && swam && !t.dead && Math.abs(t.x - (xb + 40)) < 8 && t.onGround && breath > 19,
+    `a lake 300 across with no way round: told to the far shore, a way is found (${r ? r.reached : 'no route'}); the trooper wades in, swims (${swam}, ${(wettest * 100).toFixed(0)}% under at the most, its breath never short: ${breath.toFixed(1)} s left) and walks out, ${Math.abs(t.x - (xb + 40)).toFixed(0)} cells from where it was told, alive`);
+  kill(t);
+}
+
+// 13. Sent quietly: a man told to go past a computer's guard with a quiet order goes crouched all
+// the way and fights no one - the guard, facing him, never sees him; the same man sent the same way
+// on a plain order fires on the guard.
+{
+  // (he starts down, out of the guard's sight - crouched where he stands)
+  const ours = U.create(world, { x: 4400.5, side: 'left' });
+  ours.crouch = true;
+  const guard = U.create(world, { x: 4620.5, side: 'right', unit: 'guard', facing: -1, order: { type: 'hold', at: 0 } });
+  const mag0 = ours.mag;
+  N.order(world, ours, { type: 'move', x: 4800, y: world.groundTop[4800] - 1, quiet: true });
+  let crouched = 0, walked = 0, seen = false;
+  run(50, () => { if (ours.walk) { walked += 1; if (ours.crouch) crouched += 1; } if (guard.foe === ours) seen = true; if (!ours.route && ours.x > 4790) return false; });
+  const quietOk = ours.mag === mag0 && !ours.dead && Math.abs(ours.x - 4800) < 10 && walked > 0 && crouched >= walked * 0.95 && !seen;
+  const went = Math.abs(ours.x - 4800).toFixed(0), share = walked ? (100 * crouched / walked).toFixed(0) : '-', alive = !ours.dead;
+  kill(ours);
+  // (and on a plain order, the same way: he fights)
+  const loud = U.create(world, { x: 4400.5, side: 'left' });
+  const mag1 = loud.mag;
+  N.order(world, loud, { type: 'move', x: 4800, y: world.groundTop[4800] - 1 });
+  run(10);
+  const fought = loud.mag < mag1 || loud.reload > 0;
+  check(quietOk && fought,
+    `sent quietly past a guard facing him, a man goes crouched (${share}% of his going), fires no round (${mag0 - ours.mag}) and is never seen (${!seen}), arriving ${went} cells from where he was told, alive (${alive}); on a plain order the same way he fires on the guard (${fought})`);
+  kill(loud, guard);
+}
+
+// 14. What the sentries cost: forty troopers on their own, a tick.
 {
   const crowd = [];
   for (let k = 0; k < 40; k += 1) crowd.push(U.create(world, { x: 4400 + k * 30 + 0.5, side: k & 1 ? 'left' : 'right', order: { type: 'hold', at: 0 } }));

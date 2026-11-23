@@ -40,6 +40,8 @@ const SUITES = [
   { name: 'pw-beta-legacy', page: 'beta-legacy.html' },
   // N5: the item bar, drills and dirt tunnels, guards, turrets, orders, the sentry, a skirmish
   { name: 'pw-units', page: 'pw-unit-lab.html', ready: 'window.pwLab && pwLab.ready', params: 'det=1&go=0' },
+  // N99: roofs come down with their buildings - the works hold up only what they put up
+  { name: 'pw-roofs', params: 'det=1' },
 ].filter((s) => !args.only || args.only.split(',').includes(s.name));
 const root = path.resolve(__dirname, '..');
 const out = path.join(os.tmpdir(), 'claude-scratch', 'shots');

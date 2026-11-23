@@ -35,6 +35,9 @@
   // takes it away); its works hold its loose parts up while it was worked within SITE_IDLE ticks;
   // it is a building like any other again once SITE_DONE of it stands and the work has stopped.
   const GROW_LOSS = 60, SITE_IDLE = 1800, SITE_DONE = 0.9;
+  // (N99: a storey of a site left standing on less than this share of the most it stood on was
+  // struck, not built - it is judged: see analyse)
+  const SITE_GIVE = 0.35;
   // Water against a building pushes on it with its pressure: in a row of its outer face, as a head
   // of water, the depth of the water standing outside it there (and, running at it, its speed's
   // v^2 / 2g more), less the water against its other face. The push on all of it above a row is
@@ -250,6 +253,8 @@
       const b = building(id);
       if (!b) return;
       b.calm = 0;
+      // (N99: struck - what of it this cuts loose comes down, site or not: see analyse)
+      b.struckAt = tick;
       const at = Math.max(tick + 2, (last.get(id) ?? -1e9) + REPEAT);
       if (due.has(id) && due.get(id) > at) due.set(id, at);
     }
@@ -315,7 +320,13 @@
       const rowAt = new Int32Array(runRows + 1), runX0 = [], runX1 = [], held = [];
       let frame = 0, anchored = 0;
       // (ground, or structure the building does not own, next to frame at cls index j, world i)
-      const support = (j, i) => !(cls[j] & FRAME) && holds[mat[i] & ID_MASK] === 1;
+      // (N99: structure it does not own holds it only if that itself stands on the ground - a
+      // neighbour's floor left hanging after a collapse holds nothing up)
+      const support = (j, i) => {
+        if (cls[j] & FRAME) return false;
+        const id = mat[i] & ID_MASK;
+        return holds[id] === 1 && grounded(i);
+      };
       // The main base's armoured block floats over its pit, held up by its core's field for as
       // long as the core lives.
       const f = b.floating;
@@ -359,9 +370,44 @@
       }
       return [frame, anchored];
     }
+    // Does the structure at world cell i stand on the ground - joined, solid cell to solid cell (any
+    // building's, corners too), to the ground, or to a core (which holds itself up by its field)?
+    // A neighbour's floor left hanging after a collapse holds nothing up, nor does a prop standing
+    // on one. (The ground is the world's: a building's own pillars and footings, made of stuff that
+    // is ground to the rest, stand only on what they stand on. Searched down first, so a standing
+    // building finds its ground at once; each part found is remembered for the rest of the
+    // analysis - all of it stands, or none of it.)
+    const GROUND_SEARCH = 300000;
+    let groundedOf = new Map();
+    const owned = (i) => { const o = PW.getOwner(world, i % W, (i / W) | 0); return o > 0 && o < 50000; };
+    function grounded(i0) {
+      const id0 = mat[i0] & ID_MASK;
+      if (id0 === M.CORE || (groundMat[id0] === 1 && !owned(i0))) return true;
+      const known = groundedOf.get(i0);
+      if (known !== undefined) return known;
+      const seen = new Set([i0]), stack = [i0];
+      let found = false;
+      while (stack.length) {
+        const i = stack.pop(), id = mat[i] & ID_MASK;
+        if (id === M.CORE || (groundMat[id] === 1 && !owned(i))) { found = true; break; }
+        const k = groundedOf.get(i);
+        if (k !== undefined) { found = k; break; }
+        if (seen.size > GROUND_SEARCH) { found = true; break; }
+        const x = i % W;
+        // (pushed up first, so the way down is tried first)
+        for (const j of [i - W - 1, i - W, i - W + 1, i - 1, i + 1, i + W - 1, i + W + 1, i + W]) {
+          if (j < 0 || j >= W * H || seen.has(j) || (x === 0 && (j % W) === W - 1) || (x === W - 1 && (j % W) === 0)) continue;
+          if (holds[mat[j] & ID_MASK] !== 1) continue;
+          seen.add(j); stack.push(j);
+        }
+      }
+      for (const i of seen) groundedOf.set(i, found);
+      return found;
+    }
     function analyse(b) {
       if (!b) return null;
       stats.analysed += 1;
+      groundedOf = new Map();
       const S = scan(b);
       const { cls, at, gw, gh } = S;
       const report = { id: b.id, frame: 0, anchored: 0, detached: 0, failed: null, orphans: 0 };
@@ -382,7 +428,12 @@
       // its frame (`lost`: a blast, a heavy piece through it - frame destroyed, not just cut off)
       // do its loose parts fall as any building's do. And a site is never judged against its
       // blueprint (half built, every storey of it falls short of it), only by what stood (below).
+      // (N99: nor do the works hold up what a blow cut loose - struck since it was last looked at,
+      // a blast, a piece crushing into it, its ground sinking, or giving way itself at the last
+      // look: its crown knocked off its roof, the stubs of its storeys left over the break, a roof
+      // on what is left of the tower come down. What they put up ahead of its supports they hold)
       const site = !!b.site, working = site && (world.tick || 0) - (b.grewAt ?? -1e9) <= SITE_IDLE;
+      const struck = site && b.struckAt !== undefined && b.struckAt >= (b.lookedAt ?? -1);
       const bp = blueprintOf(b);
       const lost = site && !!b.asBuilt && report.frame < (b.grownFrame ?? 0) - GROW_LOSS;
       // Parts no longer joined to anything fall; small bits crumble.
@@ -404,7 +455,10 @@
               if ((cls[k] & FRAME) && !state[k] && !seen[k]) { seen[k] = 1; queue[top++] = k; }
             }
           }
-          if (site && !lost) {
+          // (N99: the works hold up only what their props can reach - a floor put up ahead of its
+          // pillars, a lintel before its jambs, a storey or so over what is below; a roof cut loose
+          // with the tower gone from under it has nothing for a prop to stand on, and comes down)
+          if (site && !lost && !struck && (!working || propped(part))) {
             if (working) { stats.scaffolded = (stats.scaffolded || 0) + part.length; continue; }
             crumble(part); stats.crumbled += part.length; report.detached += part.length; continue;
           }
@@ -453,8 +507,13 @@
         }
         const support = carried;
         if (r >= 0 && r < rows) { rowLoad[r] = load; rowSup[r] = support; }
-        if (judge && r >= 0 && r < rows && load >= MIN_LOAD && ref.support[r] > 0 && bp.support[r] > 0) {
-          const built = ref.load[r] / ref.support[r];
+        // (N99: a site is not judged as it goes up - but a storey of it that has lost most of what
+        // it stood on at its most was struck, not built: that storey is judged, against its
+        // blueprint. A roof left on a strip of the tower under it comes down)
+        const gave = site && !judge && r >= 0 && r < rows && b.mostSupport && b.mostSupport[r] > 0 && support < b.mostSupport[r] * SITE_GIVE;
+        const against = gave ? bp : ref;
+        if ((judge || gave) && r >= 0 && r < rows && load >= MIN_LOAD && against.support[r] > 0 && bp.support[r] > 0) {
+          const built = against.load[r] / against.support[r];
           const centreX = loadX / load;
           if (!support || load / support > FAIL_RATIO * Math.max(1, built)) {
             // Crushed: the side that lost more of its support drops, pivoting about the far edge;
@@ -464,9 +523,9 @@
             const span = bp.right[r] - bp.left[r] + 1;
             const shift = support ? (carriedX / support - bp.supportX[r] / bp.support[r]) / span : 0;
             const dir = shift > 0 ? -1 : 1;
-            const even = support < ref.support[r] * 0.08 || Math.abs(shift) < 0.1;
+            const even = support < against.support[r] * 0.08 || Math.abs(shift) < 0.1;
             fail = { y, dir, pivotX: dir < 0 ? (support ? right + 1 : bp.right[r] + 1) : (support ? left : bp.left[r]),
-              reason: even ? 'pancake' : 'crushed', load, support, built, shift, row: r, builtSupport: ref.support[r] };
+              reason: even ? 'pancake' : 'crushed', load, support, built, shift, row: r, builtSupport: against.support[r] };
           } else if (!site && gap > Math.max(SPAN, bp.maxGap[r] * 1.5 + 12) && state[at(gapAt, y - 1)]) {
             // Its walls blown out from under it: what is left of the row above spans a gap far
             // wider than anything it spanned as built, and comes down into it.
@@ -508,6 +567,11 @@
       // (a site: the most frame it had, the most that stood and what each row carried then;
       // judged, what it has and what stands now - it is judged against that from here on)
       if (site) {
+        // (the most each storey has stood on, as it went up - see gave above; given way, what is left
+        // of it is what it is built up again from - the storeys over the break from nothing)
+        if (!b.mostSupport || b.mostSupport.length !== rows) b.mostSupport = new Int32Array(rows);
+        if (fail) { const fr = fail.row ?? (fail.y - b.oy); for (let r = 0; r < rows; r += 1) b.mostSupport[r] = r < fr ? 0 : rowSup[r]; }
+        else for (let r = 0; r < rows; r += 1) if (rowSup[r] > b.mostSupport[r]) b.mostSupport[r] = rowSup[r];
         b.grownFrame = lost ? report.frame - (fail ? fail.cells || 0 : 0) : Math.max(b.grownFrame ?? 0, report.frame);
         if (!fail && (judge || standing >= (b.grownAnchored ?? 0))) { b.grownAnchored = standing; b.asBuilt = { load: rowLoad, support: rowSup }; }
         else if (fail) b.grownAnchored = standing;
@@ -523,12 +587,13 @@
       b.calm = fail || report.detached || was === undefined || Math.abs(b.health - was) > 0.002 ? 0 : (b.calm || 0) + 1;
       b.ruined = b.health < 0.25;
       // (all but whole, and no longer being worked: a building like any other again)
-      if ((site || b.siteWanted) && b.health >= SITE_DONE && !PW.isGrowing(world, b)) { b.site = false; b.siteWanted = false; b.asBuilt = null; b.grownAnchored = undefined; b.grownFrame = undefined; }
+      if ((site || b.siteWanted) && b.health >= SITE_DONE && !PW.isGrowing(world, b)) { b.site = false; b.siteWanted = false; b.asBuilt = null; b.grownAnchored = undefined; b.grownFrame = undefined; b.mostSupport = null; }
       if (b.health < 1) loosePanels(b);
       // (the water has just come against it: looked at again soon - see notify)
       if (!fail && tick - (b.floodAt ?? -1e9) < WATER_QUICK) due.set(b.id, tick + WATER_REPEAT);
       // (how it stood when looked at - what it shed of its fittings counted in: see unchanged)
       b.seenV = fail ? undefined : versionOf(b);
+      b.lookedAt = tick;
       stats.last = report;
       return report;
     }
@@ -591,6 +656,25 @@
       stats.orphans += removed;
       return removed;
     }
+    // (could the works' props hold this part up: something to stand on within SCAFFOLD_REACH of
+    // open air under it, in some column of it - the ground, or structure that itself stands on the
+    // ground, or a heap on either (a prop goes down through the heap to what bears it); not another
+    // part left hanging, nor a heap on one)
+    const SCAFFOLD_REACH = 48;
+    function propped(part) {
+      const low = new Map();
+      for (const i of part) { const x = i % W, y = (i / W) | 0; if (!(low.get(x) >= y)) low.set(x, y); }
+      for (const [x, y] of low) {
+        for (let d = 0, j = (y + 1) * W + x; d <= SCAFFOLD_REACH && j < W * H; j += W) {
+          const id = mat[j] & ID_MASK;
+          if (phase[id] === PW.PHASE.POWDER) continue;
+          if (phase[id] < PW.PHASE.POWDER || PW.mat.open[id]) { d += 1; continue; }
+          if (grounded(j)) return true;
+          break;   // (what is under it is hanging too: no footing there)
+        }
+      }
+      return false;
+    }
     // Small bits of frame break up where they are: structure turns to debris that falls, back wall
     // is thrown off as debris.
     function crumble(cells) {
@@ -639,6 +723,7 @@
       } else spawnLater({ cells: piece, owner: b.id, floor: yf, base: b.ground, dir: fail.dir });
       fail.cells = piece.length + band.length;
       b.collapses = (b.collapses || 0) + 1;
+      b.struckAt = tick;   // (what it leaves over the break is struck loose: see analyse)
       (b.failures || (b.failures = [])).push(fail.reason);
       stats.collapses += 1;
       // The stump is checked again, and so are neighbours that leaned on it.

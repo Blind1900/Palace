@@ -110,6 +110,9 @@
     u.order = { ...o, at: world.tick || 0 };
     if (u.kind === 'trooper') {
       PW.troops.stopDrill(u);
+      // (told to go quietly: crouched all the way, and it fights no one - a man crouched is not
+      // seen by the computer's eyes till he fires, and he does not)
+      u.sneak = !!o.quiet;
       if (o.type === 'move') return !!PW.troops.goTo(world, u, o.x, o.y);
       if (o.type === 'hold') { u.route = null; u.walk = 0; }
       if (o.type === 'attack' && !o.target && Number.isFinite(o.x)) PW.troops.goTo(world, u, o.x, o.y);
@@ -160,6 +163,7 @@
   }
   function trooper(world, t, o) {
     const U = PW.troops, f = t.foe;
+    if (t.sneak) { if (!t.crouch && !t.swim) t.crouch = U.clear(world, t.x, t.y, U.CROUCH); return; }
     // (a guard keeps to its post: thrown off it, it goes back)
     if (t.unit === 'guard' && t.post && !t.route && !f && Math.abs(t.x - t.post.x) > 30 && (world.tick % 120) === 0) U.goTo(world, t, t.post.x, t.post.y);
     if (o.type === 'attack' && o.target && !o.target.dead && !t.foeInSight && !t.route && (world.tick % 60) === 0) U.goTo(world, t, o.target.x, o.target.y);

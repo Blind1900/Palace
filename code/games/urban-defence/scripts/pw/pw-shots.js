@@ -267,6 +267,12 @@
         lx = cx; ly = cy;
         continue;
       }
+      // (a match's rule - see PW.game.cover: a building's own side's rounds pass it untouched, as
+      // if they went by it at another depth - nothing broken, bored, glanced off or burst)
+      if (PW.game && PW.game.cover && PW.mat.phase[id] === PW.PHASE.SOLID) {
+        const owner = PW.getOwner(world, cx, cy);
+        if (owner > 0 && owner < 50000 && PW.game.cover(s, owner, cx, cy) === true) { stats.covered = (stats.covered || 0) + 1; lx = cx; ly = cy; continue; }
+      }
       if (id === M.GLASS) { shatter(world, s, cx, cy); lx = cx; ly = cy; continue; }
       if (!PW.mat.stopsShots[id]) { lx = cx; ly = cy; continue; }
       stats.struck += 1;
@@ -331,6 +337,8 @@
     if (particles) particles.spawn(x + 0.5, y + 0.5, s.vx * share + (rnd() - 0.5) * 50, s.vy * share - 20 - rnd() * 30, breaksTo[id] || M.DEBRIS, paint || 0, F().LAND, 5, owner);
     stats.broke += 1;
     if (owner > 0 && owner < 50000 && world.onDamage) world.onDamage(owner, 1, x, y);
+    // (a blow: what the round cut loose of it comes down - see PW structure's urgent)
+    if (owner > 0 && owner < 50000 && world.structure && world.structure.urgent) world.structure.urgent(owner);
   }
   // (which way a struck cell's face looks: out through its open neighbours)
   function normal(world, x, y) {
