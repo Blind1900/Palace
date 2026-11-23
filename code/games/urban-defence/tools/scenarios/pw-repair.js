@@ -16,9 +16,15 @@ const b = world.buildings.find((q) => q.type === 'population' && q.side === 'lef
 const wx = Math.round((b.body.left + b.body.right) / 2);
 await view('rp-before', wx, b.ground - 40, 4);
 pwApp.explode(b.body.left + 10, b.ground - 30, 11, 1);
-pwApp.stepWorld(120);
+// (N100: the crews wait while what the blast loosed is still coming down - then set to)
+pwApp.stepWorld(10);
+const held = repair.jobs.get(b.id);
+check(!!held && !held.calm && !(held.built > 0), `the crews hold off while the wreck is still falling (${held ? `calm ${!!held.calm}, ${held.built || 0} built` : 'no job'})`);
+let waited = 10;
+while (waited < 60 * 30 && !(repair.jobs.get(b.id) || {}).calm) { pwApp.stepWorld(10); waited += 10; }
+pwApp.stepWorld(60);
 const job = repair.jobs.get(b.id);
-check(!!job && (job.queue.length > 30 || repair.stats.restored > 10), `the wound is scanned and queued (${job ? job.queue.length : 0} cells queued)`);
+check(!!job && (job.queue.length > 30 || repair.stats.restored > 10), `once it has come to rest (${(waited / 60).toFixed(1)} s) the wound is scanned and queued (${job ? job.queue.length : 0} cells queued)`);
 await view('rp-hole', wx, b.ground - 40, 4);
 
 // 2. The building heals: debris recycled into HM, the bundle's HM drawn on, cells restored from
@@ -40,6 +46,8 @@ for (const core of other.cores || []) {
   }
 }
 pwApp.explode(other.body.left + 10, other.ground - 30, 10, 1);
+// (the crews look it over once the wreck has come to rest - N100)
+for (let t = 0; t < 60 * 30 && !(repair.jobs.get(other.id) || {}).calm; t += 10) pwApp.stepWorld(10);
 pwApp.stepWorld(120);
 const q0 = (repair.jobs.get(other.id) || { queue: [] }).queue.length;
 pwApp.stepWorld(60 * 8);

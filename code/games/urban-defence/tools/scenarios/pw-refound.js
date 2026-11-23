@@ -35,10 +35,12 @@ async function scene(name, A, blast) {
       if (B.sunk0 === undefined) B.sunk0 = sunk;
       if (sunk > B.sunk0) { B.down += sunk - B.sunk0; B.downT += 1; B.sunk0 = sunk; }
       B.lastY = y;
-      // (its clearance is read over the two seconds it floats - grit raining in can land under it
-      // the very tick it frees, and the field sweeps it off)
+      // (its clearance is the station it keeps, read over the second of its two seconds afloat -
+      // grit raining in can land under it the very tick it frees, and the field sweeps it off; a
+      // chunk of the wreck still coming down can heap up under it just after, and it climbs away
+      // from that at its rising pace: seed 3's crater)
       if (c.free && B.freeTick < 0) { B.freeTick = t; B.gaps = []; }
-      if (B.gaps && t - B.freeTick < 120 && c.free) B.gaps.push(rubbleTop(c) - ballBottom(c) - 1);
+      if (B.gaps && t - B.freeTick >= 60 && t - B.freeTick < 120 && c.free) B.gaps.push(rubbleTop(c) - ballBottom(c) - 1);
       if (B.gaps && t - B.freeTick === 120) { const g = [...B.gaps].sort((p, q) => p - q); B.clear = g[g.length >> 1]; }
       if (B.freeTick >= 0 && c.settled && B.settleTick < 0) B.settleTick = t;
     }

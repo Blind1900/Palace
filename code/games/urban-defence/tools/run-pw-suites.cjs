@@ -21,6 +21,7 @@ const SUITES = [
   { name: 'pw-pipe-flow', params: 'det=1' },       // N81: bends swept, no level change blocks the flow
   { name: 'pw-pipe-lanes', params: 'det=1' },      // N83/N84: every lane unbroken end to end; the casing's jacket
   { name: 'pw-refound', params: 'det=1' },         // N86/N87: 50 clear, down at the rise's pace, the bed re-laid at the surface
+  { name: 'pw-heap-rebuild', params: 'det=1' },    // N100: no work till the wreck rests; the heap eaten two to one, the tower down with it
   // (pw-collapse studies the wreck itself: its beds stay where they were - N87's re-founding
   // packs the heap into the new footing, and pw-refound tests that)
   { name: 'pw-fire', alone: true, params: 'det=1' }, { name: 'pw-collapse', alone: true, params: 'det=1&flags=REFOUND_BEDS:0' },

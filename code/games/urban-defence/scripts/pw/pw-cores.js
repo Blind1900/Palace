@@ -323,6 +323,8 @@
     function refound(b, G) {
       const dy = G - b.ground;
       const c = b.canvas;
+      // (N100: the ground the building first stood on - the heap above it is the cores' to eat)
+      if (b.homeGround === undefined) b.homeGround = b.ground;
       const isBundle = (x, y) => (PW.get(world, x, y) & ID_MASK) === M.PIPE || (PW.getFlags(world, x, y) & PW.FLAG.HOLLOW);
       const tunnel = (x, y) => (PW.getFlags(world, x, y) & PW.FLAG.TUNNEL) !== 0;
       // 1. What stands of the old building is its wreck now: above the new ground line it is
@@ -442,18 +444,31 @@
         }
         if (PW.refreshGroundTop) PW.refreshGroundTop(world, x, Math.max(0, G - 260));
       }
+      // N100: the mound is the wreck's still - packed hard enough to bear the footing (loose
+      // rubble packed there, PS's judges broke it loose from under the slab), but it is the heap
+      // the crews eat into the rebuild, two for one, as the building comes down through it to the
+      // ground it first stood on (pw-repair). Where FILL was left for good, the tower stood on a
+      // hill, and the next collapse heaped a higher one on it - the user's mountain.
+      const was = b.mound;
+      b.mound = { x0: Math.max(1, x0), x1: Math.min(world.width - 2, x1) };
+      if (was) { b.mound.x0 = Math.min(b.mound.x0, was.x0); b.mound.x1 = Math.max(b.mound.x1, was.x1); }
       // 5. The bundle lets go of the old beds and threads the new ones.
       const P = world.pipes;
-      if (P && P.releaseBuilding && P.lines && P.lines.some((l) => l.cores.some((q) => q.building === b.id))) {
-        P.releaseBuilding(b.id);
+      // (N100: let go by the line's side - releaseBuilding(side, id); called with the id alone it
+      // let go of nothing, and the beds were threaded twice)
+      const sides = new Set();
+      if (P && P.releaseBuilding && P.lines) for (const l of P.lines) if (l.cores.some((q) => q.building === b.id)) sides.add(l.side);
+      for (const side of sides) {
+        P.releaseBuilding(side, b.id);
         const taps = P.TAPS && P.TAPS[b.type];
         for (const core of b.cores) {
           if (core.orb || core.standing || !core.vault) continue;
-          P.connectCore(core.x, core.homeY, b.side, taps, b.id);
+          P.connectCore(core.x, core.homeY, side, taps, b.id);
         }
       }
       // 6. The crews start over from the new placement; the judges look again.
-      if (world.repair && world.repair.refit) world.repair.refit(b.id, packed);
+      // (N100: the packed heap is no credit any more - the crews spend the heap itself, cell by cell)
+      if (world.repair && world.repair.refit) world.repair.refit(b.id, 0);
       else if (world.repair) world.repair.notify(b.id);
       if (world.onDamage) world.onDamage(b.id);
       if (world.structure && world.structure.urgent) world.structure.urgent(b.id);   // (PS: judged afresh at once)

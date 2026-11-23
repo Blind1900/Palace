@@ -13,7 +13,9 @@
 
   const RATE = 0.15;              // seconds per HM per living core (user: reconstruction 67% faster)
   const CELLS_PER_HM = 8;         // repair pixels one HM buys (the translator turns HM into a burst)
-  const HM_PER_DEBRIS = 0.2;      // what a recycled cell of debris is worth
+  // What a recycled cell of debris is worth: half a repair pixel (N100, the user's: the rubble goes
+  // into the rebuild two pixels to one)
+  const HM_PER_DEBRIS = 1 / (2 * CELLS_PER_HM);
   const SCAN_COLS = 8;            // canvas columns rescanned per damaged building per tick
   // The F2 order, by the blueprint's role classes (the user's support hierarchy): the cores'
   // main pillars and frame first - the primary support - then the floors that tie pillar to
@@ -60,6 +62,240 @@
       job.pool = (old ? old.pool || 0 : 0) + packed * HM_PER_DEBRIS;
       stats.hmFromDebris += packed * HM_PER_DEBRIS;
     };
+    // ---- N100: the rebuild waits for the fall to end, eats its own heap, and comes down with it ----
+    // (the user's: no rebuilding while the structure is still falling; as it settles the cores
+    // take the rubble under them into the rebuild, two pixels of it for each one built; and as
+    // the heap is used up the whole building comes down with it - not a tower left on a hill)
+    const HEAP = new Uint8Array(64);
+    for (const id of [M.DEBRIS, M.RUBBLE, M.RUIN]) HEAP[id] = 1;
+    const EAT_PER_CELL = 2;        // heap cells taken into each restored cell
+    const SINK_STEP = 3;           // rows the building comes down at a time
+    const SINK_EVERY = 12;         // ticks between steps at the most
+    const SINK_LOW = 16;           // heap credit under which the crews take the next rows from under the bed
+    const FENCE = 96;              // cells either side of the body the heap is taken from
+    const REST_LOOKS = 3, REST_STEADY = 12, REST_EVERY = 20, REST_GIVE_UP = 30 * 60;
+    // (the ground row the building first stood on: it never comes down past it)
+    const homeOf = (b) => (b.homeGround !== undefined ? b.homeGround : b.ground);
+    const bundleAt = (x, y) => (PW.get(world, x, y) & ID_MASK) === M.PIPE || (PW.getFlags(world, x, y) & PW.FLAG.HOLLOW) !== 0;
+    const tunnelAt = (x, y) => (PW.getFlags(world, x, y) & PW.FLAG.TUNNEL) !== 0;
+    // (the bundle's bed beside its bore is the line's, not the heap)
+    const byBore = (x, y) => bundleAt(x - 1, y) || bundleAt(x + 1, y) || bundleAt(x, y - 1) || bundleAt(x, y + 1)
+      || bundleAt(x, y - 2) || bundleAt(x, y + 2);
+    // The heap: wreck lying loose, and the mound a re-found packed under the building (made ground
+    // in the mound's columns over the ground the building first stood on - b.mound, pw-cores)
+    const moundAt = (b, x, y) => !!b.mound && x >= b.mound.x0 && x <= b.mound.x1 && y < homeOf(b) - 2
+      && (PW.get(world, x, y) & ID_MASK) === M.FILL && !PW.getOwner(world, x, y) && !byBore(x, y);
+    const heapAt = (b, x, y) => (HEAP[PW.get(world, x, y) & ID_MASK] === 1 && !PW.getOwner(world, x, y)) || moundAt(b, x, y);
+    const looseAt = (x, y) => LOOSE[PW.get(world, x, y) & ID_MASK] === 1 && !PW.getOwner(world, x, y);
+    const openAt = (x, y) => PW.mat.phase[PW.get(world, x, y) & ID_MASK] <= PW.PHASE.GAS && !PW.getOwner(world, x, y);
+    // (what the bed may come down into: open air, loose wreck, the mound, the bundle - re-laid after)
+    const giveAt = (b, x, y) => !tunnelAt(x, y) && (openAt(x, y) || looseAt(x, y) || bundleAt(x, y)
+      || ((PW.get(world, x, y) & ID_MASK) === M.FILL && !PW.getOwner(world, x, y)));
+    // (1) At rest: the building's lot - the body and the fence round it, down to where its heap
+    // lies - quiet, no ball of it still rising or floating, a few looks running. Quiet is PS's
+    // recipe with the solids judged by the heap's own profile (as the re-found's look does: smoke
+    // drifting over a wreck keeps the sim's chunks awake long after the rubble has stopped): no
+    // stability look pending in the box, no piece of anything in flight in it, and the surface
+    // across it where it was at the last look. Once at work, only something coming down over it
+    // again - a piece of it in the air - stands them down (a wound alone does not: a tower being
+    // rammed is patched as it is struck, or it goes over). A first rise has nothing falling about
+    // it and is never held; a wreck that never settles is worked after half a minute anyway.
+    function settled(b, job) {
+      if (b.underConstruction && !b.ruined) return true;
+      const tick = world.tick || 0;
+      if (tick < (job.restLookAt || 0)) return !!job.calm;
+      job.restLookAt = tick + REST_EVERY;
+      const x0 = Math.max(1, b.body.left - FENCE), x1 = Math.min(world.width - 2, b.body.right + FENCE);
+      const y0 = b.body.top - 20, y1 = b.ground + 120;
+      const fr = world.fragments;
+      let piece = false;
+      if (fr) for (const p of fr.list) {
+        const cs = Math.cos(p.angle), sn = Math.sin(p.angle), cx = p.px + p.gx * cs - p.gy * sn, cy = p.py + p.gx * sn + p.gy * cs;
+        if (cx >= x0 && cx <= x1 && cy >= y0 && cy <= y1) { piece = true; break; }
+      }
+      if (job.calm) {
+        if (piece) { job.calm = false; job.restLooks = 0; job.steadyLooks = 0; job.restTops = null; job.restSince = tick; }
+        return job.calm;
+      }
+      if (job.restSince === undefined) job.restSince = tick;
+      if (tick - job.restSince > REST_GIVE_UP) { job.calm = true; return true; }
+      const S = world.stability;
+      const quiet = !(S && S.settling && S.settling(x0, y0, x1, y1));
+      const tops = [];
+      for (let x = x0; x <= x1; x += 3) tops.push(world.groundTop[x]);
+      const prev = job.restTops;
+      job.restTops = tops;
+      const moved = prev && prev.length === tops.length ? tops.filter((y, i) => Math.abs(y - prev[i]) > 2).length : Infinity;
+      const steady = moved <= Math.max(2, tops.length * 0.05);
+      // (a ball out of its bed - climbing out of the wreck, or in the air over its bed; one come
+      // down onto it, or fallen past it, waits there for the crews)
+      const floating = (b.cores || []).some((c) => !c.orb && !c.standing && !c.lost && !c.dead && c.homeY !== undefined && !c.settled
+        && (!c.free || c.y < c.homeY));
+      job.restLooks = quiet && steady && !piece && !floating ? (job.restLooks || 0) + 1 : 0;
+      // (as the re-found's look: a lot that has held its shape for four seconds with nothing in the
+      // air over it is at rest, whatever bookkeeping stability still has queued round it - a
+      // neighbour's crews and judges at work keep it looking there as long as they work)
+      job.steadyLooks = steady && !piece && !floating ? (job.steadyLooks || 0) + 1 : 0;
+      if (job.restLooks >= REST_LOOKS || job.steadyLooks >= REST_STEADY) job.calm = true;
+      return !!job.calm;
+    }
+    // The building's foot in each canvas column - its lowest cell there (-1: none standing).
+    function mapFoot(b, job) {
+      const c = b.canvas, foot = new Int32Array(c.width).fill(-1);
+      const y1 = Math.min(world.height - 3, b.oy + c.height);
+      for (let lx = 0; lx < c.width; lx += 1) {
+        const x = b.ox + lx;
+        if (x < 1 || x >= world.width - 1 || printed(c)[lx] < 0) continue;
+        for (let y = y1; y >= b.oy; y -= 1) if (PW.getOwner(world, x, y) === b.id) { foot[lx] = y; break; }
+      }
+      job.foot = foot;
+    }
+    // The lowest row of the blueprint in each canvas column, -1 where it has none (read once a
+    // blueprint).
+    const printed = (c) => {
+      if (c.printBottom) return c.printBottom;
+      const bottom = new Int16Array(c.width).fill(-1);
+      for (let lx = 0; lx < c.width; lx += 1) for (let ly = c.height - 1; ly >= 0; ly -= 1) if (c.mat[ly * c.width + lx] || c.back[ly * c.width + lx]) { bottom[lx] = ly; break; }
+      return (c.printBottom = bottom);
+    };
+    // (not under the building: the ground below its footing goes only as it comes down - eaten
+    // from above, a column of it standing empty was dug into a pit under the wall that would stand
+    // there; inside the blueprint's outline the crews dig what is in the way as they build anyway,
+    // and under an eave or a wing held out over the ground it is the mound's slope)
+    const beside = (b, x, y) => {
+      const lx = x - b.ox;
+      if (lx < 0 || lx >= b.canvas.width) return true;
+      const bottom = printed(b.canvas)[lx];
+      return bottom < 0 || b.oy + bottom < b.ground - 1 || y <= b.oy + bottom;
+    };
+    // (2) Take up to n cells of the heap round the building, from its top - the slopes of the
+    // mound it stands on and the wreck lying by it, only what lies over the ground the building
+    // first stood on. Each taken cell is gone.
+    function eatHeap(b, job, n) {
+      const tick = world.tick || 0;
+      if (tick < (job.heapIdleUntil || 0)) return 0;
+      const home = homeOf(b);
+      let took = 0;
+      const x0 = Math.max(2, b.body.left - FENCE), x1 = Math.min(world.width - 3, b.body.right + FENCE), w = x1 - x0 + 1;
+      for (let k = 0; k < w && took < n; k += 1) {
+        const x = x0 + (job.eatOut = ((job.eatOut || 0) + 1) % w);
+        const y = world.groundTop[x];
+        if (y >= home || !beside(b, x, y) || !heapAt(b, x, y)) continue;
+        PW.set(world, x, y, M.AIR, { quiet: true });
+        took += 1; stats.eaten = (stats.eaten || 0) + 1;
+      }
+      // (none left within reach: look again in a while, not every cell)
+      if (!took) job.heapIdleUntil = tick + 300;
+      return took;
+    }
+    // The building whole and home, what is left of its mound - the made ground packed beside it -
+    // is taken away too, a lap of its columns at a time, so no hill of it stays (the side's stock
+    // has what it was worth). False once a whole lap finds none.
+    function clearMound(b, job) {
+      const m = b.mound, w = m.x1 - m.x0 + 1;
+      let took = 0;
+      for (let k = 0; k < w && took < 40; k += 1) {
+        const x = m.x0 + (job.moundCol = ((job.moundCol || 0) + 1) % w);
+        const y = world.groundTop[x];
+        if (y >= homeOf(b) - 2 || !beside(b, x, y) || !heapAt(b, x, y)) continue;
+        PW.set(world, x, y, M.AIR, { quiet: true });
+        took += 1;
+      }
+      job.heapCredit = (job.heapCredit || 0) + took;
+      stats.eaten = (stats.eaten || 0) + took;
+      return took > 0;
+    }
+    // (3) The building comes down with its heap: a few rows of what lies under the whole of its
+    // bed are taken into the work (two of them a cell, as any heap) and the building is set down
+    // into their place in the same breath - every column of it, its cells and whatever stands in
+    // its rooms, its cores and its record with it (the N87 re-found's machinery, downward in
+    // steps) - so it never hangs over a gap. Only while there is heap or open air under every
+    // column of it, and never past the ground it first stood on; never while a ball of it is out.
+    // The bundle lets go first and threads the beds again after; the crews look the blueprint
+    // over afresh at its new place.
+    function trySink(b, job) {
+      let dy = Math.min(SINK_STEP, homeOf(b) - b.ground), any = false;
+      if (dy <= 0) return false;
+      if ((b.cores || []).some((q) => q.free && !q.orb && !q.standing && !q.lost && !q.dead)) return false;
+      // (read afresh: the crews build lower cells as they go)
+      mapFoot(b, job);
+      const foot = job.foot;
+      for (let lx = 0; lx < foot.length && dy > 0; lx += 1) {
+        if (foot[lx] < 0) continue;
+        any = true;
+        const x = b.ox + lx;
+        let g = 0;
+        while (g < dy) {
+          const y = foot[lx] + 1 + g;
+          if (!giveAt(b, x, y)) break;
+          g += 1;
+        }
+        dy = g;
+      }
+      if (!any || dy <= 0) return false;
+      const c = b.canvas, P = world.pipes;
+      const sides = new Set();
+      if (P && P.lines) for (const l of P.lines) if (l.cores.some((q) => q.building === b.id)) sides.add(l.side);
+      for (const side of sides) P.releaseBuilding(side, b.id);
+      // (a cell of another building, a tunnel or the bundle is neither carried nor written over)
+      const fixed = (x, y) => bundleAt(x, y) || tunnelAt(x, y) || (PW.getOwner(world, x, y) && PW.getOwner(world, x, y) !== b.id);
+      const LAYERS = ['paint', 'back', 'deco'];
+      const put = (x, ty, value, owner, layers, flags) => {
+        PW.set(world, x, ty, value, { quiet: true, keepPaint: true });
+        for (let k = 0; k < 3; k += 1) PW.setLayer(world, LAYERS[k], x, ty, layers[k]);
+        PW.setOwner(world, x, ty, owner);
+        const g = PW.getFlags(world, x, ty);
+        if (g & ~flags) PW.setFlag(world, x, ty, g & ~flags, false);
+        if (flags & ~g) PW.setFlag(world, x, ty, flags & ~g, true);
+      };
+      const NONE = [0, 0, 0];
+      let ate = 0;
+      for (let lx = 0; lx < foot.length; lx += 1) {
+        if (foot[lx] < 0) continue;
+        const x = b.ox + lx, top = Math.max(1, b.oy);
+        for (let y = foot[lx] + 1; y <= foot[lx] + dy; y += 1) if (!bundleAt(x, y) && !openAt(x, y) && giveAt(b, x, y)) ate += 1;
+        // (from the foot up: each cell read before anything is written over it)
+        for (let y = foot[lx]; y >= top; y -= 1) {
+          const ty = y + dy;
+          if (fixed(x, ty)) continue;
+          if (fixed(x, y)) { put(x, ty, M.AIR, 0, NONE, 0); continue; }
+          put(x, ty, PW.get(world, x, y), PW.getOwner(world, x, y), LAYERS.map((l) => PW.getLayer(world, l, x, y)), PW.getFlags(world, x, y));
+        }
+        for (let y = top; y < top + dy; y += 1) if (!fixed(x, y)) put(x, y, M.AIR, 0, NONE, 0);
+        if (PW.refreshGroundTop) PW.refreshGroundTop(world, x, Math.max(0, top - 4));
+      }
+      job.heapCredit = (job.heapCredit || 0) + ate;
+      stats.eaten = (stats.eaten || 0) + ate;
+      // the record, at its new place (the blueprint the same, its rows dy lower)
+      const fresh = PW.buildingRecord(world, { canvas: c, x: b.ox, y: b.oy + dy }, {});
+      if (b.y === b.oy) b.y += dy;
+      for (const key of ['oy', 'ground', 'body', 'floors', 'stairs', 'doors', 'slots', 'panels', 'devices', 'windows', 'storage', 'hatches', 'gates', 'hangar', 'floating', 'runway', 'shaft']) b[key] = fresh[key];
+      (b.cores || []).forEach((core, i) => {
+        const f = fresh.cores[i];
+        if (!f) return;
+        core.vault = f.vault;
+        core.homeY = f.y;
+        core.y += dy;
+      });
+      // (its mounted guns come down on their mounts; the batteries on the ground stay where they are)
+      for (const u of world.defence || []) if (u.building === b.id && u.type === 'turret' && !u.dead) u.y += dy;
+      if (b.base) {
+        if (b.base.G !== undefined) b.base.G += dy;
+        if (b.base.cores) b.base.cores = b.base.cores.map((q) => ({ x: q.x, y: q.y + dy }));
+      }
+      for (const side of sides) {
+        const taps = P.TAPS && P.TAPS[b.type];
+        for (const core of b.cores) if (!core.orb && !core.standing && !core.lost && core.vault) P.connectCore(core.x, core.homeY, side, taps, b.id);
+      }
+      // (the work looked over afresh from the new place - its pool and its heap credit kept; the
+      // judges look again, as at any change - not as a blow: a struck site's props let go)
+      job.queue = []; job.seen = new Set(); job.dead = 0; job.rot = 0; job.sinceReady = 0; job.scanCol = 0; job.printAt = 0;
+      mapFoot(b, job);
+      if (world.structure && world.structure.notify) world.structure.notify(b.id);
+      b.sunk = (b.sunk || 0) + dy;
+      stats.sunk = (stats.sunk || 0) + dy;
+      return true;
+    }
     // The flat list of a building's print cells (N50: world-drawn works like the lake pump,
     // captured at generation, rebuilt by the same translators as the canvas).
     const printCells = (b) => (b.prints ? (b.printList || (b.printList = b.prints.flatMap((p) => p.cells))) : EMPTY_PRINT);
@@ -203,6 +439,12 @@
         if ((job.dead || 0) > 128 && job.dead * 3 > q.length) { job.queue = q.filter(Boolean); job.dead = 0; job.rot = 0; }
       };
       const pay = () => {
+        // N100: the heap first - two of its cells into each one built: one off the mound's slopes
+        // round the building each time (the whole mound goes down together), the rest from what
+        // came out from under the bed as it came down - then the pool and the stock
+        const credit = job.heapCredit || 0;
+        job.heapCredit = credit + eatHeap(b, job, credit < EAT_PER_CELL ? EAT_PER_CELL - credit : 1);
+        if (job.heapCredit >= EAT_PER_CELL) { job.heapCredit -= EAT_PER_CELL; stats.fromHeap = (stats.fromHeap || 0) + 1; return true; }
         if (job.pool >= 1 / CELLS_PER_HM) { job.pool -= 1 / CELLS_PER_HM; return true; }
         // N73: a newborn's whole body is already paid for (the growth engine's lot price) -
         // its first rise draws no stock. A world with no economy at all (the lab) builds free.
@@ -272,6 +514,7 @@
         }
         if (!cell.print && c.deco[i]) PW.setLayer(world, 'deco', cell.x, cell.y, c.deco[i]);
         stats.restored += 1;
+        job.built = (job.built || 0) + 1;
         job.passProgress = (job.passProgress || 0) + 1;
         if (particles && F && (stats.restored & 3) === 0) {
           particles.spawn(cell.x + 0.5, cell.y + 0.5, ((PW.hash2(cell.x, cell.y) & 63) - 32) * 0.6, -26, M.DEBRIS | 3 << 6, 0, 0, 3);
@@ -352,6 +595,9 @@
         // N87: while its balls float and the new bed is being decided, the crews keep off the
         // lot - eating the heap would carry the ground the bed must sit on away under it.
         if (b.refoundPending) continue;
+        // N100: nor while what came down is still coming down (the user's: rebuilt only once the
+        // structure has finished falling and settled)
+        if (!settled(b, job)) continue;
         // A parked job stood down starved: its queue and seen set are let go (tens of
         // thousands of entries per tower - the long war's memory leak, PS's soak). It wakes
         // when HM reaches its side's stock, or when fresh damage calls notify (scanCol 0),
@@ -370,7 +616,17 @@
             // even seen until the cell clears) - look over the blueprint again. Only a pass that
             // changed nothing ends the work.
             if ((job.passProgress || 0) > 0) { job.passProgress = 0; job.scanCol = 0; job.printAt = 0; job.queue = []; job.dead = 0; job.rot = 0; }
-            else {
+            // N100: whole again, but still up on what is left of its heap - the crews work on
+            // down through it (what they take goes to the side's stock), the building coming
+            // down with it to the ground it first stood on
+            else if (homeOf(b) > b.ground && ((world.tick || 0) < (job.sinkAt || 0) || trySink(b, job))) {
+              if ((world.tick || 0) >= (job.sinkAt || 0)) job.sinkAt = (world.tick || 0) + SINK_EVERY;
+            } else if (b.mound && homeOf(b) <= b.ground + 3 && clearMound(b, job)) {
+              // (home: the rest of the mound goes)
+            } else {
+              if (b.mound && homeOf(b) <= b.ground + 3) b.mound = null;
+              const stock = world.stock && world.stock[b.side];
+              if (stock && job.heapCredit) { stock.hm += job.heapCredit * HM_PER_DEBRIS; stats.hmFromDebris += job.heapCredit * HM_PER_DEBRIS; }
               jobs.delete(id); b.growing = false;
               // N73: the first build is over - the site opens, and later wounds pay their way.
               if (b.buildFree) b.buildFree = false;
@@ -395,6 +651,13 @@
         }
         job.budget = Math.min(alive * CELLS_PER_HM * 2, (job.budget || 0) + dt * alive * CELLS_PER_HM / RATE);
         const before = stats.restored + stats.backRestored + stats.recycled + (stats.dug || 0);
+        // N100: the stuff from the heap running low - the next rows from under the bed, and the
+        // building comes down onto what is left (a few times a second at most); home, what is left
+        // of the mound beside it goes into the work
+        if ((job.heapCredit || 0) < SINK_LOW && (world.tick || 0) >= (job.sinkAt || 0)) {
+          job.sinkAt = (world.tick || 0) + SINK_EVERY;
+          if (!trySink(b, job) && b.mound && homeOf(b) <= b.ground + 3) clearMound(b, job);
+        }
         while (job.budget >= 1) {
           if (!restore(b, job)) break;
           job.budget -= 1;
