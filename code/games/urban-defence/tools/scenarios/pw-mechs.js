@@ -275,14 +275,17 @@ const drawnCells = (m) => { const P = m.P, out = new Set(); for (let y = P.box.y
     const out = !m.boosting;
     run(6);
     const f0 = X.stats.fired, m0 = m.missiles;
+    // (a second click while its first burst is still going is not lost: its burst follows - N102)
     X.click(world, m.x + 300, m.y - 30, 0);
-    run(1);
+    run(0.3);
+    X.click(world, m.x + 300, m.y - 30, 0);
+    run(1.7);
     X.click(world, m.x + 600, m.y - 30, 2);
     run(0.2);
     const fired = X.stats.fired - f0, missiles = m0 - m.missiles;
     X.hold(null);
-    check(hopped > 100 && stood && m.y - top > 100 && lit && out && fired >= 8 && missiles === 1,
-      `by hand: it hops along while D is held (${hopped.toFixed(0)} cells in 1.5 s) and stands in its idle pose, still, when it is let go (${stood}); Space leaps it (${(m.y - top).toFixed(0)} cells up) and held lights its jets (${lit}) - let go, they go out (${out}); a left click fires its cannon (${fired} rounds), a right click a missile (${missiles})`);
+    check(hopped > 100 && stood && m.y - top > 100 && lit && out && fired >= 16 && missiles === 1,
+      `by hand: it hops along while D is held (${hopped.toFixed(0)} cells in 1.5 s) and stands in its idle pose, still, when it is let go (${stood}); Space leaps it (${(m.y - top).toFixed(0)} cells up) and held lights its jets (${lit}) - let go, they go out (${out}); two left clicks, the second mid-burst, fire two bursts of its cannon (${fired} rounds), a right click a missile (${missiles})`);
     fresh();
   }
 }

@@ -1364,7 +1364,7 @@
     if (held && (held.dead || !list.includes(held))) held = null;
     const hit = list.find((t) => !t.dead && Math.abs(x - t.x) < 62 && y > t.y - 48 && y < t.y + 6);
     if (hit) { if (hit === held) { aimAt(hit, null); held = null; } else held = hit; return held; }
-    if (held && !held.dead && !shift) { aimAt(held, x, y); return held; }
+    if (held && !held.dead && !shift) { click(world, x, y, 0); return held; }   // (N102: a click aims and fires)
     // (on the ground under the click, or on top of the ground just under it - not deep inside it)
     const { mat, width: W, height: H } = world, gx = Math.round(x);
     if (gx < 64 || gx > W - 64) return null;

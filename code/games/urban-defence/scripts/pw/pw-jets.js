@@ -193,6 +193,7 @@
   // (on the ground: rolling along its runway to its rotation speed, its nose up, off - or, landed,
   // braking to a stop)
   function roll(world, j, dt) {
+    if (j.pull && (j.pullT -= dt) <= 0) j.pull = null;
     j.pitch = 0;
     j.v = Math.min(V_ROT * 1.15, j.v + GROUND_ROLL * dt);
     j.x += j.facing * j.v * dt;
@@ -234,6 +235,9 @@
     return true;
   }
   function fireStep(world, j, dt) {
+    // (a burst clicked for, still to go - see click)
+    if (j.pull && !j.burst) { j.pullT -= dt; if (fire(world, j)) { j.burstAt = j.pull; j.pull = null; } else if (j.pullT <= 0) j.pull = null; }
+    else if (j.pull) j.pullT -= dt;
     if (!j.burst || !PW.shots) return;
     j.burstT -= dt;
     while (j.burst > 0 && j.burstT <= 0) {
@@ -419,7 +423,7 @@
     if (held && (held.dead || !list.includes(held))) held = null;
     const hit = list.find((j) => !j.dead && pixel(j, x, y));
     if (hit) { held = hit === held ? null : hit; return held; }
-    if (held && !shift) { held.aim = { x, y }; return held; }
+    if (held && !shift) { click(world, x, y, 0); return held; }
     const r = runwayNear(world, x, y);
     if (!r) return null;
     held = takeOff(world, r, ['modern', 'asian', 'gothic'][dropN++ % 3], null);
@@ -433,7 +437,7 @@
     return create(world, { x: r.from + dir * 100, y: r.y - 17, facing: dir, onGround: true, runway: r, style, side: s, speed: 0 });
   }
   function hold(j) {
-    if (held && held !== j) release();
+    if (held && held !== j) { release(); held.pull = null; }
     held = j && !j.dead && j.kind === 'jet' ? j : null;
     return held;
   }
@@ -464,13 +468,17 @@
   }
   // The mouse (N102, the user's: fire at the mouse): a left click fires its cannon at the spot - its
   // gun swinging to it as far as GUN_SWING from its nose; a right click is its other fire, a missile
-  // at the unit nearest the spot. (True when the one in hand took it.)
+  // at the unit nearest the spot. (True when the one in hand took it.) A left click while a burst is
+  // still going - or before it is off the ground - is not lost: its burst at that spot goes as soon
+  // as it can, within PULL_WAIT.
+  const PULL_WAIT = 1.2;
   function click(world, x, y, button = 0) {
     const j = held;
     if (!j || j.dead || j.down) return false;
     j.aim = { x, y };
     if (button === 2) launch(world, j);
     else if (fire(world, j)) j.burstAt = { x, y };
+    else { j.pull = { x, y }; j.pullT = PULL_WAIT; }
     return true;
   }
 

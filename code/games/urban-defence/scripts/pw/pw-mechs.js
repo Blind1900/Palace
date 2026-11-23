@@ -285,6 +285,8 @@
   function stepOne(world, m, dt) {
     const g = G();
     if (m.reload > 0) { m.reload -= dt; if (m.reload <= 0) { const n = Math.min(MAG - m.mag, m.ammo); m.mag += n; m.ammo -= n; } }
+    // (a burst clicked for, still to go - see click)
+    if (m.pullT > 0) { m.pullT -= dt; if (fire(world, m)) m.pullT = 0; }
     if (m.dodgeT > 0) m.dodgeT -= dt;
     if (m.landT > 0) m.landT -= dt;
     if (m.jetT > 0) { m.jetT -= dt; if (m.jetT <= 0) m.jetUp = false; }
@@ -739,7 +741,7 @@
     if (held && (held.dead || !list.includes(held))) held = null;
     const hit = list.find((m) => !m.dead && m.P && pixel(m, x, y));
     if (hit) { held = hit === held ? null : hit; return held; }
-    if (held && !shift) { held.aim = { x, y }; return held; }
+    if (held && !shift) { click(world, x, y, 0); return held; }
     const gx = Math.round(x);
     if (gx < 60 || gx > world.width - 60) return null;
     let gy = Math.max(1, Math.round(y));
@@ -754,7 +756,7 @@
     return held;
   }
   function hold(m) {
-    if (held && held !== m) release();
+    if (held && held !== m) { release(); held.pullT = 0; }
     held = m && !m.dead && m.kind === 'mech' ? m : null;
     return held;
   }
@@ -817,13 +819,15 @@
   }
   // The mouse (N102): a left click at a spot fires its cannon, under its wing, at it; a right click
   // is its other fire, a missile from under its wing at the unit nearest it. (True when the one in
-  // hand took it.)
+  // hand took it.) A left click while its cannon is still firing a burst, or loading, is not lost:
+  // its burst goes as soon as it can, within PULL_WAIT.
+  const PULL_WAIT = RELOAD + 0.3;
   function click(world, x, y, button = 0) {
     const m = held;
     if (!m || m.dead) return false;
     m.aim = { x, y };
     if (button === 2) launch(world, m);
-    else fire(world, m);
+    else if (!fire(world, m)) m.pullT = PULL_WAIT;
     return true;
   }
 

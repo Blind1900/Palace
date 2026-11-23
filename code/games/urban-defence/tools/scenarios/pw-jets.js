@@ -86,20 +86,23 @@ function controls(x0, g) {
     J.key({ code: 'Space', type: 'keyup' });
     run(2);
     const level = Math.abs(j.climb) < 1e-6 && Math.abs(j.pitch) < 0.05;
-    const f0 = J.stats.fired, m0 = j.missiles, spot = { x: j.x + 600, y: j.y + 100 };
-    // (each round of the burst: at the spot clicked, from where it leaves)
+    const f0 = J.stats.fired, m0 = j.missiles, spot = { x: j.x + 900, y: j.y + 100 };
+    // (each round of the burst: at the spot clicked, from where it leaves; a second click mid-burst
+    // is not lost - its burst follows, at the spot - N102)
     const rounds = [], fireWas = PW.shots.fire;
     PW.shots.fire = function (w, spec) { if (spec.from === j && spec.kind === 'cannon') rounds.push(spec); return fireWas.call(this, w, spec); };
     J.click(world, spot.x, spot.y, 0);
-    run(0.6);
+    run(0.3);
+    J.click(world, spot.x, spot.y, 0);
+    run(1.2);
     PW.shots.fire = fireWas;
     J.click(world, spot.x, spot.y, 2);
     run(0.2);
     const fired = J.stats.fired - f0, missiles = m0 - j.missiles;
     const atSpot = rounds.length && rounds.every((s) => Math.abs(Math.atan2(s.dy, s.dx) - Math.atan2(spot.y - s.y, spot.x - s.x)) < 0.06);
     J.hold(null);
-    check(climbing > 40 && up > 0.5 && level && fired >= 4 && atSpot && missiles === 1,
-      `by hand: Space held climbs it (to ${climbing.toFixed(0)} degrees, its nose ${(up * 57.3).toFixed(0)} up), let go it levels out (${level}); a left click fires its cannon at the spot clicked (${fired} rounds, ${atSpot ? 'every one at it' : 'not at it'}), a right click a missile (${missiles})`);
+    check(climbing > 40 && up > 0.5 && level && rounds.length >= 24 && atSpot && missiles === 1,
+      `by hand: Space held climbs it (to ${climbing.toFixed(0)} degrees, its nose ${(up * 57.3).toFixed(0)} up), let go it levels out (${level}); two left clicks, the second mid-burst, fire two bursts of its cannon at the spot clicked (${rounds.length} rounds, ${atSpot ? 'every one at it' : 'not at it'}), a right click a missile (${missiles})`);
     fresh();
   }
 }

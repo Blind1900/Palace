@@ -262,9 +262,29 @@ const fresh = () => { world.troops = []; world.grenades = []; };
     U.click(world, t.x + 120, t.y - 10, 2);
     run(0.3);
     const threw = g0 - t.grenades;
+    // (N102: a click is never lost - five at a man's pace, one every 0.1 s, faster than its rifle
+    // fires: five rounds; and the hand's tool, clicked with it in hand, fires as well as aims)
+    const mag1 = t.mag;
+    for (let k = 0; k < 5; k += 1) { U.click(world, t.x + 200, t.y - 12, 0); run(0.1); }
+    run(0.8);
+    const quick = mag1 - t.mag, mag2 = t.mag;
+    U.tool(world, t.x + 200, t.y - 12);
+    run(0.3);
+    const byTool = mag2 - t.mag;
     U.hold(null);
-    check(walked > 12 && stood && idle && jumped >= 4 && fired === 1 && threw === 1,
-      `by hand: it walks while D is held (${walked.toFixed(0)} cells in 1 s), stands when it is let go (${stood}), and stays standing with no key held (${idle}); Space jumps it (${jumped} cells up); a left click fires its rifle at the spot (${fired} round), a right click throws a grenade at it (${threw})`);
+    // (a miner: its left click fires its rifle, though its drill is in hand; its right its drill)
+    const mi = U.create(world, { x: x0 + 160.5, y: g - 1, side: 'left', facing: 1, unit: 'miner' });
+    U.hold(mi);
+    const mm0 = mi.mag;
+    U.click(world, mi.x + 200, mi.y - 12, 0);
+    run(0.2);
+    const minerFired = mm0 - mi.mag;
+    U.click(world, mi.x + 200, mi.y - 12, 2);
+    const minerDrills = !!mi.drilling;
+    U.stopDrill(mi);
+    U.hold(null);
+    check(walked > 12 && stood && idle && jumped >= 4 && fired === 1 && threw === 1 && quick === 5 && byTool === 1 && minerFired === 1 && minerDrills,
+      `by hand: it walks while D is held (${walked.toFixed(0)} cells in 1 s), stands when it is let go (${stood}), and stays standing with no key held (${idle}); Space jumps it (${jumped} cells up); a left click fires its rifle at the spot (${fired} round), a right click throws a grenade at it (${threw}); five clicks a tenth of a second apart, five rounds (${quick}); a click of the hand's tool fires too (${byTool}); a miner's left click fires its rifle (${minerFired}), its right its drill (${minerDrills})`);
     fresh();
   }
 }

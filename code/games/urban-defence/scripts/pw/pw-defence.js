@@ -576,7 +576,7 @@
     if (held && (held.dead || !list.includes(held))) held = null;
     const hit = list.find((u) => !u.dead && x >= boxOf(u).x0 && x <= boxOf(u).x1 && y >= boxOf(u).y0 - 20 && y <= boxOf(u).y1 + 2);
     if (hit) { held = hit === held ? null : hit; return held; }
-    if (held) { held.aim = { x, y }; return held; }
+    if (held) { held.aim = { x, y }; click(world, x, y, 0); return held; }   // (N102: a click aims and fires)
     const gx = Math.round(x);
     if (gx < 80 || gx > world.width - 80) return null;
     // (a turret set down by hand: on the face of a wall beside the click, if one is nearer than the

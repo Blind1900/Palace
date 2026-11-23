@@ -529,9 +529,9 @@ else {
     const drove = placed && h.facing === 1 && h.x > hx + 20;
     T.tool(world, h.x + 300, h.y - 140);
     run(h, 1.5);
-    const laid = placed && h.target && h.elevation > 15 * deg;
+    const laid = placed && h.target && h.elevation > 15 * deg, shot = placed && h.reload > 0;
     T.key({ code: 'KeyS' });
-    check(house && !onRoof && placed && drove && laid, `by hand: a click on a roof drops nothing (${!house ? 'no building' : onRoof ? 'a tank on the roof' : 'nothing'}), a click drops a tank on the ground under it (${placed ? 'on it' : 'not placed'}), D drives it off (${drove ? `${(h.x - hx).toFixed(0)} cells in 2.5 s` : 'did not'}), a click lays its gun on the spot (${laid ? `${(h.elevation / deg).toFixed(0)} deg up` : 'not laid'})`);
+    check(house && !onRoof && placed && drove && laid && shot, `by hand: a click on a roof drops nothing (${!house ? 'no building' : onRoof ? 'a tank on the roof' : 'nothing'}), a click drops a tank on the ground under it (${placed ? 'on it' : 'not placed'}), D drives it off (${drove ? `${(h.x - hx).toFixed(0)} cells in 2.5 s` : 'did not'}), a click lays its gun on the spot (${laid ? `${(h.elevation / deg).toFixed(0)} deg up` : 'not laid'}) and fires (N102: ${shot ? 'loading the next' : 'not fired'})`);
     // (selected some other way - N78's selection - a tank is the one in hand: the keys drive it;
     // let go, the one in hand's gun goes back to level ahead and the keys drive none)
     const other = T.create(world, { style: 'asian', x: h.x + 260, y: world.groundTop[Math.round(h.x + 260)], facing: -1 });

@@ -18,8 +18,9 @@
 // - each carries a rifle (a magazine of 30 rounds, PW.shots' bullet), three grenades and, later,
 //   a drill. A round strikes them by their body; they die of what kills a man.
 // Every trooper can be taken in hand (the user's: every unit can be controlled): A / D walk, W jumps
-// (or climbs a ladder), S stops - then crouches, or climbs down; F fires at the spot last clicked
-// (or ahead), G throws a grenade there, R reloads; a click aims, a click on one takes it in hand.
+// (or climbs a ladder), S stops - then crouches, or climbs down; a left click aims at the spot and
+// fires there, a right click throws a grenade there (N102); F uses what it has in hand at the spot
+// last clicked, G throws a grenade, R reloads; a click on one takes it in hand.
 // The rules are Terraria's and Powder Toy's foundations as the user asked us to study them, for
 // behaviour only - our own code throughout.
 (function () {
@@ -49,6 +50,7 @@
   const DIG_EVERY = 0.12;       // s a cell's step of digging takes
   const DIG_HARD = 0.5;         // what it can dig through with its hands and its rifle butt
   const MAG = 30, ROF = 0.14, RELOAD = 2.4;   // a magazine, s between rounds, s to reload
+  const PULLS = 3, PULL_WAIT = RELOAD + 0.3;  // rounds clicked for kept, and how long, till it can fire (N102)
   const GRENADES = 3, FUSE = 2.6, THROW = 150;  // grenades, s on the fuse, cells/s thrown
   const CORPSE = 15;            // s a dead trooper lies there before it is gone
   const DAMAGE = { bullet: 34, ap: 200, he: 160, cannon: 90, missile: 200 };   // of its 100, by what strikes it
@@ -135,6 +137,8 @@
     if (t.dead) { t.deadFor += dt; return; }
     if (t.reload > 0) { t.reload -= dt; if (t.reload <= 0) { const n = Math.min(MAG - t.mag, t.ammo); t.mag += n; t.ammo -= n; } }
     if (t.cooldown > 0) t.cooldown -= dt;
+    // (rounds clicked for, still to go - see click)
+    if (t.pull > 0) { t.pullT -= dt; if (fire(world, t)) t.pull -= 1; else if (t.pullT <= 0) t.pull = 0; }
     wade(world, t);
     if (t.buried || buriedNow(world, t)) { dig(world, t, dt); return; }
     if (t.route) follow(world, t, dt);
@@ -943,7 +947,7 @@
     if (held && (held.dead || !list.includes(held))) held = null;
     const hit = list.find((t) => !t.dead && Math.abs(x - t.x) <= HALF + 2 && y >= t.y - heightOf(t) && y <= t.y + 2);
     if (hit) { held = hit === held ? null : hit; return held; }
-    if (held && !shift) { held.aim = { x, y }; return held; }
+    if (held && !shift) { click(world, x, y, 0); return held; }
     const gx = Math.round(x);
     if (gx < 8 || gx > world.width - 8) return null;
     let gy = Math.max(1, Math.round(y));
@@ -958,7 +962,7 @@
     return held;
   }
   function hold(t) {
-    if (held && held !== t) release();
+    if (held && held !== t) { release(); held.pull = 0; }
     held = t && !t.dead && t.kind === 'trooper' ? t : null;
     return held;
   }
@@ -1014,12 +1018,17 @@
   // The mouse (N102): a left click at a spot fires what it has in hand at it - its rifle, a grenade,
   // its drill the way of it; a right click is its other fire, a grenade thrown at it. (True when the
   // one in hand took it.)
+  // (the user's, N102: a left click aims at the spot and fires there - its rifle, whatever it has in
+  // hand; a right click is its other fire - a grenade, or, with none, its drill. A click while the
+  // rifle is not ready - between rounds, loading, up a ladder - is not lost: its rounds go as soon as
+  // it is, up to PULLS of them, within PULL_WAIT)
   function click(world, x, y, button = 0) {
     const t = held;
     if (!t || t.dead) return false;
     t.aim = { x, y };
-    if (button === 2) throwGrenade(world, t);
-    else use(world, t);
+    if (button === 2) { if (t.grenades > 0) throwGrenade(world, t); else if (t.drill) drill(world, t); return true; }
+    t.pull = Math.min(PULLS, (t.pull || 0) + 1); t.pullT = PULL_WAIT;
+    if (fire(world, t)) t.pull -= 1;
     return true;
   }
   // (driving it by code, as the keys do: walk -1 / 0 / +1)
