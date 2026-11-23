@@ -764,6 +764,25 @@
     const chunk = world.owner[chunkIndex(world, x, y)];
     return chunk ? chunk[(y & CHUNK_MASK) << CHUNK_SHIFT | x & CHUNK_MASK] : 0;
   }
+  // N104: the mountain road tunnels (WGM's PW.roadTunnels) are the only tunnels a vehicle goes into;
+  // the barricades across them (world.barricades: { side, x0, x1, y0, y1, cells }) its own side's
+  // units pass, another side's must run over or break. (Which barricade cell (x, y) - of stuff m - is
+  // part of: only concrete and steel are; its cells looked up by a set made once a laying.)
+  const roadWay = (world, x, y) => !!(PW.roadTunnels && PW.roadTunnels.onRoad && PW.roadTunnels.onRoad(world, x, y));
+  const barSets = new WeakMap();
+  function barricadeAt(world, x, y, m = null) {
+    const list = world.barricades;
+    if (!list || !list.length) return null;
+    if (m !== null) { const id = m & ID_MASK; if (id !== M.CONCRETE && id !== M.STEEL) return null; }
+    const i = y * world.width + x;
+    for (const b of list) {
+      if (!b.cells || !b.cells.length || x < b.x0 - 2 || x > b.x1 + 2 || y < b.y0 || y > b.y1) continue;
+      let s = barSets.get(b.cells);
+      if (!s || s.n !== b.cells.length) { s = new Set(b.cells); s.n = b.cells.length; barSets.set(b.cells, s); }
+      if (s.has(i)) return b;
+    }
+    return null;
+  }
   // A building is being built (b.growing, set by whatever builds or repairs it) while the work
   // touched it within GROW_HOLD ticks (b.grewAt: see pw-structure) - the work pauses between
   // batches. (pw-structure makes it a construction site, judged by what stands.)
@@ -920,7 +939,7 @@
     createWorld, chunkIndex, inside, markDirty, markWaterDirty, wake, wakeCell, wakeArea, clearSimRect, stir, stirred,
     get, id, set, swapCells, sinkColumn, touchGroundTop, refreshGroundTop, rebuildGroundTop, shapeChanged,
     getLayer, setLayer, layerCell, clearPaintAt, isSolid, isOpen, groundBelow, supportBelow, traceShot,
-    getOwner, setOwner, growing, isGrowing, getFlags, setFlag, boreAt, AMBIENT, heatAt, setHeat, addHeat, heatChunk, clearHeatBox,
+    getOwner, setOwner, growing, isGrowing, getFlags, setFlag, boreAt, AMBIENT, heatAt, setHeat, addHeat, heatChunk, clearHeatBox, roadWay, barricadeAt,
     GLOW_FROM, GLOW_FULL, glowAt, glowing,
   });
 })();

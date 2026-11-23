@@ -153,10 +153,15 @@
   }
 
   // ---- The cells ---------------------------------------------------------------------------------
+  // (N104: its own side's barricade across a road tunnel it walks through; another's it steps over -
+  // they stand lower than its stride - or blows apart)
+  let passing = null;
   const blocks = (world, x, y) => {
     if (x < 0 || y < 0 || x >= world.width || y >= world.height) return true;
-    const id = world.mat[y * world.width + x] & ID_MASK;
-    return phase[id] >= POWDER && !passable[id] && id !== M.PLATFORM;
+    const m = world.mat[y * world.width + x], id = m & ID_MASK;
+    if (!(phase[id] >= POWDER && !passable[id] && id !== M.PLATFORM)) return false;
+    if (passing && (id === M.CONCRETE || id === M.STEEL) && world.barricades && world.barricades.length) { const b = PW.barricadeAt(world, x, y, m); if (b && b.side === passing) return false; }
+    return true;
   };
   const isPlatform = (world, x, y) => x >= 0 && y >= 0 && x < world.width && y < world.height && (world.mat[y * world.width + x] & ID_MASK) === M.PLATFORM;
   const isWater = (world, x, y) => x >= 0 && y >= 0 && x < world.width && y < world.height && (world.mat[y * world.width + x] & ID_MASK) === M.WATER;
@@ -678,7 +683,8 @@
     const list = world.mechs;
     if (!list || !list.length) return;
     current = world;
-    for (const m of list) if (!m.dead) stepOne(world, m, dt);
+    for (const m of list) if (!m.dead) { passing = m.side || null; stepOne(world, m, dt); }
+    passing = null;
     for (let q = list.length - 1; q >= 0; q -= 1) if (list[q].dead) list.splice(q, 1);
   }
 

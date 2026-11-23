@@ -213,7 +213,9 @@
     if (CRUSHED[id]) return FLAT;
     if (id === M.RUIN) return RAMS;
     const o = PW.getOwner(world, x, y);
-    if (o <= 0 || o >= 50000) return PLAIN;
+    // (a barricade across a road tunnel - N104: its own side's it drives through, another's it runs over)
+    if (o >= 50000) { const bar = PW.barricadeAt(world, x, y, m); return !bar ? PLAIN : t && t.side && bar.side === t.side ? GHOST : RAMS; }
+    if (o <= 0) return PLAIN;
     const b = world.buildings && world.buildings[o - 1];
     if (!b || !(y < b.ground) || !b.body || x < b.body.left || x > b.body.right) return PLAIN;
     if (t && t.side && (b.faction || b.side) === t.side) return GHOST;
@@ -377,7 +379,7 @@
       // what it rams or flattens, aside: see meets)
       for (let up = 1; up <= t.art.height && h - up >= 0; up += 1) {
         if (solidFor(world, t, x, h - up, mat[(h - up) * W + x])) { t.stopCell = [x, h - up]; return stop(k, 'no room'); }
-        if (up <= 4 && (PW.getFlags(world, x, h - up) & PW.FLAG.TUNNEL)) return stop(k, 'tunnel');
+        if (up <= 4 && (PW.getFlags(world, x, h - up) & PW.FLAG.TUNNEL) && !PW.roadWay(world, x, h - up)) return stop(k, 'tunnel');
       }
       let water = 0;
       while (water <= DEEP && h - water - 1 >= 0 && (mat[(h - water - 1) * W + x] & ID_MASK) === M.WATER) water += 1;
@@ -1432,5 +1434,6 @@
   PW.tanks = { create, step, draw, drive, aimAt, muzzle, settle, ahead, explain, tool, key, click, release, hold, held: () => held, reach, gatesOf, STYLES: Object.keys(STYLES),
     fire, hurt, blast, target, stats, poseOf, pixel, part: () => PART, PARTS: { GUN, TURRET, HULL, RUNNING }, touches, struck,
     turretFrame: (style, f) => turnFrame(artOf(style), f), TURN_FRAMES,
-    VMAX, ACCEL, GUN_UP, GUN_DOWN, MAX_SLOPE, STEP, SPRING_UP, SPRING_DOWN, TURN, RELOAD, ARMOUR };
+    VMAX, ACCEL, GUN_UP, GUN_DOWN, MAX_SLOPE, STEP, SPRING_UP, SPRING_DOWN, TURN, RELOAD, ARMOUR,
+    roadTunnels: true };   // (N104: it drives into a road tunnel - no other - and its barricades are its side's to pass or another's to run over)
 })();

@@ -60,11 +60,29 @@
   // ---- The cells ---------------------------------------------------------------------------------
   // (what bars a trooper's body: solid ground and structure, a heap of powder - not air, gas,
   // water, cover, a platform; a platform bears it from above, see bears)
+  // (N104: a barricade across a road tunnel bars another side's men - its own side's, the side of the
+  // man moving or finding his way, go through it)
+  let passing = null;
   const blocks = (world, x, y) => {
     if (x < 0 || y < 0 || x >= world.width || y >= world.height) return true;
-    const id = world.mat[y * world.width + x] & ID_MASK;
-    return phase[id] >= POWDER && !passable[id] && id !== M.PLATFORM;
+    const m = world.mat[y * world.width + x], id = m & ID_MASK;
+    if (!(phase[id] >= POWDER && !passable[id] && id !== M.PLATFORM)) return false;
+    if (passing && (id === M.CONCRETE || id === M.STEEL) && world.barricades && world.barricades.length) { const b = PW.barricadeAt(world, x, y, m); if (b && b.side === passing) return false; }
+    return true;
   };
+  // (... nor does he climb it: no step up onto another side's barricade - rows y0 to y1 under his
+  // body at x - he must blow it apart)
+  function barricadeIn(world, x, y0, y1) {
+    if (!world.barricades || !world.barricades.length) return false;
+    const cx = Math.floor(x);
+    for (let y = Math.max(0, y0); y <= y1; y += 1) for (let xx = cx - HALF; xx < cx + HALF; xx += 1) {
+      const m = PW.get(world, xx, y), id = m & ID_MASK;
+      if (id !== M.CONCRETE && id !== M.STEEL) continue;
+      const b = PW.barricadeAt(world, xx, y, m);
+      if (b && b.side !== passing) return true;
+    }
+    return false;
+  }
   const isWater = (world, x, y) => x >= 0 && y >= 0 && x < world.width && y < world.height && (world.mat[y * world.width + x] & ID_MASK) === M.WATER;
   const isPlatform = (world, x, y) => x >= 0 && y >= 0 && x < world.width && y < world.height && (world.mat[y * world.width + x] & ID_MASK) === M.PLATFORM;
   const ladderAt = (world, x, y) => (PW.getFlags(world, x, y) & PW.FLAG.LADDER) !== 0;
@@ -163,6 +181,7 @@
       if (Math.floor(nx) === Math.floor(t.x) || clear(world, nx, t.y, h)) { t.x = nx; dx -= d; continue; }
       let up = 0;
       if (t.onGround || t.swim) for (let k = 1; k <= STEP_UP; k += 1) if (clear(world, nx, t.y - k, h)) { up = k; break; }
+      if (up && barricadeIn(world, nx, t.y - up + 1, t.y)) up = 0;
       if (up) { t.x = nx; t.y -= up; t.stepped = (t.stepped || 0) + up; dx -= d; continue; }
       t.vx = 0; break;
     }
@@ -439,7 +458,9 @@
   // (sent on its way: the way found, or null when there is none)
   function goTo(world, t, x, y) {
     if (!t || t.dead) return null;
+    passing = t.side || null;
     const p = plan(world, t, { x, y });
+    passing = null;
     if (!p) { t.route = null; return null; }
     t.route = { legs: p.legs, at: 0, goal: { x, y }, reached: p.reached, lastX: t.x, lastY: t.y, idle: 0, tries: 0, climbed: false };
     t.lost = false;
@@ -812,7 +833,8 @@
     const list = world.troops;
     if (list && list.length) {
       current = world;
-      for (const t of list) stepOne(world, t, dt);
+      for (const t of list) { passing = t.side || null; stepOne(world, t, dt); }
+      passing = null;
       for (let q = list.length - 1; q >= 0; q -= 1) if (list[q].dead && list[q].deadFor > CORPSE) list.splice(q, 1);
     }
     if (world.grenades && world.grenades.length) stepGrenades(world, dt);

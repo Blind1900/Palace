@@ -438,6 +438,81 @@ else {
   }
 }
 
+// 5c. Road tunnels and their barricades (N104, the user's: a mountain road tunnel takes vehicles, a
+// miners' tunnel only men; the boring side's units pass its barricades, an enemy's must run them
+// over or blow them apart). A tank drives into a road tunnel and through it, and stops at the mouth
+// of a miners' tunnel; across the road, its own side's barricade it drives through untouched and
+// at its pace, another side's it runs over, slowed; a man of the barricade's side walks through
+// it, one of the other side is stopped by it. (The road tunnel's record is laid as WGM's are: its
+// way from a to b, over its floor - see PW.roadTunnels.onRoad.)
+{
+  if (!PW.troops) await new Promise((resolve) => { const s = document.createElement('script'); s.src = 'scripts/pw/pw-troops.js'; s.onload = s.onerror = resolve; document.head.appendChild(s); });
+  const R = site(900), B = site(900);
+  if (!R || !B) check(false, 'stretches of the wilds for the road tunnel and the barricades');
+  else {
+    const stub = !PW.roadTunnels;
+    if (stub) PW.roadTunnels = { onRoad: (w, x, y) => (w.roadTunnels || []).find((r) => x >= r.a && x <= r.b && y <= r.floorAt(x) && y > r.floorAt(x) - 96) || null };
+    const roads0 = world.roadTunnels, bars0 = world.barricades;
+    // (two tunnels 70 high through blocks of stone 200 long: the first a road tunnel, the second a miners')
+    const { x0, g } = R;
+    for (const at of [x0 + 250, x0 + 650]) {
+      fill(at, g - 110, at + 200, g - 1, M.STONE);
+      fill(at, g - 70, at + 200, g - 1, M.AIR);
+      for (let x = at; x <= at + 200; x += 1) for (let y = g - 70; y < g; y += 1) PW.setFlag(world, x, y, PW.FLAG.TUNNEL);
+    }
+    world.roadTunnels = [...(roads0 || []), { id: 'n104-course', a: x0 + 250, b: x0 + 450, floorAt: () => g, side: null, done: true, portals: [], barricades: [] }];
+    const t = T.create(world, { style: 'modern', x: x0 + 120, y: g, facing: 1, side: 'left' });
+    T.drive(t, 1);
+    let inRoad = false;
+    run(t, 16, () => { if (t.x > x0 + 300 && t.x < x0 + 400) inRoad = true; });
+    const short = x0 + 650 - t.x - 58;
+    if (inRoad) await view('tank-road-tunnel', x0 + 500, g - 50, 4);
+    world.tanks.length = 0;
+    // (two barricades across the road - a jersey block and a steel hedgehog each, a tunnel network's
+    // cells: the left side's, then the right side's)
+    const { x0: b0, g: bg } = B, bars = [];
+    for (const [at, side] of [[b0 + 300, 'left'], [b0 + 600, 'right']]) {
+      const bar = { id: `n104-${side}`, side, x0: at, x1: at + 25, y0: bg - 12, y1: bg - 1, cells: [] };
+      const put = (x, y, m) => { PW.set(world, x, y, m, { quiet: true }); PW.setOwner(world, x, y, 50990); bar.cells.push(y * world.width + x); };
+      for (let h = 0; h < 12; h += 1) for (let dx = h < 4 ? 0 : 2; dx < (h < 4 ? 12 : 10); dx += 1) put(at + dx, bg - 1 - h, M.CONCRETE);
+      for (let k = 0; k < 12; k += 1) { put(at + 14 + k, bg - 1 - k, M.STEEL); put(at + 25 - k, bg - 1 - k, M.STEEL); }
+      bars.push(bar);
+    }
+    world.barricades = [...(bars0 || []), ...bars];
+    const standing = (bar) => bar.cells.filter((i) => { const id = world.mat[i] & 63; return id === M.CONCRETE || id === M.STEEL; }).length;
+    const n0 = bars.map(standing);
+    const u = T.create(world, { style: 'asian', x: b0 + 120, y: bg, facing: 1, side: 'left' });
+    T.drive(u, 1);
+    let throughOwn = Infinity, ramming = Infinity;
+    run(u, 18, () => {
+      if (u.x + 58 > b0 + 300 && u.x - 58 < b0 + 326) throughOwn = Math.min(throughOwn, Math.abs(u.v));
+      if (u.x + 58 > b0 + 600 && u.x - 58 < b0 + 626) ramming = Math.min(ramming, Math.abs(u.v));
+    });
+    const n1 = bars.map(standing);
+    await view('tank-barricades', b0 + 600, bg - 20, 5);
+    world.tanks.length = 0;
+    // (men: one of each side walking at the left side's barricade, still standing)
+    const U = PW.troops;
+    let manOwn = null, manOther = null;
+    if (U) {
+      const k0 = world.troops ? world.troops.length : 0;
+      const a = U.create(world, { x: b0 + 250.5, y: bg - 1, side: 'left' }), z = U.create(world, { x: b0 + 250.5, y: bg - 1, side: 'right' });
+      U.walk(a, 1); U.walk(z, 1);
+      for (let k = 0; k < 4 * 60; k += 1) U.step(world, DT);
+      manOwn = a.x - (b0 + 326); manOther = b0 + 300 - z.x;
+      world.troops.splice(k0);
+    }
+    world.roadTunnels = roads0; world.barricades = bars0;
+    if (stub) delete PW.roadTunnels;
+    check(inRoad && t.x > x0 + 450 && t.blocked === 'tunnel' && short >= 0 && short < 16,
+      `a tank drives into a road tunnel and through it (${inRoad ? `out past its far portal by ${(t.x - x0 - 450).toFixed(0)} cells` : 'never in it'}) and stops at the mouth of a miners' tunnel (${t.blocked || 'went on'}, its nose ${short.toFixed(0)} cells off)`);
+    check(n1[0] === n0[0] && throughOwn > T.VMAX * 0.95 && n1[1] < n0[1] * 0.2 && ramming < T.VMAX * 0.6 && u.x > b0 + 700,
+      `across the road its own side's barricade it drives through untouched (${n1[0]} of its ${n0[0]} cells standing, ${throughOwn.toFixed(0)} cells/s at the slowest); another side's it runs over (${n0[1] - n1[1]} of its ${n0[1]} cells crushed, slowed to ${ramming.toFixed(0)} cells/s, on ${(u.x - b0 - 626).toFixed(0)} past it)`);
+    check(U && manOwn > 0 && manOther >= 0 && manOther < 8,
+      `a man of the barricade's side walks through it (${manOwn === null ? 'no troops' : `${manOwn.toFixed(0)} cells past it`}); one of the other side is stopped by it (${manOther === null ? '-' : `${manOther.toFixed(0)} cells short`})`);
+  }
+}
+
 // 4. What it costs: one tank's tick, and drawing it.
 {
   const D = used.length ? used[0] : null;
