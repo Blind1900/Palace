@@ -883,6 +883,66 @@
           K.solidIfEmpty(c, ax(k), aTop - 2, M.CONCRETE, tone(KIT_P(style).ornament || [120, 120, 126], 0.9), ROLE.ORNAMENT);
         }
       }
+      // N97: floors, roofs and walls run on until they MEET. On a sloped host the storeys
+      // recede inside the body's widest line, and the wing - built out from that line - stood
+      // off the recessed facade by the recess: open air between them (the user's screenshot).
+      // Each row of the wing's height is carried in from the body line to the tower's own
+      // cells - its wall, its glazing or its room: a roof row as the roof, a floor row as the
+      // steel slab, the rest as the room's back wall; and a doorway is cut through the facade
+      // met at every floor. Where nothing of the tower stands within reach (the sky over a
+      // lower tower) nothing is laid.
+      {
+        const slabRow = new Set();
+        for (const f of wingFloors) for (let r = 0; r < S.SLAB; r += 1) slabRow.add(f.y + r);
+        const REACH_IN = 40, hitAt = new Map();
+        for (let y = aTop - 1; y < c.ground - 1; y += 1) {
+          const run = [];
+          let x = inner, hit = null;
+          for (let s = 0; s < REACH_IN && x > 1 && x < c.width - 2; s += 1, x -= dirOut) {
+            const i = y * c.width + x;
+            if (c.mat[i] || c.back[i]) { hit = x; break; }
+            run.push(x);
+          }
+          if (hit === null || !run.length) continue;
+          hitAt.set(y, hit);
+          for (const rx of run) {
+            const i = y * c.width + rx;
+            if (y <= aTop) K.solidIfEmpty(c, rx, y, sloped ? M.CONCRETE : M.STEEL, sloped ? K.slabColor(style, y - aTop + 1, rx, y) : tone(tint, 1.1), ROLE.ROOF);
+            else if (slabRow.has(y)) { c.mat[i] = M.STEEL; c.role[i] = ROLE.SLAB; c.paint[i] = K.pack(tone(tint, slabRow.has(y - 1) ? 0.8 : 1.05)); }
+            else c.back[i] = roomBack(rx, y);
+          }
+        }
+        for (const f of wingFloors) {
+          for (let y = f.y - S.DOOR_H; y < f.y; y += 1) {
+            const hit = hitAt.get(y);
+            if (hit === undefined) continue;
+            for (let d = 0; d < 4; d += 1) {
+              const i = y * c.width + hit - dirOut * d;
+              if (c.mat[i] && (c.role[i] === ROLE.WALL || c.role[i] === ROLE.GLASS)) {
+                c.mat[i] = 0; c.role[i] = 0; c.paint[i] = 0; c.back[i] = c.back[i] || K.pack([40, 44, 52]);
+              }
+            }
+          }
+        }
+        // ...and no pocket of open air is left sealed inside the join: under the wing's roof,
+        // from its glacis to forty cells into the tower, a run with neither cell nor back wall
+        // closed in on both sides (the doorways, the cap and the roof meeting the slabs left a
+        // few) is back-walled like the rooms round it
+        const xa = Math.min(ax(ANNEX_W), inner - dirOut * REACH_IN), xb = Math.max(ax(ANNEX_W), inner - dirOut * REACH_IN);
+        const filled = (i) => c.mat[i] || c.back[i];
+        for (let y = aTop - 1; y < c.ground - 1; y += 1) {
+          let x = Math.max(1, xa);
+          while (x <= Math.min(c.width - 2, xb)) {
+            if (filled(y * c.width + x)) { x += 1; continue; }
+            let e = x;
+            while (e <= xb && !filled(y * c.width + e)) e += 1;
+            if (e <= xb && e - x <= REACH_IN && filled(y * c.width + x - 1)) {
+              for (let k = x; k < e; k += 1) c.back[y * c.width + k] = roomBack(k, y);
+            }
+            x = e;
+          }
+        }
+      }
       // the wing's own guns: turrets on the armoured roof (and an interceptor from level 3)
       if (PW.buildingOrnaments && PW.buildingOrnaments.devices) {
         const roofRect = [{ left: Math.min(ax(1), ax(bayL - 2)), right: Math.max(ax(1), ax(bayL - 2)), y: aTop - 1, top: true }];

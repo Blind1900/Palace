@@ -37,7 +37,11 @@ const SUITES = [
   { name: 'pw-game-win', params: 'mode=game&start=versus&side=left&det=1' },
   // N8: the game is the main page, opened from disk as a downloaded copy is; the old beta still loads
   { name: 'pw-main-page', page: 'index.html', file: true, alone: true, ready: "!!document.getElementById('gm-menu')" },
-  { name: 'pw-beta-legacy', page: 'beta-legacy.html' },
+  // (the old beta makes its world from Math.random: seeded, the same world each run - unseeded it
+  // now and then found no dry ground for a building and threw)
+  { name: 'pw-beta-legacy', page: 'beta-legacy.html', mathSeed: true },
+  // N97: a sloped tower and its military wing, and the wing and its neighbour, meet with no gap
+  { name: 'pw-mil-join', alone: true, page: 'capital-lab.html', ready: 'window.pwLab && pwLab.ready', params: 'det=1' },
   // N88: halls and rooms - hallways opening through door frames into rooms of every size
   { name: 'pw-tunnel-rooms', params: 'det=1' },
   // N5: the item bar, drills and dirt tunnels, guards, turrets, orders, the sentry, a skirmish
@@ -56,7 +60,7 @@ function run(suite, attempt = 1) {
     const params = suite.params ? `${suite.params}&seed=${seed}` : `seed=${seed}`;
     const cap = suite.limit || limit;   // (a long match suite may take more than the usual cap)
     const child = spawn(process.execPath, [path.join(__dirname, 'check-beta-game.cjs'), `--page=${suite.page || 'pixel-world.html'}`, `--params=${params}`,
-      ...(suite.ready ? [`--ready=${suite.ready}`] : []), ...(suite.file ? ['--file'] : []),
+      ...(suite.ready ? [`--ready=${suite.ready}`] : []), ...(suite.file ? ['--file'] : []), ...(suite.mathSeed ? [`--seed=${seed}`] : []),
       '--wait=300', '--size=1600x900', `--timeout=${(cap - 10) * 1000}`, `--out=${out}`, `--scenario=tools/scenarios/${suite.scenario || suite.name}.js`],
     { cwd: root, env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' } });
     let text = '';

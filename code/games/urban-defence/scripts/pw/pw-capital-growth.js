@@ -1457,16 +1457,20 @@
     const S = PW.buildingKit.S;   // (KIT is declared further down; the kit global is loaded first)
     function clearWeld(l, key) {
       const w = l[key];
-      if (!w || !w.span) return;
-      const [wx0, wx1, wy0, wy1] = w.span;
-      for (let y = Math.max(2, wy0); y <= Math.min(world.height - 2, wy1); y += 1) {
-        for (let x = wx0; x <= wx1; x += 1) {
-          if (PW.getOwner(world, x, y) !== l.owner) continue;
-          PW.set(world, x, y, M.AIR, Q);
-          PW.setLayer(world, 'paint', x, y, 0);
-          PW.setLayer(world, 'back', x, y, 0);
-          PW.setOwner(world, x, y, 0);
-        }
+      if (!w) { l[key] = null; return; }
+      // (N97: exactly the cells the weld laid - its runs reach into the buildings' recesses, and a
+      // box round them took the wing's own glacis with it, the wing being the weld's owner too)
+      const take = (x, y) => {
+        if (PW.getOwner(world, x, y) !== l.owner) return;
+        PW.set(world, x, y, M.AIR, Q);
+        PW.setLayer(world, 'paint', x, y, 0);
+        PW.setLayer(world, 'back', x, y, 0);
+        PW.setOwner(world, x, y, 0);
+      };
+      if (w.cells) for (const i of w.cells) take(i % world.width, (i / world.width) | 0);
+      else if (w.span) {
+        const [wx0, wx1, wy0, wy1] = w.span;
+        for (let y = Math.max(2, wy0); y <= Math.min(world.height - 2, wy1); y += 1) for (let x = wx0; x <= wx1; x += 1) take(x, y);
       }
       l[key] = null;
     }
@@ -1476,45 +1480,86 @@
       const b = dir > 0 ? n.placed.worksL - 1 : l.placed.worksL - 1;
       const gapW = b - a + 1;
       if (gapW < 1 || gapW > 46) return false;
-      const sig = n.placed.x0 * 100000 + a;
+      // N97: the faces are met as they STAND - so the weld waits until both buildings have risen
+      // (N73, as the joints do), and is laid once more when both are whole: a weld laid round a
+      // blueprint met no face and carried nothing across (the user's gaps).
+      if (stillBuilding(l) || stillBuilding(n)) return false;
+      const rec = world.buildings[l.owner - 1], nrec = world.buildings[n.owner - 1];
+      const whole = (r) => ((r && r.health) || 0) >= 0.99 ? 1 : 0;
+      const sig = `${n.placed.x0}|${a}|${whole(rec)}${whole(nrec)}`;
       if (l[key] && l[key].sig === sig) return false;
-      const rec = world.buildings[l.owner - 1];
       const wing = (rec.floors || []).filter((f) => f.wing).sort((p, q) => p.y - q.y);
       if (!wing.length) return false;
       clearWeld(l, key);
       const sloped = ['setback', 'tapered', 'crown', 'spire', 'needle'].includes(l.variant || '');
       const wingTopY = wing[0].y - S.FLOOR + S.SLAB;   // the wing's roof band sits here
       const backTone = (x, y) => (((x + y) % 9) ? [34, 38, 46] : [40, 45, 54]);
-      for (let x = a; x <= b; x += 1) {
-        // the roof rows carried across
-        for (const yy of [wingTopY - 1, wingTopY]) {
-          if (!PW.getOwner(world, x, yy) && PW.mat.open[PW.get(world, x, yy) & 63]) {
+      const slabRow = new Map();
+      for (const f of wing) for (let r = 0; r < S.SLAB; r += 1) slabRow.set(f.y + r, r);
+      // N97: every row of the merged height is carried across from the one building's face to
+      // the other's - the faces as they stand, not the lots' works lines: a sloped tower's
+      // storeys recede inside its works, and a weld laid between the works lines left open air
+      // either side of it (and a band under each slab bare). Roof rows as the roof, floor rows
+      // as gallery slabs, every row between them back-walled, all of it the wing's.
+      const xc = Math.round((a + b) / 2);
+      const open = (x, y) => (PW.get(world, x, y) & 63) === M.AIR && !PW.getLayer(world, 'back', x, y) && !PW.getOwner(world, x, y);
+      const own = (x, y) => { const o = PW.getOwner(world, x, y); return o === l.owner || o === n.owner; };
+      const REACH = 70;
+      let spanL = a, spanR = b;
+      const faceAt = new Map();   // row -> the neighbour's face met there
+      const laid = [];            // every cell the weld lays (clearWeld takes up exactly these)
+      const bottomY = world.groundTop[Math.max(0, Math.min(world.width - 1, xc))];
+      for (let yy = wingTopY - 1; yy < bottomY; yy += 1) {
+        if (!open(xc, yy)) continue;
+        let L = xc, R = xc;
+        while (xc - L < REACH && open(L - 1, yy)) L -= 1;
+        while (R - xc < REACH && open(R + 1, yy)) R += 1;
+        // (closed in on both sides by the two buildings - else it is sky or ground, not a gap)
+        if (!own(L - 1, yy) || !own(R + 1, yy)) continue;
+        faceAt.set(yy, dir > 0 ? R + 1 : L - 1);
+        spanL = Math.min(spanL, L); spanR = Math.max(spanR, R);
+        for (let x = L; x <= R; x += 1) {
+          if (yy <= wingTopY) {
             PW.set(world, x, yy, sloped ? M.CONCRETE : M.STEEL, Q);
             PW.setLayer(world, 'paint', x, yy, PW.abgr(...(sloped ? [104, 106, 110, 255] : (((x >> 1) & 1) ? [196, 164, 58, 255] : [64, 68, 74, 255]))));
-            PW.setOwner(world, x, yy, l.owner);
-          }
-        }
-        // the floors carried across as gallery slabs, the band between back-filled
-        for (const f of wing) {
-          for (let r = 0; r < S.SLAB; r += 1) {
-            const yy = f.y + r;
-            if (!PW.getOwner(world, x, yy) && PW.mat.open[PW.get(world, x, yy) & 63]) {
-              PW.set(world, x, yy, M.STEEL, Q);
-              PW.setLayer(world, 'paint', x, yy, PW.abgr(...(r === 0 ? [88, 92, 100, 255] : [56, 60, 68, 255])));
-              PW.setOwner(world, x, yy, l.owner);
-            }
-          }
-          for (let yy = f.y - S.CLEAR + 6; yy < f.y; yy += 1) {
-            if ((PW.get(world, x, yy) & 63) === M.AIR && !PW.getLayer(world, 'back', x, yy)) {
-              PW.setLayer(world, 'back', x, yy, PW.abgr(...backTone(x, yy), 255));
-            }
-          }
+          } else if (slabRow.has(yy)) {
+            PW.set(world, x, yy, M.STEEL, Q);
+            PW.setLayer(world, 'paint', x, yy, PW.abgr(...(slabRow.get(yy) === 0 ? [88, 92, 100, 255] : [56, 60, 68, 255])));
+          } else PW.setLayer(world, 'back', x, yy, PW.abgr(...backTone(x, yy), 255));
+          PW.setOwner(world, x, yy, l.owner);
+          laid.push(yy * world.width + x);
         }
       }
-      // a doorway into the neighbour at every floor with a room behind its wall
-      const wallX0 = dir > 0 ? n.placed.worksL : n.placed.worksR - 7;
+      // ...and no pocket of open air is left sealed in the joined mass: between the two
+      // buildings' middles, under the wing's roof, a run with neither cell nor back wall closed
+      // in on both sides by the two (an armour skin's plates and belts round a recess left
+      // some) is back-walled, the wing's
+      const recN = world.buildings[n.owner - 1];
+      const mid = (r, p) => (r && r.body ? Math.round((r.body.left + r.body.right) / 2) : Math.round((p.worksL + p.worksR) / 2));
+      const px0 = Math.min(mid(rec, l.placed), mid(recN, n.placed)), px1 = Math.max(mid(rec, l.placed), mid(recN, n.placed));
+      for (let yy = wingTopY - 1; yy < bottomY; yy += 1) {
+        let x = px0;
+        while (x <= px1) {
+          if (!open(x, yy)) { x += 1; continue; }
+          let e = x;
+          while (e <= px1 && open(e, yy)) e += 1;
+          if (e <= px1 && e - x <= 40 && own(x - 1, yy) && own(e, yy)) {
+            for (let k = x; k < e; k += 1) {
+              PW.setLayer(world, 'back', k, yy, PW.abgr(...backTone(k, yy), 255));
+              PW.setOwner(world, k, yy, l.owner);
+              laid.push(yy * world.width + k);
+            }
+            spanL = Math.min(spanL, x); spanR = Math.max(spanR, e - 1);
+          }
+          x = e;
+        }
+      }
+      // a doorway into the neighbour at every floor with a room behind its wall - cut where its
+      // face stands at that row
       for (const f of wing) {
-        const probeX = dir > 0 ? n.placed.worksL + 9 : n.placed.worksR - 9;
+        const face = faceAt.get(f.y - 2);
+        const wallX0 = face !== undefined ? (dir > 0 ? face : face - 7) : (dir > 0 ? n.placed.worksL : n.placed.worksR - 7);
+        const probeX = dir > 0 ? wallX0 + 9 : wallX0 - 2;
         let roomRows = 0;
         for (let yy = f.y - S.DOOR_H; yy < f.y; yy += 1) {
           if ((PW.get(world, probeX, yy) & 63) === M.AIR && PW.getLayer(world, 'back', probeX, yy)) roomRows += 1;
@@ -1532,9 +1577,8 @@
           }
         }
       }
-      const bottomY = world.groundTop[Math.max(0, Math.min(world.width - 1, Math.round((a + b) / 2)))];
-      l[key] = { sig, span: [a, b, wingTopY - 2, bottomY] };
-      clearSimAround(a - 2, wingTopY - 4, b + 2, bottomY + 4);
+      l[key] = { sig, span: [spanL, spanR, wingTopY - 2, bottomY], cells: laid };
+      clearSimAround(spanL - 2, wingTopY - 4, spanR + 2, bottomY + 4);
       note(city, 'the wing is welded to its neighbour: one building');
       return true;
     }
