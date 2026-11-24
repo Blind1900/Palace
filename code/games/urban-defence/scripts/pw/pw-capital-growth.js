@@ -55,7 +55,9 @@
     // fully, at each level (and its next level can't be bought until it has): the crews' pace is
     // set by it (pw-repair), not by its cores
     const GROW_SECS = { capital: 180, military: 120, farm: 90 };
-    const purseOf = (city) => (city && city.faction && world.stock && world.stock[city.faction]) || null;
+    // (a neutral town in a match has no side to pay its way - N130: it grows on the match's own
+    // clock, free; outside a match the world's own stock keeps it, as ever)
+    const purseOf = (city) => (city && city.faction && !(city.faction === 'neutral' && city.neutralGrows) && world.stock && world.stock[city.faction]) || null;
     function pay(city, kind) {
       const purse = purseOf(city);
       if (!purse) return true;
@@ -739,6 +741,9 @@
         // N33: the town ranks like any capital - but never capped under what already stands.
         city.levelCap = Math.max(Math.min(MAX_LEVEL, Math.max(2, maxLevel)), capitalCap(s.side || null));
         city.level = Math.min(MAX_LEVEL, Math.max(2, maxLevel));
+        // (N130, the user's: in a match a neutral town starts at the lowest level - the level of
+        // the buildings it stands with; PW.game's neutral clock sets it there as the match opens)
+        city.firstLevel = Math.min(MAX_LEVEL, Math.max(1, maxLevel));
         cities.push(city);
         s.adopted = true;
         adopted += 1;
@@ -1007,7 +1012,8 @@
       // on past the far portal once it is through. (Water still waits for the level.)
       // (a city grown from a seed - the world's own standing towns, adopted, keep to their old ways:
       // the match's passes give the armies a road through the ranges between the capitals)
-      if (b && b.kind === 'mountain' && PW.roadTunnels && !city.adopted && (city.kind === 'capital' || city.kind === 'military')) {
+      // (N130, the user's: a neutral town growing through a match does make its tunnels and bridges)
+      if (b && b.kind === 'mountain' && PW.roadTunnels && (!city.adopted || city.neutralGrows) && (city.kind === 'capital' || city.kind === 'military')) {
         // (the user's: a seed never makes a tunnel at once - it builds its road at level 3, and
         // till then its spread waits at the mountain's foot)
         if (city.level < TUNNEL_LEVEL) { city.blocked[side] = 'mountain'; return false; }
@@ -2385,13 +2391,17 @@
       return node;
     }
     function coreShaft(city) {
-      if (!PW.tunnels || !PW.mining || !city.faction || city.adopted || city.kind === 'farm' || !city.main || !city.main.placed) return false;
+      // (a side's city, or a neutral town growing through a match - N130; the world's standing towns
+      // otherwise keep their starter mines)
+      if (!PW.tunnels || !PW.mining || city.kind === 'farm' || !city.main || !city.main.placed) return false;
+      if (!(city.neutralGrows || (city.faction && !city.adopted))) return false;
       const T = PW.tunnels.state(world);
       let s = city.shaft;
       if (!s) {
         // (the user's: a seed makes no tunnel at once - its city starts digging at TUNNEL_LEVEL; a
-        // mountain base from the first)
-        if (city.level < TUNNEL_LEVEL && !mountainBase(city)) return false;
+        // mountain base from the first; and a side's starting base - the core bunker its match opens
+        // with - has its tunnel from the start of the game, growing down from under the bunker)
+        if (city.level < TUNNEL_LEVEL && !mountainBase(city) && !city.start) return false;
         const rec = world.buildings[city.main.owner - 1];
         if (!rec || rec.underConstruction || !rec.cores || !rec.cores.length) return false;
         const core = rec.cores.find((k) => k.vault) || rec.cores[0];
@@ -2408,7 +2418,13 @@
         // (deep enough for the deepest ore it is bound for, its floor a little under the body's middle)
         s.bottom = Math.min(world.height - 140, Math.max(top + 160, g + 240, ...first.map((n) => n.y + 8)));
         s.targets = first;
-        s.net = PW.tunnels.createNetwork(world, { side: city.faction, x, y: top, building: city.main.owner }).id;
+        s.net = PW.tunnels.createNetwork(world, { side: city.faction || 'neutral', x, y: top, building: city.main.owner }).id;
+        // N130: a base up on a mountain digs its way out - an adit from its shaft at the level of the
+        // mountain's foot on its front, out to the daylight there (the shaft goes at least that deep)
+        if (mountainBase(city)) {
+          const exit = exitPlan(city, s);
+          if (exit) { s.exit = exit; s.bottom = Math.min(world.height - 140, Math.max(s.bottom, exit.row + 2)); }
+        }
         city.shaft = s;
       }
       if (s.done || T.time < s.at) return false;
@@ -2434,8 +2450,12 @@
           PW.tunnels.digBox(world, net, s.x - 34, s.bottom - 30, s.x + 34, s.bottom + 2, { kind: 'room', keepOre: true });
           s.sunk = true; s.sunkAt = T.time;
         }
+        // (the way out leaves as soon as the shaft has passed its level)
+        if (s.exit && s.y >= s.exit.row) stepExit(city, s, net, T);
         return true;
       }
+      if (s.exit) stepExit(city, s, net, T);
+      if (mountainBase(city)) stepLink(city, s, net, T);
       // ---- out sideways: each branch a step ----
       const live = s.branches.filter((b) => !b.end);
       for (const t of s.targets.splice(0)) live.push(branch(s, t, T.time));
@@ -2452,6 +2472,178 @@
         if (b.end) claims().delete(b.node);
       }
       return true;
+    }
+    // ---- N130 (the user's, 2026-11-24): a mountain base's ways out ----------------------------------
+    // Before a base up on a mountain sends out a man it needs a proper way out. Its shaft goes down
+    // to the level of the mountain's foot on its front, and an adit is driven out from it at that
+    // level to the daylight there. Once the adit is through, a room is opened by the shaft, and when
+    // its dust has settled a military spawn core is set down on its floor and built up: from it the
+    // base's troopers come up and walk out (PW.game's way out - hulls still wait for the road tunnel).
+    // And the base's tunnels are joined to its side's main base: a drive from the shaft's foot to the
+    // capital's shaft, slowly, as the rest of its tunnel grows.
+    const ADIT_STEP = 12, ADIT_H = 30, ADIT_MAX = 6000, ROOM_W = 80, ROOM_H = 44, SETTLE = 6, CORE_BUILD = 0.08;
+    const front = (city) => (city.faction === 'right' ? -1 : 1);
+    function exitPlan(city, s) {
+      const rel = world.layout && world.layout.relief;
+      if (!rel) return null;
+      const dir = front(city);
+      let x = s.x;
+      while (x > 80 && x < world.width - 80 && rel[x] > 0.15) x += dir * 8;
+      const row = world.groundTop[x] - 1;
+      if (row - s.top < 60 || row > world.height - 160) return null;   // (a base at the foot: its gate is its way)
+      return { dir, row, x: s.x + dir * 11, footX: x, done: false, why: null, room: null, core: null };
+    }
+    function stepExit(city, s, net, T) {
+      const e = s.exit;
+      if (e.why) return;
+      if (!e.done) {
+        const nx = e.x + e.dir * ADIT_STEP, a = Math.min(e.x, nx), b = Math.max(e.x, nx);
+        // (meeting a mountain road tunnel the adit stops there: that is its way out)
+        if (PW.mining.crossesRoad && PW.mining.crossesRoad(world, a, e.row - ADIT_H - 4, b, e.row + 4)) { e.done = true; e.via = 'road tunnel'; return; }
+        // (a way out is cut clean: ore in its way is broken out with the rock, and a cave it crosses
+        // gets a floor laid level across it - no lump to climb, no pit to fall in)
+        if (Math.abs(nx - s.x) > ADIT_MAX || !PW.tunnels.digBox(world, net, a, e.row - ADIT_H + 1, b, e.row, { kind: 'drift', exact: true }).ok) { e.why = 'blocked'; return; }
+        levelFloor(a, b, e.row);
+        e.x = nx;
+        // (daylight: the flank's surface ahead has come down to the adit's floor)
+        const ahead = Math.max(0, Math.min(world.width - 1, e.x + e.dir * 6));
+        if (world.groundTop[ahead] >= e.row - 2) { e.done = true; e.mouth = e.x; portal(e, net); }
+        return;
+      }
+      if (!e.room) {
+        const a = s.x + e.dir * 12, b = s.x + e.dir * (12 + ROOM_W);
+        if (!PW.tunnels.digBox(world, net, Math.min(a, b), e.row - ROOM_H + 1, Math.max(a, b), e.row, { kind: 'room', exact: true }).ok) { e.why = 'no room'; return; }
+        levelFloor(Math.min(a, b), Math.max(a, b), e.row);
+        e.room = { x0: Math.min(a, b), x1: Math.max(a, b), y0: e.row - ROOM_H + 1, y1: e.row, at: T.time };
+        return;
+      }
+      const rec = world.buildings[city.main.owner - 1];
+      if (!e.core) {
+        // (the space has cleared: settled a while, nothing loose or fallen left standing in it)
+        if (T.time - e.room.at < SETTLE) return;
+        const r = e.room;
+        for (let y = r.y0 + 2; y < r.y1; y += 2) for (let x = r.x0 + 2; x < r.x1 - 2; x += 2) {
+          const id = PW.get(world, x, y) & 63;
+          if (!PW.mat.open[id]) { e.room.at = T.time; return; }
+        }
+        e.core = { x: Math.round((r.x0 + r.x1) / 2), y: r.y1, build: 0, ready: false, dead: false, spawn: true };
+      }
+      if (rec && rec.body && !(rec.spawnCores || []).includes(e.core)) rec.spawnCores = [e.core];   // (a re-seat's fresh record)
+      if (!e.core.ready) {
+        e.core.build = Math.min(1, e.core.build + CORE_BUILD);
+        drawSpawnCore(e.core, city);
+        if (e.core.build >= 1) { e.core.ready = true; note(city, 'a spawn core stands in its tunnel - its men can go out by the adit'); }
+      }
+    }
+    // The floor under a way out, made good: open cells under its floor row filled with stone (down to
+    // what bears, a few rows at most - a cave's pit under it is bridged, not filled).
+    function levelFloor(a, b, row) {
+      for (let x = a; x <= b; x += 1) {
+        for (let y = row + 1; y <= row + 4; y += 1) {
+          const id = PW.get(world, x, y) & 63;
+          if (!PW.mat.open[id] && id !== M.WATER) break;
+          PW.set(world, x, y, M.STONE | ((PW.hash2(x, y) & 3) << 6), Q);
+        }
+      }
+    }
+    // The adit's mouth: a cast frame on the flank, two posts and a lintel, on the back layer.
+    function portal(e, net) {
+      const steel = PW.abgr ? PW.abgr(92, 96, 100, 255) : 0, dark = PW.abgr ? PW.abgr(54, 56, 60, 255) : 0;
+      for (const dx of [0, 1, 2, 3]) for (let y = e.row - ADIT_H - 2; y <= e.row; y += 1) {
+        const x = e.mouth - e.dir * (2 + dx);
+        if (dx >= 2 && y > e.row - ADIT_H) continue;
+        PW.setLayer(world, 'back', x, y, dx === 1 ? dark : steel);
+        PW.setFlag(world, x, y, FLAG.FIXTURE);
+      }
+    }
+    // The spawn core, built up from its floor: a steel cradle, the core's glow in its middle, a
+    // hazard band at its foot - back layer only (nothing in a man's way).
+    function drawSpawnCore(k, city) {
+      const c = (r, g, b) => (PW.abgr ? PW.abgr(r, g, b, 255) : 0);
+      const H = 26, upTo = Math.round(H * k.build);
+      for (let h = 0; h < upTo; h += 1) {
+        const y = k.y - h;
+        for (let dx = -8; dx <= 8; dx += 1) {
+          const x = k.x + dx, edge = Math.abs(dx) >= 7, band = h < 2;
+          const glow = Math.abs(dx) <= 3 && h >= 6 && h <= 18;
+          const col = band ? ((((x >> 1) + h) & 1) ? c(222, 186, 52) : c(30, 30, 32))
+            : edge ? c(110, 114, 120) : glow ? (city.faction === 'right' ? c(240, 96, 80) : c(96, 214, 236)) : c(64, 68, 74);
+          PW.setLayer(world, 'back', x, y, col);
+          PW.setFlag(world, x, y, FLAG.FIXTURE);
+        }
+      }
+    }
+    // The drive joining the base's tunnels to its side's main base: from the shaft's foot towards the
+    // nearest capital's shaft, a step at a time (the prospectors' drift, stairs where the levels part).
+    function stepLink(city, s, net, T) {
+      if (s.link && s.link.end) return;
+      if (!s.link) {
+        const caps = cities.filter((c) => c !== city && c.faction === city.faction && c.kind === 'capital' && !c.fallen && c.shaft && c.shaft.sunk);
+        if (!caps.length) return;
+        const cap = caps.sort((p, q) => Math.abs(p.x - city.x) - Math.abs(q.x - city.x))[0], cs = cap.shaft;
+        const dir = Math.sign(cs.x - s.x) || 1;
+        // (its level: deep under the lowest ground between - the drive keeps well under the land all
+        // the way, under the valleys too - and no higher than the capital's shaft reaches)
+        let row = Math.max(cs.top + 80, Math.min(cs.bottom, s.bottom));
+        // (the land's own surface - a shaft or pit open to the sky is not the ground's level)
+        const land = world.surface0 || world.groundTop;
+        for (let x = Math.min(s.x, cs.x); x <= Math.max(s.x, cs.x); x += 16) row = Math.max(row, land[x] + 200);
+        row = Math.min(world.height - 260, row);   // (room left under it to go below what stands in its way)
+        const x = s.x + dir * 11;
+        s.link = { to: cap.id, node: { x: cs.x - dir * 11, y: row - 8 }, shaftX: cs.x, capBottom: cs.bottom, row, x, y: row, dir, steps: 0, caves: 0, path: [x, row], from: { x, y: row }, end: null, opened: null, through: true };
+      }
+      const L = s.link;
+      // (the base's shaft first goes on down to the drive's level)
+      if (s.y < L.row) {
+        const y1 = Math.min(L.row, s.y + SHAFT_STEP);
+        if (!PW.tunnels.digBox(world, net, s.x - 11, s.y, s.x + 11, y1, { kind: 'shaft', keepOre: true }).ok) { L.end = 'stopped'; return; }
+        if (ST.ladder) ST.ladder(world, s.x - 2, s.y, y1 - 1);
+        s.y = y1;
+        return;
+      }
+      if (Math.abs(L.x - L.node.x) <= 12) {
+        // (through into the capital's shaft - a raise up to its foot where the drive runs under it)
+        PW.tunnels.digBox(world, net, Math.min(L.x, L.shaftX + L.dir * 11), L.y - ADIT_H + 1, Math.max(L.x, L.shaftX + L.dir * 11), L.y, { kind: 'drift', exact: true, through: true });
+        if (L.y > L.capBottom) {
+          PW.tunnels.digBox(world, net, L.shaftX - 11, L.capBottom - 2, L.shaftX + 11, L.y, { kind: 'shaft', exact: true, through: true });
+          if (ST.ladder) ST.ladder(world, L.shaftX - 2, L.capBottom - 2, L.y - 1);
+        }
+        L.end = 'joined';
+        note(city, 'its tunnels reach the capital\'s');
+        return;
+      }
+      // (something in its way - another's lined tunnel, a road tunnel: it goes down under it, a
+      // flight of stairs at a time, and on at the new level; a few tries, then it stops there)
+      if (L.under > 0) {
+        // (down where there is depth for it, else up over it - never within the cover of the land)
+        if (!L.way) L.way = L.y + 70 < world.height - 150 ? 2 : -2;
+        const nx = L.x + L.dir * 3, ny = L.y + L.way;
+        const tooHigh = ny - ADIT_H < (world.surface0 || world.groundTop)[Math.max(0, Math.min(world.width - 1, nx))] + 160;
+        if (ny > world.height - 150 || tooHigh || !PW.tunnels.digBox(world, net, Math.min(L.x, nx), ny - ADIT_H + 1, Math.max(L.x, nx), ny, { kind: 'incline', keepOre: true, exact: true, through: true }).ok) {
+          if (!L.flipped) { L.flipped = true; L.way = -L.way; return; }
+          L.end = 'stopped'; L.why = `no way past at ${L.x},${L.y}`; return;
+        }
+        for (let d = 0; d <= 3; d += 1) PW.setFlag(world, L.x + L.dir * d, ny, FLAG.LADDER);
+        L.x = nx; L.y = ny; L.node.y = ny - 8; L.path.push(L.x, L.y);
+        L.under -= 1;
+        return;
+      }
+      L.steps = 0;   // (a long drive: the prospectors' step limit is not its)
+      const r = PW.mining.driveStep(world, net, L);
+      if (r === 'stop') {
+        // (what stood in its way, for the suites)
+        const ax = L.x + L.dir * 12, seen = new Set();
+        for (let y = L.y - ADIT_H - 4; y <= L.y + 4; y += 2) for (let x = Math.min(L.x, ax); x <= Math.max(L.x, ax); x += 2) {
+          const id = PW.get(world, x, y) & 63;
+          if (id === M.REINFORCED) { const o = PW.getOwner(world, x, y); seen.add(`lining of ${o}`); }
+        }
+        if (PW.mining.crossesRoad && PW.mining.crossesRoad(world, Math.min(L.x, ax), L.y - ADIT_H - 4, Math.max(L.x, ax), L.y + 4)) seen.add('a road tunnel');
+        if (L.y - ADIT_H < (world.surface0 || world.groundTop)[Math.max(0, Math.min(world.width - 1, ax))] + 140) seen.add('the land too near over it');
+        L.blockedBy = [...seen].slice(0, 4).join(', ') || 'unknown';
+        L.unders = (L.unders || 0) + 1;
+        L.way = 0; L.flipped = false;
+        if (L.unders > 6) { L.end = 'stopped'; L.why = `stopped ${L.unders - 1} times, last at ${L.x},${L.y}`; } else L.under = 30;   // (60 rows down or up, 90 along)
+      } else if (r === 'done') L.opened = null;   // (a mine opened on its way: it drives on)
     }
     // A branch leaves the shaft at the row nearest its ore's depth, through the shaft's side wall.
     function branch(s, node, born) {

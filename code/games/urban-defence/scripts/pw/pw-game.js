@@ -56,6 +56,9 @@
     if (world.capitalGrowth) { world.capitalGrowth.manual = true; world.capitalGrowth.factionFacing = true; }
     for (const side of SIDES) if (match.sides[side].controller === 'ai' && PW.ai) match.sides[side].ai = PW.ai.create(match, side);
     if (placing) world.visionExtra = SIDES.map((side) => { const [x0, x1] = thirdOf(world, side); return { side, x0, x1, start: true }; });
+    // (N130: the neutral towns open the match at their lowest level - see neutrals)
+    const eng = world.capitalGrowth;
+    for (const c of (eng && eng.cities) || []) if ((!c.faction || c.faction === 'neutral') && c.firstLevel) c.level = c.firstLevel;
     current = match;
     // N103/N114: every turret, launcher and interceptor base that stands takes its piece now, in the
     // match's hands (one already seated, silent, before the match - freed)
@@ -300,12 +303,16 @@
       if (!b || !b.recoverAt || match.clock < b.recoverAt) continue;
       b.recoverAt = 0;
       const side = ownerOf(b);
-      if (!standing(b) || !match.sides[side] || !PW.troops) continue;
+      if (b.type !== 'military' || !standing(b) || !match.sides[side] || !PW.troops) continue;
       const at = exitOf(match, b, 'guard');
+      if (!at) continue;   // (N130: guards too come up from its core - a base without one sends none)
       for (let i = 0; i < GUARDS; i += 1) {
-        // (PS's guards: the lavender men, holding their post by the base)
-        const g = PW.troops.create(world, { x: at.x + 0.5 + i * 8, y: at.y, side, style: match.sides[side].style, facing: match.sides[side].dir,
-          unit: 'guard', post: { x: at.x + i * 8, y: at.y } });
+        // (PS's guards: the lavender men, holding their post by the base - each up at the core's
+        // exit, where spawnPoint finds a man room, or not at all)
+        const p = PW.units && PW.units.spawnPoint ? PW.units.spawnPoint(world, 'trooper', at.x + i * 8, at.y) : { x: at.x + i * 8, y: at.y - 1 };
+        if (!p) continue;
+        const g = PW.troops.create(world, { x: p.x + 0.5, y: p.y, side, style: match.sides[side].style, facing: match.sides[side].dir,
+          unit: 'guard', post: { x: p.x, y: p.y } });
         if (g) g.game = { side, kind: 'trooper', base: b.id, order: { type: 'hold' }, goal: null, born: match.clock, guard: true };
       }
       alert(match, side, 'The base\'s defences are back - guards sent out', '', b.body.left);
@@ -360,6 +367,31 @@
     if (match.log.length > 40) match.log.shift();
   }
 
+  // ---- N130 (the user's, 2026-11-24): the neutral towns grow through the match ------------------------
+  // They start at the lowest level (the world lays them at their first) and, with no side to buy their
+  // levels, the match raises them itself - one level every NEUTRAL_EVERY seconds, staggered town by
+  // town, to the top their kind allows - and each level-up does what any city's does: its lots and
+  // streets, a bridge over water in its way, its road through a mountain, its tunnel down from its core.
+  // A town that has fallen grows no more.
+  const NEUTRAL_FIRST = 120, NEUTRAL_EVERY = 150;
+  function neutrals(match) {
+    const eng = match.world.capitalGrowth;
+    if (!eng || !eng.upgrade || match.neutralHold) return;   // (neutralHold: a suite's pause on them)
+    for (const c of eng.cities) {
+      if ((c.faction && c.faction !== 'neutral') || c.fallen) continue;
+      if (c.neutralAt === undefined) {
+        // (the match opens it at its lowest level - the level of the buildings it stands with)
+        if (c.firstLevel) c.level = c.firstLevel;
+        c.neutralAt = match.clock + NEUTRAL_FIRST + (c.id * 47) % 90;
+      }
+      c.neutralGrows = true;
+      if (match.clock < c.neutralAt) continue;
+      const r = eng.upgrade(c);
+      // (refused for now - a fresh blast near, its main still building - it tries again soon)
+      c.neutralAt = match.clock + (r.ok ? NEUTRAL_EVERY : 20);
+      if (r.ok) alert(match, null, `A neutral town grows to level ${r.level}`, '', c.x);
+    }
+  }
   function step(match, dt) {
     if (match.over) return;
     if (match.phase === 'placing') { placing(match); return; }   // (N115: the clock waits for both capitals)
@@ -371,7 +403,7 @@
     match.autoClock = (match.autoClock || 0) - dt;
     if (match.autoClock <= 0) { match.autoClock = AUTO_EVERY; advance(match); }
     match.ruleClock = (match.ruleClock || 0) - dt;
-    if (match.ruleClock <= 0) { match.ruleClock = 1; rules(match); levy(match); }
+    if (match.ruleClock <= 0) { match.ruleClock = 1; rules(match); levy(match); neutrals(match); }
     if (!PW.units || !PW.units.order) {
       for (const list of ['tanks', 'mechs']) for (const u of match.world[list] || []) if (u.game && u.game.goal != null) towards(u);
     }
@@ -478,17 +510,21 @@
     if (!K) return { ok: false, note: `no such unit: ${kind}` };
     if (match.over) return { ok: false, note: 'the match is over' };
     const from = b ? [b] : bases(match, side);
-    const leveled = from.filter((q) => standing(q) && ownerOf(q) === side && (q.level || 1) >= K.level);
+    // (N130, the user's: troopers, tanks and mechs come only from a military building's core spawner -
+    // no other building, never the bare ground; a drone is the one exception, off its runway)
+    const leveled = from.filter((q) => q && q.type === 'military' && standing(q) && ownerOf(q) === side && (q.level || 1) >= K.level);
     if (!leveled.length) return { ok: false, note: b ? `needs a level ${K.level} base` : `no base of level ${K.level}` };
-    const able = leveled.filter((q) => wayOut(match.world, q));
-    if (!able.length) return { ok: false, note: 'no way down from the mountain yet (its road tunnel is still to come)' };
+    const able = leveled.filter((q) => wayOut(match, q, kind).ok);
+    if (!able.length) return { ok: false, note: wayOut(match, leveled[0], kind).why };
     const p = purse(match, side);
     if (p.hm < K.hm) return { ok: false, note: `needs ${K.hm} HM` };
     if (p.sm < (K.sm || 0)) return { ok: false, note: `needs ${K.sm} SM` };
     if (fielded(match, side) + K.pop > armyCap(match, side)) return { ok: false, note: 'the army is as big as the population' };
     if (K.most && unitsOf(match, side).filter((u) => kindOf(u) === kind).length >= K.most) return { ok: false, note: `${K.most} at most` };
     // (a drone off a pad once PS's drones lift off one, else off a runway)
-    if (K.runway && !(padJets() && able.some((q) => q.pad)) && !runwayOf(match, side)) return { ok: false, note: padJets() ? 'no spawn pad' : 'no runway' };
+    // (N126, PS's: a drone goes up off the side's missile launcher where it has one - takeOff finds it)
+    const launcher = !!(PW.jets && PW.jets.launchFrom) && (match.world.defence || []).some((u) => !u.dead && u.type === 'launcher' && (u.placedBy || u.side) === side);
+    if (K.runway && !launcher && !(padJets() && able.some((q) => q.pad)) && !runwayOf(match, side)) return { ok: false, note: padJets() ? 'no spawn pad' : 'no runway or launcher' };
     return { ok: true, from: able };
   }
   function runwayOf(match, side) {
@@ -513,32 +549,107 @@
       if (x > 40 && x < world.width - 40) gate = x;
     }
     if (b.pad && onPad(kind)) return { x: Math.round((b.pad.x0 + b.pad.x1) / 2), y: b.pad.y, pad: b.pad, gate };
-    // N130 (the user's, 2026-11-24): every unit comes up from the base's core - on the floor over
-    // it, where a base has no pad - and heads out by the town's gate where it has one
-    const core = (b.cores || []).find((k) => k.vault && !k.dead) || (b.cores || [])[0];
-    // (a hull out of a core's floor only once PS's spawnPoint finds it room there - N131)
-    if (core && (kind === 'trooper' || (kind !== 'guard' && PW.units && PW.units.spawnPoint))) return { x: Math.round(core.x), y: b.ground, core, gate };
-    if (gate !== null) return { x: gate, y: world.groundTop[gate] };
-    if (kind === 'trooper' || kind === 'guard') {
-      const door = (b.doors || []).filter((d) => Math.abs(d.bottom - b.ground) < 6).sort((p, q) => (q.x - p.x) * dir)[0];
-      if (door) return { x: door.x, y: b.ground };
+    // N130 (the user's, 2026-11-24): every unit comes up from a military building's core - on the
+    // floor over it, where a base has no pad - and heads out by the town's gate where it has one. A
+    // base without a living core sends no one; nothing comes up beside a wall or at a door.
+    const core = (b.cores || []).find((k) => k.vault && !k.dead) || (b.cores || []).find((k) => !k.dead);
+    if (!core) return null;
+    return { x: Math.round(core.x), y: b.ground, core, gate };
+  }
+  // A spawn core a mountain base set down in its tunnel (N130: before its road is bored, its men
+  // come up there and walk out by the tunnel's mouth). Troopers only.
+  const tunnelCore = (b) => (b.spawnCores || []).find((k) => k.ready && !k.dead) || null;
+  // ---- N130: the way out ---------------------------------------------------------------------------
+  // A base sends out no one until a unit of the kind could get from where it comes up to open ground
+  // on the front: off the mountain, on the land's own surface. Troopers by PS's way-finding (ladders,
+  // stairs, drifts and shafts, the base's own tunnels); hulls along a floor they can drive - a road
+  // tunnel, a bridge, ground no steeper than they climb - with the headroom they need. Nothing is
+  // set down stranded on a mountain or at its foot. Worked out per kind and kept until the tunnels,
+  // the road tunnels or the base change.
+  const OFF_MOUNTAIN = 0.15;
+  const relief = (world, x) => { const L = world.layout; return L && L.relief ? L.relief[Math.max(0, Math.min(world.width - 1, Math.round(x)))] || 0 : 0; };
+  const perchedAt = (world, b) => perched(world, b) || relief(world, (b.body.left + b.body.right) / 2) > 0.2;
+  // Open ground on the front: past the mountain the base stands on (or in), a little way out.
+  function frontGround(world, b, dir) {
+    let x = Math.round((b.body.left + b.body.right) / 2);
+    while (x > 60 && x < world.width - 60 && relief(world, x) > OFF_MOUNTAIN) x += dir * 8;
+    x += dir * 40;
+    if (x < 60 || x > world.width - 60) return null;
+    return { x, y: world.groundTop[x] - 1 };
+  }
+  const solidAt = (world, x, y) => {
+    if (x < 0 || y < 0 || x >= world.width || y >= world.height) return true;
+    const id = world.mat[y * world.width + x] & 63;
+    return PW.mat.phase[id] >= PW.PHASE.POWDER && !PW.mat.passable[id];
+  };
+  // A hull's drive along the floor from (x, floor y) towards dir until it stands on the open ground
+  // at goal.x: each column's floor within its climb of the last, its height clear over it.
+  function driveable(world, kind, x, y, dir, goal) {
+    const S = { ...((PW.units && PW.units.SPAWN && PW.units.SPAWN[kind]) || { height: 36, step: 15 }) };
+    if (kind === 'mech' && PW.mechs) { S.height = PW.mechs.HEIGHT; S.step = PW.mechs.STEP_UP; }   // (as PS's spawnPoint reads it)
+    // (a tank no steeper than it climbs; a man or a mech up a step a stride)
+    const climb = kind === 'tank' ? Math.tan(((PW.tanks && PW.tanks.MAX_SLOPE) || 43) * Math.PI / 180) * 4 + 2 : S.step;
+    let fy = Math.round(y);
+    while (fy < world.height - 2 && !solidAt(world, x, fy)) fy += 1;   // (the floor under the exit)
+    for (let cx = x, n = 0; n < 3000; n += 1) {
+      if ((cx - goal.x) * dir >= 0) return Math.abs(fy - (goal.y + 1)) < 30;
+      const nx = cx + dir * 4;
+      let best = null;   // (the floor nearest this one's level, within a climb up or a short drop)
+      for (let k = 0; k <= Math.ceil(climb) + 6 && best === null; k += 1) {
+        for (const f of [fy - k, fy + k]) {
+          if (best !== null || f - fy > climb + 6 || fy - f > climb) continue;
+          if (solidAt(world, nx, f) && !solidAt(world, nx, f - 1)) best = f;
+        }
+      }
+      if (best === null) { driveable.stop = { x: nx, y: fy, why: 'no floor' }; return false; }
+      for (let h = 1; h <= S.height; h += 3) if (solidAt(world, nx, best - h)) { driveable.stop = { x: nx, y: best, why: 'no headroom' }; return false; }
+      cx = nx; fy = best;
     }
-    if (b.hangar && b.hangar.spawn && kind !== 'trooper' && kind !== 'guard') return { x: b.hangar.spawn.x, y: b.hangar.spawn.y };
-    const x = Math.round(dir > 0 ? b.body.right + 70 : b.body.left - 70);
-    return { x, y: world.groundTop[Math.max(0, Math.min(world.width - 1, x))] };
+    return false;
   }
-  // N130 (the user's): a base up on a mountain sends out no one until it has a way down - its
-  // road tunnel bored through (or another's within reach of it); no unit is left stranded at a
-  // mountain's foot or on its top.
-  function onMountain(world, b) {
-    if (perched(world, b)) return true;
-    const L = world.layout, x = Math.round((b.body.left + b.body.right) / 2);
-    return !!(L && L.relief && L.relief[x] > 0.2);
+  // A trooper's way (PS's way-finding): to the goal, or at least out onto the open ground before it.
+  function walkable(world, p, goal) {
+    // (along a floor - the flank, an adit - first: cheap, and good for a long way; else the full
+    // way-finding with its ladders and shafts, near enough for it to look over)
+    if (driveable(world, 'trooper', p.x, p.y + 1, Math.sign(goal.x - p.x) || 1, goal)) return true;
+    if (!PW.troops || !PW.troops.plan || Math.abs(goal.x - p.x) > 1600) return false;
+    const r = PW.troops.plan(world, { x: p.x, y: p.y }, goal);
+    if (!r) return false;
+    if (r.reached) return true;
+    const end = r.legs[r.legs.length - 1];
+    return !!end && relief(world, end.x) <= OFF_MOUNTAIN && Math.abs(end.y - world.groundTop[Math.round(end.x)]) < 20;
   }
-  function wayOut(world, b) {
-    if (!onMountain(world, b)) return true;
-    const x = (b.body.left + b.body.right) / 2;
-    return (world.roadTunnels || []).some((t) => t.done && x > t.a - 900 && x < t.b + 900);
+  function waysSig(match) {
+    const world = match.world, T = PW.tunnels ? PW.tunnels.state(world) : null;
+    return `${T ? T.segments.length : 0}|${(world.roadTunnels || []).filter((t) => t.done).length}|${Math.floor((world.tick || 0) / 1800)}`;
+  }
+  // Can a unit of this kind get out from this base? { ok, from: the exit it comes up at, goal, why }
+  function wayOut(match, b, kind) {
+    const world = match.world, sig = waysSig(match);
+    const kept = b.ways && b.ways.sig === sig ? b.ways : (b.ways = { sig });
+    if (kept[kind]) return kept[kind];
+    const dir = match.sides[ownerOf(b)].dir;
+    let r;
+    const at = exitOf(match, b, kind);
+    if (!at) r = { ok: false, why: 'no living core to deploy from' };
+    else if (kind === 'jet' || !perchedAt(world, b)) r = { ok: true, from: at };   // (a base on the land: its gate is the way)
+    else {
+      const goal = frontGround(world, b, dir);
+      const exits = [at];
+      if (kind === 'trooper' && tunnelCore(b)) { const k = tunnelCore(b); exits.push({ x: k.x, y: k.y, core: k, tunnel: true }); }
+      r = { ok: false, why: kind === 'trooper' ? 'no way out yet: no path down from the mountain' : 'no way out yet: the road tunnel is still to come' };
+      for (const e of goal ? exits : []) {
+        const p = PW.units && PW.units.spawnPoint ? PW.units.spawnPoint(world, kind, e.x, e.y) : { x: e.x, y: e.y - 1 };
+        if (!p) continue;
+        driveable.stop = null;
+        const reached = kind === 'trooper' ? walkable(world, p, goal) : driveable(world, kind, p.x, p.y + 1, dir, goal);
+        if (reached) { r = { ok: true, from: e, goal }; break; }
+        (r.tried = r.tried || []).push({ from: { x: p.x, y: p.y }, stop: driveable.stop });   // (where each try stopped: for the suites)
+      }
+      if (!r.ok && kind !== 'trooper' && wayOut(match, b, 'trooper').ok) r.why = `${UNIT_KINDS[kind].label.toLowerCase()}s need the road tunnel; troopers can go by the tunnels`;
+    }
+    kept[kind] = r;
+    return r;
   }
   // (a mountain outpost or bunker: a base, but a long climb down - the army leaves from the towns)
   const perched = (world, b) => [...(world.outposts || []), ...(world.bunkers || [])].some((o) => o.building === b);
@@ -553,13 +664,23 @@
     // (N111: a base with a spawn pad first - where there is one, every unit comes up on it)
     const padded = onPad(kind) ? pool.filter((q) => q.pad) : [];
     const base = (padded.length ? padded : pool).sort((p, q) => ((q.body.left + q.body.right) - (p.body.left + p.body.right)) * dir)[0];
-    const at = exitOf(match, base, kind);
-    // (N131/N130, with PS: the room a kind needs round the core's exit - headroom, ground that
-    // bears it, a tank's no steeper than it climbs - or no deploy)
-    if (PW.units && PW.units.spawnPoint && !at.pad) {
-      const p = PW.units.spawnPoint(world, kind, at.x, at.y);
-      if (!p) return { ok: false, note: 'no room at its core\'s exit' };
-      at.x = p.x; at.y = p.y;
+    // (N130: it comes up at the core its way out starts from - the base's own, or the spawn core in
+    // its tunnel - and makes first for the open ground at the way's end)
+    const way = wayOut(match, base, kind);
+    const at = way.from ? { ...way.from } : exitOf(match, base, kind);
+    if (!at) return { ok: false, note: 'no living core to deploy from' };
+    if (way.goal) at.gate = way.goal.x;
+    // (N131/N130, with PS: every kind, on a pad or not - the room it needs round the core's exit:
+    // headroom, ground that bears it, a tank's no steeper than it climbs - or nothing is placed.
+    // spawnPoint gives a tank's floor row and the others' feet; kept here as the floor row, as a
+    // pad's deck row is, so the feet below come out one over the floor for every kind)
+    // (a drone that still takes off from a runway - till PS's pad launch is on - leaves no core)
+    if (PW.units && PW.units.spawnPoint && !(kind === 'jet' && !at.pad)) {
+      let p = PW.units.spawnPoint(world, kind, at.x, at.y);
+      // (a pad is the core's lift the whole of its deck: rubble at its middle, the deck's ends)
+      if (!p && at.pad) for (const f of [0.2, 0.8, 0.05, 0.95]) { p = PW.units.spawnPoint(world, kind, Math.round(at.pad.x0 + (at.pad.x1 - at.pad.x0) * f), at.y); if (p) break; }
+      if (!p) return { ok: false, note: 'no room at the core' };
+      at.x = p.x; at.y = kind === 'tank' ? p.y : p.y + 1;
     }
     // (on the pad: a man's, a mech's or a drone's feet on its deck, a tank's wheels; elsewhere
     // each on the floor at the exit)
@@ -578,7 +699,7 @@
     world.stock[side].sm -= K.sm || 0;
     // (each goes its own way at the next look - one up on a town base's pad by way of the town's gate)
     const via = placed && at.gate !== null && at.gate !== undefined && kind !== 'jet' ? at.gate : undefined;
-    u.game = { side, kind, base: base.id, order: { type: 'auto' }, goal: null, born: match.clock, via };
+    u.game = { side, kind, base: base.id, order: { type: 'auto' }, goal: null, born: match.clock, via, viaFor: way.goal ? 150 : 45 };
     if (via !== undefined) carry(world, u, { type: 'move', x: via });
     else match.autoClock = Math.min(match.autoClock || 0, 0.1);
     if (at.pad) padLift(match, at.pad, at.x);
@@ -841,7 +962,7 @@
         // (N111: one up on a town base's pad makes for the town's gate first - there, or given
         // time, it goes its own way)
         if (g.via !== undefined) {
-          if (Math.abs(u.x - g.via) < 40 || match.clock - g.born > 45) delete g.via;
+          if (Math.abs(u.x - g.via) < 40 || match.clock - g.born > (g.viaFor || 45)) delete g.via;
           else continue;
         }
         // (a tank stopped by ground no tank takes - too steep, a drop, deep water - holds there and
@@ -941,5 +1062,6 @@
     UNIT_KINDS, bases, unitsOf, kindOf, fielded, armyCap, canDeploy, deploy, order, standing, ruinsAt, buildingsOf, livingCore,
     HACK_TIME, rules, cover, standAt, TURRET, canTurret, placeTurret, turretCap, adopt, current: () => current,
     UPGRADE, RUSH, upgradeCost, cityAt, canUpgrade, upgrade, tunnelAt, rushTunnel, placeStart, thirdOf, seedPreview,
-    ARTILLERY, canArtillery, placeArtillery, artilleryCap };
+    ARTILLERY, canArtillery, placeArtillery, artilleryCap,
+    exitOf, wayOut, frontGround };   // N130
 })();

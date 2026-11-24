@@ -417,12 +417,12 @@
       const state = j.down ? 'going down' : j.onGround ? `rolling ${Math.round(j.v)}` : `${Math.round(j.v)} cells/s`;
       unitPanel.innerHTML = `<h3>DRONE — ${styleTag(j.style)} ${(j.side || '').toUpperCase()}</h3>` +
         `<div>airframe ${hp}/100 · ${state}</div><div class="bar"><i class="${tone}" style="width:${hp}%"></i></div>` +
-        `<div>missiles <kbd>${j.missiles ?? 0}</kbd></div>` +
         `<div class="keys">` +
         `<div><kbd>A</kbd><kbd>D</kbd><kbd>←</kbd><kbd>→</kbd> turn about</div>` +
         `<div><kbd>Space</kbd><kbd>W</kbd><kbd>↑</kbd> climb (held)</div>` +
         `<div><kbd>S</kbd><kbd>↓</kbd> dive (held)</div>` +
-        `<div>left click: aim + cannon there</div><div>right click: missile</div>` +
+        // (N126, PS's drones: no guns - sent in, it dives into the spot; or it circles over one)
+        `<div>left click: send it in (kamikaze)</div><div>right click: circle there</div>` +
         `<div><kbd>P</kbd> pause <kbd>Esc</kbd> free</div>` +
         `</div>`;
     } else if (selected.kind === 'defence') {

@@ -75,11 +75,28 @@ hurt.dead = true; foeT.dead = true;
 // 4. It outguns what it sees: it rushes - small waves early.
 // (the field cleared of the fights above, and room left in its army for the waves it sends)
 clear('left'); clear('right'); secs(1);
+// (and the bases' spawn pads cleared of the fights' wrecks: a deploy comes up only where there is
+// room on its core's pad - N130 with PS's spawnPoint - and the hurt tank above died on one)
+for (const side of ['left', 'right']) for (const q of G.bases(m, side)) {
+  if (!q.pad) continue;
+  for (let y = q.pad.y - 70; y < q.pad.y; y += 1) for (let x = q.pad.x0 - 10; x <= q.pad.x1 + 10; x += 1) {
+    const id = PW.get(world, x, y) & 63;
+    if (id === PW.M.WRECK || id === PW.M.DEBRIS || id === PW.M.SMOKE) PW.set(world, x, y, PW.M.AIR);
+  }
+}
 const waves0 = b.waves;
 // (deployed as its own arming would: gathered at the rally for the next wave)
+const refused = [];
 for (let k = 0; k < 10; k += 1) {
   const d = G.deploy(m, 'right', k % 3 ? 'trooper' : 'tank');
   if (d.ok && d.unit.game) d.unit.game.order = { type: 'gather' };
+  else if (!d.ok) refused.push(`${k % 3 ? 'trooper' : 'tank'}: ${d.note}`);
+}
+if (refused.length) {
+  const rb = G.bases(m, 'right')[0], at = rb && G.exitOf(m, rb, 'trooper');
+  const col = [];
+  if (at) for (let y = at.y - 26; y <= at.y + 2; y += 2) col.push(PW.mat.names[PW.get(world, at.x, y) & 63]);
+  info(`deploys refused: ${refused.slice(0, 3).join('; ')}${refused.length > 3 ? ` (+${refused.length - 3})` : ''}; at the exit ${at ? `${at.x},${at.y}${at.pad ? ' (pad)' : ''}: ${col.join(' ')}` : 'none'}`);
 }
 for (let s = 0; s < 30 && !(b.posture === 'rush' && b.waves > waves0); s += 1) secs(1);
 check(b.posture === 'rush', `with ${b.sized ? b.sized.mine : '?'} power to the enemy's ${b.sized ? b.sized.theirs : '?'} in sight: it rushes (posture ${b.posture})`);

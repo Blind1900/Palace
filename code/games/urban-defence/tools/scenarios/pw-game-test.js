@@ -120,6 +120,15 @@ for (const lot of [start.main, ...start.rings.left, ...start.rings.right]) {
 }
 check(trees === 0, `no tree stands inside a lot it built (${trees} plant cells showing)`);
 await view('n115-starting-capital', start.x, world.groundTop[start.x] - 120, 2);
+// N129 (the user's clarification): the starting base has its tunnel from the start of the game - a
+// shaft growing straight down from the centre bottom of its core bunker, at level 1.
+for (let s = 0; s < 60 && !(start.shaft && start.shaft.y - start.shaft.top > 60); s += 1) secs(1);
+const ss = start.shaft, bunkerRec = world.buildings[start.main.owner - 1];
+const bk = bunkerRec && bunkerRec.cores && (bunkerRec.cores.find((k) => k.vault) || bunkerRec.cores[0]);
+const bcx = bk && Math.round(bk.vault ? (bk.vault.x0 + bk.vault.x1) / 2 : bk.x);
+check(!!ss && start.level === 1 && Math.abs(ss.x - bcx) <= 1 && PW.getOwner(world, ss.x, ss.top - 1) === start.main.owner && ss.y - ss.top > 60,
+  `the starting base's tunnel grows from the centre bottom of its core bunker from the start (level ${start.level}, ${ss ? `x ${ss.x} under the core at ${bcx}, ${ss.y - ss.top} rows down by ${m.clock.toFixed(0)} s` : 'no tunnel'})`);
+if (ss) await view('n129-start-tunnel', ss.x, (ss.top + ss.y) / 2, 3);
 
 // 4. A later capital from a seed has the capital building for its main.
 world.stock.left.hm = 4000; world.stock.left.sm = 600;

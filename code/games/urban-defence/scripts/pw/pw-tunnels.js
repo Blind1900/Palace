@@ -536,6 +536,9 @@
         if (id !== M.REINFORCED) continue;
         const other = networkOfOwner(world, PW.getOwner(world, x, y));
         // (a mountain road tunnel's lining stops no one: the miners' drifts cross it as they go - N104)
+        // (N130: a drive joining a base to its capital passes through what lies across its way - its
+        // own side's or a neutral town's lined shaft - and on out the far side; an enemy's stops it)
+        if (options.through && other && (!other.side || other.side === 'neutral' || other.side === net.side)) continue;
         if (other && other.side !== net.side && other.use !== 'road') return { ok: false, blocked: true, at: { x, y }, by: other.id, cells: 0 };
       }
     }

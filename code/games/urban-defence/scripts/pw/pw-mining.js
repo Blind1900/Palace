@@ -363,6 +363,9 @@
   const STEP_W = 6;
   const MAX_STEPS = 260;
   const groundAt = (world, x) => world.groundTop[Math.max(0, Math.min(world.width - 1, Math.round(x)))];
+  // (the cover a drive keeps under: the ground over it - for a drive passing through others' workings
+  // (p.through, N130's link), the land's own surface: a mine's shaft open to the sky is not the land)
+  const coverAt = (world, p, x) => (p.through && world.surface0 ? world.surface0[Math.max(0, Math.min(world.width - 1, Math.round(x)))] : groundAt(world, x));
   function prospectFor(world, op, from) {
     const nodes = (world.layout && world.layout.nodes) || [];
     const taken = new Set();
@@ -440,8 +443,8 @@
       // stairs: two rows down (or up) per three along, the roof clear over the treads
       const s = Math.sign(dy) * 2;
       box = { x0: Math.min(p.x, p.x + dir * 4), y0: Math.min(p.y, p.y + s) - 22, x1: Math.max(p.x, p.x + dir * 4), y1: Math.max(p.y, p.y + s) };
-      if (box.y0 < groundAt(world, p.x) + 140) return 'stop';
-      if (!PW.tunnels.digBox(world, net, box.x0, box.y0, box.x1, box.y1, { kind: 'incline', keepOre: true }).ok) return 'stop';
+      if (box.y0 < coverAt(world, p, p.x) + 140) return 'stop';
+      if (!PW.tunnels.digBox(world, net, box.x0, box.y0, box.x1, box.y1, { kind: 'incline', keepOre: true, through: !!p.through }).ok) return 'stop';
       for (let d = 0; d <= 3; d += 1) { PW.setFlag(world, p.x + dir * d, p.y + s, FLAG.LADDER); }
       p.x += dir * 3; p.y += s;
     } else {
@@ -454,8 +457,8 @@
         box = { x0: Math.min(p.x, p.x - dir * run), y0: p.y - DRIFT_H, x1: Math.max(p.x, p.x - dir * run), y1: p.y };
       } else {
         box = { x0: Math.min(p.x, ahead), y0: p.y - DRIFT_H + 1, x1: Math.max(p.x, ahead), y1: p.y };
-        if (box.y0 < groundAt(world, ahead) + 140) return 'stop';
-        if (!PW.tunnels.digBox(world, net, box.x0, box.y0, box.x1, box.y1, { kind: 'drift', keepOre: true }).ok) return 'stop';
+        if (box.y0 < coverAt(world, p, ahead) + 140) return 'stop';
+        if (!PW.tunnels.digBox(world, net, box.x0, box.y0, box.x1, box.y1, { kind: 'drift', keepOre: true, through: !!p.through }).ok) return 'stop';
         p.x = ahead - dir * 2;
       }
     }

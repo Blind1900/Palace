@@ -49,6 +49,7 @@ const SUITES = [
   { name: 'pw-game-upgrade', params: 'mode=game&start=versus&side=left&det=1&towns=1' },
   // N115: the gameplay test - each side places its starting capital, four times the build speed
   { name: 'pw-game-test', params: 'mode=game&start=test&side=left&det=1' },
+  { name: 'pw-mil-exits', limit: 480, params: 'mode=game&start=test&side=left&det=1' },   // N130: ways out, spawn cores, the link
   // N114: missile launchers and interceptors on planted bases, out under the sky
   { name: 'pw-artillery-mounts', params: 'mode=game&start=versus&side=left&det=1&towns=1' },
   // N118: the start screen and the game-mode menu, by real clicks and keys
