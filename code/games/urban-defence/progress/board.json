@@ -1,5 +1,315 @@
 [
  {
+  "title": "N111 - a spawn pad in every military base's hangar, over its armoured core",
+  "time": "2026-11-23",
+  "author": "Fable (WGM)",
+  "note": "Every military base with a hangar now has a spawn pad 140 wide, set flush in the middle of the hangar floor. It is a steel lift deck with marker lights and hazard ends, with lift rams under it. Its bay on the wall behind has amber guide lights, a clearance line and chevrons pointing to the door. The core column that stood on the hangar floor is gone. The base's core now sits in a vault under the pad, in an armoured casing: riveted plate, a hazard collar, coolant and power conduits, red and amber status lamps and a stencilled number. Deployed troopers, tanks and mechs come up on the pad with a burst of white flecks, then drive out of the hangar door (in a town, by way of the town's gate). Batteries are set down where they always were, since they can't drive out. JET now reads DRONE. Drones will lift off the pad once PS's drone (N106) lands; until then they take off from the runway. Commit 7ec8652; matrix 49/49 on seeds 7, 3 and 11; suite pw-spawn-pad (15 checks).",
+  "shots": [
+   {
+    "src": "shots/n111-tank-on-the-pad.png",
+    "caption": "A tank just come up on the pad, the armoured core in its vault below"
+   },
+   {
+    "src": "shots/n111-core-under-the-pad.png",
+    "caption": "Close up: the pad's bay on the wall and the core in its armoured casing under the pad"
+   },
+   {
+    "src": "shots/n111-out-the-door.png",
+    "caption": "The tank, mech and trooper out of the hangar door, heading for the enemy"
+   }
+  ]
+ },
+ {
+  "title": "N104 - the supply line runs under the mountain road, not across it",
+  "time": "2026-11-23",
+  "author": "Fable (WGM)",
+  "note": "After the bore, the city growing past the far portal re-laid the supply-line bundle under the mountainside. Where the rock over the tunnel is thin, that put it in the tunnel's headroom, sloping down across the road, and PS's tank stopped on it. The bundle now never runs above its row under the road anywhere in a road tunnel. pw-road-tunnel checks every column twice: as bored, and after the city has grown past it. With PS's vehicle side applied, a tank, a mech and a trooper all go through portal to portal on all three seeds. Commit e29e916; matrix 48/48 on seeds 7, 3 and 11.",
+  "shots": [
+   {
+    "src": "shots/n104-bore-developed.png",
+    "caption": "The finished road tunnel: tiles, lights and emergency niches, with the supply line under the road all the way"
+   }
+  ]
+ },
+ {
+  "title": "N103 - turrets stand on bases on any flat surface",
+  "time": "2026-11-23",
+  "author": "Fable (WGM)",
+  "note": "The turret built into military roofs is gone. In its place is a 32x6 steel base plate where PS's turret is seated, on outposts, hangars, military wings and towers lv3+. The world also lays its own bases on flat land in front of military buildings, on cave-base pads, in starter storage rooms, armouries (now 48 tall) and tunnel rooms. In a match it is a TURRET tool (60 HM, any flat surface or tunnel-room floor in vision, 3 per military base level), and the computer sets turrets at its front. A building's turret is re-seated 30 s after it is lost, if the plate is whole. One on the land or in a room is lost for good. Pushed cdb2a05; suite pw-turret-mounts.",
+  "shots": [
+   {
+    "src": "shots/n103-roof-turret.png",
+    "caption": "Base plate and turret on an outpost roof; hangar vault turret"
+   },
+   {
+    "src": "shots/n103-land-turret.png",
+    "caption": "A turret on its plate on a hilltop"
+   },
+   {
+    "src": "shots/n103-room-turret.png",
+    "caption": "A turret on its plate in a starter storage room"
+   },
+   {
+    "src": "shots/n103-tunnel-room-turret.png",
+    "caption": "A turret in a halls-and-rooms tunnel room"
+   }
+  ]
+ },
+ {
+  "title": "N104 - a road bored through the mountain",
+  "time": "2026-11-23",
+  "author": "Fable (WGM)",
+  "note": "A seed-grown city or military seed that reaches a mountain's foot bores a road through the whole massif. A mountain base also bores one at half its levels (3 of 6). There are portals on the flats at each foot (or at the edge of a town grown up to it), 96 rows clear over a paved road, and barricades of the boring side. Developed, its walls get tiles, an amber band, strip lights, jet fans and emergency niches. There is one road per mountain, and anyone may use it. Miners' drifts cross it freely. PS owns vehicles in road tunnels and barricade pass/ram. Known issue, fix written and waiting for test runs: in the developed tunnel the supply-line bundle climbs across the road's way instead of staying under the road. A new check in pw-road-tunnel catches it. Suites pw-road-tunnel, pw-road-tunnel-base. Commit cdb2a05.",
+  "shots": [
+   {
+    "src": "shots/n104-in-the-bore.png",
+    "caption": "The bore under the mountain, barricades at each end, the approach banked across the valley"
+   },
+   {
+    "src": "shots/n104-portal-b.png",
+    "caption": "The far portal opening at the edge of the town grown up to the mountain"
+   },
+   {
+    "src": "shots/n104-base-and-its-road.png",
+    "caption": "A mountain military base at lv6 and the road it bored"
+   }
+  ]
+ },
+ {
+  "title": "N108 - the black box with a white dot is gone from the tunnels",
+  "time": "2026-11-23",
+  "author": "Fable (WGM)",
+  "note": "It was the 'subliminal' hall room (inked walls round one white point), not a core or device. It is removed, and a small pipe room takes its turn so the worldgen is unchanged. The shot is BEFORE the fix. An after shot follows when the machine is free.",
+  "shots": [
+   {
+    "src": "shots/n108-hit-0-near.png",
+    "caption": "Before: the subliminal room as it was (now removed)"
+   }
+  ]
+ },
+ {
+  "title": "N109 - tunnel roofs 1.5% higher",
+  "time": "2026-11-23",
+  "author": "Fable (WGM)",
+  "note": "Every non-shaft dig raises its roof by ceil(1.5% of its height) rows, never within 6 rows of the surface. pw-tunnel-rooms checks it, and N88's rooms pass. No shot: the change is a few rows. Commit cdb2a05.",
+  "shots": null
+ },
+ {
+  "title": "Fable: N102 LANDED (910aab9) - one unit selected is in your hands: it stands till its keys are held, jumps on Space/W/Up, fires where the mouse is (left click), its second fire on a right click; P pauses",
+  "author": "Fable",
+  "time": "2026-11-23",
+  "note": "The selection and key layer (pw-ui, pw-app) on PS's modules (baf5343 keys and clicks; f77f6c2: a unit in hand thinks nothing of its own). Selecting one unit of your own takes it in hand at once - it drops its errand and stands (manual + PW.units hold); A/D or the arrows walk it only while held; Space, W or Up jumps (a jet climbs, S/Down dives); its aim is laid on the mouse every frame in a match, so the gun turns to the pointer and F/G and clicks go there; a left click fires, a right click its second fire (grenade, other round, missile); a click on an enemy is a shot, on another of your own takes that one; Shift+right-click still sends an order (the single trooper's hack is Shift+right-click now); Q lets it go its own way; P pauses; the view follows it as it moves. Unit panels show the map (laid out to fit), PLAY.md and the menu hint too. Suite pw-game-hand (20 checks) - matrix 44/44 on seeds 7, 3 and 11.",
+  "shots": [
+   {
+    "src": "shots/n102-in-hand.png",
+    "caption": "N102: a trooper in hand on the game page - its panel shows the key map (walk while held, jump, clicks fire at the mouse)"
+   }
+  ]
+ },
+ {
+  "title": "Fable: N100 LANDED (31e8782) - no more mountains: the rebuild waits for rest, eats its heap two to one, and the building comes down with it to its own ground",
+  "author": "Fable",
+  "time": "2026-11-23",
+  "note": "Cause: the N87 re-found packed the wreck under a re-founded building into made ground (FILL) for good and counted it as credit - the tower stayed up on a hill, and the next collapse heaped a higher one on it. Now (agreed with PS): (1) a fresh job waits until the lot is at rest - no stability look pending, nothing in the air over it, the surface steady for a few looks (a steady lot for 4 s counts, as the re-found look does; a wreck that never settles is worked after 30 s); at work, only a piece coming down over the lot stands the crews down again (a tower being rammed is patched as it is struck, or it goes over - pw-tank); (2) every repair pixel takes two cells of the heap - one off the slopes round the building, the rest from under its bed - and recycled debris is worth half a pixel; (3) the building comes down with the heap: a few rows from under its whole bed are taken and the building is set down into their place in the same tick (cells, rooms, cores, mounted guns, record; the bundle re-threaded; PS notify, not urgent), never past the ground it first stood on; whole again, the crews work on down and take the rest of the mound away; (4) left-over rubble on the land weathers to dirt (PS, 9fce845). The packing stays FILL - packed rubble was broken loose from under the footing by the stability judges - but it is the mound now, eaten like the heap. Also fixed: the re-found let go of the bundle with the wrong arguments (releaseBuilding(side, id)), so beds were threaded twice. Suite pw-heap-rebuild (tallest left tower, ground floor blown): nothing rebuilt while it falls; 27-29k heap cells taken for ~14k cells built; the tower came down 104 rows to its first ground; 24,404 heap/mound cells over the old ground line -> 50; no air seam; no fill left. Matrix 43/43 on seeds 7, 3 and 11. Shots: seed 11 - on its heap after the re-found, coming down with it, home.",
+  "shots": [
+   {
+    "src": "shots/n100-1-refounded-on-heap.png",
+    "caption": "N100: the tower re-founded on top of its rubble heap"
+   },
+   {
+    "src": "shots/n100-2-coming-down.png",
+    "caption": "N100: the crews eat the heap two for one and the tower comes down with it"
+   },
+   {
+    "src": "shots/n100-3-rebuilt-home.png",
+    "caption": "N100: back on the ground it first stood on - no mound left"
+   }
+  ]
+ },
+ {
+  "title": "Fable: N98 vent stack - PLAN agreed with PS (awaiting go)",
+  "author": "Fable",
+  "time": "2026-11-22",
+  "note": "WGM (design + repair): every building gets a vent stack in its design - a duct (4-cell open interior, steel walls) from the ground storey up through each slab to a roof outlet, an intake grille under each storey's ceiling, and a cowl in the faction's style (modern louvred fan box, asian tiled hood, gothic chimney pot). While a repair job works the building it vents (b.venting, off ~10 s after), its work throws gas-phase dust where it now throws debris specks, and the cowl's fan turns. PS (flow): FLAG.VENT kept as a bitmap like the pipe bore (gas, smoke, steam, dust and flame pass; water, powders, debris and units do not); PW.air.vents draws gas and dust on a storey to its intake (~20 cells/s), up the duct (~60 cells/s) and out of the cowl as a plume that drifts with the wind; a holed duct vents at the hole until repair restamps it. Tests: blast a tower in the capital lab - dust inside falls while particles leave through the outlet; A/B without the draft; shots of the plume.",
+  "shots": []
+ },
+ {
+  "title": "Fable: N97 LANDED (bb639d2) - sloped towers and their military wings meet with no gap; the wing joins the building beside it face to face",
+  "author": "Fable",
+  "time": "2026-11-22",
+  "note": "Reproduced on the capital lab, seed 7 (military seeds on a crown and two spires): 200-390 open-air runs per militarised tower. Two causes: (1) the wing was built out from the tower's widest line, and a sloped tower's upper storeys recede inside it - open air between them; (2) the weld to the next building filled only between the lots' works lines (faces stand further back) and left a bare band under every slab - and it was laid while both buildings were still blueprints, so it met no face at all. Fixed: the wing's rows run in to the tower's own cells (roof, slabs, back wall, doorways, sealed pockets filled); the weld runs face to face on every row of the merged height, waits until both buildings have risen, is laid again when both are whole, and is taken up cell for cell. Suite pw-mil-join: 0 gaps on seeds 7, 3, 11. Matrix 42/42 on 7 and 11; seed 3 41/42 (pw-repair flake).",
+  "shots": [
+   {
+    "src": "shots/n97-before.png",
+    "caption": "N97 before: open gaps between a sloped tower and its military wing"
+   },
+   {
+    "src": "shots/n97-after.png",
+    "caption": "N97 after: floors, roof and walls run on until they meet"
+   }
+  ]
+ },
+ {
+  "title": "Fable: N88 tunnel halls and rooms + armies that reach each other LANDED (5e9d9bd)",
+  "author": "Fable",
+  "time": "2026-11-22",
+  "note": "N88 (the user's tunnel and room-type photos): PW.tunnels.planTunnel / carveTunnel lay a tunnel as narrow hallways opening through door frames into higher rooms of every size. Hallways: corridor (chequer-plate walkway, ducts), gallery (sprayed concrete, wall strip lights, gutter grating), drift (timber sets, rails), tube (segment rings, rails, cable racks). Rooms: cavern (raw rock, blockhouses inside), vault (ribbed hall), canal (water along the quay), hub (arched side passages), hangar (off a vehicle drive). Doors: steel frame, hazard-striped blast door, arched grille gate, timber set. Each faction still lines it its own way. Suite pw-tunnel-rooms: every type laid, rooms 117-301 wide and 61-139 high, a trooper walks all 2200 cells through every door. PS's lab can now call it for its periodic tunnels.\n\nN6 armies: with PS's swim nodes troopers cross lakes; mountain ranges between the capitals get a road tunnel at their foot when a match starts (their flanks and the posts' terraces were unclimbable); capitals pay a war levy (0.5 HM/s per level); the army cap holds through level-ups; hackers sneak (PS's quiet order). Computer vs computer on seed 7: both armies now cross to the first neutral towns in about 5 minutes - getting through a neutral town (and its turrets) is the next wall. N102 controls wired (keyup, P pauses, blur, clicks to the unit in hand).\n\nMatrix 41/41 on 7 and 11; seed 3 40/41 (pw-repair known flake).",
+  "shots": [
+   {
+    "src": "shots/n88-room-canal.png",
+    "caption": "N88: a canal room off the hallway"
+   },
+   {
+    "src": "shots/n88-room-cavern.png",
+    "caption": "N88: a cavern room with blockhouses built inside"
+   },
+   {
+    "src": "shots/n88-room-hub.png",
+    "caption": "N88: a hub room with arched side passages"
+   },
+   {
+    "src": "shots/n88-hall-drift.png",
+    "caption": "N88: a drift hallway (timber sets) opening through its door frame"
+   }
+  ]
+ },
+ {
+  "title": "Fable: N6 + N8 LANDED (3cfddfc) - a match you can win against the computer; index.html is the game and runs from a download (PLAY.md)",
+  "author": "Fable",
+  "time": "2026-11-22",
+  "note": "N6: deploy by base level (HM, within POP), units leave at the town gate; click / Shift+click / Shift+drag select, right-click go or attack (one trooper on an enemy base or tower goes to hack its panel), H hold, Q on their own. Bases' turrets, Iron Domes, Patriots and launchers come alive on their devices and die with their building. Hacking 15 s at the panel: a base's defences silent 45 s, then guards, 2 min cooldown; a tower: the enemy's sight for 60 s. Cover: a side's own buildings let its rounds through (PS wires the hook in pw-shots). A capital with no living core falls; win = the enemy's capitals all fallen and your capital raised over their ruins. HUD, minimap, fog veil, victory/defeat screen.\n\nComputer player: grows, arms, gathers waves at its gate, attacks, bombards with launchers and jets, hacks, rebuilds over ruins - only through the player's own calls and sight. KNOWN: a lake between the capitals stops its troopers at the shore (PS is adding swimming to the troopers' way-finding) and tanks stop at ground over 43 deg - so computer-vs-computer matches stall at the first lake until then.\n\nN8: index.html = the game (menu, staged loading screen), beta-legacy.html = the old beta, pixel-world.html = the dev page. Runs from disk (file://), checked by the pw-main-page suite. F3 = per-part frame costs vs budgets. Download: https://github.com/Blind1900/Palace/archive/refs/heads/urban-defence-game-source-2026-11-09.zip then open code/games/urban-defence/index.html. Still to do: generation speed (5.3 s, target 2.5 s), laptop auto-quality.\n\nSuites: pw-game, pw-game-menu, pw-game-rules, pw-game-win, pw-main-page, pw-beta-legacy - 6/6 on 7, 3, 11; full matrix 38/38 on 7 (seed 3 pw-repair known flake).",
+  "shots": [
+   {
+    "src": "shots/n8-main-page-file.png",
+    "caption": "N8: the game as the main page, opened from disk like a downloaded copy"
+   },
+   {
+    "src": "shots/n6-squad-sent.png",
+    "caption": "N6: a squad box-selected and sent with a right click"
+   },
+   {
+    "src": "shots/n6-victory.png",
+    "caption": "N6: victory - the enemy capital destroyed and ours raised over its ruins"
+   }
+  ]
+ },
+ {
+  "title": "Fable: N6 slice 1 LANDED (dd140f8) - the match: menu (you vs computer / computer vs computer), world made behind a loading screen, HUD, seeds by real clicks in your vision, the computer grows its side",
+  "author": "Fable",
+  "time": "2026-11-22",
+  "note": "Game page: pixel-world.html?mode=game (start=versus|watch&side=left|right skips the menu). Generation is now a list of stages - the dev page runs them back to back as before, the game page one a frame behind a loading screen (N8 part A started). Each side starts with HM 500 / SM 300. A seed is refused beyond your vision. Watching, PLAY LEFT / PLAY RIGHT takes a chair, HAND BACK returns it. The computer casts seeds out from its front at a person's pace, on its own dice. Matrix 33/33 on 7 and 11; seed 3 32/33 (pw-repair fails identically on the untouched tip). Next: N8 timers, then HUD fog, selection and orders, deploy.",
+  "shots": [
+   {
+    "src": "shots/n6-1-versus.png",
+    "caption": "N6: you against the computer - the HUD and the game bar"
+   },
+   {
+    "src": "shots/n6-1-watch-took-left.png",
+    "caption": "N6: computer vs computer, the person taking the left chair"
+   }
+  ]
+ },
+ {
+  "title": "Fable: N6 first playable + N8 new world as the main page - PLAN (awaiting go); N88 tunnel room refs received",
+  "author": "Fable",
+  "time": "2026-11-22",
+  "note": "SPLIT: N5 (PS) = what a unit is and can do - bodies, art, physics, pathing, weapons, item bar mechanics, drills, guards firing through glass; asks: an in-world sentry for every unit kind (crouched = unseen by the AI), a work-at-panel pose, one cover hook in pw-shots. N88 (shared lab) = PS: the page and unit behaviour on the course; WGM: the tunnel generator (hallways, rooms that vary in size, door frames). The lab uses N6's selection and orders module, so group control is built once. N6 (WGM) = the player and the match.\n\nN6 SLICES: (1) match frame - pixel-world.html?mode=game, sides left/right, hot-seat toggle as in the old beta, sandbox brushes only with dev=1; (2) HUD - HM/SM/water/POP with rates, unit counts, clock, centre-hold meter, alerts, minimap (beige friendly / pinkish-red enemy dots), health green-yellow-red; fog look from pw-vision (enemy units only in sight); (3) selection and orders - click, shift-click, shift-drag box; move/attack/attack building/capture/hack; surface or tunnel route; auto mode (head for the enemy, neutrals first, heal at friendly housing, back off a falling building); keys take manual control, a few seconds idle on release; (4) deploy by building level from all or selected bases (troopers, then tanks/launchers, jets/mechs from runways once N89 lands, mechs max 2); (5) cover rules on PS's cell-by-cell rounds - own buildings never stop a side's rounds, a friendly building takes the hit for a unit in front of it until mostly destroyed; (6) hacking - top-floor panels recorded per building, exactly 15 s, interrupted by leaving or dying; military: defences down, then guards, 2 min cooldown; antenna: steals vision; (7) capture - ported from the old beta: hack a building's panel, or walk out of an undefended territory; the building, its cores and pipes, and its city change side; (8) win - enemy core destroyed, enemy POP gone, centre held 60 s; (9) pw-game suite - a real-click match on 7/3/11.\n\nN8: today generation is one 5.3 s synchronous block on seed 7 (terrain 2.6 s, settlements 0.83, vegetation 0.70, pipes 0.54, urban 0.33, props 0.13, overview 0.13) - a blank page until done. (A) staged boot with a pixel loading screen, world painted as it is made, long stages sliced, byte-identical world hash on 7/3/11; (B) speed-ups to the 2.5 s target, terrain first; (C) per-subsystem timers in pw-app's loop + F3 overlay + pw-perf suite (p95 budgets units 2, particles 2, fragments 1.5, integrity 1, sim 3, raster 3, draw/UI 3 ms; quiet / battle / collapse); (D) switch-over - old beta to beta-legacy.html, index.html = the game (menu, loading, HUD), pixel-world.html stays the dev page; work branch only, live site untouched.\n\nORDER: N6-1 -> N8 A+C -> N6-2..9 -> N8 B+D.\n\nN88 refs (user, 2026-11-22; contact sheet attached): hallways T1 rock-cut drive, T2 board-formed concrete corridor, T3 shotcrete gallery with gutter, T4 portal with wing walls, T5 cavern road with a blast-door frame, T6 rock cavern with blockhouses, T7 square corridor through a steel door frame, T8 vaulted hangar, T9 square duct corridor; rooms R1 timber-set mine drift, R2 ribbed vault hall, R3 canal hall with quays, R4 canal with pier bays, R5 segment-lined round bore, R6 tube with arched cross-passages. Rooms vary in size (user).\n\nPS AGREED (2026-11-22): the in-world sentry (crouched = never spotted; secret dirt tunnel = spotted only within 120 cells); PW.troops.work(t, panel); PW.units.order(world, unit, {type, x, y, target}) per unit kind, so the orders module stays kind-agnostic; the cover hook PW.game.cover(shot, owner, x, y) only for rounds entering building cells - earth, tunnel lining, blasts and debris are never asked.",
+  "shots": [
+   {
+    "src": "shots/n88-tunnel-refs.jpg",
+    "caption": "N88: the user's tunnel and room-type references"
+   }
+  ]
+ },
+ {
+  "title": "Fable: N86+N87 LANDED - a ball rises 50+ cells clear of its rubble and comes down at the pace it rose, into a NEW bed laid at the surface as it now lies; the building re-founds and rebuilds there",
+  "author": "Fable",
+  "time": "2026-11-22",
+  "note": "N86 (verified, tightened): the ball frees by the real open gap under it (>= 50 cells at default zoom 1.0 = 50 px), not by rows counted while its tower is still coming down round it (it used to free 25 cells over a heap that had caught up); while it floats it keeps station 50 clear as the heap settles; blocked overhead by its own falling building it presses up to 3 s before an obstruction caps the climb; a floating ball is held by its field (a crater's open air no longer drops it); descent = rise = 60 rows/s.\nN87: once the wreck is at rest (PS's stability.atRest recipe - looks pending, pieces falling - plus the heap's own profile holding still; the balls' own columns and the neighbours' crews left out), the building re-founds: the same blueprint moves its ground line to the surface's median (heap top or crater floor), its old remains above are shattered for the crews and below are packed with the heap into made ground (a mound with 45-degree flanks, every footing cell bearing, caves below untouched), the gift (beds, vaults, cradles) is set whole, the bundle re-threads to the new beds, the crews start over from the new placement - paid with the packed wreck as salvage - and the ball comes down into its new vault. The crews keep off the heap while the bed is decided. Flooded lot or a wreck that never settles: after a minute the old bed is rebuilt instead. Blasted again, it all runs again.\nN80 kept: the settled ball is its building's again, attached. D15 kept: Life disc, float hold.\nNew suite pw-refound (heap + crater scenes): 20/20 on seeds 7, 3, 11; full matrix 31/31 on all three seeds (266a922, 150e70e). pw-collapse runs with REFOUND_BEDS:0 (it studies the wreck itself). A ball the blast destroyed is lost: its new vault stays empty (re-seeding is a later slice).\nAlso fixed: the pipe regrowth's tip stamp re-broke intact pipe beyond narrow cuts for ever (seed 11) - unmasked by N83.",
+  "shots": [
+   {
+    "src": "shots/n87-1-floating.png",
+    "caption": "N86/N87: the ball risen 50+ clear of its rubble, floating"
+   },
+   {
+    "src": "shots/n87-2-new-bed.png",
+    "caption": "N87: the new bed laid at the surface as it now lies"
+   },
+   {
+    "src": "shots/n87-3-rebuilding.png",
+    "caption": "N87: the crews raise the body from the new bed"
+   },
+   {
+    "src": "shots/n87-4-crater-rebuilding.png",
+    "caption": "N87: re-founded in its crater and rebuilding"
+   }
+  ]
+ },
+ {
+  "title": "Fable: UNITS WIRED (7f22ea2) - troopers, mechs, jets, rocket launcher, Iron Dome and Patriot are in the world's hands; N89 base redesign + N88 unit/tunnel lab PLAN (awaiting go)",
+  "author": "Fable",
+  "time": "2026-11-21",
+  "note": "WIRED: PS's pw-troops/jets/defence/mechs load on pixel-world and the capital lab; toolbar TROOP, MECH, JET, RKT, DOME, PATRIOT; every unit kind selects with its own panel (trooper item bar with live rifle/grenades, mech cannon+missiles, jet airframe+missiles, battery rounds+hold fire); keys follow the selected unit. Live probe 21/21; matrix seed 7 28/29 (pre-existing collapse budget), unit suites 9/9 on 3 and 11.\nPLAN N89 base redesign (refs fetched: cgtrader, Djibouti, renderhub, Spratly, gate photo + turrets, Patriot/MLRS, Iron Dome): a spread compound - largest HQ with a control-tower watchtower cab, arched barracks, vehicle canopy, ammo bunker, water tower, comms mast, helipad, each its own record under one base; chain-link + concertina fence and concrete T-walls (+HESCO where the ground steps): troopers can't pass, tanks crush the fence / climb or shoot over the low walls; corner watchtowers; a gatehouse with a boom barrier; runway = road + jet/mech deploy points, replacing the road near a population capital; upgrade structures grow over time on pads and friendly roofs (sandbag nests, RCWS turrets, Patriot/MLRS racks, Iron Dome batteries) as garrison points.\nPLAN N88 lab (shared with PS): new unit-tunnel-lab page; one-or-many troop control (click / drag-box select, group orders), control panels + ladders; tunnels grow periodically from the core tunnel: narrow hallway - door frame - room (longer, floor dipping to its centre, higher roof) - door frame; room types (command, barracks, armoury, generator/pump, drill, storage); a tunnel meeting a cave makes the whole cave a room. NEEDED: the user's tunnel room-type images (not found in any chat attachment). NUMBER CLASH: N88/N89 now name the lab/base redesign; my earlier basins/pumps and roof water-core outlines need new numbers.",
+  "shots": [
+   {
+    "src": "shots/units-troop-selected.png",
+    "caption": "Units: a trooper selected, its item bar in the panel"
+   },
+   {
+    "src": "shots/units-dome-selected.png",
+    "caption": "Units: an Iron Dome battery selected"
+   },
+   {
+    "src": "shots/units-mech-selected.png",
+    "caption": "Units: a mech selected"
+   },
+   {
+    "src": "shots/n89-ref-base-cgtrader.jpg",
+    "caption": "N89: the user's military base reference"
+   }
+  ]
+ },
+ {
+  "title": "Fable: N83+N84 LANDED (fe2fdd0) - every lane unbroken through every bend, level change, tee and bed approach; the casing wears an armoured jacket. Aprons 38.7 deg pushed (72e12ff)",
+  "author": "Fable",
+  "time": "2026-11-21",
+  "note": "N83 causes found and fixed: (1) the well elbows reversed lane order against the shaft - 45 of 51 lane paths dead-ended on seed 7 alone; (2) staircases of 2-row steps each got a box and the boxes cut each other; (3) risers were laid solid ACROSS the trunk, walling all three lanes for 7 columns; (4) the bed-to-bed shelf ran straight through a neighbour's stage flight; (5) a shaft box reached into a core unit. Now: every level change is ONE fitting met to the runs where they really arrive - a ramp (bore on a slant, a row a column at most) or a shaft between two swept turns of concentric rings (the outside lane stays outside: no lane ever crosses another); fittings stop at core beds; risers open a port into the trunk instead of cutting it; the shelf is laid only where clear. N84: a light-steel jacket ring outside the casing (shaded underneath), the same ring round risers, shafts and turns - the tube reads thick and cased against its own neon lanes; the cyberpunk palette kept. NEW SUITE pw-pipe-lanes (det): every run lane an open channel + every lane flood-filled through every fitting to ITS OWN slot, at generation and after a minute live, + the jacket: 9/9 on seeds 7, 3, 11 (fails 5/5 on the previous tip). Matrix: 7 24/25, 11 24/25, 3 23/25 - the misses (pw-collapse budget, pw-tank seed-3 slab) fail identically on the untouched tip / tip+aprons, handed to PS. Shots: same world, same spots - before/after at the user's x25800 cross-section, the x20482 shaft, and the pump tee.",
+  "shots": [
+   {
+    "src": "shots/n83-before-shelf-x25800.png",
+    "caption": "N83 before: the lanes at the shelf, x 25800"
+   },
+   {
+    "src": "shots/n83-after-shelf-x25800.png",
+    "caption": "N83 after: every lane unbroken across the shelf"
+   },
+   {
+    "src": "shots/n83-before-shaft-x20482.png",
+    "caption": "N83 before: the shaft at x 20482"
+   },
+   {
+    "src": "shots/n83-after-shaft-x20482.png",
+    "caption": "N83 after: the lanes through the shaft"
+   },
+   {
+    "src": "shots/n84-before-cross-x25800.png",
+    "caption": "N84 before: the crossing at x 25800"
+   },
+   {
+    "src": "shots/n84-after-cross-x25800.png",
+    "caption": "N84 after: the casing's jacket through the crossing"
+   },
+   {
+    "src": "shots/n83-before-riser-tee.png",
+    "caption": "N83 before: the riser tee"
+   },
+   {
+    "src": "shots/n83-after-riser-tee.png",
+    "caption": "N83 after: the riser tee, lanes unbroken"
+   }
+  ]
+ },
+ {
   "title": "Fable: N82 STUDY - Terraria 1.2 worldgen read (behaviour only, no code copied); five takes reported, build still waits on the plan go",
   "author": "Fable",
   "time": "2026-11-21",
@@ -12,7 +322,10 @@
   "time": "2026-11-21",
   "note": "Order honoured: N86 is landed, N87 (core re-founding) builds first on the go-ahead - N88-N90 lean on the same core code.\n- N88: underground water basins become a real terrain feature sized like surface lakes (today cave pools are 5-12 rows deep; lakes are half 160-600, depth 160-280 - the new flooded caverns join that class). ALL pumps become one design, the user's sketch: the pump IS a water core, set in a carved pocket on the basin's flank just under the waterline, its slim intake tap to the trunk kept (tee flanges, eye). The old under-bed machine chamber retires. Pumps keep the N62 rule: they METER the basin, never drain it. Farms connect to basins through their pumps - water originates only at pump cores; the farm's branch meets the trunk at the pump's tee.\n- N89: each underground basin gets a water core socketed into the cavern ROOF above the water (pocket in roof rock, owned mount ring), a pump in the economy like any other; the line reaches it by a bored well down from the surface run (the pit-riser precedent). Roof collapses - the core floats (N86) and waits over water (N87's water gate).\n- N90: a seed placed on the rubble of destroyed enemy territory replaces capture: it plants into the settled rubble line with N87's seat/underpin and the rebuild eats the wreck; overlapping dead enemy claims retire. Enemy pipes NEVER connect (lines are per-side; cross-side unite asserted away) and lines AVOID each other where they overlap: the newer run dips under the standing one with N81-legal swept transitions, clearing bore+casing by margin; crossings read as two separate casings, no shared tees. Player seed tool is a pw-app edit - PS gets the heads-up first.\n- Proof: new/extended suites - basin sizing + pump-core attachment on 7/3/11, a rival-lines check (no cell shared by two sides' lines, cargo passes the crossing on both), seed-on-rubble end-to-end. Gen change re-rolls det worlds: re-baseline window coordinated with PS like 000fc62.",
   "shots": [
-   "n88-sketch.jpg"
+   {
+    "src": "shots/n88-sketch.jpg",
+    "caption": "N88-N90: the user's sketch for the plan"
+   }
   ]
  },
  {
@@ -2228,6 +2541,13 @@
         "pct": 100,
         "done": true,
         "left": ""
+       },
+       {
+        "id": "N103",
+        "owner": "F",
+        "step": "M8, K",
+        "pct": 0,
+        "text": "Military turrets (user, 2026-11-22): remove the turret on top of military buildings. Replace it with a turret that spawns on any flat surface (roof or terrain) on a turret base. It automatically attacks any hostile unit nearby and can attach to vertical surfaces. Sized between a tank and a trooper. Tunnels are large enough to house turrets in their rooms. Refs: the turret and RCWS photos. WGM owns placement and the base; PS owns firing and vertical attachment. GO given (user, 2026-11-23). Keep the auto cannon on the turret. DONE cdb2a05 (suite pw-turret-mounts)."
        }
       ]
      },
@@ -2480,6 +2800,27 @@
         "step": "C2, K",
         "text": "REMOVED 2026-11-21 (user): military mountain base garrison peek holes are removed altogether. The mountain bases keep their other features; this item is no longer a feature. Earlier note: garrison peek holes are openings troops can shoot out of at wide angles, or enter the building through. The edges have no sharp cut-off: the corners smooth out and merge into the terrain or building structure at both ends. Same rules as the pipe: clean edges, not wider than needed. Earlier note: military bases level up by hollowing out more of the mountain, with more rooms and defences at each level; at max level a deployment hangar sits at the base of the mountain. Refs: the underground defence facility and bunker cross-sections the user sent. Garrison holes connect to the building and terrain with no sharp cut-off at the edges; the corners blend into both (user, 2026-11-21).",
         "pct": 100
+       },
+       {
+        "id": "N109",
+        "owner": "F",
+        "step": "H, M5",
+        "pct": 0,
+        "text": "Tunnel roofs higher by 1.5% for more head space (user, 2026-11-23). DONE cdb2a05: roofs +1.5%."
+       },
+       {
+        "id": "N108",
+        "owner": "F",
+        "step": "H",
+        "pct": 0,
+        "text": "Black boxes with a white dot inside tunnels (user, 2026-11-23, canvas screenshot): remove them from showing up. WGM to identify the element first (core, tunnel fitting or device). DONE: the subliminal room removed; a pipe room takes its turn."
+       },
+       {
+        "id": "N111",
+        "owner": "F",
+        "step": "C, K",
+        "pct": 0,
+        "text": "Military base main core (user, 2026-11-23): redesign the main core to look more militarised. Add a spawn pad above the core on the surface, in the hangar, where units spawn when deployed. Part of N89. DONE 7ec8652: spawn pad in every hangar over an armoured core; matrix 49/49."
        }
       ]
      }
@@ -2538,6 +2879,118 @@
      {
       "name": "Growth and economy",
       "items": [
+       {
+        "id": "N125",
+        "owner": "F",
+        "step": "H, A2.3b",
+        "pct": 0,
+        "text": "Miners and ore (user, 2026-11-23): always keep one miner mining and one expanding to other veins. Miners sniff out ore and walk toward it; undiscovered ore sparkles. Caves are shortcuts; a tunnel reaching a cave becomes a room with no gaps. Ore redrawn as 3D animal silhouettes (koi, hawk, wolf, bull, eel), not obviously animals until closely viewed."
+       },
+       {
+        "id": "N124",
+        "owner": "F",
+        "step": "B, C",
+        "pct": 0,
+        "text": "Terrain and rules (user, 2026-11-23): units pass poles. Deco never blocks friendly units. Only mountains without tunnels and lakes without bridges stop units. Each map end: a lake near the end, and at least 22% flat per side before a mountain. A larger mountain or lake in the centre."
+       },
+       {
+        "id": "N123",
+        "owner": "F",
+        "step": "K, M",
+        "pct": 0,
+        "text": "Vision and camera (user, 2026-11-23): unseen areas black; seen areas not in view greyed, showing last seen detail, updating on return. Vision circles from antennas and units (troopers < tanks < mechs < drones). Building vision cut off only by mountains. Military antennas sized between mech and drone. Camera follows the selected unit and keeps it centred."
+       },
+       {
+        "id": "N122",
+        "owner": "F",
+        "step": "F2, I",
+        "pct": 0,
+        "text": "Upgrades (user, 2026-11-23): seeds don't upgrade on their own. A button above the main building upgrades it and its surrounding buildings. Growth ends at: pop 3 min, military 2 min, farm 1.5 min."
+       },
+       {
+        "id": "N121",
+        "owner": "F",
+        "step": "H, C",
+        "pct": 0,
+        "text": "Doorways and tunnel portals (user, 2026-11-23): surface doorways the same height as mountain tunnels. Highway tunnel portals get entrance detail, not a sharp cut-off, and can join an adjacent base doorway."
+       },
+       {
+        "id": "N120",
+        "owner": "F",
+        "step": "G",
+        "pct": 0,
+        "text": "Start (user, 2026-11-23): no territory at start. Place the first seed where the main core bunker spawns, with a vertical cursor-to-surface line (green/red) and an outline of the first main building. Growth spreads from it. The main core seed is free. Seed growth replaces trees."
+       },
+       {
+        "id": "N119",
+        "owner": "F",
+        "step": "M6",
+        "pct": 0,
+        "text": "Full game UI (user, 2026-11-23): remove the background radar; show text on black."
+       },
+       {
+        "id": "N112",
+        "owner": "F",
+        "step": "G",
+        "pct": 0,
+        "text": "Seed placement preview (user, 2026-11-23): a vertical line from the mouse to the terrain surface, green where a building can be placed and red where it can't. When green, show a preview of the finished building. UI look from the UI reference zip (d:Urban Defence RefRefGame refUI.zip)."
+       },
+       {
+        "id": "N104",
+        "owner": "F",
+        "step": "H, N3",
+        "pct": 0,
+        "text": "Mountain road tunnels (user, 2026-11-23, capital lab seed 7): population and military buildings build outward towards mountains. A road tunnel through the mountain, wide enough for tanks, mechs and ground troops. Generated by population or military seeds spreading to a mountain's base, or by a mountain military base reaching half its max level. Portals open towards the flat ground at each end. Refs: the road tunnel photos and cross-sections in the checklist chat. FIXED e29e916: the supply line runs under the road; a tank, a mech and a trooper go portal to portal on seeds 7, 3 and 11 (with PS's vehicle side)."
+       },
+       {
+        "id": "N100",
+        "owner": "F",
+        "step": "F, F2",
+        "pct": 0,
+        "text": "Repair after settling (user, 2026-11-22): a mountain builds off buildings that rebuilt off rubble, a glitch to fix. Buildings rebuild once the structure has finished falling and settled, not constantly. Cores use the rubble beneath them to rebuild, recycling each pixel 2 to 1. As the debris is used up, the whole building falls with the mountain of debris."
+       },
+       {
+        "id": "N100",
+        "owner": "F",
+        "step": "F, A2.3",
+        "pct": 0,
+        "text": "Rebuild after settling, and debris turns to dirt (user, 2026-11-22): buildings rebuild only once the structure has finished falling and settled, not constantly. The cores use the rubble beneath them to rebuild the structure, recycling each pixel 2 to 1. As the debris is used up, the whole building falls with the mountain of debris. Debris settled on terrain slowly merges into the surface as dirt, keeping some remaining debris and its look, now decayed and ruined. Fixes the glitch where a mountain builds off buildings that rebuilt off rubble."
+       },
+       {
+        "id": "N98",
+        "owner": "F",
+        "step": "F, A2.4",
+        "pct": 0,
+        "text": "Repair ventilation (user, 2026-11-22): while a building is being repaired, it vents the dust and gas from the work out through its top, like a ventilation system. Repair (F) owns the vent; the gas flow is PS's air and particle physics, so PS needs the vent as a real outlet."
+       },
+       {
+        "id": "N97",
+        "owner": "F",
+        "step": "C, K",
+        "pct": 0,
+        "text": "Gaps between sloped population buildings and military add-ons (user, 2026-11-22, capital lab seed 7 screenshot): floors, roofs and walls must continue until they meet and connect with no gap. Extends N66, N67 and N68."
+       },
+       {
+        "id": "N94",
+        "owner": "F",
+        "step": "G, H",
+        "pct": 0,
+        "text": "Population seeds and pillars (user, 2026-11-22): buildings spread out more as they get farther from the centre, with the capital's centre the densest. Pillars from cores appear only in the background layer, not overlapping deco, and are thicker in girth."
+       },
+       {
+        "id": "N95",
+        "owner": "F",
+        "step": "J",
+        "pct": 0,
+        "text": "Farm buildings (user, 2026-11-22): the first and main building is the storage silos. The top of the farm core grows a pipe that splits and connects to each silo from its bottom. The farm core may spawn lower to allow this. Refs: the grain bin and feed silo photos."
+       },
+       {
+        "id": "N96",
+        "owner": "F",
+        "step": "H, M7",
+        "pct": 0,
+        "text": "Mining and tunnels (user, 2026-11-22): an HM storage room, where surplus HM is stored until it is needed."
+       },
        {
         "id": "N84",
         "owner": "F",
@@ -2651,7 +3104,119 @@
       "name": "Units and combat",
       "items": [
        {
-        "id": "N84",
+        "id": "N126",
+        "owner": "O",
+        "step": "M8, N106",
+        "pct": 0,
+        "text": "Drones smaller (same size as mechs; mechs slightly larger). Drones launch from missile launchers. Deploy drones as an option button, plus a single deploy button that lights when HM and SM are enough. Missile aim: vertical line cursor to surface, flashing orange and red downward like a spiral, with a pulsing rotating crosshair at the surface (user, 2026-11-23)."
+       },
+       {
+        "id": "N118",
+        "owner": "F",
+        "step": "M6, M9",
+        "pct": 0,
+        "text": "Start screen and game-mode menu (user, 2026-11-23): the main game beta test gets a start screen and a menu to select the game mode. Remove the difficulty option; keep only a map size select. Refs: d:Urban Defence RefRefGame refstart screen.zip and Modeselect.zip; pixel-ui-lab.html for the look. Refinement (user, 2026-11-23): start menu is only a Start button; the game mode menu has map size, left or right, and aesthetic (R replaces asian, B replaces modern, P replaces gothic). Phosphor green on black, as in Modeselect.zip."
+       },
+       {
+        "id": "N117",
+        "owner": "O",
+        "step": "M8, N90",
+        "pct": 0,
+        "text": "Bullets blocked by trees and enemy deco (user, 2026-11-23): some bullets are stopped by trees instead of all passing through. The same for enemy deco material."
+       },
+       {
+        "id": "N116",
+        "owner": "F",
+        "step": "M6, I",
+        "pct": 0,
+        "text": "Gameplay mechanics (user, 2026-11-23): seeds do not upgrade by themselves; the player chooses which seed to upgrade, based on the HM stored. HM and SM spend on deploying troops. HM also spends on accelerating tunnel growth."
+       },
+       {
+        "id": "N115",
+        "owner": "F",
+        "step": "M6, M9",
+        "pct": 0,
+        "text": "Gameplay test option (user, 2026-11-23): an option to open it, like the live test seed button on the checklist website. Each side chooses a starting capital (core bunker as the main building; later capitals from seeds are capital buildings). Build speed 4x. Left-side players face right, towards the other end; the right side mirrors."
+       },
+       {
+        "id": "N114",
+        "owner": "F",
+        "step": "M8, K",
+        "pct": 0,
+        "text": "Missile launchers and interceptors (user, 2026-11-23): stationary artillery like the turrets (N103), built on flat rooftops or other flat surfaces, not vehicles. Never spawn inside buildings or tunnels. Firing HM cost: an interceptor launches only if HM is stored. PS owns firing; WGM owns placement."
+       },
+       {
+        "id": "N110",
+        "owner": "O",
+        "step": "M5",
+        "pct": 0,
+        "text": "Troopers move twice as fast in every direction (user, 2026-11-23)."
+       },
+       {
+        "id": "N107",
+        "owner": "O",
+        "step": "M5, N72",
+        "pct": 0,
+        "text": "Tanks over bumpy terrain (user, 2026-11-23, two canvas screenshots): tanks move through bumpy ground like the terrain in the user's images, more versatile than now. Tanks also move 1.7% faster."
+       },
+       {
+        "id": "N105",
+        "owner": "O",
+        "step": "M5, A2.22",
+        "pct": 0,
+        "text": "Tanks pass through most trees without knocking them over (user, 2026-11-23). Units only fire when a fire is called, not on every mouse click (N102)."
+       },
+       {
+        "id": "N106",
+        "owner": "O",
+        "step": "M8, N90",
+        "pct": 0,
+        "text": "Avenger drones replace jets (user, 2026-11-23; Avenger refs). Drones launch from the flat runways 45 to 85 degrees upward with an initial rocket launch. They never land and roam the skies until destroyed."
+       },
+       {
+        "id": "N102",
+        "owner": "F",
+        "step": "M5, M6",
+        "pct": 0,
+        "text": "Unit controls (user, 2026-11-22): a selected unit moves only while an arrow or A/D key is held, and is idle with no keys. Pause is P. Jump is Space, W or Up arrow. Left click fires at the mouse position on screen; right click is secondary fire. Shared with PS for the unit side (N5). Update (user, 2026-11-23): left click is both the aim button and the fire button; right click is alt fire."
+       },
+       {
+        "id": "N101",
+        "owner": "O",
+        "step": "M5",
+        "pct": 0,
+        "text": "Mech silhouette and motion (user, 2026-11-22, ref d:Urban Defence RefUnitsMechs(hoppers).zip): a two-legged grasshopper hopping mech with shredded butterfly wings and two front-pointing horns. The cannon is under its wing. When dodging, it fires rocket jets from its ankles and from under the wing, with guns firing the opposite way. Add in-between frames for smooth movement."
+       },
+       {
+        "id": "N93",
+        "owner": "F",
+        "step": "M6, M9",
+        "pct": 0,
+        "text": "Game design change (user, 2026-11-22, GO on everything): no capture rule. Win by destroying the enemy and raising your own capital over their ruins. Hacking a military building disables its defences for a while. Hacking a population building grants the enemy's vision. No hot-seat: a computer opponent, and the user can play two human players against each other. The user must be able to download the build from the GitHub repository and run it on a laptop (push to the work branch)."
+       },
+       {
+        "id": "N88",
+        "owner": "F",
+        "step": "M5, M6",
+        "pct": 0,
+        "text": "Unit and tunnel lab (user, 2026-11-21, new page): control one or many troops at once; how troops use control panels and ladders; tunnels spawn periodically in different path styles, narrow hallways alternating with larger high-roofed rooms split by door frames, following the user's tunnel room-type images. Shared with PS for unit behaviour against the environment."
+       },
+       {
+        "id": "N89",
+        "owner": "F",
+        "step": "M, K",
+        "pct": 0,
+        "text": "Military base redesign (user, 2026-11-21): no more base as one building plus a hangar. Spread the base over several smaller buildings, the main one the largest with a watchtower. Fences with barbed wire and concrete walls stop troopers, tanks can drive over or shoot across them. Flat runways work like roads, but jets and mechs deploy from them; a base on or near a population capital replaces the road with the runway in the visual. Military upgrade structures spawn across the base area, on land and on top of friendly buildings, where troops garrison. Refs: the military base photos and turret and launcher images."
+       },
+       {
+        "id": "N90",
+        "owner": "O",
+        "step": "M8",
+        "pct": 0,
+        "text": "Bullets, jets and mechs (user, 2026-11-21): bullet physics for tank shots, plane missiles, ground fire and mech shooting. Jets take off from the flat runways, strafe and get shot down. Mechs jump, boost and dodge. Missile salvos on high arcs, with interceptors (Iron Dome and Patriot refs)."
+       },
+       {
+        "id": "N92",
         "owner": "O",
         "step": "M5 (before)",
         "pct": 0,
@@ -2661,25 +3226,29 @@
         "text": "Units at GIF scale: troopers, guards, miners, tanks, mechs, jets; the item bar (rifle, 3 grenades, drills); hand-drilled secret dirt tunnels",
         "step": "M5",
         "id": "N5",
-        "pct": 0
+        "pct": 0,
+        "owner": "O"
        },
        {
         "text": "First playable: deploy, orders, take control, hacking, capture, win conditions, hot-seat, HUD; bullets cell by cell with cover rules",
         "step": "M6",
         "id": "N6",
-        "pct": 0
+        "pct": 0,
+        "owner": "F"
        },
        {
         "text": "Heavy combat: mech dodge, jets from the runway, missile salvos and interceptors, tunnel skirmishes",
         "step": "M8",
         "id": "N7",
-        "pct": 0
+        "pct": 0,
+        "owner": "O"
        },
        {
         "text": "The new world becomes the main game page (staged loading, performance budgets)",
         "step": "M9",
         "id": "N8",
-        "pct": 0
+        "pct": 0,
+        "owner": "F"
        },
        {
         "id": "N77",
@@ -2698,6 +3267,20 @@
      {
       "name": "Physics",
       "items": [
+       {
+        "id": "N101",
+        "owner": "O",
+        "step": "A2.11, A2.30",
+        "pct": 0,
+        "text": "Debris settling into terrain (user, 2026-11-22): debris that settles on terrain slowly merges into the surface as dirt, keeping some remaining debris and its look but decaying and looking ruined. Mech (user, 2026-11-22, Mechs(hoppers).zip reference): exact silhouette of a two-legged grasshopper hopping mech with shredded butterfly wings and forward horns; cannons under the wing; when dodging, rocket jets from the ankles and under the wing, with guns firing the opposite way. Add in-between frames to smooth movement."
+       },
+       {
+        "id": "N99",
+        "owner": "O",
+        "step": "A2.11",
+        "pct": 0,
+        "text": "Roof tops fall with the rest of the building (user, 2026-11-22, capital lab seed 7 screenshot): when a building collapses, its roof must come down with it, not stay behind. Extends N40 and N49."
+       },
        {
         "id": "N87",
         "owner": "F",
