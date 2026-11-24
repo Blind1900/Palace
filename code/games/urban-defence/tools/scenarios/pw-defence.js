@@ -124,6 +124,74 @@ const along = (x0, step, n) => Array.from({ length: n }, (_, k) => x0 + step * k
   fresh();
 }
 
+// 5. Artillery on its base (N114, the user's: missile launchers and interceptors stand on a base on a
+// roof or flat ground, not on wheels; each round costs its side HM, and with none an interceptor
+// does not go). A launcher on a steel plate stands on it - nothing of it under the plate's top -
+// raises its pod and fires its salvo, its side paying 2 HM a rocket; a side with 9 HM fires 4 of
+// its 12; a Dome whose side has no HM fires nothing at a salvo coming down on it, and with HM it
+// does, paying for each; the plate cut away under the launcher, it falls off it.
+{
+  fresh();
+  // (a match on this world, for the rounds' price - two sides of the test's own, so no town of the
+  // world's spends their stocks)
+  const stock0 = world.stock, game0 = PW.game, current0 = PW.game && PW.game.current;
+  if (!PW.game) PW.game = {};
+  PW.game.current = () => ({ world });
+  const A = 'n114a', Z = 'n114z';
+  const z = layout.wilds[0], x = Math.round(z.x0 + 900), g = world.groundTop[x];
+  for (let xx = x - 24; xx <= x + 24; xx += 1) for (let y = g - 6; y < g; y += 1) PW.set(world, xx, y, M.STEEL, { quiet: true });
+  const base = { x0: x - 24, x1: x + 24, y: g - 6 };
+  const L = D.create(world, { type: 'launcher', x, y: g - 6, base, side: A, facing: 1, style: 'modern' });
+  let low = -1;
+  for (let j = 0; j < L.ras.h; j += 1) for (let i = 0; i < L.ras.w; i += 1) if (L.ras.px[j * L.ras.w + i]) low = Math.max(low, L.ras.y0 + j);
+  const stands = L.y === g - 7 && low === g - 7;
+  world.stock = { [A]: { hm: 100 }, [Z]: { hm: 999 } };
+  L.aim = { x: x + 1600, y: world.groundTop[x + 1600] };
+  const r0 = D.stats.rockets;
+  D.fire(world, L);
+  let raised = 0;
+  steps(5, () => { raised = Math.max(raised, L.el); });
+  const fired = D.stats.rockets - r0, paid = 100 - world.stock[A].hm;
+  await view('n114-launcher-on-base', x + 20, g - 50, 5);
+  L.ammo = 12; L.reloadT = 0; world.stock[A].hm = 9;
+  const r1 = D.stats.rockets;
+  D.fire(world, L);
+  steps(4);
+  const short = D.stats.rockets - r1;
+  // (the plate cut away from under the launcher)
+  const off0 = D.stats.cameOff || 0;
+  for (let xx = x - 24; xx <= x + 24; xx += 1) for (let y = g - 6; y < g; y += 1) PW.set(world, xx, y, M.AIR, { quiet: true });
+  steps(0.5);
+  const fell = L.dead && (D.stats.cameOff || 0) > off0;
+  // (a Dome - its side's ground, itself on it - and the other side's launcher 2600 off, firing at
+  // it: first with HM on its side, then - a Dome set down again if that salvo got through to it -
+  // with none)
+  const R = D.create(world, { type: 'launcher', x: x + 2700, side: Z, facing: -1 });
+  let B = placeClear({ type: 'dome', side: A, facing: 1 }, along(x + 160, 40, 20));
+  world.stock[A].hm = 400;
+  R.aim = { x: B ? B.x : x, y: g };
+  const l1 = D.stats.launched;
+  D.fire(world, R);
+  steps(14);
+  const firedPaid = D.stats.launched - l1, paidDome = 400 - world.stock[A].hm;
+  world.shots = [];
+  if (!B || B.dead) B = placeClear({ type: 'dome', side: A, facing: 1 }, along(x + 160, 40, 20));
+  R.ammo = 12; R.reloadT = 0; world.stock[A].hm = 0;
+  R.aim = { x: B ? B.x : x, y: g };
+  const l0 = D.stats.launched, n0 = D.stats.noHm || 0;
+  D.fire(world, R);
+  steps(14);
+  const firedBroke = D.stats.launched - l0, refused = (D.stats.noHm || 0) - n0;
+  world.shots = [];
+  world.stock = stock0;
+  if (game0) PW.game.current = current0; else delete PW.game;
+  check(stands && raised > 0.8 && fired === 12 && paid === 24 && short === 4,
+    `a launcher on a steel plate stands on it, no wheels (its lowest cells ${low === g - 7 ? 'on the plate' : `at ${g - low} over the ground`}); it raises its pod (to ${(raised * 57.3).toFixed(0)} deg) and fires its salvo (${fired} rockets), its side paying ${paid} HM for it; a side with 9 HM fires ${short} of the 12`);
+  check(!!B && firedBroke === 0 && refused > 0 && firedPaid >= 2 && paidDome === firedPaid * D.PRICE.interceptor && fell,
+    `a Dome whose side has no HM fires no interceptor at a salvo coming down on it (${firedBroke} fired, ${refused} times it had none to pay with); with HM it does (${firedPaid}, ${paidDome} HM paid); the plate cut away under the launcher, it falls off it (${fell})`);
+  fresh();
+}
+
 // 4. What they cost: two batteries watching a sky full of a salvo coming down on them; and drawing
 // three units.
 {
