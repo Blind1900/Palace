@@ -593,7 +593,9 @@
         if (!b.cores || !b.cores.length) continue;
         // (a building still going up for the first time is no ruin to expose - its cores are
         // already home in fresh beds; the flag drops once it first stands all but whole)
-        if (b.underConstruction && (b.health || 0) >= 0.9) b.underConstruction = false;
+        // (N122: a paced seed building is a site till its kind's time is up - pw-repair lets it go)
+        if (b.underConstruction && (b.health || 0) >= 0.9
+          && !(b.paceSecs && b.buildFree && ((world.tick || 0) - (b.paceAt || 0)) / 60 * (world.buildSpeed || 1) < b.paceSecs)) b.underConstruction = false;
         if (b.ruined && !b.coresOpen && !b.underConstruction) expose(b);
         // N18O support checks. A settled unit whose vault floor is gone from under it is given
         // up by the vault: its ball is freed and managed again (and falls whole just below).

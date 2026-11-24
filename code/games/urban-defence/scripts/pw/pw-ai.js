@@ -27,7 +27,15 @@
   const HACK_EVERY = [70, 110]; // s between hack attempts
   const UPGRADE_EVERY = [30, 55]; // s between looks at which city to raise (N116)
   const UPGRADE_FIRST = 60;     // s into the match before its first look
-  const MIX = ['trooper', 'trooper', 'trooper', 'tank', 'trooper', 'trooper', 'launcher', 'trooper', 'tank', 'dome', 'trooper', 'mech', 'jet', 'patriot'];
+  // The adaptive mind: how it weighs a field, and how it fights
+  const POSTURE_EVERY = 8;      // s between its looks at how the field stands
+  const POWER = { trooper: 1, tank: 4, mech: 8, jet: 3 };   // a unit's weight in a fight, a trooper's the unit
+  const DOOR = 700;             // cells past its front the enemy is at its door
+  const WAVE_RUSH = 4;          // a rushing wave
+  const REACH = 420;            // cells round a unit of its own an enemy is in the fight
+  const RETREAT = 0.3;          // the share of its armour under which a unit falls back
+  // (its first launcher early: N114's artillery is placed on its bases, a work of the defence)
+  const MIX = ['trooper', 'trooper', 'launcher', 'trooper', 'tank', 'trooper', 'trooper', 'trooper', 'tank', 'dome', 'trooper', 'mech', 'jet', 'patriot'];
 
   function create(match, side) {
     const G = PW.game, world = match.world;
@@ -56,7 +64,8 @@
           brain.seeds += 1;
           brain.last = `${kind} at ${Math.round(x)}`;
           brain.seedN += 1;
-          brain.seedAt = match.clock + between(SEED_EVERY);
+          // (rushing, it seeds at half the pace)
+          brain.seedAt = match.clock + between(SEED_EVERY) * (brain.posture === 'rush' ? 2 : 1);
           return true;
         }
         brain.last = `${kind}: ${r.note}`;
@@ -95,11 +104,15 @@
       const mine = eng.cities.filter((c) => c.faction === side && !c.fallen && c.level < eng.topLevel(c));
       if (!mine.length) return false;
       const p = G.purse(match, side);
-      const pick = (kind) => mine.filter((c) => c.kind === kind).sort((a, b) => (kind === 'military' ? b.level - a.level : a.level - b.level))[0];
+      // (of its cities of a kind, one that can rise now - N122: not one still growing from its last)
+      const pick = (kind) => mine.filter((c) => c.kind === kind && G.canUpgrade(match, side, c).ok)
+        .sort((a, b) => (kind === 'military' ? b.level - a.level : a.level - b.level))[0];
       const order = [];
+      // (its posture first: fortifying or rushing, its military; building, what holds it back)
+      if (brain.posture === 'fortify' || brain.posture === 'rush') order.push('military');
       if (G.fielded(match, side) + 3 > G.armyCap(match, side)) order.push('capital');
       if (p.sm < 120) order.push('farm');
-      order.push('military', 'capital', 'farm');
+      if (brain.posture !== 'rush') order.push('military', 'capital', 'farm');
       for (const kind of order) {
         const c = pick(kind);
         if (!c) continue;
@@ -121,10 +134,11 @@
       const army = G.unitsOf(match, side).filter((u) => !u.building && !u.mount).length;
       const keep = army < 6 ? 20 : ARM_KEEP;
       // (N103: now and then a turret on its base at its front, where the enemy will come - once it
-      // has a few men out)
-      if (army >= 4 && match.clock >= (brain.turretAt || 0) && G.canTurret && G.canTurret(match, side).ok
+      // has a few men out; fortifying, at once and twice as often)
+      const fortify = brain.posture === 'fortify';
+      if ((army >= 4 || fortify) && match.clock >= (brain.turretAt || 0) && G.canTurret && G.canTurret(match, side).ok
         && G.purse(match, side).hm >= G.TURRET.hm + keep) {
-        brain.turretAt = match.clock + 50 + random() * 40;
+        brain.turretAt = match.clock + (50 + random() * 40) / (fortify ? 2 : 1);
         const front = G.frontOf(match, side, true);
         for (let k = 0; k < 5; k += 1) {
           const r = G.placeTurret(match, side, front + dir() * (40 + k * 70 + random() * 30));
@@ -132,14 +146,17 @@
           brain.last = `turret: ${r.note}`;
         }
       }
-      for (let k = 0; k < MIX.length; k += 1) {
-        const kind = MIX[(brain.mixN + k) % MIX.length];
+      // (fortifying, its artillery first; rushing, none - men, tanks, mechs and drones)
+      const mix = fortify ? MIX.filter((k) => G.ARTILLERY[k]).concat(MIX.filter((k) => !G.ARTILLERY[k]))
+        : brain.posture === 'rush' ? MIX.filter((k) => !G.ARTILLERY[k]) : MIX;
+      for (let k = 0; k < mix.length; k += 1) {
+        const kind = mix[(brain.mixN + k) % mix.length];
         // (N114: the rockets and the interceptors are set on bases behind its front, not deployed)
         if (G.ARTILLERY[kind]) {
           const A = G.ARTILLERY[kind];
           if (G.purse(match, side).hm < A.hm + keep || !G.canArtillery(match, side, kind).ok) continue;
           if (!placeArtillery(kind)) continue;
-          brain.mixN = (brain.mixN + k + 1) % MIX.length;
+          brain.mixN = (brain.mixN + k + 1) % mix.length;
           return true;
         }
         const K = G.UNIT_KINDS[kind];
@@ -147,7 +164,7 @@
         if (!G.canDeploy(match, side, kind).ok) continue;
         const r = G.deploy(match, side, kind);
         if (!r.ok) continue;
-        brain.mixN = (brain.mixN + k + 1) % MIX.length;
+        brain.mixN = (brain.mixN + k + 1) % mix.length;
         brain.deployed += 1;
         // (fresh units gather at the rally point; a drone flies its own way)
         if (kind !== 'jet') {
@@ -168,7 +185,7 @@
       for (const x of spots) {
         const r = G.placeArtillery(match, side, type, x);
         if (r.ok) { brain.artillery = (brain.artillery || 0) + 1; brain.last = `${type} at ${r.mount.x}`; return true; }
-        brain.last = `${type}: ${r.note}`;
+        brain.last = brain.lastArt = `${type}: ${r.note}`;
       }
       return false;
     }
@@ -182,7 +199,8 @@
     // Attack: a gathered wave big enough goes its own way.
     function attack() {
       const gathered = G.unitsOf(match, side).filter((u) => u.game && u.game.order.type === 'gather');
-      if (gathered.length < WAVE + Math.min(6, brain.waves)) return false;
+      // (rushing: small waves early and often; building: one that grows with each it has sent)
+      if (gathered.length < (brain.posture === 'rush' ? WAVE_RUSH : WAVE + Math.min(6, brain.waves))) return false;
       G.order(match, gathered, { type: 'auto' });
       brain.waves += 1;
       brain.last = `wave ${brain.waves}: ${gathered.length} units`;
@@ -247,19 +265,111 @@
       return true;
     }
 
+    // ---- The adaptive mind (the user's, 2026-11-23) ----------------------------------------------------
+    // One computer player that is all three - it rushes, builds or fortifies as its situation turns -
+    // and takes its own units in hand in a fight. Every POSTURE_EVERY s it sizes the field up: its army
+    // against what it sees of the enemy's, and what of the enemy's stands at its own door.
+    //   fortify - pressed at its door: no waves out, turrets and artillery set sooner, its gathered men
+    //             sent at the enemy in its ground, its military raised first;
+    //   rush    - it outguns what it sees: small early waves, men and tanks, few seeds;
+    //   build   - neither: seeds and levels, the army gathered for a big wave.
+    const powerOf = (u) => POWER[G.kindOf(u)] || 1;
+    const field = (u) => !u.dead && !u.building && !u.mount && u.kind !== 'defence';
+    function sizeUp() {
+      const foe = G.other(side), front = G.frontOf(match, side, true);
+      const mine = G.unitsOf(match, side).filter(field);
+      const theirs = G.unitsOf(match, foe).filter((u) => field(u) && (!PW.vision || PW.vision.sees(world, side, u.x)));
+      const sum = (list) => list.reduce((s, u) => s + powerOf(u), 0);
+      // (at its door: in its ground, or within DOOR of its front)
+      const near = theirs.filter((u) => (u.x - front) * dir() < DOOR);
+      return { mine: sum(mine), theirs: sum(theirs), near: sum(near), nearUnits: near };
+    }
+    function posture() {
+      if (match.clock < (brain.postureAt || 0)) return;
+      brain.postureAt = match.clock + POSTURE_EVERY;
+      const s = sizeUp();
+      brain.sized = s;
+      const p = s.near > Math.max(3, s.mine * 0.8) ? 'fortify' : s.mine >= Math.max(8, s.theirs * 1.5) ? 'rush' : 'build';
+      if (p !== brain.posture) { brain.posture = p; brain.shifts = (brain.shifts || 0) + 1; brain.last = `posture: ${p}`; }
+    }
+    // Fortify: its gathered men and its own-way units go for the enemy in its ground.
+    function defend() {
+      if (brain.posture !== 'fortify' || !brain.sized || !brain.sized.nearUnits.length) return false;
+      const ours = G.unitsOf(match, side).filter((u) => field(u) && u.game && (u.game.order.type === 'gather' || u.game.order.type === 'auto'));
+      if (!ours.length || match.clock < (brain.defendAt || 0)) return false;
+      brain.defendAt = match.clock + 6;
+      const target = brain.sized.nearUnits.reduce((a, b) => ((a.x - b.x) * dir() > 0 ? a : b));   // (the deepest in)
+      G.order(match, ours, { type: 'attack', x: Math.round(target.x), target });
+      for (const u of ours) u.game.order = { type: 'auto' };
+      brain.defends = (brain.defends || 0) + 1;
+      brain.last = `defend: ${ours.length} at ${Math.round(target.x)}`;
+      return true;
+    }
+    // In a fight it takes its units in hand: each focuses the weakest enemy in its reach; a trooper
+    // throws a grenade into a knot of men, a mech looses a missile at armour; one badly hurt falls back
+    // to the rally to go with the next wave. (Held: the match's own way-finding leaves it be a while.)
+    const hpShare = (u) => (u.hp ?? 1) / ((u.kind === 'trooper' ? PW.troops && PW.troops.HP : u.kind === 'mech' ? PW.mechs && PW.mechs.ARMOUR : PW.tanks && PW.tanks.ARMOUR) || 100);
+    function fight() {
+      const foe = G.other(side);
+      const enemies = G.unitsOf(match, foe).filter((u) => !u.dead && u.kind !== 'jet' && (!PW.vision || PW.vision.sees(world, side, u.x)));
+      if (!enemies.length) return 0;
+      let acted = 0;
+      for (const u of G.unitsOf(match, side)) {
+        if (!field(u) || u.kind === 'jet' || !u.game) continue;
+        const o = u.game.order.type;
+        if (o === 'hack' || o === 'manual') continue;
+        const near = enemies.filter((e) => Math.abs(e.x - u.x) < REACH && Math.abs(e.y - u.y) < 220);
+        if (!near.length) continue;
+        const g = u.game;
+        // (badly hurt: back to the rally, with the next wave after)
+        if (hpShare(u) < RETREAT && u.kind !== 'trooper' || hpShare(u) < RETREAT * 0.8) {
+          if (!g.fallback) { g.fallback = true; G.order(match, [u], { type: 'move', x: rally() }); u.game.order = { type: 'gather' }; g.handUntil = match.clock + 20; acted += 1; brain.retreats = (brain.retreats || 0) + 1; }
+          continue;
+        }
+        // (its abilities, a while apart)
+        if (match.clock >= (g.abilityAt || 0)) {
+          if (u.kind === 'trooper' && (u.grenades || 0) > 0 && PW.troops && PW.troops.throwGrenade) {
+            const knot = near.filter((e) => e.kind === 'trooper' && Math.abs(e.x - u.x) > 40 && Math.abs(e.x - u.x) < 180);
+            if (knot.length >= 2) {
+              u.aim = { x: knot.reduce((s, e) => s + e.x, 0) / knot.length, y: knot[0].y - 12 };
+              PW.troops.throwGrenade(world, u);
+              g.abilityAt = match.clock + 6; acted += 1; brain.grenades = (brain.grenades || 0) + 1;
+            }
+          } else if (u.kind === 'mech' && (u.missiles || 0) > 0 && PW.mechs && PW.mechs.launch) {
+            const armour = near.find((e) => e.kind === 'tank' || e.kind === 'mech' || (!e.kind && e.art));
+            if (armour) {
+              u.aim = { x: armour.x, y: armour.y - 20 };
+              PW.mechs.launch(world, u);
+              g.abilityAt = match.clock + 5; acted += 1; brain.missiles = (brain.missiles || 0) + 1;
+            }
+          }
+        }
+        // (focus: the weakest in reach)
+        const weakest = near.reduce((a, b) => (hpShare(b) < hpShare(a) ? b : a));
+        if (g.focus !== weakest || match.clock >= (g.handUntil || 0)) {
+          G.order(match, [u], { type: 'attack', x: Math.round(weakest.x), target: weakest });
+          u.game.order = { type: o === 'gather' ? 'gather' : 'auto' };
+          g.focus = weakest; g.handUntil = match.clock + 4; acted += 1;
+        }
+      }
+      if (acted) brain.handled = (brain.handled || 0) + acted;
+      return acted;
+    }
+
     function step(dt) {
       brain.think -= dt;
       if (brain.think > 0) return;
       brain.think = between(THINK);
       if (!world.capitalGrowth) return;
-      // (one thing a look, the most pressing first)
-      if (rebuild()) brain.doing = 'rebuild';
-      else if (attack()) brain.doing = 'attack';
-      else if (bombard()) brain.doing = 'bombard';
-      else if (hack()) brain.doing = 'hack';
-      else if (upgrade()) brain.doing = 'upgrade';
-      else if (grow()) brain.doing = 'grow';
-      else if (arm()) brain.doing = 'arm';
+      posture();
+      fight();   // (its hands in the fight - every look, beside the one thing it does)
+      // (one thing a look, the most pressing first - in the order its posture puts them)
+      const order = brain.posture === 'fortify' ? [rebuild, defend, bombard, arm, upgrade, hack]
+        : brain.posture === 'rush' ? [rebuild, attack, bombard, arm, hack, upgrade, grow]
+          // (arming before the next seed: it keeps its own pace - DEPLOY_EVERY - and a side
+          // seeding every look never armed at all)
+          : [rebuild, attack, bombard, hack, upgrade, arm, grow];
+      for (const act of order) if (act()) { brain.doing = act.name; break; }
     }
     return { side, brain, step };
   }

@@ -7,6 +7,7 @@
   const { S, STYLES, ROLE, tone, mix } = K;
   const FARM_VARIANTS = ['silos', 'barn', 'greenhouse', 'homestead'];
   const GRAIN = [214, 176, 92];
+  const CORE_DROP = 14;   // N95: how much lower the silo bank's core sits, for the manifold over it
 
   function siding(style, x, y, d, P) {
     // Farm walls: Asian red timber, Gothic stone base with timber, Modern ribbed metal.
@@ -169,7 +170,7 @@
     const random = PW.createRandom(seed);
     const P = STYLES[style];
     // (room under the ground for the core's vault)
-    const width = 480, height = 270 + K.VAULT_DEPTH + 5, ground = 270;
+    const width = 480, height = 270 + K.VAULT_DEPTH + 5 + (variant === 'silos' ? CORE_DROP : 0), ground = 270;
     const c = K.createCanvas(width, height, ground);
     c.meta = { type: 'farm', style, level, variant, facing, seed };
     c.storage = [];
@@ -270,20 +271,29 @@
         const bx = X(b.lx0 + b.d / 2);
         for (const [dx, dy] of [[-2, 3], [-1, 2], [0, 1], [1, 2], [2, 3]]) K.deco(c, bx + dx, ground - dy, [96, 100, 106]);
       }
-      for (let x = g0x + 1; x < g1x; x += 2) K.deco(c, x, ground - 1, tone(GRAIN, 1.1));
-      const MH = 30;   // the manifold's height over the floor line
-      const pipe = (x, y, edge) => K.deco(c, x, y, edge ? [58, 60, 64] : (PW.hash2(x, y) & 7) === 0 ? tone(GRAIN, 1.05) : [124, 128, 134]);
-      for (let v = 1; v <= MH; v += 1) { pipe(coreCx - 1, ground - v, true); pipe(coreCx, ground - v, false); pipe(coreCx + 1, ground - v, true); }
+      // N95 (the user's, 2026-11-22): the silos are the farm's first and main building, and the
+      // pipe out of the core's top splits UNDER the floor and comes up into each bin from its
+      // bottom - the core set CORE_DROP lower to make room for the manifold between its top and
+      // the floor line.
+      const MD = 7;   // the manifold's depth under the floor line
+      // (in the ground the pipe is steel of the farm's own works - a deco cell may not lie on earth)
+      const pipe = (x, y, edge) => {
+        const col = edge ? [58, 60, 64] : (PW.hash2(x, y) & 7) === 0 ? tone(GRAIN, 1.05) : [124, 128, 134];
+        if (y >= ground) K.solid(c, x, y, M.STEEL, col, ROLE.CRADLE); else K.deco(c, x, y, col);
+      };
+      const lidRow = ground + CORE_DROP;
+      for (let y = ground + MD - 1; y < lidRow; y += 1) { pipe(coreCx - 1, y, true); pipe(coreCx, y, false); pipe(coreCx + 1, y, true); }
       const centres = bins.map((b) => X(b.lx0 + b.d / 2));
-      const mx0 = Math.min(...centres), mx1 = Math.max(...centres);
+      const mx0 = Math.min(coreCx, ...centres), mx1 = Math.max(coreCx, ...centres);
       for (let x = mx0; x <= mx1; x += 1) {
-        pipe(x, ground - MH - 1, true); pipe(x, ground - MH, false); pipe(x, ground - MH + 1, true);
-        if ((x - mx0) % 12 === 6) { pipe(x, ground - MH - 2, true); pipe(x, ground - MH + 2, true); }   // flange rings
+        pipe(x, ground + MD - 1, true); pipe(x, ground + MD, false); pipe(x, ground + MD + 1, true);
+        if ((x - mx0) % 12 === 6) { pipe(x, ground + MD - 2, true); pipe(x, ground + MD + 2, true); }   // flange rings
       }
       for (const bx of centres) {
-        for (let v = MH - 8; v < MH; v += 1) { pipe(bx - 1, ground - v, true); pipe(bx, ground - v, false); pipe(bx + 1, ground - v, true); }
-        for (const dx of [-2, 2]) { pipe(bx + dx, ground - (MH - 8), true); pipe(bx + dx, ground - (MH - 7), true); }   // the collar at the tap
-        K.deco(c, bx, ground - (MH - 9), tone(GRAIN, 1.2));   // grain in the throat where the pipe taps the bin
+        // the riser up into the bin's foot - a hopper's throat through the floor - and its collar
+        for (let y = ground - 2; y < ground + MD - 1; y += 1) { pipe(bx - 1, y, true); pipe(bx, y, false); pipe(bx + 1, y, true); }
+        for (const dx of [-2, 2]) { pipe(bx + dx, ground + 1, true); pipe(bx + dx, ground + 2, true); }
+        K.deco(c, bx, ground - 3, tone(GRAIN, 1.2));   // grain in the throat where the pipe meets the bin
       }
     } else if (variant === 'barn') {
       const w = 180, wallH = 72;
@@ -488,7 +498,7 @@
       trough(art, yard0 + 58);
       bodyRight = yard1;
     }
-    K.core(c, X(coreLx), ground);
+    K.core(c, X(coreLx), variant === 'silos' ? ground + CORE_DROP : ground);
     K.corePillars(c, style);
     K.bakeLights(c, style);
     const [l, r] = xs(0, bodyRight);

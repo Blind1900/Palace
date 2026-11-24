@@ -11,7 +11,8 @@ const totalWater = () => pwApp.countWater() + waterInFlight();
 const run = (ticks) => pwApp.stepWorld(ticks);
 
 // 1. Tunnel under a lake, breached: floods quickly and conserves water.
-const lake = layout.lakes.filter((l) => !l.pond && l.left !== undefined).sort((a, b) => (b.right - b.left) - (a.right - a.left))[0];
+// (N133: a map's lakes are its ends' and, some maps, the centre's - the widest there is)
+const lake = layout.lakes.filter((l) => l.left !== undefined).sort((a, b) => (b.right - b.left) - (a.right - a.left))[0];
 let deepest = lake.level;
 for (let x = lake.left; x <= lake.right; x += 1) deepest = Math.max(deepest, world.groundTop[x]);
 // (the deepest point clear of anything built under the lake, like a lake pump's chamber: the
@@ -24,7 +25,7 @@ for (let x = lake.left; x <= lake.right; x += 1) {
   if (y > bottomY) { bottomY = y; bottomX = x; }
 }
 const tunnelTop = bottomY + 70, tunnelBottom = tunnelTop + 40;
-const t0 = bottomX - 300, t1 = bottomX + 300;
+const t0 = Math.max(40, bottomX - 300), t1 = Math.min(world.width - 41, bottomX + 300);
 PW.settlementTools.carveBox(world, t0, tunnelTop, t1, tunnelBottom, 0);
 for (let c = 0; c < world.chunkCount; c += 1) if (world.simActive[c]) { /* carving woke nothing that moves yet */ }
 const before = totalWater();

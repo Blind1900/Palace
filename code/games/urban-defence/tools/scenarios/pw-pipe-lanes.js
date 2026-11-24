@@ -158,9 +158,10 @@ function jacket() {
 }
 
 const s0 = scan('frame0'), j0 = joints('frame0'), jk = jacket();
-check(s0.cols > 20000 && s0.cuts === 0, `every run lane is an open channel at generation (${s0.cuts} cut cells in ${s0.cols} columns)`);
-check(j0.tested > 5 && j0.bad === 0, `every lane passes every bend and level change at generation (${j0.bad} failures in ${j0.tested} fittings)`);
-check(jk.cased > 20000 && jk.bare === 0, `the cased runs wear their armoured jacket (${jk.worn} of ${jk.cased} rows, ${jk.barred} barred by others' works, ${jk.bare} missing)`);
+// (N124/N133: four towns on gentler land - fewer runs and level changes than the old five on rough)
+check(s0.cols > 4000 && s0.cuts === 0, `every run lane is an open channel at generation (${s0.cuts} cut cells in ${s0.cols} columns)`);
+check(j0.bad === 0, `every lane passes every bend and level change at generation (${j0.bad} failures in ${j0.tested} fittings)`);
+check(jk.cased > 4000 && jk.bare === 0, `the cased runs wear their armoured jacket (${jk.worn} of ${jk.cased} rows, ${jk.barred} barred by others' works, ${jk.bare} missing)`);
 pwApp.stepWorld(60 * 60);
 const s1 = scan('after60s'), j1 = joints('after60s');
 check(s1.cuts === 0, `every run lane is still open after a minute of the living world (${s1.cuts} cut cells)`);

@@ -653,6 +653,9 @@
       let entry = cache.get(key);
       const version = world.chunkVersion[c];
       if (entry && entry.version === version) { entry.used = frame; return entry; }
+      // N123: out of the watching side's sight, a chunk keeps the picture it had when last seen
+      // (the fog greys it over); it is drawn afresh when the side sees it again
+      if (entry && entry.canvas && world.fogSide && PW.vision && !PW.vision.chunkInSight(world, world.fogSide, c)) { entry.used = frame; return entry; }
       // Gas-only dirt (chunkHardVersion unmoved: just smoke or dust drifting through) does not
       // deserve a full re-raster every frame - during a blast that re-rastered nearly every
       // visible chunk for seconds on end (the perf pass). Deco never shows gas, so it stays

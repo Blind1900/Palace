@@ -50,7 +50,9 @@
       // formations.
       { name: 'settlements', label: 'Founding the towns', when: () => wild() && PW.generateSettlements, run() {
         // (N115: the test's sides found their own; N118: the person's side in its chosen aesthetic)
-        PW.generateSettlements(world, layout, seed, { homes: !opts.test, style: opts.style || null });
+        // (N120: a match's sides start with no territory - no home towns - unless towns=1, the suites'
+        // fixtures; the sandbox keeps them)
+        PW.generateSettlements(world, layout, seed, { homes: opts.homes !== false, style: opts.style || null });
         if (PW.bunkers) PW.bunkers.generate(world, layout, seed);
       } },
       { name: 'vegetation', label: 'Growing the wilds', when: () => wild() && PW.generateVegetation, run() {
@@ -599,8 +601,12 @@
       else if (selected) select(null);
     }
   });
+  // (N126: the cursor over the world, handed to PS's missile aim each frame - null off the canvas)
+  let cursorWorld = null;
+  canvas.addEventListener('pointerleave', () => { cursorWorld = null; });
   canvas.addEventListener('pointermove', (event) => {
     if (!renderer) return;
+    cursorWorld = toWorld(event);
     if (match && PW.gameUI) PW.gameUI.pointerMove(event, toWorld(event));
     if (tool === 'digL' || tool === 'digR') planDig(tool === 'digL' ? 'left' : 'right', toWorld(event));
     if (!drag.active) return;
@@ -715,7 +721,20 @@
     if (pipes) pipes.draw(renderer, now / 1000);
     if (fragments) fragments.draw(renderer);
     if (PW.mining) PW.mining.draw(renderer, world, now / 1000);
-    if (PW.drawUnitsHook) PW.drawUnitsHook(renderer);
+    if (PW.defence && PW.defence.pointer) PW.defence.pointer(world, cursorWorld ? cursorWorld.x : null, cursorWorld ? cursorWorld.y : null);
+    if (PW.drawUnitsHook) {
+      // N123: the other side's units are drawn only where the watching side sees them
+      const fog = world.fogSide && PW.vision ? world.fogSide : null, kept = [];
+      if (fog) {
+        for (const list of ['troops', 'tanks', 'mechs', 'jets', 'defence']) {
+          const all = world[list];
+          if (!all || !all.length) continue;
+          kept.push([list, all]);
+          world[list] = all.filter((u) => u.side === fog || PW.vision.sees(world, fog, u.x, (u.y ?? 0) - 12));
+        }
+      }
+      try { PW.drawUnitsHook(renderer); } finally { for (const [list, all] of kept) world[list] = all; }
+    }
     drawSelection(renderer);   // N78: the selected unit's bracket
     if (selected && (frames & 7) === 0) renderUnitPanel();   // and its live readout
     renderer.drawDeco();
@@ -818,7 +837,7 @@
   async function startMatch(choice) {
     const ui = PW.gameUI;
     const style = choice.style && choice.mode === 'versus' ? { side: choice.human, style: choice.style } : null;
-    await generateStaged({ seed: choice.seed, width: choice.width, test: !!choice.test, style }, ui.loading);
+    await generateStaged({ seed: choice.seed, width: choice.width, homes: !!choice.towns, style }, ui.loading);
     if (choice.test) world.buildSpeed = TEST_BUILD_SPEED;
     start();
     match = PW.game.create(world, { ...choice, app: window.pwApp });

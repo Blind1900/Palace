@@ -29,27 +29,36 @@ const SUITES = [
   { name: 'pw-vehicle', alone: true, page: 'capital-lab.html', ready: 'window.pwLab && pwLab.ready', params: 'det=1' },
   // N92: the tunnel and traversal lab - a squad finds its way through a course dug as it watches
   { name: 'pw-unit-lab', page: 'pw-unit-lab.html', ready: 'window.pwLab && pwLab.ready', params: 'det=1' },
+  // (towns=1: the world made with its home towns and the match played from them - the match suites'
+  // fixtures. N120's own opening - no territory, the first seed placed - is the game's, and is
+  // pw-game-test's, pw-first-seed's and the menu runs')
   // N6: the match on the game page - against the computer from a link, and from the menu watching
   // the computer play itself (the person takes a chair and hands it back)
-  { name: 'pw-game', params: 'mode=game&start=versus&side=left&det=1' },
+  { name: 'pw-game', params: 'mode=game&start=versus&side=left&det=1&towns=1' },
   { name: 'pw-game-menu', scenario: 'pw-game', ready: "!!document.getElementById('gm-menu')", params: 'mode=game&det=1' },
   // N6: the rules - deploying, hacking, cover - and the ruins and the win
-  { name: 'pw-game-rules', alone: true, limit: 420, params: 'mode=game&start=versus&side=left&det=1' },
-  { name: 'pw-game-win', params: 'mode=game&start=versus&side=left&det=1' },
+  { name: 'pw-game-rules', alone: true, limit: 420, params: 'mode=game&start=versus&side=left&det=1&towns=1' },
+  { name: 'pw-game-win', params: 'mode=game&start=versus&side=left&det=1&towns=1' },
   // N102: the unit in hand - stands unless its keys are held, jumps, fires where the mouse is
-  { name: 'pw-game-hand', params: 'mode=game&start=versus&side=left&det=1' },
+  { name: 'pw-game-hand', params: 'mode=game&start=versus&side=left&det=1&towns=1' },
   // N103: turrets on their bases - on the roofs, the land and the tunnel rooms; set down by a click
-  { name: 'pw-turret-mounts', params: 'mode=game&start=versus&side=left&det=1' },
+  { name: 'pw-turret-mounts', params: 'mode=game&start=versus&side=left&det=1&towns=1' },
   // N111: the spawn pad in every hangar floor over the base's armoured core; units come up on it
-  { name: 'pw-spawn-pad', params: 'mode=game&start=versus&side=left&det=1' },
+  { name: 'pw-spawn-pad', params: 'mode=game&start=versus&side=left&det=1&towns=1' },
   // N116: levels bought by hand, units priced in HM and SM, HM to rush a tunnel's works
-  { name: 'pw-game-upgrade', params: 'mode=game&start=versus&side=left&det=1' },
+  { name: 'pw-game-upgrade', params: 'mode=game&start=versus&side=left&det=1&towns=1' },
   // N115: the gameplay test - each side places its starting capital, four times the build speed
   { name: 'pw-game-test', params: 'mode=game&start=test&side=left&det=1' },
   // N114: missile launchers and interceptors on planted bases, out under the sky
-  { name: 'pw-artillery-mounts', params: 'mode=game&start=versus&side=left&det=1' },
+  { name: 'pw-artillery-mounts', params: 'mode=game&start=versus&side=left&det=1&towns=1' },
   // N118: the start screen and the game-mode menu, by real clicks and keys
   { name: 'pw-start-menu', ready: "!!document.getElementById('gm-menu')", params: 'mode=game&det=1' },
+  // the user's: the computer player is all three - builds, fortifies, rushes - and fights hands-on
+  { name: 'pw-ai-adaptive', params: 'mode=game&start=versus&side=left&det=1&towns=1' },
+  // N123: black where never seen, grey and held where seen before, circles cut only by mountains; the view on the unit
+  { name: 'pw-vision', params: 'mode=game&start=versus&side=left&det=1&towns=1' },
+  // N129: a city's tunnel - a shaft down from under its core at level 3, then out sideways to the ore
+  { name: 'pw-core-shaft', params: 'det=1' },
   // N8: the game is the main page, opened from disk as a downloaded copy is; the old beta still loads
   { name: 'pw-main-page', page: 'index.html', file: true, alone: true, ready: "!!document.getElementById('gm-menu')" },
   // (the old beta makes its world from Math.random: seeded, the same world each run - unseeded it

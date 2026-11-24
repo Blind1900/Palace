@@ -25,9 +25,13 @@ const key = (type, code) => window.dispatchEvent(new KeyboardEvent(type, { code,
 const tap = (code, ticks) => { key('keydown', code); pwApp.stepWorld(ticks); key('keyup', code); };
 
 // A trooper of one's own, deployed by a real click, on its way somewhere.
+// (N126: TROOPER picked, then the DEPLOY button)
 const el = document.querySelector('#gm-bar [data-deploy="trooper"]');
 const pc = centre(el);
 await click(pc.x, pc.y);
+await sleep(60);
+const go = centre(document.querySelector('#gm-bar [data-deploy-go]'));
+await click(go.x, go.y);
 await sleep(60);
 const u = G.unitsOf(m, 'left').filter((q) => q.kind === 'trooper').pop();
 check(!!u, 'a trooper is deployed');

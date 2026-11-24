@@ -7,48 +7,59 @@
 (function () {
   const PW = window.PW;
 
+  // N119 (the user's): the whole game UI simplified - text on plain black in the menu's phosphor green,
+  // the buttons bracketed words (no boxes, no shadows, no gradients), the one in use lit.
   const CSS = `
-  .gm { font: 16px 'Ithaca', Consolas, monospace; color: #c8dcb0; }
-  .gm button { font: inherit; color: #c8dcb0; background: #0b140f; border: 2px solid #2c4030; padding: 2px 10px 1px; cursor: pointer;
-    box-shadow: 2px 2px 0 #000; }
-  .gm button:hover { border-color: #4c7050; color: #e8f0d8; }
-  .gm button.on { background: #2c4a30; color: #f0f6e0; border-color: #6a9a60; }
-  .gm button:disabled { opacity: 0.4; cursor: default; }
-  #gm-menu, #gm-loading, #gm-end { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
-    background: radial-gradient(#0c1812 0%, #05080a 70%); z-index: 20; }
-  #gm-end { background: #05080acc; }
-  .gm .card { background: #08100ce8; border: 2px solid #3c5a40; box-shadow: 4px 4px 0 #000; padding: 18px 24px; min-width: 380px; }
-  .gm h1 { font: 48px 'Ithaca', Consolas, monospace; margin: 0 0 4px; color: #e8f0d8; letter-spacing: 3px; }
-  .gm h2 { font: 32px 'Ithaca', Consolas, monospace; margin: 0 0 10px; color: #e8f0d8; }
-  .gm .sub { color: #7e9a70; margin-bottom: 14px; }
-  .gm .row { display: flex; align-items: center; gap: 6px; margin: 8px 0; }
-  .gm .row > span { width: 92px; color: #9fb890; }
-  .gm input { font: inherit; color: #e8f0d8; background: #0b140f; border: 2px solid #2c4030; padding: 1px 6px; width: 140px; }
-  .gm .go { margin-top: 14px; font-size: 24px; padding: 4px 24px 2px; border-color: #6a9a60; }
-  .gm .bar { height: 14px; background: #0b140f; border: 2px solid #2c4030; margin: 10px 0 6px; }
-  .gm .bar i { display: block; height: 100%; width: 0; background: #6fae58; }
+  .gm { --ph: #6ef08a; --ph-dim: #3c9a58; --ph-lit: #d8ffe0; font: 16px 'Ithaca', Consolas, monospace; color: var(--ph);
+    letter-spacing: 0.04em; -webkit-font-smoothing: none; }
+  .gm button { font: inherit; color: var(--ph); background: none; border: none; padding: 1px 2px; cursor: pointer; letter-spacing: inherit; }
+  .gm button:before { content: '[ '; color: var(--ph-dim); }
+  .gm button:after { content: ' ]'; color: var(--ph-dim); }
+  .gm button:hover { color: var(--ph-lit); }
+  .gm button.on { color: #020402; background: var(--ph); }
+  #gm-bar button.dim { color: var(--ph-dim); }
+  #gm-bar button.go { border: 1px solid var(--ph-dim); padding: 0 8px; }
+  #gm-bar button.go.lit { color: #020402; background: var(--ph); border-color: var(--ph); }
+  .gm button.on:before, .gm button.on:after { color: #020402; }
+  .gm button:disabled { color: #24503a; cursor: default; }
+  .gm button:disabled:before, .gm button:disabled:after { color: #1c3a2a; }
+  #gm-end { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: #000; z-index: 20; }
+  .gm .card { background: #000; padding: 18px 24px; min-width: 380px; }
+  .gm h1 { font: 48px 'Ithaca', Consolas, monospace; margin: 0 0 4px; color: var(--ph); letter-spacing: 3px; font-weight: normal; }
+  .gm h2 { font: 32px 'Ithaca', Consolas, monospace; margin: 0 0 10px; color: var(--ph); font-weight: normal; }
+  .gm .sub { color: var(--ph-dim); margin-bottom: 14px; }
+  .gm .go { margin-top: 14px; font-size: 24px; }
   #gm-top { position: fixed; left: 0; right: 0; top: 0; display: flex; align-items: center; gap: 14px; padding: 4px 10px;
-    background: #05080ae0; border-bottom: 2px solid #2c4030; z-index: 10; }
-  #gm-top .side { color: #e8f0d8; letter-spacing: 1px; }
-  #gm-top .res b { color: #f0f6e0; font-weight: normal; }
-  #gm-top .res i { font-style: normal; color: #7e9a70; }
+    background: #000; z-index: 10; }
+  #gm-top .side { color: var(--ph-lit); }
+  #gm-top .res b { color: var(--ph-lit); font-weight: normal; }
+  #gm-top .res i { font-style: normal; color: var(--ph-dim); }
   #gm-top .gap { flex: 1; }
-  #gm-top .clock { color: #e8f0d8; min-width: 56px; text-align: center; }
-  #gm-bar { position: fixed; left: 8px; bottom: 8px; display: flex; flex-wrap: wrap; gap: 4px; padding: 4px; max-width: calc(100vw - 480px);
-    background: #05080ae0; border: 2px solid #2c4030; z-index: 10; }
-  #gm-alerts { position: fixed; left: 10px; top: 40px; display: flex; flex-direction: column; gap: 3px; z-index: 9; pointer-events: none; }
-  #gm-alerts div { background: #05080acc; border-left: 3px solid #3c5a40; padding: 1px 8px; }
-  #gm-alerts div.good { border-color: #c8b040; color: #fff0b8; }
-  #gm-alerts div.bad { border-color: #b04030; color: #ffc8b8; }
-  #unit-panel { top: 44px !important; }
-  #gm-sel { position: fixed; right: 8px; top: 44px; width: 250px; display: none; background: #05080ae0; border: 2px solid #2c4030;
-    padding: 8px; z-index: 10; }
-  #gm-sel h3 { margin: 0 0 4px; font: 20px 'Ithaca', Consolas, monospace; color: #e8f0d8; letter-spacing: 1px; }
-  #gm-sel .deploys { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
-  #gm-sel .deploys button { padding: 1px 6px; font-size: 14px; }
-  #gm-map { position: fixed; right: 8px; bottom: 8px; width: 440px; height: 70px; border: 2px solid #2c4030; z-index: 10;
-    image-rendering: pixelated; cursor: pointer; background: #05080a; }
-  #gm-bar button[data-deploy] { font-size: 14px; padding: 2px 6px 1px; }
+  #gm-top .clock { color: var(--ph-lit); min-width: 56px; text-align: center; }
+  #gm-bar { position: fixed; left: 0; bottom: 0; display: flex; flex-wrap: wrap; gap: 2px 8px; padding: 4px 8px; max-width: calc(100vw - 460px);
+    background: #000; z-index: 10; }
+  #gm-bar .grp { color: var(--ph-dim); margin-left: 10px; align-self: center; }
+  #gm-quit { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(0, 0, 0, 0.7); z-index: 30; }
+  #gm-quit .card { text-align: center; font-size: 22px; }
+  #gm-upg { position: fixed; inset: 0; pointer-events: none; z-index: 8; }
+  #gm-upg button { position: absolute; pointer-events: auto; transform: translate(-50%, -100%); white-space: nowrap; background: #000; padding: 1px 4px; }
+  #gm-alerts { position: fixed; left: 10px; top: 34px; display: flex; flex-direction: column; gap: 2px; z-index: 9; pointer-events: none; }
+  #gm-alerts div { background: #000; padding: 1px 8px; }
+  #gm-alerts div.good { color: var(--ph-lit); }
+  #gm-alerts div.bad { color: #ff7a5c; }
+  #unit-panel { top: 34px !important; background: #000 !important; border: none !important; color: #6ef08a !important;
+    font: 15px 'Ithaca', Consolas, monospace !important; box-shadow: none !important; }
+  #unit-panel h3 { font: 18px 'Ithaca', Consolas, monospace !important; color: #d8ffe0 !important; }
+  #unit-panel kbd { background: none !important; border: none !important; color: #d8ffe0 !important; }
+  #unit-panel .bar, #gm-sel .bar { background: #0a1a10 !important; border: none !important; }
+  #unit-panel .bar i { background: #6ef08a !important; }
+  #unit-panel .bar i.hurt { background: #e0c050 !important; }
+  #unit-panel .bar i.grave { background: #ff7a5c !important; }
+  #gm-sel { position: fixed; right: 8px; top: 34px; width: 250px; display: none; background: #000; padding: 8px; z-index: 10; }
+  #gm-sel h3 { margin: 0 0 4px; font: 20px 'Ithaca', Consolas, monospace; color: var(--ph-lit); font-weight: normal; }
+  #gm-sel .deploys { display: flex; flex-wrap: wrap; gap: 2px 8px; margin-top: 4px; }
+  #gm-map { position: fixed; right: 0; bottom: 0; width: 440px; height: 70px; border: none; z-index: 10;
+    image-rendering: pixelated; cursor: pointer; background: #000; }
   `;
   let styled = false;
   function style() {
@@ -183,6 +194,9 @@
       // (N115: start=test - the gameplay test: you against the computer, each placing its capital)
       choice.mode = fromUrl === 'watch' ? 'watch' : 'versus';
       choice.test = fromUrl === 'test';
+      // (towns=1: the world made with its home towns, the match played from them - the suites'
+      // fixtures for what is not the opening; N120's opening is the game's)
+      choice.towns = params.get('towns') === '1';
       choice.human = params.get('side') === 'right' ? 'right' : 'left';
       choice.map = mapOf(params.get('map'));
       const st = params.get('style');
@@ -209,7 +223,7 @@
             <div class="ph-group"><span>MATCH</span><div class="ph-opts">
               ${opt('mode', 'versus', 'YOU VS COMPUTER', 'Destroy the enemy, raise your capital over its ruins')}
               ${opt('mode', 'watch', 'COMPUTER VS COMPUTER', 'Watch - take either side when you like')}
-              ${opt('mode', 'test', 'GAMEPLAY TEST', 'Place your own starting capital - builds 4x as fast')}
+              ${opt('mode', 'test', 'GAMEPLAY TEST', 'You against the computer, everything built 4x as fast')}
             </div></div>
             <div class="ph-group"><span>MAP SIZE</span><div class="ph-opts">
               ${Object.keys(MAPS).map((k) => opt('map', k, k.toUpperCase(), MAP_TIME[k], '')).join('')}
@@ -299,20 +313,21 @@
   let match = null, app = null, top = null, bar = null, alerts = null, endEl = null;
   let gameTool = 'select', cursor = null, refreshAt = 0;
   const rates = { at: 0, last: null, perMin: {} };
+  // (N119: one short row - the tools grouped under a dim word, the names cut to the bone; the prices
+  // HM+SM. N122: a city is raised by the button over it, not a tool.)
   const TOOLS = [
     { id: 'select', label: 'SELECT', tip: 'Click a unit to select it; drag to pan' },
-    { id: 'seed:capital', label: 'SEED CAPITAL', tip: 'Plant a capital seed in your vision' },
-    { id: 'seed:farm', label: 'SEED FARM', tip: 'Plant a farm seed in your vision' },
-    { id: 'seed:military', label: 'SEED MILITARY', tip: 'Plant a military seed in your vision' },
+    { id: 'seed:capital', group: 'SEED', label: 'CAPITAL', tip: 'Plant a capital seed in your vision' },
+    { id: 'seed:farm', label: 'FARM', tip: 'Plant a farm seed in your vision' },
+    { id: 'seed:military', label: 'MILITARY', tip: 'Plant a military seed in your vision' },
     // N103: a turret set on its base on flat ground (or a tunnel room's floor) in your vision
-    { id: 'turret', label: 'TURRET 60', tip: 'Set a turret on its base on flat ground in your vision (60 HM)' },
+    { id: 'turret', group: 'BUILD', label: 'TURRET 60', tip: 'Set a turret on its base on flat ground in your vision (60 HM)' },
     // N114: the missile artillery, set on a base like a turret - out under the sky
     { id: 'art:launcher', label: 'ROCKETS 70+15', tip: 'Set a rocket launcher on its base on flat ground open to the sky, in your vision (70 HM, 15 SM)' },
-    { id: 'art:dome', label: 'IRON DOME 90+15', tip: 'Set an Iron Dome on its base on flat ground open to the sky, in your vision (90 HM, 15 SM)' },
+    { id: 'art:dome', label: 'DOME 90+15', tip: 'Set an Iron Dome on its base on flat ground open to the sky, in your vision (90 HM, 15 SM)' },
     { id: 'art:patriot', label: 'PATRIOT 120+20', tip: 'Set a Patriot on its base on flat ground open to the sky, in your vision (120 HM, 20 SM)' },
-    // N116: no city levels by itself - click the one to raise, and pay; HM rushes a tunnel's works
-    { id: 'upgrade', label: 'UPGRADE', tip: 'Click one of your cities to raise it a level (HM by its kind and level)' },
-    { id: 'rush', label: 'RUSH TUNNEL 50', tip: 'Click one of your tunnels: its next 4 minutes of growth in 1 (50 HM)' },
+    // N116: HM rushes a tunnel's works
+    { id: 'rush', label: 'RUSH 50', tip: 'Click one of your tunnels: its next 4 minutes of growth in 1 (50 HM)' },
   ];
 
   let cmd = null, attachedAt = 0, slowTold = false, fpsSum = 0, fpsN = 0;
@@ -393,7 +408,7 @@
       }
     }
     // (the seed and deploy tools are for the side a person plays)
-    bar.querySelectorAll('[data-tool^="seed:"], [data-tool^="art:"], [data-tool="turret"], [data-tool="upgrade"], [data-tool="rush"], [data-deploy]').forEach((b) => { if (!match.human) b.disabled = true; else if (b.dataset.tool) b.disabled = false; });
+    bar.querySelectorAll('[data-tool^="seed:"], [data-tool^="art:"], [data-tool="turret"], [data-tool="rush"], [data-deploy], [data-deploy-go]').forEach((b) => { if (!match.human) b.disabled = true; else if (b.dataset.tool || b.dataset.deploy) b.disabled = false; });
     refreshDeploys();
     renderSel();
   }
@@ -402,21 +417,43 @@
   // from the base nearest the front that can.
   function renderBar() {
     const K = PW.game.UNIT_KINDS;
-    bar.innerHTML = TOOLS.map((t) => `<button data-tool="${t.id}" title="${t.tip}" class="${gameTool === t.id ? 'on' : ''}">${t.label}</button>`).join('') +
-      '<span style="width:10px"></span>' +
-      // (N116: each costs HM and SM both - shown HM+SM)
-      Object.keys(K).map((k) => `<button data-deploy="${k}" title="Deploy a ${K[k].label.toLowerCase()} (${K[k].hm} HM, ${K[k].sm || 0} SM)">${K[k].label} ${K[k].hm}+${K[k].sm || 0}</button>`).join('');
+    const grp = (word) => `<span class="grp">${word}</span>`;
+    bar.innerHTML = TOOLS.map((t) => `${t.group ? grp(t.group) : ''}<button data-tool="${t.id}" title="${t.tip}" class="${gameTool === t.id ? 'on' : ''}">${t.label}</button>`).join('') +
+      grp('DEPLOY') +
+      // (N116: each costs HM and SM both - shown HM+SM. N126, the user's: the kinds are options -
+      // one picked at a time - and a single DEPLOY button lights when the picked one can go)
+      Object.keys(K).map((k) => `<button data-deploy="${k}" class="opt${deployKind === k ? ' on' : ''}" title="Pick ${K[k].label.toLowerCase()} to deploy (${K[k].hm} HM, ${K[k].sm || 0} SM)">${K[k].label} ${K[k].hm}+${K[k].sm || 0}</button>`).join('') +
+      `<button data-deploy-go="1" class="go" title="Deploy the picked unit">DEPLOY</button>`;
     deployKey = '';
   }
-  let deployKey = '';
+  let deployKey = '', deployKind = 'trooper';
   function refreshDeploys() {
     if (!match.human) return;
     const base = cmd.building && PW.game.ownerOf(cmd.building) === match.human && cmd.building.type === 'military' ? cmd.building : null;
     const can = Object.keys(PW.game.UNIT_KINDS).map((k) => PW.game.canDeploy(match, match.human, k, base));
-    const key = can.map((c) => (c.ok ? '1' : c.note)).join('|');
+    const key = `${deployKind}|${can.map((c) => (c.ok ? '1' : c.note)).join('|')}`;
     if (key === deployKey) return;
     deployKey = key;
-    bar.querySelectorAll('[data-deploy]').forEach((b, i) => { b.disabled = !can[i].ok; b.title = can[i].ok ? b.title.replace(/ - .*/, '') : `${PW.game.UNIT_KINDS[b.dataset.deploy].label}: ${can[i].note}`; });
+    // (an option that cannot go now is dimmed, but may still be picked; DEPLOY lights for the picked one)
+    bar.querySelectorAll('[data-deploy]').forEach((b, i) => {
+      b.classList.toggle('dim', !can[i].ok);
+      b.classList.toggle('on', b.dataset.deploy === deployKind);
+      b.title = can[i].ok ? `Pick ${PW.game.UNIT_KINDS[b.dataset.deploy].label.toLowerCase()} to deploy` : `${PW.game.UNIT_KINDS[b.dataset.deploy].label}: ${can[i].note}`;
+    });
+    const go = bar.querySelector('[data-deploy-go]'), pick = Object.keys(PW.game.UNIT_KINDS).indexOf(deployKind);
+    if (go) {
+      const ok = pick >= 0 && can[pick].ok;
+      go.disabled = !ok;
+      go.classList.toggle('lit', ok);
+      go.title = ok ? `Deploy a ${PW.game.UNIT_KINDS[deployKind].label.toLowerCase()}` : pick >= 0 ? can[pick].note : 'Pick a unit first';
+    }
+  }
+  function deployPicked() {
+    if (!match.human || !deployKind) return;
+    const base = cmd.building && PW.game.ownerOf(cmd.building) === match.human && cmd.building.type === 'military' ? cmd.building : null;
+    const r = PW.game.deploy(match, match.human, deployKind, base);
+    if (PW.notify) PW.notify.flash(r.ok ? `${PW.game.UNIT_KINDS[deployKind].label} deployed` : r.note, r.ok ? 'good' : 'bad', 2);
+    deployKey = '';
   }
   function setTool(id) {
     gameTool = id;
@@ -427,12 +464,8 @@
     const b = event.target.closest('button');
     if (!b) return;
     if (b.dataset.tool) setTool(b.dataset.tool === gameTool ? 'select' : b.dataset.tool);
-    if (b.dataset.deploy && match.human) {
-      const base = cmd.building && PW.game.ownerOf(cmd.building) === match.human && cmd.building.type === 'military' ? cmd.building : null;
-      const r = PW.game.deploy(match, match.human, b.dataset.deploy, base);
-      if (PW.notify) PW.notify.flash(r.ok ? `${PW.game.UNIT_KINDS[b.dataset.deploy].label} deployed` : r.note, r.ok ? 'good' : 'bad', 2);
-      deployKey = '';
-    }
+    if (b.dataset.deploy && match.human) { deployKind = b.dataset.deploy; deployKey = ''; refreshDeploys(); }
+    if (b.dataset.deployGo && match.human) deployPicked();
   }
   function onTopClick(event) {
     const b = event.target.closest('button');
@@ -488,12 +521,11 @@
       if (r.ok) setTool('select');
       return true;
     }
-    // N116: a city raised a level, a tunnel's works rushed - each paid in HM
-    if (event.button === 0 && (gameTool === 'upgrade' || gameTool === 'rush')) {
+    // N116: a tunnel's works rushed, paid in HM (a city is raised by the button over it - N122)
+    if (event.button === 0 && gameTool === 'rush') {
       if (!match.human) return true;
-      const r = gameTool === 'upgrade' ? PW.game.upgrade(match, match.human, p.x) : PW.game.rushTunnel(match, match.human, p.x, p.y);
-      if (PW.notify) PW.notify.flash(r.ok ? (gameTool === 'upgrade' ? `${r.city.kind} raised to level ${r.level}` : 'Tunnel works rushed')
-        : `${gameTool === 'upgrade' ? 'Upgrade' : 'Rush'}: ${r.note}`, r.ok ? 'good' : 'bad', 2.5);
+      const r = PW.game.rushTunnel(match, match.human, p.x, p.y);
+      if (PW.notify) PW.notify.flash(r.ok ? 'Tunnel works rushed' : `Rush: ${r.note}`, r.ok ? 'good' : 'bad', 2.5);
       if (r.ok) setTool('select');
       return true;
     }
@@ -536,14 +568,6 @@
       if (PW.notify) PW.notify.cursor(!sees ? 'Beyond your vision' : can.ok ? `Set ${A.label.toLowerCase()} here (flat ground, open sky)` : `${A.label}: ${can.note}`, sees && can.ok ? '' : 'bad');
       return;
     }
-    if (gameTool === 'upgrade' && match.human) {
-      const city = PW.game.cityAt(match, p.x, match.human);
-      const can = PW.game.canUpgrade(match, match.human, city);
-      const name = city ? `${city.kind.toUpperCase()} ${city.id}` : '';
-      if (PW.notify) PW.notify.cursor(!city ? 'Point at one of your cities' : can.ok ? `Raise ${name} to level ${city.level + 1}: ${can.cost} HM`
-        : `${name}: ${can.note}`, city && can.ok ? '' : 'bad');
-      return;
-    }
     if (gameTool === 'rush' && match.human) {
       const net = PW.game.tunnelAt(match, match.human, p.x, p.y);
       const rushed = net && net.rushUntil > PW.tunnels.state(match.world).time;
@@ -552,14 +576,10 @@
       return;
     }
     if (!gameTool.startsWith('seed:') || !match.human) return;
-    if (match.phase === 'placing') {
-      const [a, b] = PW.game.thirdOf(match.world, match.human), inThird = p.x >= a && p.x <= b;
-      if (PW.notify) PW.notify.cursor(gameTool !== 'seed:capital' ? 'Place your starting capital first (SEED CAPITAL)'
-        : inThird ? 'Start your capital here' : `Your capital starts in the ${match.human} third of the map`, gameTool === 'seed:capital' && inThird ? '' : 'bad');
-      return;
-    }
-    const sees = !PW.vision || PW.vision.sees(match.world, match.human, Math.round(p.x));
-    if (PW.notify) PW.notify.cursor(sees ? `Plant a ${gameTool.slice(5)} seed here` : 'Beyond your vision', sees ? '' : 'bad');
+    // (the note reads the same preview the line is drawn from: why it can't, or what it will be)
+    const kind = gameTool.slice(5), first = match.phase === 'placing' && kind === 'capital';
+    const look = seedLook(Math.round(p.x));
+    if (PW.notify) PW.notify.cursor(look.ok ? (first ? 'Place your core here (free)' : `Plant a ${kind} seed here`) : look.note, look.ok ? '' : 'bad');
   }
   function pointerUp(event, p) {
     if (!match) return;
@@ -604,9 +624,41 @@
   // the selection go, H holds the selection where it stands and Q sends it on its own way again - a
   // unit in hand let go of with it (in hand, it would only stand).
   const PAN_KEYS = { KeyA: [-1, 0], ArrowLeft: [-1, 0], KeyD: [1, 0], ArrowRight: [1, 0], KeyW: [0, -1], ArrowUp: [0, -1], KeyS: [0, 1], ArrowDown: [0, 1] };
+  // (the user's: Esc asks before it quits - YES back to the start screen, NO or Esc again goes on; the
+  // match waits while it asks)
+  let quitEl = null, quitWasPaused = false;
+  function askQuit() {
+    if (quitEl) return;
+    quitWasPaused = app.paused();
+    app.setPaused(true);
+    quitEl = make('div', { id: 'gm-quit', class: 'gm' }, '<div class="card"><h2>QUIT THE MATCH?</h2><button data-q="yes">YES</button> <button data-q="no">NO</button></div>');
+    quitEl.addEventListener('click', (event) => {
+      const b = event.target.closest('button[data-q]');
+      if (!b) return;
+      if (b.dataset.q === 'yes') location.href = location.pathname + (/(^|[?&])mode=game/.test(location.search) ? '?mode=game' : '');
+      else closeQuit();
+    });
+    document.body.appendChild(quitEl);
+    quitEl.querySelector('[data-q="no"]').focus();
+  }
+  function closeQuit() {
+    if (!quitEl) return;
+    quitEl.remove(); quitEl = null;
+    app.setPaused(quitWasPaused);
+  }
   function key(event) {
     if (!match) return false;
-    if (event.code === 'Escape') { cmd.clear(); setTool('select'); selectionChanged(); return true; }
+    if (quitEl) {
+      if (event.code === 'Escape' || event.code === 'KeyN') closeQuit();
+      else if (event.code === 'KeyY' || event.code === 'Enter') quitEl.querySelector(`[data-q="${event.code === 'KeyY' ? 'yes' : document.activeElement && document.activeElement.dataset.q || 'no'}"]`).click();
+      return true;
+    }
+    if (event.code === 'Escape') {
+      // (first it lets go of what is in hand - a selection, a tool; with nothing, it asks to quit)
+      if (cmd.sel.length || cmd.building || gameTool !== 'select') { cmd.clear(); setTool('select'); selectionChanged(); return true; }
+      askQuit();
+      return true;
+    }
     const own = cmd.sel.filter(cmd.mine);
     if (event.code === 'KeyH' && own.length) { PW.game.order(match, own, { type: 'hold' }); return true; }
     if (event.code === 'KeyQ' && own.length) {
@@ -703,7 +755,7 @@
     const both = match.view === 'both' && !match.human;
     for (const u of [...(world.troops || []), ...(world.tanks || []), ...(world.mechs || []), ...(world.jets || []), ...(world.defence || [])]) {
       if (u.dead) continue;
-      if (!both && u.side !== side && PW.vision && !PW.vision.sees(world, side, u.x)) continue;
+      if (!both && u.side !== side && PW.vision && !PW.vision.sees(world, side, u.x, (u.y ?? 0) - 12)) continue;
       ctx.fillStyle = tone(u.side);
       ctx.fillRect(Math.round(u.x / k) - 1, Math.round(yOf(u.y)) - 2, 2, 2);
     }
@@ -726,43 +778,129 @@
   function follow(renderer) {
     const s = inHand();
     if (!s) { followAt = null; return; }
-    const u = s.t, moved = followAt && Math.abs(u.x - followAt.x) + Math.abs(u.y - followAt.y) > 0.05;
+    // N123 (the user's): the view keeps the selected unit centred - it comes after it as it moves
+    // (swiftly, not in one jerk), and a drag only looks about until the unit moves again
+    const u = s.t, moved = !followAt || Math.abs(u.x - followAt.x) + Math.abs(u.y - followAt.y) > 0.05;
     followAt = { x: u.x, y: u.y };
     if (!moved) return;
     const d = renderer.worldToDevice(u.x, u.y - 20), W = renderer.view.width, H = renderer.view.height;
-    const mx = W * 0.3, my = H * 0.3;
-    const dx = d.x < mx ? mx - d.x : d.x > W - mx ? W - mx - d.x : 0;
-    const dy = d.y < my ? my - d.y : d.y > H - my ? H - my - d.y : 0;
-    if (dx || dy) renderer.panByDevice(dx * 0.2, dy * 0.2);
+    const dx = W / 2 - d.x, dy = H / 2 - d.y;
+    if (Math.abs(dx) + Math.abs(dy) > 0.5) renderer.panByDevice(dx * 0.25, dy * 0.25);
+  }
+  // ---- N122: the upgrade button over each of the side's cities -----------------------------------------
+  // A seed never levels by itself (N116): over the main building of each of the person's cities a
+  // button raises it - and the buildings round it - a level, for its price. It stands until the city is
+  // fully grown, dimmed while it is short of HM; while its main is growing it says so.
+  let upgEl = null;
+  const upgButtons = new Map();
+  function upgrades() {
+    const side = match.human, eng = match.world.capitalGrowth;
+    if (!upgEl) {
+      upgEl = make('div', { id: 'gm-upg', class: 'gm' });
+      upgEl.addEventListener('click', (event) => {
+        const b = event.target.closest('button[data-city]');
+        if (!b || b.disabled) return;
+        const city = eng.cities.find((c) => c.id === Number(b.dataset.city));
+        const r = city ? PW.game.upgrade(match, side, city) : { ok: false, note: 'gone' };
+        if (PW.notify) PW.notify.flash(r.ok ? `${city.kind} raised to level ${r.level}` : `Upgrade: ${r.note}`, r.ok ? 'good' : 'bad', 2.5);
+      });
+      document.body.appendChild(upgEl);
+    }
+    const show = !!side && !!eng && match.phase !== 'placing' && !match.over;
+    upgEl.style.display = show ? '' : 'none';
+    if (!show) return;
+    const live = new Set();
+    for (const city of eng.cities) {
+      if (city.faction !== side || city.fallen || !city.main || !city.main.placed || city.level >= eng.topLevel(city)) continue;
+      const p = city.main.placed, at = app.toClient((p.x0 + p.x1) / 2, p.y0 - 6);
+      if (at.x < 0 || at.x > innerWidth || at.y < 40 || at.y > innerHeight - 60) continue;
+      live.add(city.id);
+      let b = upgButtons.get(city.id);
+      if (!b) { b = make('button', { 'data-city': String(city.id) }); upgEl.appendChild(b); upgButtons.set(city.id, b); }
+      const rec = match.world.buildings[city.main.owner - 1];
+      // (N122: growing, it says so - and may be raised again all the same; each raise starts its
+      // growing time over)
+      const growing = !!rec && (rec.underConstruction || (rec.health ?? 1) < 0.98);
+      const can = PW.game.canUpgrade(match, side, city);
+      const text = `UPGRADE LV ${city.level}>${city.level + 1} · ${PW.game.upgradeCost(city)} HM${growing ? ' · GROWING' : ''}`;
+      if (b.textContent !== text) b.textContent = text;
+      b.disabled = !can.ok;
+      b.title = can.ok ? `Raise ${city.kind} ${city.id} and the buildings round it a level${growing ? ' (it is still growing from its last)' : ''}` : can.note;
+      b.style.left = `${Math.round(at.x)}px`; b.style.top = `${Math.round(at.y)}px`;
+    }
+    for (const [id, b] of upgButtons) if (!live.has(id)) { b.remove(); upgButtons.delete(id); }
   }
   function drawWorld(renderer, now) {
     refresh(now);
     if (!match) return;
+    upgrades();
     follow(renderer);
     const { ctx, camera, view } = renderer, z = camera.zoom, world = match.world;
     // The fog: the ground the side does not see is veiled (the other side's units in it are not its
     // to see - PS's draws skip them as the fog query lands there).
-    if (match.view !== 'both' || match.human) {
-      const spans = PW.vision ? PW.vision.spans(world, viewSide()) : [];
-      const x0 = camera.x, x1 = camera.x + view.width / z;
-      ctx.fillStyle = 'rgba(3, 5, 9, 0.55)';
-      let x = x0;
-      for (const [a, b] of spans) {
-        if (b < x0) continue;
-        if (a > x1) break;
-        if (a > x) ctx.fillRect(Math.floor((x - camera.x) * z), 0, Math.ceil((a - x) * z), view.height);
-        x = Math.max(x, b);
+    // N123 (the user's): ground never seen is black; ground seen but out of sight now is grey,
+    // showing what it was when last seen (the renderer holds those chunks' pictures).
+    const fogged = (match.view !== 'both' || match.human) && PW.vision && !PW.FOG_OFF;
+    world.fogSide = fogged ? viewSide() : null;
+    if (fogged) {
+      const T = PW.vision.TILE, x0 = camera.x, y0 = camera.y, x1 = camera.x + view.width / z, y1 = camera.y + view.height / z;
+      const grey = [], black = [];
+      PW.vision.fogRuns(world, world.fogSide, x0, y0, x1, y1, (state, c, r0, r1) => (state ? grey : black).push(c, r0, r1));
+      const rect = (list) => {
+        for (let k = 0; k < list.length; k += 3) {
+          const left = Math.floor((list[k] * T - camera.x) * z), top = Math.floor((list[k + 1] * T - camera.y) * z);
+          ctx.fillRect(left, top, Math.ceil(((list[k] + 1) * T - camera.x) * z) - left, Math.ceil(((list[k + 2] + 1) * T - camera.y) * z) - top);
+        }
+      };
+      if (grey.length) {
+        // (drained of colour, then dimmed)
+        ctx.globalCompositeOperation = 'saturation'; ctx.fillStyle = '#808080'; rect(grey);
+        ctx.globalCompositeOperation = 'source-over'; ctx.fillStyle = 'rgba(8, 10, 12, 0.42)'; rect(grey);
       }
-      if (x < x1) ctx.fillRect(Math.floor((x - camera.x) * z), 0, Math.ceil((x1 - x) * z), view.height);
+      ctx.fillStyle = '#000'; rect(black);
     }
     cmd.draw(renderer, now);
     drawMap(now);
-    if (!cursor || !gameTool.startsWith('seed:')) return;
-    const x = Math.round(cursor.x), g = world.groundTop[x] || cursor.y;
-    const sx = Math.round((x - camera.x) * z), sy = Math.round((g - camera.y) * z);
-    const sees = !match.human || !PW.vision || PW.vision.sees(world, match.human, x);
-    ctx.fillStyle = sees ? 'rgba(255,236,170,0.9)' : 'rgba(255,120,100,0.9)';
-    for (let k = 0; k < 9; k += 1) ctx.fillRect(sx - 1, sy - (k + 1) * 6 * Math.max(1, z / 2), Math.max(2, z), Math.max(2, 3 * z / 2));
+    if (!cursor || !gameTool.startsWith('seed:') || !match.human) return;
+    // N120/N112 (the user's): a line from the pointer down to the ground - green where the seed can
+    // go, red where it can't - and where it can, the outline of what would stand there.
+    const look = seedLook(Math.round(cursor.x));
+    const x = look.x, g = world.groundTop[x] || cursor.y;
+    const sx = Math.round((x + 0.5 - camera.x) * z), top = Math.round((Math.min(cursor.y, g - 4) - camera.y) * z), sy = Math.round((g - camera.y) * z);
+    ctx.fillStyle = look.ok ? 'rgba(110, 240, 138, 0.95)' : 'rgba(255, 90, 70, 0.95)';
+    ctx.fillRect(sx - Math.max(1, Math.round(z / 2)), top, Math.max(2, Math.round(z)), Math.max(2, sy - top));
+    ctx.fillRect(sx - Math.round(4 * Math.max(1, z / 2)), sy - 1, Math.round(8 * Math.max(1, z / 2)), Math.max(2, Math.round(z)));
+    if (!look.ok || !look.canvas) return;
+    const cells = outlineOf(look.canvas), c = look.canvas, oy = look.floor - c.ground, s = Math.max(1, z);
+    ctx.fillStyle = 'rgba(110, 240, 138, 0.55)';
+    for (let k = 0; k < cells.length; k += 2) {
+      const wx = look.worldX + cells[k], wy = oy + cells[k + 1];
+      ctx.fillRect(Math.floor((wx - camera.x) * z), Math.floor((wy - camera.y) * z), Math.ceil(s), Math.ceil(s));
+    }
+  }
+  // (the preview read at most once a few cells of the pointer's travel - the measure is not free)
+  let lookAt = null;
+  function seedLook(x) {
+    const kind = gameTool.slice(5), start = match.phase === 'placing' && kind === 'capital';
+    const key = `${kind}|${start}|${Math.round(x / 3)}|${match.phase}`;
+    if (lookAt && lookAt.key === key && (performance.now() - lookAt.t) < 1000) return lookAt.look;
+    const look = PW.game.seedPreview(match, match.human, kind, x, { start });
+    lookAt = { key, look, t: performance.now() };
+    return look;
+  }
+  // (a building's outline: its solid cells with open air beside them, as pairs of canvas x, y)
+  const outlines = new WeakMap();
+  function outlineOf(c) {
+    let cells = outlines.get(c);
+    if (cells) return cells;
+    const out = [], W = c.width, solid = (x, y) => x >= 0 && y >= 0 && x < W && y < c.height && !!c.mat[y * W + x];
+    for (let y = 0; y < c.height; y += 1) for (let x = 0; x < W; x += 1) {
+      if (!solid(x, y)) continue;
+      if (!solid(x - 1, y) || !solid(x + 1, y) || !solid(x, y - 1) || !solid(x, y + 1)) out.push(x, y);
+    }
+    cells = Int32Array.from(out);
+    outlines.set(c, cells);
+    return cells;
   }
 
   PW.gameUI = { menu, loading, attach, pointerDown, pointerMove, pointerUp, key, tookControl, drawWorld, setTool,

@@ -80,7 +80,8 @@ const smokeLeft = count(fx - 400, fy - 600, fx + 400, fy, [M.SMOKE]);
 check(smokeLeft < 150, `the smoke thins away once the fire is out (${smokeLeft} cells left)`);
 
 // 2. Boiling water: steam rises, cools and condenses; no water is lost.
-const lake = layout.lakes.filter((l) => !l.pond && l.left !== undefined)[0];
+// (N133: a centre lake where the map has one, else an end's)
+const lake = layout.lakes.filter((l) => !l.pond && l.left !== undefined)[0] || layout.lakes.filter((l) => l.left !== undefined)[0];
 const lx = Math.round(lake.x);
 const waterBefore = pwApp.countWater();
 for (let k = 0; k < 20; k += 1) { heat.heatDisc(lx, lake.level + 3, 10, 900); pwApp.stepWorld(3); }

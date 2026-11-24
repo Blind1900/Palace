@@ -15,7 +15,9 @@ check(!!repair, 'the repair system is up');
 const b = world.buildings.find((q) => q.type === 'population' && q.side === 'left');
 const wx = Math.round((b.body.left + b.body.right) / 2);
 await view('rp-before', wx, b.ground - 40, 4);
-pwApp.explode(b.body.left + 10, b.ground - 30, 11, 1);
+// (into the first storey's wall - over a tall gate hall (N121), that is the hall's height up)
+const holeY = b.ground - 30 - ((b.canvas && b.canvas.meta && b.canvas.meta.hallRaise) || 0);
+pwApp.explode(b.body.left + 10, holeY, 11, 1);
 // (N100: the crews wait while what the blast loosed is still coming down - then set to)
 pwApp.stepWorld(10);
 const held = repair.jobs.get(b.id);
@@ -26,6 +28,24 @@ pwApp.stepWorld(60);
 const job = repair.jobs.get(b.id);
 check(!!job && (job.queue.length > 30 || repair.stats.restored > 10), `once it has come to rest (${(waited / 60).toFixed(1)} s) the wound is scanned and queued (${job ? job.queue.length : 0} cells queued)`);
 await view('rp-hole', wx, b.ground - 40, 4);
+
+// 1b. N98 (the user's): while the crews work, the work's dust and gas go out through vents in the
+// roof - flagged as the outlet for the air's flow.
+{
+  const P = world.particles, F = PW.PARTICLE;
+  pwApp.stepWorld(60 * 3);
+  const vents = (b.vents && b.vents.list) || [];
+  const flagged = vents.filter((v) => PW.getFlags(world, v.x, v.roof) & PW.FLAG.VENT).length;
+  let puffs = 0;
+  for (let i = 0; i < P.stats.count; i += 1) {
+    if (!(P.flags[i] & F.SMOKE)) continue;
+    if (vents.some((v) => Math.abs(P.px[i] - v.x) < 30 && P.py[i] < v.y + 2 && P.py[i] > v.y - 120)) puffs += 1;
+  }
+  check(vents.length >= 1 && flagged === vents.length && world.vents && world.vents.size >= vents.length,
+    `its roof has vents (${vents.map((v) => `${v.x},${v.roof}`).join(' ')}), each flagged the air's outlet`);
+  check(puffs > 0, `the work's gas rises out of them as the crews work (${puffs} puffs over the roof)`);
+  if (vents[0]) await view('n98-vent', vents[0].x, vents[0].y - 30, 5);
+}
 
 // 2. The building heals: debris recycled into HM, the bundle's HM drawn on, cells restored from
 // the blueprint, bottom-up within each class.

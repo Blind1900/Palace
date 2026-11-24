@@ -188,6 +188,11 @@
       if (b > a) layWells(line, a, b);
     }
     const FIT = 5;
+    // A lot taken down where its works had sleeved the bundle (a plinth laid across the bore) hands
+    // those columns back: they are laid again at the next step, the lanes carved through the fill.
+    function heal(x0, x1) {
+      for (const line of lines) if (x1 >= line.x0 && x0 <= line.x1) pendingHeals.push({ line, x0, x1 });
+    }
     function runHeals() {
       if (!pendingHeals.length) return;
       for (const h of pendingHeals) {
@@ -2018,7 +2023,7 @@
       }
     }
 
-    const api = { build, step, draw, attach, carry, connectCore, releaseBuilding, releaseSeedCore, notifyDamage, openEnds, unite, lines, stats, flowing, lineFor, contour, relayAlong, BORE, BED, LANES, TAPS };
+    const api = { build, step, draw, attach, carry, connectCore, releaseBuilding, releaseSeedCore, notifyDamage, heal, openEnds, unite, lines, stats, flowing, lineFor, contour, relayAlong, BORE, BED, LANES, TAPS };
     return api;
   }
 

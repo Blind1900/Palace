@@ -95,14 +95,16 @@
     const hw = vertical ? HANGAR_VERTICAL_WIDTH : HANGAR.width;
     const bodyWidth = hangar ? rearWidth + hw - HANGAR.wall : rearWidth;
     const margin = 44, coreDepth = K.VAULT_DEPTH + 3;
-    const top = hangar ? Math.max(rearStoreys * S.FLOOR + 120, HANGAR.clear + HANGAR.vaultRise + 90) : rearStoreys * S.FLOOR + 130;
+    // (N121: the rear block's ground storey a gate hall as tall as the road tunnels, like a tower's)
+    const raise = PW.NO_UNDERCROFT || PW.NO_HALL_RAISE ? 0 : S.HALL_RAISE;
+    const top = hangar ? Math.max(rearStoreys * S.FLOOR + raise + 120, HANGAR.clear + HANGAR.vaultRise + 90) : rearStoreys * S.FLOOR + raise + 130;
     const width = bodyWidth + margin * 2, height = top + coreDepth + 20;
     const ground = height - coreDepth - 1;
     const c = K.createCanvas(width, height, ground);
-    c.meta = { type: 'military', style, level, variant, facing, seed };
+    c.meta = { type: 'military', style, level, variant, facing, seed, hallRaise: raise };
     // Work in "front-right" coordinates and mirror x when the building faces left.
     const X = (lx) => facing > 0 ? margin + lx : margin + bodyWidth - 1 - lx;
-    const floorRow = (k) => ground - k * S.FLOOR;
+    const floorRow = (k) => ground - k * S.FLOOR - (k > 0 ? raise : 0);
     const rearLeft = 0, rearRight = rearWidth - 1;
     const hangarLeft = rearWidth - HANGAR.wall, hangarRight = bodyWidth - 1;
     const wallTop = ground - HANGAR.clear;
@@ -115,7 +117,7 @@
       const left = narrow ? rearLeft + 24 : rearLeft, right = narrow ? rearRight - 18 : rearRight;
       rearFloors.push({ k, left, right });
       const innerLeft = Math.min(X(left + S.WALL), X(right - S.WALL)), innerRight = Math.max(X(left + S.WALL), X(right - S.WALL));
-      K.rect(c, innerLeft, fRow - S.CLEAR, innerRight, fRow - 1,
+      K.rect(c, innerLeft, floorRow(k + 1) + S.SLAB, innerRight, fRow - 1,
         (x, y) => K.back(c, x, y, K.backWallColor(style, x, y, fRow - 1 - y, innerLeft, innerRight)));
       for (let wx = innerLeft + 10; wx < innerRight - 22; wx += 34) {
         if (Math.abs(wx - (innerLeft + innerRight) / 2) < 36) continue;
@@ -157,7 +159,7 @@
         K.FURNITURE[name](c, Math.min(X(x), X(x + 24)), fRow, P);
         x += { console: 30, rack: 26, locker: 18, crate: 24 }[name];
       }
-      for (let lx = left + 20; lx < right - 14; lx += 44) K.ceilingLamp(c, style, X(lx), fRow - S.CLEAR);
+      for (let lx = left + 20; lx < right - 14; lx += 44) K.ceilingLamp(c, style, X(lx), floorRow(k + 1) + S.SLAB);
       c.floors.push({ storey: k, y: fRow, left: Math.min(X(left + S.WALL), X(right - S.WALL)), right: Math.max(X(left + S.WALL), X(right - S.WALL)) });
       c.slots.push({ x: X(left + 30), y: fRow, storey: k, facing });
     }
@@ -172,6 +174,24 @@
     for (let k = 0; k < rearStoreys - 1; k += 1) {
       const dir = k % 2 === 0 ? 1 : -1;
       const start = dir > 0 ? bandLeft + S.LANDING : bandLeft + S.LANDING + S.STAIR_RUN - 1;
+      // (N121: out of the tall gate hall by a ladder on its back wall, through a hatch in the slab)
+      if (k === 0 && raise) {
+        const lx = start + dir * 4, upper = floorRow(1), fRow = floorRow(0);
+        const rail = tone(P.ornament, 0.62), rung = tone(P.ornament, 0.82);
+        for (let y = upper; y < fRow; y += 1) {
+          K.back(c, X(lx - 2), y, rail); K.back(c, X(lx + 2), y, rail);
+          if ((fRow - y) % 4 === 0) for (let x = lx - 1; x <= lx + 1; x += 1) K.back(c, X(x), y, rung);
+        }
+        for (let x = lx - 3; x <= lx + 3; x += 1) {
+          for (let row = 0; row < S.SLAB; row += 1) {
+            const i = (upper + row) * c.width + X(x);
+            if (c.role[i] === ROLE.SLAB) c.mat[i] = M.PLATFORM;
+          }
+        }
+        (c.ladders = c.ladders || []).push({ x0: Math.min(X(lx - 1), X(lx + 1)), x1: Math.max(X(lx - 1), X(lx + 1)), y0: upper - 2, y1: fRow - 1 });
+        c.stairs.push({ storey: 0, dir: dir * facing, from: X(lx), to: X(lx), floorRow: fRow, upperRow: upper, ladder: true });
+        continue;
+      }
       for (let i = 0; i < S.STAIR_RUN / S.STEP; i += 1) {
         const surface = floorRow(k) - S.STEP * (i + 1);
         for (let j = 0; j < S.STEP; j += 1) for (let y = surface; y < Math.min(floorRow(k), surface + S.STEP + S.STAIR_THICK); y += 1) {
@@ -242,7 +262,7 @@
       // Upper rear wall of the hangar where it rises above the rear block's ground storey.
       for (let d = 0; d < HANGAR.wall; d += 1) {
         const wx = X(hangarLeft + d);
-        for (let y = wallTop; y < ground - S.FLOOR; y += 1) {
+        for (let y = wallTop; y < floorRow(1); y += 1) {
           if (!K.isSolid(c, wx, y)) K.solid(c, wx, y, P.wallMat, milPlate(style, d, HANGAR.wall, ground - 1 - y, wx, y, setting), ROLE.WALL);
         }
       }
@@ -1084,7 +1104,122 @@
   }
   const KIT_P = (style) => STYLES[style] || STYLES.modern;
 
+  // ---- N89 (the user's, 2026-11-21): a base spread over several smaller buildings -----------------
+  // Round the base's main building (the largest, with its watchtower) stand smaller ones: a
+  // barracks - a long low block of bunks and lockers with a sandbagged nest on its roof where the
+  // troops garrison; a watchtower - a steel-legged lookout with its cab and searchlight up top and a
+  // ladder up its legs; a bunker - a low pillbox of thick concrete with gun slits, its earth banked
+  // against its sides. Each over a sub core of its own (the cores make everything).
+  const POSTS = { barracks: { w: 96 }, watchtower: { w: 34 }, bunker: { w: 74 } };
+  function militaryPost(options) {
+    const style = options.style, variant = options.variant, level = options.level || 2;
+    const facing = options.facing || 1, seed = options.seed || 1, setting = options.setting || null;
+    const P = STYLES[style] || STYLES.modern, spec = POSTS[variant];
+    const random = PW.createRandom(seed);
+    const margin = 26, coreDepth = K.VAULT_DEPTH + 3, w = spec.w;
+    const bodyH = variant === 'bunker' ? 28 : variant === 'watchtower' ? 150 + level * 6 : S.FLOOR + S.SLAB;
+    const width = w + margin * 2, height = bodyH + 70 + coreDepth;
+    const ground = height - coreDepth - 1;
+    const c = K.createCanvas(width, height, ground);
+    c.meta = { type: 'military', style, level, variant, facing, seed, post: true };
+    const X = (lx) => facing > 0 ? margin + lx : margin + w - 1 - lx;
+    const wallAt = (lx, y, d, total) => K.solid(c, X(lx), y, P.wallMat, milPlate(style, d, total, ground - 1 - y, X(lx), y, setting), ROLE.WALL);
+    const sandbags = (lx0, lx1, row, h) => {
+      for (let lx = lx0; lx <= lx1; lx += 1) for (let dy = 1; dy <= h; dy += 1) {
+        const brick = ((lx + (dy & 1) * 3) % 6) === 0 || dy % 3 === 0;
+        K.solid(c, X(lx), row - dy, M.COVER_SAND || M.SAND, brick ? [140, 124, 90] : [176, 158, 116], ROLE.ORNAMENT);
+      }
+    };
+    let top;
+    if (variant === 'barracks') {
+      const fRow = ground, roof = ground - S.FLOOR;
+      for (const [lx, side] of [[0, 1], [w - 1, -1]]) for (let d = 0; d < S.WALL; d += 1) for (let y = roof; y < fRow; y += 1) wallAt(lx + side * d, y, d, S.WALL);
+      for (let lx = 0; lx < w; lx += 1) for (let row = 0; row < S.SLAB; row += 1) K.solid(c, X(lx), roof + row, M.CONCRETE, K.slabColor(style, row, X(lx), roof + row), ROLE.ROOF);
+      const inL = Math.min(X(S.WALL), X(w - 1 - S.WALL)), inR = Math.max(X(S.WALL), X(w - 1 - S.WALL));
+      K.rect(c, inL, roof + S.SLAB, inR, fRow - 1, (x, y) => K.back(c, x, y, K.backWallColor(style, x, y, fRow - 1 - y, inL, inR)));
+      // bunks and lockers down its length
+      for (let lx = S.WALL + 4; lx < w - S.WALL - 30; lx += 34) K.FURNITURE.bed(c, Math.min(X(lx), X(lx + 29)), fRow, P, facing < 0);
+      K.FURNITURE.locker(c, Math.min(X(w - S.WALL - 22), X(w - S.WALL - 5)), fRow, P);
+      K.ceilingLamp(c, style, X(w >> 1), roof + S.SLAB);
+      // doors at both ends; slit windows
+      for (const lx0 of [0, w - S.WALL]) for (let d = 0; d < S.WALL; d += 1) for (let y = fRow - S.DOOR_H; y < fRow; y += 1) { K.clear(c, X(lx0 + d), y); K.back(c, X(lx0 + d), y, tone(P.frame, 0.3)); }
+      c.doors.push({ x: X(0), side: -facing, top: fRow - S.DOOR_H, bottom: fRow - 1 }, { x: X(w - 1), side: facing, top: fRow - S.DOOR_H, bottom: fRow - 1 });
+      c.floors.push({ storey: 0, y: fRow, left: inL, right: inR });
+      // the garrison's nest on the roof: a ring of sandbags, troops' places behind it
+      sandbags(2, 9, roof, 7); sandbags(w - 10, w - 3, roof, 7); sandbags(10, w - 11, roof, 3);
+      c.slots.push({ x: X(14), y: roof, storey: 1, facing }, { x: X(w - 15), y: roof, storey: 1, facing });
+      top = roof - 8;
+    } else if (variant === 'watchtower') {
+      // four legs braced in an X up to the cab, a ladder up the middle
+      const cabFloor = ground - bodyH + 34, legL = 3, legR = w - 4;
+      for (let y = cabFloor; y < ground; y += 1) {
+        const t = (y - cabFloor) / (ground - cabFloor), spread = Math.round(t * 5);
+        for (const [lx, d] of [[legL - spread, 0], [legL - spread + 1, 1], [legR + spread, 0], [legR + spread - 1, 1]]) K.solid(c, X(lx), y, M.STEEL, d ? tone(P.frame, 0.8) : tone(P.frame, 1.05), ROLE.FRAME);
+      }
+      for (let seg = 0; seg < 5; seg += 1) {
+        const y0 = cabFloor + seg * (ground - cabFloor) / 5, y1 = y0 + (ground - cabFloor) / 5;
+        for (let s = 0; s <= 24; s += 1) {
+          const u = s / 24, y = Math.round(y0 + (y1 - y0) * u);
+          K.back(c, X(legL + Math.round((legR - legL) * u)), y, tone(P.frame, 0.7));
+          K.back(c, X(legR - Math.round((legR - legL) * u)), y, tone(P.frame, 0.7));
+        }
+      }
+      const lx = w >> 1;
+      for (let y = cabFloor; y < ground; y += 1) {
+        K.back(c, X(lx - 2), y, tone(P.ornament, 0.6)); K.back(c, X(lx + 3), y, tone(P.ornament, 0.6));
+        if ((ground - y) % 4 === 0) for (let x = lx - 1; x <= lx + 2; x += 1) K.back(c, X(x), y, tone(P.ornament, 0.8));
+      }
+      (c.ladders = c.ladders || []).push({ x0: Math.min(X(lx - 1), X(lx + 2)), x1: Math.max(X(lx - 1), X(lx + 2)), y0: cabFloor - 2, y1: ground - 1 });
+      // the cab: a floor (a hatch over the ladder), armoured walls with a glazed slit all round, a roof
+      for (let lx2 = -4; lx2 < w + 4; lx2 += 1) for (let row = 0; row < S.SLAB; row += 1) {
+        const hatch = lx2 >= lx - 3 && lx2 <= lx + 4;
+        K.solid(c, X(lx2), cabFloor + row, hatch ? M.PLATFORM : M.CONCRETE, K.slabColor(style, row, X(lx2), cabFloor + row), ROLE.SLAB);
+      }
+      const cabTop = cabFloor - 30;
+      for (const [lx0, side] of [[-4, 1], [w + 3, -1]]) for (let d = 0; d < 4; d += 1) for (let y = cabTop; y < cabFloor; y += 1) {
+        const slit = y > cabFloor - 22 && y < cabFloor - 12;
+        if (slit) K.solid(c, X(lx0 + side * d), y, M.GLASS, mix([30, 34, 40], P.lamp, 0.35), ROLE.GLASS);
+        else wallAt(lx0 + side * d, y, d, 4);
+      }
+      for (let lx2 = -6; lx2 < w + 6; lx2 += 1) for (let row = 0; row < 4; row += 1) K.solid(c, X(lx2), cabTop - row, M.STEEL, row === 3 ? tone(P.roofLight, 1.05) : tone(P.roof, 1 - row * 0.03), ROLE.ROOF);
+      // the searchlight on the roof, swung towards the front
+      for (let dy = 1; dy <= 4; dy += 1) for (let dx = 0; dx < 5; dx += 1) K.deco(c, X(lx + dx), cabTop - 4 - dy, dy === 2 && dx === 4 ? [255, 246, 200] : [70, 74, 80]);
+      c.floors.push({ storey: 0, y: cabFloor, left: Math.min(X(-1), X(w)), right: Math.max(X(-1), X(w)) });
+      c.slots.push({ x: X(lx + 8), y: cabFloor, storey: 1, facing });
+      c.doors.push({ x: X(lx), side: facing, top: ground - S.DOOR_H, bottom: ground - 1 });
+      top = cabTop - 9;
+    } else {
+      // the bunker: a low box of thick concrete, slits towards the front, earth banked on its flanks
+      const roof = ground - bodyH, T = 8;
+      for (let lx = 0; lx < w; lx += 1) {
+        for (let y = roof; y < ground; y += 1) {
+          const wallCell = lx < T || lx >= w - T || y < roof + T;
+          if (!wallCell) { K.back(c, X(lx), y, tone([70, 72, 74], 0.8)); continue; }
+          const slit = lx >= w - T && y >= ground - 18 && y <= ground - 14;
+          if (slit) { K.back(c, X(lx), y, [20, 22, 24]); continue; }
+          K.solid(c, X(lx), y, M.CONCRETE, (y - roof) % 6 === 0 ? [104, 104, 100] : [138, 138, 132], y < roof + T ? ROLE.ROOF : ROLE.WALL);
+        }
+      }
+      for (const [lx0, side] of [[-1, -1], [w, 1]]) for (let k = 0; k < 18; k += 1) {
+        const h = Math.round((bodyH - 4) * (1 - k / 18));
+        for (let dy = 1; dy <= h; dy += 1) K.solid(c, X(lx0 + side * k), ground - dy, M.SOIL, tone([116, 92, 64], 0.9 + ((k + dy) & 3) * 0.04), ROLE.ORNAMENT);
+      }
+      for (let d = 0; d < T; d += 1) for (let y = ground - S.DOOR_H + 6; y < ground; y += 1) { K.clear(c, X(d), y); K.back(c, X(d), y, tone(P.frame, 0.3)); }
+      c.doors.push({ x: X(0), side: -facing, top: ground - S.DOOR_H + 6, bottom: ground - 1 });
+      c.floors.push({ storey: 0, y: ground, left: Math.min(X(T), X(w - T - 1)), right: Math.max(X(T), X(w - T - 1)) });
+      c.slots.push({ x: X(w - T - 6), y: ground, storey: 0, facing });
+      top = roof - 2;
+    }
+    K.core(c, X(w >> 1), ground, { tier: 'sub' });
+    K.corePillars(c, style);
+    K.bakeLights(c, style);
+    void random;
+    c.body = { left: Math.min(X(0), X(w - 1)), right: Math.max(X(0), X(w - 1)), top: Math.max(0, top), bottom: ground - 1 };
+    return c;
+  }
+
   function military(options) {
+    if (POSTS[options.variant]) return militaryPost(options);
     return options.variant === 'tower' ? militaryTower(options) : militaryBase(options);
   }
 

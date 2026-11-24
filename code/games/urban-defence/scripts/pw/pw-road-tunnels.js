@@ -110,12 +110,49 @@
   // (a daylight cut - no lip left hanging over the road), the dips under it banked up; then the road.
   // (done: the column the last box already dug - shared with this one; its cover is the cut's or the
   // bore's now, not the hill's, and read as the hill's it cut every box after the first open to the sky)
+  // N132 (the user's, 2026-11-24): a building standing over the line keeps the ground it stands on.
+  // The bottom row of a building's works over the road at x (within reach of the dig), or null.
+  function worksOver(world, x, f) {
+    // (over the road only: a town's foundations and made ground under its street are no roof)
+    for (let y = f - 1; y > Math.max(2, f - CLEAR - 420); y -= 1) if (works(world, x, y)) return y;
+    return null;
+  }
+  // Under a building the way is bored, never cut open: the bore's rows only, SKIN rows of ground
+  // kept under the building's bottom (its footings, its bed), so it is not left hanging over a pit.
+  const SKIN = 6;
+  function boreUnder(world, x, f, bottom) {
+    for (let y = Math.max(f - CLEAR, bottom + SKIN + 1); y < f; y += 1) {
+      if (works(world, x, y) || bundle(world, x, y)) continue;
+      const id = idAt(world, x, y);
+      if (id === M.AIR || id === M.BEDROCK) continue;
+      PW.set(world, x, y, M.AIR, { quiet: true });
+      PW.setLayer(world, 'paint', x, y, 0); PW.setLayer(world, 'deco', x, y, 0);
+      PW.setFlag(world, x, y, PW.FLAG.TUNNEL, true);
+    }
+  }
   function dig(world, t, x0, x1, done = null) {
     const net = netOf(world, t);
     let fLow = -Infinity, fHigh = Infinity, cover = Infinity;
     for (let x = x0; x <= x1; x += 1) { const f = t.floorAt(x); fLow = Math.max(fLow, f); fHigh = Math.min(fHigh, f); }
     const top = fHigh - CLEAR;
     for (let x = x0; x <= x1; x += 1) if (x !== done) cover = Math.min(cover, top - world.groundTop[x]);
+    // (the columns a building stands over: bored under it by hand, whatever the cover)
+    const built = new Map();
+    if (!PW.NO_BORE_UNDER) for (let x = x0; x <= x1; x += 1) { const lo = worksOver(world, x, t.floorAt(x)); if (lo !== null) built.set(x, lo); }
+    if (built.size) {
+      for (const [x, lo] of built) boreUnder(world, x, t.floorAt(x), lo);
+      const rest = [];
+      for (let x = x0; x <= x1; x += 1) if (!built.has(x)) rest.push(x);
+      // (the rest of the box as it would have been, a run at a time)
+      for (let i = 0; i < rest.length;) {
+        let j = i;
+        while (j + 1 < rest.length && rest[j + 1] === rest[j] + 1) j += 1;
+        dig(world, t, rest[i], rest[j], done);
+        i = j + 1;
+      }
+      if (PW.settlementTools && PW.settlementTools.paveStreet) for (const x of built.keys()) PW.settlementTools.paveStreet(world, x, x, (q) => t.floorAt(q), () => t.style);
+      return;
+    }
     if (cover >= COVER) {
       const r = PW.tunnels.digBox(world, net, x0, top, x1, fLow - 1, { kind: 'drift', exact: true });
       if (r && r.segment) { r.segment.type = 'road'; r.segment.span = t.span; }
@@ -210,7 +247,109 @@
     }
     // (a lamp either side of the mouth, on the face)
     for (const ly of [top - 4]) for (const lx of [px - dir * 2]) { PW.setLayer(world, 'deco', lx, ly, rgb([255, 236, 170])); }
+    if (!PW.NO_PORTAL_DETAIL) entrance(world, t, px, dir, top, owner);
     t.portals.push({ x: px, top, floor: t.floorAt(px), end });
+    if (!PW.NO_PORTAL_DETAIL) joinDoorway(world, t, px, dir, top, owner);
+  }
+  // N121 (the user's, 2026-11-23, after the four tunnel-mouth photos): the mouth is an entrance,
+  // not a sharp cut in the hill - an arch ring of dressed voussoirs projecting out over the road
+  // (its soffit curving up from the crown, its ring stones banded), a coursed stone portal face
+  // with a cornice and a crenellated parapet over it, stepped wing walls running down to the
+  // road's shoulders, a signal gantry hung inside the mouth (red and green lane lights, an amber
+  // sign) and lamps on the face. Everything of it is the tunnel's own concrete (REINFORCED).
+  const HOOD = 14;            // how far the arch ring stands out from the face
+  const STONE = [132, 128, 120], STONE_LIT = [164, 160, 150], STONE_DARK = [92, 88, 82], MORTAR = [70, 68, 64];
+  function entrance(world, t, px, dir, top, owner) {
+    const out = -dir;   // (the mouth opens towards the flats: away from the hill)
+    const put = (x, y, c) => {
+      if (x < 2 || x > world.width - 3 || y < 2 || y > world.height - 3) return;
+      const id = idAt(world, x, y);
+      if (id === M.BEDROCK || bundle(world, x, y) || works(world, x, y)) return;
+      PW.set(world, x, y, M.REINFORCED, { quiet: true });
+      PW.setLayer(world, 'paint', x, y, rgb(c));
+      PW.setLayer(world, 'deco', x, y, 0);
+      PW.setOwner(world, x, y, owner);
+    };
+    // the arch ring: a hood over the road, its underside rising from the crown as it stands out -
+    // its first cells solid on the headwall, the rest of it standing over the road in the front
+    // of the face's plane, drawn on the back layer (a cantilever of masonry over open air is no
+    // ground the physics would hold up)
+    for (let k = 0; k <= HOOD; k += 1) {
+      const x = px + out * k, u = k / HOOD;
+      const soffit = top - 1 - Math.round(10 * (1 - Math.sqrt(Math.max(0, 1 - u * u))));
+      const crown = soffit - 9;
+      const lay = k <= 2 ? put : (xx, yy, c) => { if (xx >= 2 && xx <= world.width - 3 && PW.mat.open[idAt(world, xx, yy)]) { PW.setLayer(world, 'back', xx, yy, rgb(c)); PW.setFlag(world, xx, yy, PW.FLAG.FIXTURE); } };
+      for (let y = crown; y <= soffit; y += 1) {
+        const v = (x * 5 + Math.floor((y - crown) / 3)) % 7;   // voussoir joints, radial-ish
+        const joint = v === 0 || y === crown;
+        lay(x, y, joint ? MORTAR : y === soffit ? STONE_DARK : (k & 3) === 0 ? STONE_LIT : STONE);
+      }
+      // the keystone over the middle of the ring
+      if (k === Math.round(HOOD / 2)) for (let y = crown - 3; y < crown; y += 1) lay(x, y, STONE_LIT);
+    }
+    // the portal face over the ring and the wing walls beside the road stand BEHIND it (the back
+    // layer, where the cells are open): coursed stone up to a cornice and a crenellated parapet,
+    // and the wing walls stepping down from the face to the road's shoulder out past the ring -
+    // the entrance's look, with nothing over the road for the physics to hold up but the ring
+    const wall = (x, y, c) => {
+      if (x < 2 || x > world.width - 3 || y < 2 || y > world.height - 3) return;
+      if (!PW.mat.open[idAt(world, x, y)]) return;
+      PW.setLayer(world, 'back', x, y, rgb(c));
+      PW.setFlag(world, x, y, PW.FLAG.FIXTURE);
+    };
+    const faceTop = Math.min(world.groundTop[px] - 2, top - 34);
+    const stoneAt = (x, y, y0) => {
+      const course = Math.floor((y - y0) / 5), stagger = (course & 1) * 4;
+      const joint = (y - y0) % 5 === 0 || ((x + stagger) % 9) === 0;
+      return joint ? MORTAR : ((x * 13 + course * 7) % 5 === 0 ? STONE_DARK : STONE);
+    };
+    for (let k = -2; k <= HOOD + 2; k += 1) {
+      const x = px + out * k;
+      for (let y = faceTop; y < top - 10; y += 1) wall(x, y, stoneAt(x, y, faceTop));
+      wall(x, faceTop - 1, STONE_LIT); wall(x, faceTop - 2, STONE_LIT);            // the cornice
+      if (((k + 40) % 8) < 4) for (let y = faceTop - 7; y < faceTop - 2; y += 1) wall(x, y, (k & 1) ? STONE : STONE_LIT);   // the crenels
+    }
+    for (let s = 0; s < 5; s += 1) {
+      for (let k = 0; k < 9; k += 1) {
+        const x = px + out * (HOOD + 3 + s * 9 + k), floor = t.floorAt(Math.max(t.a, Math.min(t.b, x)));
+        const stepTop = top - 12 + Math.round((s + 1) * (CLEAR - 4) / 6);
+        for (let y = stepTop; y < floor; y += 1) wall(x, y, y === stepTop ? STONE_LIT : stoneAt(x, y, stepTop));
+      }
+    }
+    // the signal gantry inside the mouth: a steel beam under the crown, red and green lane lights,
+    // an amber sign between them; lamps on the face either side of the ring
+    const gx = px + dir * 10;
+    for (let k = -8; k <= 8; k += 1) { const x = gx + k; if ((PW.get(world, x, top + 3) & ID_MASK) === M.AIR) PW.setLayer(world, 'deco', x, top + 3, rgb(STEEL_DARK)); }
+    for (const [k, c] of [[-6, [60, 220, 110]], [-5, [60, 220, 110]], [5, [230, 60, 50]], [6, [230, 60, 50]]]) PW.setLayer(world, 'deco', gx + k, top + 4, rgb(c));
+    for (let k = -2; k <= 2; k += 1) for (const y of [top + 4, top + 5]) PW.setLayer(world, 'deco', gx + k, y, rgb(k & 1 ? [255, 168, 60] : [40, 30, 20]));
+    for (const lx of [px + out * (HOOD + 2)]) for (const ly of [top - 20, top - 21]) PW.setLayer(world, 'deco', lx, ly, rgb([255, 236, 170]));
+  }
+  // ...and where a base building's doorway stands by the mouth (its gate hall or hangar door at the
+  // road's level, a short way out), the ring carries on to it as a covered way: a roof slab from the
+  // hood to the building's face, walls left open - the army goes straight from the hall into the
+  // mountain under cover.
+  function joinDoorway(world, t, px, dir, top, owner) {
+    const out = -dir, floor = t.floorAt(px);
+    let best = null;
+    for (const b of world.buildings || []) {
+      if (!b || !b.body || b.ruined || (b.type !== 'military' && b.type !== 'population')) continue;
+      const face = out > 0 ? b.body.left : b.body.right;
+      const gap = (face - (px + out * HOOD)) * out;
+      if (gap < 2 || gap > 60 || Math.abs((b.ground ?? floor) - floor) > 6) continue;
+      if (!best || gap < best.gap) best = { b, face, gap };
+    }
+    if (!best) return;
+    const roof = top - 10;
+    for (let x = px + out * (HOOD + 1); (best.face - x) * out > 0; x += out) {
+      for (let y = roof; y < roof + 6; y += 1) {
+        if ((PW.get(world, x, y) & ID_MASK) !== M.AIR) continue;
+        PW.set(world, x, y, M.REINFORCED, { quiet: true });
+        PW.setLayer(world, 'paint', x, y, rgb(y === roof ? STONE_LIT : y === roof + 5 ? STONE_DARK : (x & 7) === 0 ? MORTAR : STONE));
+        PW.setOwner(world, x, y, owner);
+      }
+      if (((x - px) & 15) === 0) PW.setLayer(world, 'deco', x, roof + 6, rgb([255, 236, 170]));
+    }
+    t.joined = best.b.id;
   }
 
   // ---- Barricades ---------------------------------------------------------------------------------

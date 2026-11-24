@@ -23,6 +23,7 @@
   const FARM_BRIDGE_MAX = 72;    // ...and only this narrow (a lesser bridge)
   const CAPITAL_BRIDGE_MAX = 1400;
   const TIGHTEN = 3, GAP_MIN = 7;    // N43: gaps tighten toward the centre as the city levels
+  const SPREAD_RING = 12;            // N94: each ring out stands this much further from the last
   const GAP0 = 12, GAP_RING = 9;     // (fallback only: lots carry their own gap now - N51)
   const APPEND_EVERY = 110;      // growth-seconds before a side's edge creeps out another ring
   const INFILL_EVERY = 160;      // growth-seconds between looks for a gap worth filling in (N51)
@@ -50,6 +51,10 @@
     const RESERVE_HM = 60;       // the war chest the growth never spends into
     let manual = false;          // N116: in a match the levels are bought by hand (see upgrade)
     let factionFacing = false;   // N115: in a match a side's military faces the enemy's end (canvasFor)
+    // N122 (the user's): in a match a seed's one building - its main - takes this long to grow
+    // fully, at each level (and its next level can't be bought until it has): the crews' pace is
+    // set by it (pw-repair), not by its cores
+    const GROW_SECS = { capital: 180, military: 120, farm: 90 };
     const purseOf = (city) => (city && city.faction && world.stock && world.stock[city.faction]) || null;
     function pay(city, kind) {
       const purse = purseOf(city);
@@ -298,12 +303,41 @@
         rec.siteWanted = true;
         rec.growing = true;
         rec.grewAt = world.tick || 0;
+        // (the main: ring -1 - at the seed's drop, city.main is set only once its lot has taken)
+        if (manual && (lot === city.main || lot.ring === -1) && GROW_SECS[city.kind]) { rec.paceSecs = GROW_SECS[city.kind]; rec.paceCells = 0; rec.paceAt = world.tick || 0; }   // N122
         world.repair.jobs.delete(lot.owner);   // (a re-seat's old job holds stale coordinates)
         world.repair.notify(lot.owner);
       }
       clearSimAround(lot.placed.x0 - 8, lot.placed.y0 - 8, lot.placed.x1 + 8, lot.placed.y1 + 60);
+      clearPlants(lot.placed);
       flashes.push({ box: { ...lot.placed }, age: 0 });
       return true;
+    }
+    // N120 (the user's): growth replaces the trees in its way - every plant rooted in the lot's
+    // ground goes whole (its crown with it, wherever it reaches), and any green left in its box
+    function clearPlants(p) {
+      const a = Math.min(p.x0, p.worksL ?? p.x0) - 4, b = Math.max(p.x1, p.worksR ?? p.x1) + 4;
+      const wipe = (x, y) => {
+        if (!(PW.getFlags(world, x, y) & FLAG.FLORA)) return;
+        PW.setLayer(world, 'deco', x, y, 0);
+        PW.setFlag(world, x, y, FLAG.FLORA | FLAG.WOOD | FLAG.CHARRED, false);
+      };
+      const list = world.flora || [];
+      for (let i = list.length - 1; i >= 0; i -= 1) {
+        const r = list[i];
+        if (!r || r.width === undefined) continue;
+        // (rooted in its ground, or reaching into its box - a crown leaning in over the lot goes too)
+        const base = r.x + r.width / 2;
+        const reaches = r.x <= p.x1 && r.x + r.width >= p.x0 && r.y <= p.y1 && r.y + r.height >= p.y0;
+        if ((base < a || base > b) && !reaches) continue;
+        for (let k = 0; k < r.width * r.height; k += 1) {
+          if (r.mask && !(r.mask[k >> 3] >> (k & 7) & 1)) continue;
+          wipe(r.x + (k % r.width), r.y + ((k / r.width) | 0));
+        }
+        list.splice(i, 1);
+        world.floraIndex = null;
+      }
+      for (let y = p.y0; y <= p.y1; y += 1) for (let x = p.x0; x <= p.x1; x += 1) wipe(x, y);
     }
 
     // Take a building out of the world and regrow the natural ground under it, so it can be
@@ -324,8 +358,10 @@
       const rec = world.buildings[lot.owner - 1];
       const canvasTop = rec && Number.isFinite(rec.oy) ? rec.oy : p.y0 - 220;
       const y0 = Math.max(2, Math.min(p.y0 - 4, canvasTop - 2)), y1 = Math.min(world.height - 30, p.y1 + 150);
+      let boreL = Infinity, boreR = -Infinity;
       for (let y = y0; y <= y1; y += 1) for (let x = x0; x <= x1; x += 1) {
         if (PW.getOwner(world, x, y) !== lot.owner) continue;
+        if (PW.getFlags(world, x, y) & FLAG.HOLLOW) { boreL = Math.min(boreL, x); boreR = Math.max(boreR, x); }
         PW.set(world, x, y, M.AIR, Q);
         PW.setLayer(world, 'paint', x, y, 0);
         PW.setLayer(world, 'back', x, y, 0);
@@ -333,17 +369,29 @@
         PW.setOwner(world, x, y, 0);
         PW.setFlag(world, x, y, FLAG.LADDER | FLAG.FIXTURE | FLAG.HATCH | FLAG.NOBUILD | FLAG.CARVED, false);
       }
+      // (where the line ran through made ground the lot stood on - above the land's first surface -
+      // its trench is backfilled too, so the re-lay below has ground to carve its lanes in)
+      const trench = (x) => {
+        if (x < boreL - 4 || x > boreR + 4 || !world.pipes || !world.pipes.lines) return Infinity;
+        let top = Infinity;
+        for (const line of world.pipes.lines) if (x >= line.x0 && x <= line.x1) top = Math.min(top, line.ys[x - line.x0] - 3);
+        return top;
+      };
       for (let x = x0; x <= x1; x += 1) {
         const s = surf(x);
-        for (let y = Math.max(y0, s); y <= y1; y += 1) {
+        for (let y = Math.max(y0, Math.min(s, trench(x))); y <= y1; y += 1) {
           if ((PW.get(world, x, y) & 63) !== M.AIR || PW.getLayer(world, 'back', x, y)) continue;
           const d = y - s;
-          const id = d < 3 ? M.GRASS : d < 16 ? M.TOPSOIL : d < 260 ? M.SOIL : M.STONE;
+          const id = d < 0 ? M.SOIL : d < 3 ? M.GRASS : d < 16 ? M.TOPSOIL : d < 260 ? M.SOIL : M.STONE;
           PW.set(world, x, y, id | (PW.hash2(x >> 3, y >> 3) & 3) << 6, Q);
         }
         PW.refreshGroundTop(world, x);
       }
       clearSimAround(x0, y0, x1, y1);
+      // (a lot whose works had sleeved the supply line - a plinth laid across the bore - hands those
+      // columns back filled: the line lays them again, its lanes carved through the fill - the
+      // seed-11 re-seat left ten lane cells bare air)
+      if (boreR >= boreL && world.pipes && world.pipes.heal) world.pipes.heal(boreL - 4, boreR + 4);
       lot.placed = null;
       world.buildings[lot.owner - 1] = emptyRecord(lot.owner);
     }
@@ -555,6 +603,32 @@
       return Math.max(4, MAX_LEVEL - (rank - 1));
     }
 
+    // N120/N112 (the user's): could a seed go here - and what would stand? The drop's own tests, and
+    // its main building measured on the ground (PW.foundations.measure: nothing is written). Answers
+    // { ok, note, canvas, worldX, floor } - the canvas and where it would stand, for the preview.
+    const previewCanvas = new Map();
+    function canDrop(xIn, kind, style, faction, opts = {}) {
+      const x = Math.round(xIn);
+      if (x < 120 || x > world.width - 120) return { ok: false, note: 'off the map' };
+      const b = barrierIn(x - 40, x + 40);
+      if (b && (b.kind === 'water' || kind !== 'military')) return { ok: false, note: b.kind === 'water' ? 'open water' : 'mountain: only military digs in here' };
+      const other = claimed(x - 60, x + 60, null);
+      if (other && !(kind === 'military' && other.kind === 'capital')) return { ok: false, note: `claimed by ${other.kind} ${other.id}` };
+      const start = kind === 'capital' && !!opts.start;
+      const type = start ? 'core' : kind === 'capital' ? 'population' : kind;
+      const key = `${type}|${style}|${faction}`;
+      let canvas = previewCanvas.get(key);
+      if (!canvas) {
+        const stub = { kind, style, faction: faction || null, level: 1, setting: null };
+        canvas = canvasFor(stub, { type, level: 1, ring: -1, side: 'right', variant: start ? 'core' : kind === 'capital' ? 'offset' : kind === 'farm' ? 'silos' : 'compound', seedN: 17 });
+        previewCanvas.set(key, canvas);
+      }
+      if (other) return { ok: true, note: `joins capital ${other.id}`, canvas: null };   // (a military seed merging into a capital)
+      const worldX = Math.round(x - canvas.body.left - bodyWidth(canvas) / 2);
+      const m = PW.foundations.measure(world, canvas, worldX, style);
+      if (!m) return { ok: false, note: 'ground too steep for a seed', canvas, worldX };
+      return { ok: true, note: '', canvas, worldX, floor: m.plan.G };
+    }
     // (opts.start - N115's gameplay test: a side's STARTING capital, its main the core bunker - the
     // orb in its pit under the floating armoured block - standing fixed as a home town's does, the
     // rings growing round it; a later capital's main is the capital building, as ever)
@@ -597,7 +671,8 @@
       // every level-up, to its rank's cap (N33).
       const start = kind === 'capital' && !!opts.start;
       const main = { type: start ? 'core' : kind === 'capital' ? 'population' : kind, level: 1, ring: -1, side: 'right',
-        bornLevel: 1, variant: start ? 'core' : kind === 'capital' ? 'offset' : kind === 'farm' ? 'homestead' : 'compound',
+        // (N95: a farm's first and main building is its storage silos)
+        bornLevel: 1, variant: start ? 'core' : kind === 'capital' ? 'offset' : kind === 'farm' ? 'silos' : 'compound',
         seedN: seedN += 17, owner: allotOwner(), x };
       if (!placeLot(city, main, x)) {
         world.buildings.pop();
@@ -918,8 +993,10 @@
       // N51: the town spreads out - gaps start loose and varied, with the odd plaza-sized hole
       // left open (one lot in six), and the infill fills them in as it grows (the tightening
       // on level-up pulls the centre in besides).
+      // N94 (the user's): and the further out a ring, the further apart - the capital's middle
+      // the densest
       lot.gapWant = GAP_MIN + rand.int(8, 34) + (rand.int(0, 5) === 0 ? 110 + rand.int(0, 50) : 0)
-        + terrainGap(city.edge[side], city.edge[side] + dir * (w + 36));
+        + terrainGap(city.edge[side], city.edge[side] + dir * (w + 36)) + (PW.NO_RING_SPREAD ? 0 : ring * SPREAD_RING);
       let cursor = city.edge[side] + dir * lot.gapWant;
       let far = cursor + dir * (w + 6);
       if (far < 80 || far > world.width - 80) { city.blocked[side] = 'edge'; return false; }
@@ -1548,14 +1625,17 @@
       const a = dir > 0 ? l.placed.worksR + 1 : n.placed.worksR + 1;
       const b = dir > 0 ? n.placed.worksL - 1 : l.placed.worksL - 1;
       const gapW = b - a + 1;
-      if (gapW < 1 || gapW > 46) return false;
+      // (N94 stands the outer rings further apart: a wing still meets its neighbour across it)
+      if (gapW < 1 || gapW > 66) return false;
       // N97: the faces are met as they STAND - so the weld waits until both buildings have risen
       // (N73, as the joints do), and is laid once more when both are whole: a weld laid round a
       // blueprint met no face and carried nothing across (the user's gaps).
       if (stillBuilding(l) || stillBuilding(n)) return false;
       const rec = world.buildings[l.owner - 1], nrec = world.buildings[n.owner - 1];
       const whole = (r) => ((r && r.health) || 0) >= 0.99 ? 1 : 0;
-      const sig = `${n.placed.x0}|${a}|${whole(rec)}${whole(nrec)}`;
+      // (and looked over again each minute: the crews finishing either face can take a pocket of
+      // the weld's back wall with them)
+      const sig = `${n.placed.x0}|${a}|${whole(rec)}${whole(nrec)}|${Math.floor((world.tick || 0) / 3600)}`;
       if (l[key] && l[key].sig === sig) return false;
       const wing = (rec.floors || []).filter((f) => f.wing).sort((p, q) => p.y - q.y);
       if (!wing.length) return false;
@@ -1612,7 +1692,11 @@
           if (!open(x, yy)) { x += 1; continue; }
           let e = x;
           while (e <= px1 && open(e, yy)) e += 1;
-          if (e <= px1 && e - x <= 40 && own(x - 1, yy) && own(e, yy)) {
+          // (N121: the taller gate halls stand the towers further apart at their feet - pockets up
+          // to the joint's reach)
+          // (a face's own sill or a crown's step a cell proud of it still closes the pocket in)
+          const shut = (q) => own(q, yy) || own(q, yy - 1) || own(q, yy + 1);
+          if (e <= px1 && e - x < 60 && (shut(x - 1) || shut(x - 2)) && (shut(e) || shut(e + 1))) {
             for (let k = x; k < e; k += 1) {
               PW.setLayer(world, 'back', k, yy, PW.abgr(...backTone(k, yy), 255));
               PW.setOwner(world, k, yy, l.owner);
@@ -1715,6 +1799,7 @@
       city.capEdge = { left: city.main.placed.worksL - 2, right: city.main.placed.worksR + 2 };
       city.edge = { left: Math.min(city.edge.left, city.capEdge.left), right: Math.max(city.edge.right, city.capEdge.right) };
       layRunway(city);          // N57: the door moved with the bigger base - the strip follows
+      basePerimeter(city);      // N89: the fences go out with it (and onto its new record's gates)
       adaptNeighbours(city);    // N57: the neighbours' bases adapt to the reshaped ground
       note(city, `dug in deeper: level ${city.level}`);
       mountainRoad(city);
@@ -1724,14 +1809,30 @@
       // (N116: in a match a base levels only when its side pays for it - see upgrade)
       if (!manual && city.actions % 3 === 2 && city.level < MIL_TOP && !nearBlast(city.capEdge.left, city.capEdge.right)) return militaryLevelUp(city);
       const side = city.actions % 2 ? 'left' : 'right';
-      if (city.rings[side].length >= 2) return false;
+      // N89 (the user's): the base spreads over smaller buildings round its main - a watchtower, a
+      // barracks, a bunker - more of them as it levels (POSTS_MOST by level, each side)
+      const most = PW.NO_POSTS ? 0 : Math.min(3, 1 + (city.level >> 1));
+      if (city.rings[side].length >= most) return false;
       const dir = side === 'left' ? -1 : 1;
-      const lot = { type: 'military', level: 1, ring: city.rings[side].length, side, bornLevel: city.level,
-        variant: 'compound', seedN: seedN += 17, owner: 0 };
+      const ring = city.rings[side].length;
+      const lot = { type: 'military', level: 1, ring, side, bornLevel: city.level,
+        variant: POST_KINDS[(ring + (side === 'left' ? 0 : 1)) % POST_KINDS.length], seedN: seedN += 17, owner: 0 };
       const canvas = canvasFor(city, lot);
       const w = bodyWidth(canvas);
       const cursor = city.edge[side] + dir * 14;
-      if (barrierIn(cursor, cursor + dir * (w + 8)) || claimed(cursor, cursor + dir * (w + 8), city)) return false;
+      {
+        // (a base's posts may stand on its own side's capital's claimed ground - not on its lots)
+        const x0p = Math.min(cursor, cursor + dir * (w + 8)), x1p = Math.max(cursor, cursor + dir * (w + 8));
+        const lotIn = (c) => [c.main, ...c.rings.left, ...c.rings.right].some((q) => q && q.placed && q.placed.worksR >= x0p && q.placed.worksL <= x1p);
+        let by = claimed(cursor, cursor + dir * (w + 8), city);
+        if (by && city.faction && by.faction === city.faction && by.kind !== 'military' && !lotIn(by)) by = null;
+        const bar = barrierIn(cursor, cursor + dir * (w + 8));
+        if (bar || by) {
+          const why = bar ? `a ${bar.kind} in the way` : `${by.kind} ${by.id}'s ground`;
+          if (city.ringWhy !== `${side}:${why}`) { city.ringWhy = `${side}:${why}`; note(city, `no room on the ${side}: ${why}`); }
+          return false;
+        }
+      }
       if (!pay(city, 'lot')) { city.blocked[side] = 'upkeep'; return false; }   // N4
       lot.canvas = canvas;
       lot.owner = allotOwner();
@@ -1741,7 +1842,65 @@
       if (!PW.NO_LANE_GRADING) gradeLane(city.capEdge[side], dir > 0 ? lot.placed.worksL : lot.placed.worksR);   // N3 vehicle rule
       paveSegment(city, city.capEdge[side], dir > 0 ? lot.placed.worksL : lot.placed.worksR);
       refreshSigs(city, Math.min(city.capEdge[side], lot.placed.worksL), Math.max(city.capEdge[side], lot.placed.worksR));
+      basePerimeter(city);
       return true;
+    }
+    // N89: the base's perimeter - at its outer edge each side a barrier across the way in: concrete
+    // T-wall blocks on the side facing the enemy, a chain-link fence topped with barbed wire on the
+    // other, FENCE_H high - over a man's step (they stop troopers), under a hull's (tanks drive
+    // over them). They are the main building's works, marked as its gate piers (record.gates), so
+    // the base's own men pass them as they pass its halls; another side's are stopped.
+    const POST_KINDS = ['watchtower', 'barracks', 'bunker'];
+    const FENCE_H = 13;
+    function basePerimeter(city) {
+      const rec = city.main && world.buildings[city.main.owner - 1];
+      if (!rec || !rec.body) return;
+      const foe = city.faction === 'left' ? 1 : city.faction === 'right' ? -1 : 0;
+      city.fences = city.fences || {};
+      for (const side of ['left', 'right']) {
+        const dir = side === 'left' ? -1 : 1;
+        // (laid afresh each time: the base may have grown out, or its main been raised a new record)
+        const old = city.fences[side];
+        if (old) for (const [x, y] of old.cells) if (PW.getOwner(world, x, y) === old.owner) { PW.set(world, x, y, M.AIR, { quiet: true }); PW.setOwner(world, x, y, 0); }
+        const wall = dir === foe;   // (the T-walls face the enemy)
+        const thick = wall ? 3 : 1, cells = [];
+        // (the first open stretch of ground out past the base's edge - its works, a runway's end, a
+        // tree's trunk are passed over)
+        const openAt = (xs) => {
+          for (let k = 0; k < thick; k += 1) {
+            const x = xs + dir * k, g = world.groundTop[x];
+            if (Math.abs(g - world.groundTop[xs]) > 2) return false;
+            for (let y = g - FENCE_H; y < g; y += 1) if (!PW.mat.open[PW.get(world, x, y) & 63] || PW.getOwner(world, x, y)) return false;
+          }
+          return true;
+        };
+        let x0 = null;
+        for (let off = 10; off <= 200 && x0 === null; off += 3) { const xs = Math.round(city.edge[side] + dir * off); if (openAt(xs)) x0 = xs; }
+        const ok = x0 !== null;
+        rec.gates = (rec.gates || []).filter((q) => q.fence !== side);
+        if (!ok) { city.fences[side] = null; continue; }
+        for (let k = 0; k < thick; k += 1) {
+          const x = x0 + dir * k, g = world.groundTop[x];
+          for (let y = g - FENCE_H; y < g; y += 1) {
+            const c = wall ? ((y - g) % 5 === 0 ? [118, 116, 110] : [156, 154, 146]) : (y === g - FENCE_H ? [150, 156, 164] : [96, 102, 110]);
+            PW.set(world, x, y, wall ? M.CONCRETE : M.STEEL, { quiet: true });
+            PW.setLayer(world, 'paint', x, y, PW.abgr(c[0], c[1], c[2]));
+            PW.setLayer(world, 'deco', x, y, 0);   // (the grass it stands in goes - no plant on a wall)
+            PW.setFlag(world, x, y, FLAG.FLORA | FLAG.WOOD, false);
+            PW.setOwner(world, x, y, rec.id);
+            cells.push([x, y]);
+          }
+          rec.gates.push({ x, y0: g - FENCE_H, y1: g - 1, fence: side });
+          // barbed wire coiled along the top
+          if (!wall) for (let dx = -3; dx <= 3; dx += 1) { const y = g - FENCE_H - 1 - ((dx & 1) ? 1 : 0); if (PW.mat.open[PW.get(world, x + dx, y) & 63]) PW.setLayer(world, 'deco', x + dx, y, PW.abgr(170, 172, 176)); }
+        }
+        // the chain-link mesh behind the posts, a little way along the ground each way
+        if (!wall) for (let dx = -6; dx <= 6; dx += 1) {
+          const x = x0 + dx, g = world.groundTop[x];
+          for (let y = g - FENCE_H + 1; y < g; y += 1) if (((x + y) & 3) === 0 && PW.mat.open[PW.get(world, x, y) & 63]) PW.setLayer(world, 'back', x, y, PW.abgr(88, 94, 100));
+        }
+        city.fences[side] = { x: x0, cells, wall, owner: rec.id };
+      }
     }
 
     // ---- N58: merge points ---------------------------------------------------------------------
@@ -1808,13 +1967,15 @@
     // their roofs (the spine's cap). `rise` is how far the spine climbs above the block.
     function buildJoint(style, w, decorKind, rise = 0) {
       const S2 = KIT.S, P = KIT.STYLES[style], R = KIT;
-      const ground = 3 * S2.FLOOR + 10 + Math.max(0, rise);
+      // (N121: its ground storey a gate hall as tall as the towers' either side of it)
+      const raise = PW.NO_UNDERCROFT || PW.NO_HALL_RAISE ? 0 : S2.HALL_RAISE;
+      const ground = 3 * S2.FLOOR + raise + 10 + Math.max(0, rise);
       const c = R.createCanvas(w, ground + R.VAULT_DEPTH + 5, ground);
-      c.meta = { type: 'joint', style, decor: decorKind };
-      const floorRow = (k) => ground - k * S2.FLOOR;
+      c.meta = { type: 'joint', style, decor: decorKind, hallRaise: raise };
+      const floorRow = (k) => ground - k * S2.FLOOR - (k > 0 ? raise : 0);
       for (let k = 0; k < 3; k += 1) {
         const fRow = floorRow(k);
-        R.rect(c, 2, fRow - S2.CLEAR, w - 3, fRow - 1, (x, y) => R.back(c, x, y, R.backWallColor(style, x, y, fRow - 1 - y, 2, w - 3)));
+        R.rect(c, 2, floorRow(k + 1) + S2.SLAB, w - 3, fRow - 1, (x, y) => R.back(c, x, y, R.backWallColor(style, x, y, fRow - 1 - y, 2, w - 3)));
         for (let wx = 10; wx < w - 16; wx += 30) if (k > 0) R.backWindow(c, style, wx, fRow, (PW.hash2(wx, k) & 3) !== 0);
         R.ceilingLamp(c, style, w >> 1, fRow - S2.CLEAR + 2);
         for (let x = 2; x < w - 2; x += 1) for (let r = 0; r < S2.SLAB; r += 1) {
@@ -2086,7 +2247,7 @@
       city.level += 1;
       eraseLot(city.main);
       city.main.level = Math.min(7, city.level + 1);
-      city.main.variant = city.level >= 4 ? 'silos' : 'homestead';
+      city.main.variant = 'silos';   // N95 (the user's): a farm's main building is its silos, at every level
       city.main.canvas = null;
       if (!placeLot(city, city.main, city.main.x)) { city.main.level -= 1; city.main.canvas = null; placeLot(city, city.main, city.main.x); }
       city.capEdge = { left: city.main.placed.worksL - 2, right: city.main.placed.worksR + 2 };
@@ -2107,8 +2268,29 @@
       const ok = city.kind === 'capital' ? levelUp(city) : city.kind === 'farm' ? farmLevelUp(city) : militaryLevelUp(city);
       return ok ? { ok: true, level: city.level } : { ok: false, note: 'no room to grow' };
     }
+    // N120 (the user's): from the first seed, the core, growth spreads outward - its towers, and its
+    // farms: past its edge, once it has STARTER_FARMS[k] rings, a farm of its own takes root (free).
+    const STARTER_FARMS = [2, 5];
+    function starterFarm(city) {
+      if (!city.start || city.fallen) return false;
+      const k = city.farmsSown || 0;
+      if (k >= STARTER_FARMS.length || city.rings.left.length + city.rings.right.length < STARTER_FARMS[k]) return false;
+      // (the side away from the middle of the map first - the farms behind the town)
+      const away = city.x < world.width / 2 ? 'left' : 'right';
+      for (const side of k % 2 ? [away === 'left' ? 'right' : 'left', away] : [away, away === 'left' ? 'right' : 'left']) {
+        const dir = side === 'left' ? -1 : 1;
+        for (let d = 140; d <= 520; d += 95) {
+          const r = drop(city.edge[side] + dir * d, 'farm', city.style, city.faction);
+          if (r.ok) { city.farmsSown = k + 1; r.city.fromStart = city.id; note(city, 'a farm takes root beside it'); return true; }
+        }
+      }
+      city.farmTries = (city.farmTries || 0) + 1;
+      if (city.farmTries > 6) { city.farmsSown = k + 1; city.farmTries = 0; }   // (no ground for it: the next)
+      return false;
+    }
     function act(city) {
       city.actions += 1;
+      if (city.kind === 'capital' && starterFarm(city)) return true;
       if (city.kind === 'capital') {
         const lots = city.rings.left.length + city.rings.right.length;
         if (!manual && lots >= city.level * 2 && city.level < (city.levelCap || MAX_LEVEL)
@@ -2168,6 +2350,52 @@
       return false;
     };
     let stepTick = 0;
+    // N129 (the user's, 2026-11-24): a city's tunnel grows from the bottom of its core - a shaft
+    // straight down, a box at a time as the workings' clock goes on (the rock under the core's bed
+    // left to carry it), to the depth of the nearest ore it smells; from its foot a miner sets out
+    // sideways to that ore (PW.mining's trip) and opens a mine there. A mountain base digs its own
+    // three times slower. (Towns laid at the world's making have their own starter mines.)
+    const SHAFT_STEP = 12, SHAFT_EVERY = 1.6, SHAFT_UNDER = 44;
+    function coreShaft(city) {
+      if (!PW.tunnels || !PW.mining || !city.faction || city.adopted || city.kind === 'farm' || !city.main || !city.main.placed) return false;
+      const T = PW.tunnels.state(world);
+      let s = city.shaft;
+      if (!s) {
+        // (the user's: a seed makes no tunnel at once - its city starts digging at TUNNEL_LEVEL)
+        if (city.level < TUNNEL_LEVEL) return false;
+        const rec = world.buildings[city.main.owner - 1];
+        if (!rec || rec.underConstruction || !rec.cores || !rec.cores.length) return false;
+        const core = rec.cores.find((k) => k.vault) || rec.cores[0];
+        const x = Math.round(core.vault ? (core.vault.x0 + core.vault.x1) / 2 : core.x);
+        const top = Math.round((core.vault ? core.vault.bottom : core.y) + SHAFT_UNDER), g = world.groundTop[x];
+        const node = PW.mining.prospectFor(world, {}, { x, y: g + 300 });
+        const bottom = Math.min(world.height - 140, Math.max(top + 160, g + 240, node ? node.y + 8 : g + 360));
+        const net = PW.tunnels.createNetwork(world, { side: city.faction, x, y: top, building: city.main.owner });
+        s = city.shaft = { x, top, y: top, bottom, net: net.id, at: T.time + SHAFT_EVERY, node: node || null,
+          slow: city.kind === 'military' && city.setting === 'mountain' ? 3 : 1, done: false };
+      }
+      if (s.done || T.time < s.at) return false;
+      s.at = T.time + SHAFT_EVERY * s.slow;
+      const net = T.networks[s.net - 1];
+      const y1 = Math.min(s.bottom, s.y + SHAFT_STEP);
+      // (a shaft stops short of a mountain's road tunnel: its foot is where it stands then)
+      if (PW.mining.crossesRoad && PW.mining.crossesRoad(world, s.x - 34, s.y, s.x + 34, y1 + 34)) {
+        if (s.y - s.top < 40) { s.done = true; s.why = 'a road tunnel under it'; return false; }
+        s.bottom = s.y;
+      } else {
+        if (!net || !PW.tunnels.digBox(world, net, s.x - 11, s.y, s.x + 11, y1, { kind: 'shaft', keepOre: true }).ok) { s.done = true; s.why = 'blocked'; return false; }
+        if (ST.ladder) ST.ladder(world, s.x - 6, s.y, y1 - 1);
+        s.y = y1;
+      }
+      if (s.y >= s.bottom) {
+        // the shaft's foot: a landing, and a miner sets out from it towards the ore
+        PW.tunnels.digBox(world, net, s.x - 34, s.bottom - 30, s.x + 34, s.bottom + 2, { kind: 'room', keepOre: true });
+        const dir = s.node ? Math.sign(s.node.x - s.x) || 1 : (city.x < world.width / 2 ? 1 : -1);
+        s.trip = PW.mining.expedition(world, net, s.x, s.bottom + 2, dir, { slow: s.slow, by: city.id });
+        s.done = true;
+      }
+      return true;
+    }
     function step(dt) {
       // Idle engine, idle cost: with no city grown (the live world before any seed lands)
       // nothing is scanned - the storm check alone walked the falling-pieces list every
@@ -2199,6 +2427,7 @@
             : supplied(city) ? 1 : 0.25;
           for (const side of ['left', 'right']) for (const l of city.rings[side]) l.age += dt * feed;
         }
+        if (!PW.NO_CORE_SHAFT && (stepTick + city.id) % 20 === 0) coreShaft(city);   // N129
         city.jointClock += dt;
         if (city.jointClock >= JOINT_EVERY) {   // N58: close neighbours join through a merge point
           city.jointClock = 0;
@@ -2273,6 +2502,8 @@
       _adapt: adaptNeighbours,     // (test hook: the N57 neighbour re-seat, called by the harness)
       _levelUp: levelUp, mountainRange,   // (N104: a level-up by hand for the suites; the massif a barrier is part of)
       upgrade, topLevel,   // N116: a level bought by the city's side
+      GROW_SECS,           // N122: how long a match's seed building takes to grow, by kind
+      canDrop,             // N120/N112: would a seed take here - and the building that would stand
       get manual() { return manual; }, set manual(v) { manual = !!v; },
       get factionFacing() { return factionFacing; }, set factionFacing(v) { factionFacing = !!v; } };
     world.capitalGrowth = api;     // N2: vision reads the engine's cities off the world

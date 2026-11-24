@@ -79,9 +79,15 @@ if (m.mode === 'versus') {
   // right click. (The box and the right click go in as pointer events on the canvas - the harness's
   // real mouse has no Shift or right button - through the same handlers a mouse would reach.)
   const troops0 = G.unitsOf(m, 'left').filter((u) => u.kind === 'trooper').length;
-  for (let k = 0; k < 3; k += 1) await press('#gm-bar [data-deploy="trooper"]');
+  // (N126, the user's: the kinds are options - TROOPER picked - and the one DEPLOY button sends them)
+  await press('#gm-bar [data-deploy="trooper"]');
+  const picked = document.querySelector('#gm-bar [data-deploy="trooper"]').classList.contains('on');
+  const goBtn = document.querySelector('#gm-bar [data-deploy-go]');
+  check(picked && !!goBtn && goBtn.classList.contains('lit') && G.unitsOf(m, 'left').filter((u) => u.kind === 'trooper').length === troops0,
+    `TROOPER is an option - picked, nothing deployed yet - and the DEPLOY button lights for it (${goBtn ? goBtn.className : 'no button'})`);
+  for (let k = 0; k < 3; k += 1) await press('#gm-bar [data-deploy-go]');
   const squad = G.unitsOf(m, 'left').filter((u) => u.kind === 'trooper');
-  check(squad.length - troops0 === 3, `three real clicks on TROOPER deploy three troopers (${squad.length - troops0})`);
+  check(squad.length - troops0 === 3, `three real clicks on DEPLOY deploy three troopers (${squad.length - troops0})`);
   const lead = squad[squad.length - 1];
   pwApp.focus(lead.x, lead.y - 30, 4);
   await sleep(200);

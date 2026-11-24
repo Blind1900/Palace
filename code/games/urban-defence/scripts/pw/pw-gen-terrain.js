@@ -21,7 +21,7 @@
     return tilt * (smooth(along / span) - 0.5) + amp * Math.sin(along / period * Math.PI * 2 + phase);
   }
 
-  function planLayout(world, random) {
+  function planLayout(world, random, seed = 1) {
     const W = world.width;
     const baseY = Math.round(world.height * 0.44);
     const baseWidth = 2600, neutralWidth = 1500, margin = 420;
@@ -112,9 +112,72 @@
         }
       });
     });
+    // N124 (the user's, 2026-11-23): the map's ends are open country - no mountain stands within
+    // FLAT_END of either end (each side has that much flat land to found its capital and spread
+    // before the first range), and the centre is the map's great barrier: in place of the middle
+    // town, a larger mountain than any other or a wide lake. Laid after the zones have spent their
+    // draws (the shapes are drawn from hashes), so the rest of the world is laid as it was.
+    const FLAT_END = 0.22;
+    const flatL = W * FLAT_END, flatR = W * (1 - FLAT_END);
+    // N133 (the user's, 2026-11-24): a land for ground troops - one or two high mountains on the
+    // whole map, every other range worn down to rolling hills; no lakes but the one near each end
+    // and, if it is the centre's, the great lake; most rises and falls gradual, every slope one a
+    // tank can climb (the profile's grade limit, below).
+    const centreSite = sites[2], wing = Math.round((wilds[1].x1 - wilds[1].x0) * 0.3);
+    const c0 = centreSite.x0 - wing, c1 = centreSite.x1 + wing, cx = Math.round((centreSite.x0 + centreSite.x1) / 2);
+    const crest = (k) => (PW.hash2(seed * 31 + 0xce17e, k) & 1023) / 1023;
+    const centreMountain = crest(1) < 0.6;
+    const hills = [];
+    // (the high ones kept, when the centre is a lake: the tallest range on each side of it)
+    const keep = new Set();
+    if (!centreMountain) {
+      for (const half of [-1, 1]) {
+        const best = mountains.filter((m) => (m.x - cx) * half > 0 && m.x - m.half >= flatL && m.x + m.half <= flatR && (m.x + m.half < c0 || m.x - m.half > c1))
+          .sort((p, q) => q.height - p.height)[0];
+        if (best) keep.add(best);
+      }
+    }
+    for (let i = mountains.length - 1; i >= 0; i -= 1) {
+      const m = mountains[i], a = m.x - m.half, b = m.x + m.half;
+      if (keep.has(m)) continue;
+      mountains.splice(i, 1);
+      if (a < flatL || b > flatR) {
+        // (where it stood, a valley floor: flat ground, not a hole in the relief)
+        pockets.push({ kind: 'valley', x0: Math.round(Math.max(a, sites[0].x1 + 200)), x1: Math.round(Math.min(b, sites[4].x0 - 200)), shoulder: 150 });
+      } else if (b < c0 || a > c1) {
+        // a range worn down to a long rolling hill
+        const k = i * 7 + 3, h = 80 + crest(k) * 120, half = Math.max(m.half * 1.25, h * 4.5);
+        hills.push({ x: m.x, half, height: h, peaks: [{ x: m.x, height: h, left: half, right: half, shape: 1.15 + crest(k + 1) * 0.3, kind: 'hill' }],
+          seed: m.seed, mesa: 0 });
+      }
+    }
+    for (let i = lakes.length - 1; i >= 0; i -= 1) lakes.splice(i, 1);
+    for (let i = pockets.length - 1; i >= 0; i -= 1) {
+      if (pockets[i].x1 > c0 && pockets[i].x0 < c1) pockets.splice(i, 1);
+      else if (pockets[i].kind === 'river') pockets[i].kind = 'valley';
+    }
+    let centre;
+    if (centreMountain) {
+      const tallest = 1000;
+      const height = Math.min(baseY - 260, tallest * (1.15 + crest(2) * 0.15)), half = (c1 - c0) / 2;
+      const peaks = [{ x: cx, height, left: half * (0.86 + crest(3) * 0.1), right: half * (0.86 + crest(4) * 0.1), shape: 1.05 + crest(5) * 0.12, kind: 'pyramid' }];
+      for (const side of [-1, 1]) {
+        peaks.push({ x: cx + side * half * (0.32 + crest(6 + side) * 0.18), height: height * (0.5 + crest(8 + side) * 0.18),
+          left: half * 0.42, right: half * 0.42, shape: 1.1, kind: 'pyramid' });
+        peaks.push({ x: cx + side * half * 0.9, height: height * 0.14, left: half * 0.36, right: half * 0.36, shape: 1.4, kind: 'hill' });
+      }
+      mountains.push({ x: cx, half: half * 1.08, height, peaks, seed: (seed * 7919 + 0xce17e) % 1000000000, mesa: 0, centre: true });
+      centre = { kind: 'mountain', x: cx, half, height };
+    } else {
+      const half = Math.min((c1 - c0) / 2 - 120, 900 + crest(2) * 300);
+      lakes.push({ x: cx, half, depth: 300 + crest(3) * 80, centre: true });
+      centre = { kind: 'lake', x: cx, half };
+    }
+    sites.splice(2, 1);
+    wilds.splice(1, 2, { x0: wilds[1].x0, x1: wilds[2].x1 });
     // A pond beside each base for its farms, on the outer side.
     lakes.push({ x: sites[0].x0 - margin * 0.5 + 40, half: 180, depth: 110, pond: true });
-    lakes.push({ x: sites[4].x1 + margin * 0.5 - 40, half: 180, depth: 110, pond: true });
+    lakes.push({ x: sites[sites.length - 1].x1 + margin * 0.5 - 40, half: 180, depth: 110, pond: true });
     // Pockets of flat land in the wild, good ground for a city, a farm or both: the valley floors
     // above, and on a broad mountain now and then a bench, a flat shelf partway up one flank.
     // (drawn from hashes, so the layout's random sequence is unchanged)
@@ -133,7 +196,7 @@
       }
     }
     for (let i = pockets.length - 1; i >= 0; i -= 1) if (pockets[i].x1 - pockets[i].x0 < 200) pockets.splice(i, 1);
-    return { baseY, sites, wilds, mountains, lakes, pockets };
+    return { baseY, sites, wilds, mountains, hills, lakes, pockets, centre, flatEnd: [Math.round(flatL), Math.round(flatR)] };
   }
 
   // Surface height (row of the first ground cell) for every column.
@@ -162,8 +225,10 @@
       return Math.max(a, b) + h * h * k / 4;
     };
     for (let x = 0; x < W; x += 1) {
+      // (N133: the land's own rise and fall gradual - the short swells and the fine roughness
+      // that made steps a man or a hull balks at are a third of what they were)
       let y = layout.baseY
-        - hills[0](x) * 170 - hills[1](x) * 95 - hills[2](x) * 32 - hills[3](x) * 9 - hills[4](x) * 2.5;
+        - hills[0](x) * 170 - hills[1](x) * 95 - hills[2](x) * 12 - hills[3](x) * 3 - hills[4](x) * 1;
       for (const m of layout.mountains) {
         let lift = 0;
         for (const peak of m.peaks) {
@@ -189,6 +254,11 @@
         y -= lift * rough;
         liftSum[x] += lift * rough;
         relief[x] = Math.max(relief[x], Math.min(1, lift / m.height));
+      }
+      // (N133: the ranges worn down to hills - long, rounded, country ground all through)
+      for (const hl of layout.hills || []) {
+        const t = Math.abs(x - hl.x) / hl.half;
+        if (t < 1) y -= hl.height * Math.pow(1 - smooth(t), hl.peaks[0].shape);
       }
       // Edges of the map rise into hills.
       const edge = Math.min(x, W - 1 - x);
@@ -216,6 +286,17 @@
         const blend = smooth((Math.min(x - p.x0, p.x1 - x) + p.shoulder) / p.shoulder);
         if (blend > 0) { y += (p.level + hills[4](x) * 0.6 - y) * blend; liftSum[x] *= 1 - blend; }
       }
+      surface[x] = y;
+    }
+    // N133 (the user's): every slope one a tank can climb - the ground never rises or falls more
+    // than GRADE a column (38 degrees, under the tanks' 43), the crests worn down to it
+    // - and off the mountains the land no steeper than LAND_GRADE (24 degrees: rolling country)
+    const GRADE = 0.8, LAND_GRADE = 0.45;
+    const gradeAt = (x) => (relief[x] > 0.02 ? GRADE : LAND_GRADE);
+    for (let x = 1; x < W; x += 1) { const g = gradeAt(x); if (surface[x] < surface[x - 1] - g) surface[x] = surface[x - 1] - g; }
+    for (let x = W - 2; x >= 0; x -= 1) { const g = gradeAt(x); if (surface[x] < surface[x + 1] - g) surface[x] = surface[x + 1] - g; }
+    for (let x = 0; x < W; x += 1) {
+      let y = surface[x];
       for (const lake of layout.lakes) {
         const t = Math.abs(x - lake.x) / lake.half;
         if (t >= 1.25) continue;
@@ -452,6 +533,21 @@
     return aprons;
   }
 
+  // N133: what the scree and the talus banked up is held to the land's grade as well - any crest
+  // left steeper than a tank climbs is cut back to it (lakes' bowls and shores aside)
+  function gradeCut(world, layout, surface, top) {
+    const { mat, width: W } = world, G = 0.8;
+    const wet = (x) => layout.lakes.some((l) => Math.abs(x - l.x) < l.half * 1.3);
+    const lim = Float32Array.from(surface);
+    for (let x = 1; x < W; x += 1) if (!wet(x) && lim[x] < lim[x - 1] - G) lim[x] = lim[x - 1] - G;
+    for (let x = W - 2; x >= 0; x -= 1) if (!wet(x) && lim[x] < lim[x + 1] - G) lim[x] = lim[x + 1] - G;
+    for (let x = 0; x < W; x += 1) {
+      const to = Math.round(lim[x]);
+      if (to <= Math.round(surface[x])) continue;
+      for (let y = Math.max(0, Math.round(surface[x])); y < to; y += 1) mat[y * W + x] = M.AIR;
+      surface[x] = to; top[x] = to;
+    }
+  }
   // Talus: at the foot of every mountain, where its flank meets the flat, the rock it has shed
   // lies banked against the slope and spreads out over the ground below - coarse gravel with
   // blocks of stone in it, thickest at the break of slope and thinning out to nothing at its toe
@@ -613,6 +709,102 @@
       }
     }
   }
+  // N125 (the user's, 2026-11-23): every deposit is the silhouette of a beast - a koi, a hawk, a
+  // wolf, a bull or an eel - carved in the crystal and lit as a body in the round, its edges
+  // broken and its sides terraced like cut stone, so that it reads as ore until it is looked at
+  // closely. A beast is tapered capsules [x0, y0, r0, x1, y1, r1] on a body one long, facing +x,
+  // y down, centred on the deposit; and an eye.
+  const BEASTS = {
+    koi: { eye: [0.3, -0.03], parts: [
+      [-0.25, 0, 0.12, 0.18, 0, 0.16], [0.18, 0, 0.15, 0.36, 0.01, 0.09], [-0.25, 0, 0.11, -0.38, 0, 0.045],
+      [-0.38, 0, 0.04, -0.5, -0.14, 0.06], [-0.38, 0, 0.04, -0.5, 0.13, 0.06], [-0.1, -0.13, 0.045, 0.12, -0.17, 0.025],
+      [0.14, 0.1, 0.03, 0.05, 0.22, 0.045], [0.36, 0.03, 0.016, 0.45, 0.1, 0.01]] },
+    hawk: { eye: [0.21, -0.03], parts: [
+      [-0.14, 0.02, 0.07, 0.14, 0, 0.08], [0.14, -0.01, 0.065, 0.24, 0, 0.045], [0.24, 0, 0.03, 0.29, 0.045, 0.012],
+      [-0.03, -0.04, 0.07, -0.26, -0.36, 0.035], [-0.26, -0.36, 0.035, -0.4, -0.42, 0.015],
+      [0.04, -0.04, 0.065, 0.12, -0.42, 0.035], [0.12, -0.42, 0.035, 0.1, -0.5, 0.012],
+      [-0.14, 0.03, 0.05, -0.36, 0.08, 0.085], [0.0, 0.08, 0.025, 0.05, 0.18, 0.015], [0.06, 0.08, 0.025, 0.12, 0.18, 0.015]] },
+    wolf: { eye: [0.29, -0.11], parts: [
+      [-0.24, 0, 0.1, 0.14, -0.02, 0.12], [0.14, -0.03, 0.09, 0.27, -0.1, 0.07], [0.27, -0.1, 0.05, 0.4, -0.06, 0.028],
+      [0.25, -0.15, 0.03, 0.26, -0.24, 0.008], [0.21, -0.14, 0.03, 0.2, -0.22, 0.008],
+      [0.12, 0.08, 0.04, 0.15, 0.3, 0.028], [0.05, 0.08, 0.04, 0.01, 0.3, 0.028],
+      [-0.19, 0.06, 0.05, -0.24, 0.3, 0.028], [-0.12, 0.07, 0.04, -0.09, 0.3, 0.028], [-0.26, -0.03, 0.05, -0.46, 0.12, 0.045]] },
+    bull: { eye: [0.27, 0.05], parts: [
+      [-0.26, 0, 0.16, 0.12, -0.02, 0.19], [0.04, -0.13, 0.11, 0.1, -0.12, 0.1], [0.17, 0.02, 0.1, 0.32, 0.11, 0.07],
+      [0.24, -0.05, 0.028, 0.36, -0.15, 0.012], [0.21, -0.05, 0.026, 0.19, -0.17, 0.01],
+      [0.1, 0.12, 0.05, 0.12, 0.3, 0.04], [0.0, 0.12, 0.05, -0.02, 0.3, 0.04],
+      [-0.2, 0.1, 0.06, -0.22, 0.3, 0.04], [-0.12, 0.1, 0.05, -0.1, 0.3, 0.04], [-0.3, -0.05, 0.022, -0.37, 0.17, 0.014]] },
+    eel: { eye: [0.42, -0.02], parts: (() => {
+      const out = [], at = (u) => [0.46 - u * 0.94, 0.11 * Math.sin(u * Math.PI * 2.6)], r = (u) => 0.055 * (1 - u * 0.8);
+      for (let k = 0; k < 16; k += 1) { const a = at(k / 16), b = at((k + 1) / 16); out.push([a[0], a[1], r(k / 16), b[0], b[1], r((k + 1) / 16)]); }
+      out.push([0.1, -0.06, 0.02, -0.3, -0.04, 0.012]);   // the fin along its back
+      return out;
+    })() },
+  };
+  const BEAST_KINDS = ['koi', 'hawk', 'wolf', 'bull', 'eel'];
+  // The beast a deposit at (cx, cy) takes, its size by the ore the deposit was to hold (a beast
+  // as big as the seam was long would hold ten times the ore): its field over its box. Drawn
+  // from hashes, so the random sequence that lays the world is unchanged.
+  function beastOf(world, cx, cy, length, thick, pad) {
+    const h = (k) => (PW.hash2(Math.round(cx) * 7 + k, Math.round(cy) * 13 - k) & 4095) / 4095;
+    const kind = BEAST_KINDS[Math.floor(h(1) * BEAST_KINDS.length) % BEAST_KINDS.length], B = BEASTS[kind];
+    const L = Math.max(26, 2 * Math.sqrt(length * thick * 0.7));
+    const flip = h(2) < 0.5 ? -1 : 1, rot = (h(3) - 0.5) * 1.1, c = Math.cos(rot), s = Math.sin(rot);
+    const to = (u, v) => { const x = u * flip * L, y = v * L; return [cx + x * c - y * s, cy + x * s + y * c]; };
+    const parts = B.parts.map(([u0, v0, r0, u1, v1, r1]) => { const a = to(u0, v0), b = to(u1, v1); return [a[0], a[1], r0 * L, b[0], b[1], r1 * L]; });
+    // (veinlets run off it into the rock, as off any lode - the outline is not an animal's alone)
+    const body = parts.length;
+    for (let v = 0, n = 3 + Math.floor(h(9) * 4); v < n; v += 1) {
+      const p = parts[Math.floor(h(10 + v) * body) % body], t = h(20 + v);
+      const ax = p[0] + (p[3] - p[0]) * t, ay = p[1] + (p[4] - p[1]) * t, a = h(30 + v) * Math.PI * 2, len = L * (0.12 + h(40 + v) * 0.22);
+      parts.push([ax, ay, 1.3, ax + Math.cos(a) * len, ay + Math.sin(a) * len, 0.45]);
+    }
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const p of parts) {
+      x0 = Math.min(x0, p[0] - p[2], p[3] - p[5]); x1 = Math.max(x1, p[0] + p[2], p[3] + p[5]);
+      y0 = Math.min(y0, p[1] - p[2], p[4] - p[5]); y1 = Math.max(y1, p[1] + p[2], p[4] + p[5]);
+    }
+    x0 = Math.max(1, Math.floor(x0) - pad); y0 = Math.max(1, Math.floor(y0) - pad);
+    x1 = Math.min(world.width - 2, Math.ceil(x1) + pad); y1 = Math.min(world.height - 2, Math.ceil(y1) + pad);
+    const w = x1 - x0 + 1, hgt = y1 - y0 + 1;
+    const depth = new Float32Array(w * hgt).fill(-9);
+    for (let y = y0; y <= y1; y += 1) for (let x = x0; x <= x1; x += 1) {
+      const px = x + 0.5, py = y + 0.5;
+      let d = -9;
+      for (const [ax, ay, ra, bx, by, rb] of parts) {
+        const ex = bx - ax, ey = by - ay, ll = ex * ex + ey * ey || 1;
+        const t = Math.max(0, Math.min(1, ((px - ax) * ex + (py - ay) * ey) / ll));
+        const dd = ra + (rb - ra) * t - Math.hypot(px - ax - ex * t, py - ay - ey * t);
+        if (dd > d) d = dd;
+      }
+      // (broken, crystalline edges: the outline is chipped, never a smooth curve)
+      if (d > -2 && d < 2) d += ((PW.hash2(x, y) & 7) - 3.5) * 0.16;
+      depth[(y - y0) * w + (x - x0)] = d;
+    }
+    // Lit as a body in the round from the upper left, and grown of crystal: its skin is a mosaic
+    // of facets a few cells across, each tilted its own way off the body's curve (lit, shaded, a
+    // bright edge where it catches the light) - from afar a lump of ore, close up a beast in the
+    // stone. A pale rim, and the eye a pale glint.
+    const art = new Int8Array(w * hgt).fill(-1);
+    const [ex, ey] = to(B.eye[0], B.eye[1]);
+    const facet = (x, y) => {
+      const fx = x + ((PW.hash2(y >> 2, 91) & 3) - 1.5), fy = y + ((PW.hash2(x >> 2, 37) & 3) - 1.5);
+      return PW.hash2(Math.floor(fx / 4), Math.floor(fy / 4));
+    };
+    for (let y = y0 + 1; y < y1; y += 1) for (let x = x0 + 1; x < x1; x += 1) {
+      const k = (y - y0) * w + (x - x0), d = depth[k];
+      if (d < 0) continue;
+      const gx = depth[k + 1] - depth[k - 1], gy = depth[k + w] - depth[k - w], g = Math.hypot(gx, gy);
+      const f = facet(x, y), tilt = ((f & 7) - 3.5) * 0.16;
+      const lit = (g > 0.05 ? (gx + gy) * Math.SQRT1_2 / g : 0) * Math.min(1, g) + tilt;
+      const edge = facet(x - 1, y) !== f || facet(x, y - 1) !== f;
+      art[k] = d < 0.9 ? 0
+        : Math.hypot(x + 0.5 - ex, y + 0.5 - ey) < Math.max(0.8, L * 0.012) ? 0
+          : edge ? (lit > 0.15 ? 3 : 2)
+            : lit > 0.1 ? 1 : 2;
+    }
+    return { kind, box: { x0, y0, x1, y1 }, w, h: hgt, depth, art, L };
+  }
   function oreVein(world, cx, cy, spec, random) {
     const { mat, width: W, height: H } = world;
     const form = spec.form || pickForm(spec, random);
@@ -690,13 +882,13 @@
     const pad = 4;
     x0 = Math.max(1, Math.floor(x0) - pad); y0 = Math.max(1, Math.floor(y0) - pad);
     x1 = Math.min(W - 2, Math.ceil(x1) + pad); y1 = Math.min(H - 2, Math.ceil(y1) + pad);
-    const w = x1 - x0 + 1, h = y1 - y0 + 1;
-    const depth = new Float32Array(w * h).fill(-9);
+    let w = x1 - x0 + 1, h = y1 - y0 + 1;
+    let depth = new Float32Array(w * h).fill(-9);
     const width = new Float32Array(w * h);   // half-width of the part each cell belongs to
-    const near = new Int32Array(w * h).fill(-1);   // the seam point a cell belongs to
+    let near = new Int32Array(w * h).fill(-1);   // the seam point a cell belongs to
     // Variant decided by a part's own crystal geometry (-1: by comb texture; HOLLOW: open space).
     const HOLLOW = -2;
-    const art = new Int8Array(w * h).fill(-1);
+    let art = new Int8Array(w * h).fill(-1);
     const each = (cx0, cy0, r, fn) => {
       for (let y = Math.max(y0, Math.floor(cy0 - r)); y <= Math.min(y1, cy0 + r); y += 1) {
         for (let x = Math.max(x0, Math.floor(cx0 - r)); x <= Math.min(x1, cx0 + r); x += 1) fn(x, y, (y - y0) * w + (x - x0));
@@ -754,7 +946,7 @@
       const d = inside(l, x, y);
       if (d > field[k]) field[k] = d;
     });
-    const rubble = clasts.length ? new Float32Array(w * h).fill(-9) : null;
+    let rubble = clasts.length ? new Float32Array(w * h).fill(-9) : null;
     for (const c of clasts) stamp(c, rubble);
     // Comb texture across a seam: crystals 3.2 cells wide grow from both walls (interlocking) to a
     // suture down the middle; each is lit on one side and shaded on the other, with dark lines
@@ -790,6 +982,24 @@
       if (depth[k] >= 0 && art[k] !== HOLLOW && !(rubble && rubble[k] >= 0) && id !== M.BEDROCK && id !== M.AIR && id !== M.WATER) would += 1;
     }
     if (would < MIN_ORE) return null;
+    // N125: the body laid is a beast's (the form above has spent its draws, so all round it the
+    // world is laid as it always was); its geodes and rock fragments go with the form
+    let beast = PW.ORE_BEASTS === false ? null : beastOf(world, cx, cy, length, thick, pad);
+    if (beast) {
+      // (a beast that would lie mostly in a cave's air keeps the form it was drawn as)
+      let n = 0;
+      const bx = beast.box;
+      for (let y = bx.y0; y <= bx.y1 && n < MIN_ORE; y += 1) for (let x = bx.x0; x <= bx.x1; x += 1) {
+        const k = (y - bx.y0) * beast.w + (x - bx.x0), id = mat[y * W + x] & 63;
+        if (beast.depth[k] >= 0 && id !== M.BEDROCK && id !== M.AIR && id !== M.WATER) n += 1;
+      }
+      if (n < MIN_ORE) beast = null;
+    }
+    if (beast) {
+      ({ x0, y0, x1, y1 } = beast.box);
+      w = beast.w; h = beast.h; depth = beast.depth; art = beast.art;
+      near = new Int32Array(w * h).fill(-1); rubble = null; geodes.length = 0;
+    }
     let cells = 0;
     for (let y = y0; y <= y1; y += 1) {
       for (let x = x0; x <= x1; x += 1) {
@@ -827,9 +1037,10 @@
         }
       }
     }
-    const seamLike = form === 'seam' || form === 'lens';
+    const seamLike = !beast && (form === 'seam' || form === 'lens');
     return { x: Math.round(cx), y: Math.round(cy), radius: seamLike ? Math.round(thick / 2) : Math.round(Math.max(x1 - x0, y1 - y0) / 2 - pad),
-      length: Math.round(length), angle, form, tier: spec.tier, amount: cells, geodes: geodes.length, box: { x0, y0, x1, y1 } };
+      length: Math.round(beast ? beast.L : length), angle, form: beast ? beast.kind : form, shape: form, beast: !!beast,
+      tier: spec.tier, amount: cells, geodes: geodes.length, box: { x0, y0, x1, y1 } };
   }
 
   function placeOreNodes(world, layout, top, random) {
@@ -837,7 +1048,7 @@
     const nodes = [];
     const tooClose = (x, y, gap) => nodes.some((n) => Math.hypot(n.x - x, n.y - y) < gap);
     // Starter veins below each base core: a solid vein the starter workings reach.
-    for (const site of [layout.sites[0], layout.sites[4]]) {
+    for (const site of [layout.sites[0], layout.sites[layout.sites.length - 1]]) {
       const coreX = site.side === 'left' ? site.x0 + 260 : site.x1 - 260;
       const nodeX = coreX + (site.side === 'left' ? 220 : -220);
       const node = oreVein(world, nodeX, top[Math.round(coreX)] + random.range(480, 560),
@@ -1036,7 +1247,7 @@
     const times = world.genTimings = {};
     let t0 = performance.now();
     const mark = (name) => { const t1 = performance.now(); times[name] = Math.round(t1 - t0); t0 = t1; };
-    const layout = planLayout(world, random);
+    const layout = planLayout(world, random, seed);
     const surface = surfaceProfile(world, layout, seed);
     mark('profile');
     world.soil = soilProvinces(world, seed, layout);
@@ -1044,6 +1255,7 @@
     mark('strata');
     layout.scree = scree(world, layout, surface, top, seed);
     layout.talus = talus(world, layout, surface, top, seed);
+    gradeCut(world, layout, surface, top);
     addLenses(world, layout, top, random);
     mark('scree');
     // Caves first: veins then run through the rock around them and show in the cave walls.

@@ -750,7 +750,10 @@
     HOLLOW: 262144,
     // BORE: this cell was drilled out by hand - a trooper's or a miner's dirt tunnel (N5): rough, a
     // secret from the enemy until it joins its side's tunnels (see pw-troops' drill).
-    BORE: 524288 });
+    BORE: 524288,
+    // VENT: this roof cell is a building's vent (N98): the outlet the inside's gas - its repair
+    // crews' dust and fumes - goes out by (pw-repair's b.vents / world.vents; the flow is pw-air's)
+    VENT: 1048576 });
   // Does a pipe fixed to the wall show at open cell (x, y)? Over the wall face (a finished
   // tunnel's too, clamped to it), or across a cave's rock; not behind a fitting, a ladder's rails
   // and rungs, a rail or a belt - but between a ladder's rungs, yes.

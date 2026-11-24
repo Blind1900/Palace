@@ -102,6 +102,7 @@
     // One operation per ore body, whoever reaches it (N12F: at most two miners harvest any one
     // body - the next tunnel to touch it digs on to other ore, or to the caves).
     if (all.some((op) => op.node === node)) return null;
+    node.found = true;   // (N125: a body reached no longer sparkles)
     let floor, rx0, rx1, dir, storage = w.storage || null, shaft = w.shaft || null;
     if (w.drift) {
       floor = w.drift.bottom;
@@ -347,9 +348,269 @@
         if (!op.exhausted || hauler) m.state = 'toFace';
     }
   }
+  // ---- N125: one miner mines, the other prospects -------------------------------------------------
+  // The user's (2026-11-23): every mine keeps one miner at the face and sends the other out to more
+  // ore. He smells the nearest body no one has reached or set out for (within SNIFF, the rock
+  // between counted, depth double), walks out of the room and drives a drift towards it, a step of
+  // drift (or of stairs, where it lies higher or lower) every DIG_EVERY seconds of the workings'
+  // clock; where the drift breaks into a cave, the cave is a shortcut - its chamber made a room
+  // with no gaps in its floor, walked across, and the drift driven on from its far wall. Reaching
+  // the ore, the drift opens a mine there (with a miner and a prospector of its own) and he goes
+  // back to his own face; with nothing left to smell he mines beside the other.
+  const SNIFF = 1500;
+  const DIG_EVERY = 1.1;
+  const DRIFT_H = 30;
+  const STEP_W = 6;
+  const MAX_STEPS = 260;
+  const groundAt = (world, x) => world.groundTop[Math.max(0, Math.min(world.width - 1, Math.round(x)))];
+  function prospectFor(world, op, from) {
+    const nodes = (world.layout && world.layout.nodes) || [];
+    const taken = new Set();
+    for (const o of list(world)) { taken.add(o.node); if (o.prospect) taken.add(o.prospect.node); }
+    for (const o of trips(world)) if (o.prospect) taken.add(o.prospect.node);
+    let best = null, bestD = SNIFF;
+    for (const n of nodes) {
+      if (taken.has(n) || n.found || (op.tried && op.tried.has(n)) || (n.amount || 0) < 40) continue;
+      if (n.y < groundAt(world, n.x) + 220) continue;
+      const d = Math.abs(n.x - from.x) + 2 * Math.abs(n.y - from.y);
+      if (d < bestD) { bestD = d; best = n; }
+    }
+    return best;
+  }
+  // The open chamber of a cave the drift has met at (x, y): its run along the drift's rows from x
+  // in dir, while it stays open (at most 400).
+  function caveRun(world, x, y, dir) {
+    let n = 0;
+    const open = (cx) => { const id = PW.get(world, cx, y - 12) & ID_MASK; return id === M.AIR && !(PW.getFlags(world, cx, y - 12) & FLAG.TUNNEL); };
+    while (n < 400 && open(x + dir * (n + 1))) n += 1;
+    return n;
+  }
+  // The cave made a room: a level floor at the drift's row across its run, the gaps under it
+  // filled with stone (no pit for a man to fall in), its height dug clean - the rest of the
+  // cave, its dome and its formations, is left as it was.
+  function caveRoom(world, net, x, y, dir, run) {
+    const a = Math.min(x, x + dir * (run + 4)), b = Math.max(x, x + dir * (run + 4));
+    // (the supply line's bore is open air of its own - never filled - nor anything a building owns)
+    const keep = (xx, yy) => (PW.getFlags(world, xx, yy) & FLAG.HOLLOW) || PW.getOwner(world, xx, yy) || PW.getLayer(world, 'pipe', xx, yy);
+    for (let cx = a; cx <= b; cx += 1) {
+      for (let k = 1; k < 90; k += 1) {
+        const id = PW.get(world, cx, y + k) & ID_MASK;
+        if (id !== M.AIR && id !== M.WATER) break;
+        if (keep(cx, y + k)) break;
+        PW.set(world, cx, y + k, M.STONE | ((PW.hash2(cx, y + k) & 3) << 6), { quiet: true });
+      }
+      if ((PW.get(world, cx, y) & ID_MASK) === M.AIR && !keep(cx, y)) PW.set(world, cx, y, M.STONE, { quiet: true });
+    }
+    return PW.tunnels.digBox(world, net, a, y - DRIFT_H - 6, b, y, { kind: 'room', keepOre: true }).ok;
+  }
+  // (a drift never cuts a mountain's road tunnel - its road, its bore, the line laid under it)
+  function crossesRoad(world, x0, y0, x1, y1) {
+    for (const t of world.roadTunnels || []) {
+      if (x1 < t.a - 4 || x0 > t.b + 4) continue;
+      for (let x = Math.max(x0, t.a); x <= Math.min(x1, t.b); x += 2) {
+        const f = t.floorAt(x), top = f - (PW.roadTunnels.CLEAR || 96) - 6, bottom = f + (PW.roadTunnels.PIPE_UNDER || 18) + 8;
+        if (y1 >= top && y0 <= bottom) return true;
+      }
+    }
+    return false;
+  }
+  function prospectStep(world, op, p) {
+    const net = PW.tunnels.state(world).networks[op.net - 1];
+    if (!net) return 'stop';
+    {
+      // (the next step's reach, before anything is dug: a road tunnel in it stops the drift there)
+      const dir0 = Math.sign(p.node.x - p.x) || p.dir;
+      if (crossesRoad(world, Math.min(p.x, p.x + dir0 * (STEP_W + 4)), p.y - DRIFT_H - 4, Math.max(p.x, p.x + dir0 * (STEP_W + 4)), p.y + 4)) return 'stop';
+    }
+    const dir = Math.sign(p.node.x - p.x) || p.dir;
+    p.dir = dir;
+    const dy = p.node.y + 8 - p.y;
+    let box;
+    if (Math.abs(dy) > 6 && Math.abs(p.node.x - p.x) < Math.abs(dy) * 1.5 + 60) {
+      // stairs: two rows down (or up) per three along, the roof clear over the treads
+      const s = Math.sign(dy) * 2;
+      box = { x0: Math.min(p.x, p.x + dir * 4), y0: Math.min(p.y, p.y + s) - 22, x1: Math.max(p.x, p.x + dir * 4), y1: Math.max(p.y, p.y + s) };
+      if (box.y0 < groundAt(world, p.x) + 140) return 'stop';
+      if (!PW.tunnels.digBox(world, net, box.x0, box.y0, box.x1, box.y1, { kind: 'incline', keepOre: true }).ok) return 'stop';
+      for (let d = 0; d <= 3; d += 1) { PW.setFlag(world, p.x + dir * d, p.y + s, FLAG.LADDER); }
+      p.x += dir * 3; p.y += s;
+    } else {
+      const ahead = p.x + dir * (STEP_W + 2);
+      const run = caveRun(world, p.x + dir * 2, p.y, dir);
+      if (run > 24) {
+        // a cave: the shortcut
+        if (!caveRoom(world, net, p.x, p.y, dir, run)) return 'stop';
+        p.x += dir * (run + 2); p.caves += 1;
+        box = { x0: Math.min(p.x, p.x - dir * run), y0: p.y - DRIFT_H, x1: Math.max(p.x, p.x - dir * run), y1: p.y };
+      } else {
+        box = { x0: Math.min(p.x, ahead), y0: p.y - DRIFT_H + 1, x1: Math.max(p.x, ahead), y1: p.y };
+        if (box.y0 < groundAt(world, ahead) + 140) return 'stop';
+        if (!PW.tunnels.digBox(world, net, box.x0, box.y0, box.x1, box.y1, { kind: 'drift', keepOre: true }).ok) return 'stop';
+        p.x = ahead - dir * 2;
+      }
+    }
+    p.path.push(p.x, p.y);
+    p.steps += 1;
+    const hit = veinNear(world, box, REACH);
+    if (hit) {
+      const made = open(world, net, hit.node, { contact: { x: Math.round((box.x0 + box.x1) / 2), floor: box.y1, oreX: hit.x } });
+      if (made && !made.blocked) {
+        p.opened = made; made.foundBy = op.id;
+        if (world.pipes && world.pipes.attach) world.pipes.attach(made);   // (its riser joins the side's line)
+        return 'done';
+      }
+      hit.node.found = true;
+    }
+    return p.steps >= MAX_STEPS ? 'stop' : 'on';
+  }
+  function stepProspect(world, op, m, dt) {
+    const T = PW.tunnels.state(world);
+    let p = op.prospect;
+    if (!p) {
+      if (PW.NO_PROSPECT || (op.nextSniff || 0) > T.time) return false;
+      op.nextSniff = T.time + 20;
+      const from = { x: op.dir > 0 ? op.room.x1 : op.room.x0, y: op.floor };
+      const node = prospectFor(world, op, from);
+      if (!node) return false;
+      const dir = Math.sign(node.x - from.x) || op.dir;
+      const x = node.x >= op.room.x0 && node.x <= op.room.x1 ? from.x : (dir > 0 ? op.room.x1 : op.room.x0) - dir * 2;
+      p = op.prospect = { node, x, y: op.floor, dir, at: T.time + DIG_EVERY, steps: 0, caves: 0, path: [x, op.floor], home: m.x, back: false };
+      m.state = 'prospect'; m.floor = op.floor; m.load = 0; m.value = 0;
+    }
+    // He walks to the head of the drift (along it, floor by floor), then digs; going home he walks
+    // it back the same way.
+    const pts = p.path, last = pts.length / 2 - 1;
+    m.pi = Math.max(0, Math.min(m.pi ?? 0, last));
+    const tx = pts[m.pi * 2], ty = pts[m.pi * 2 + 1], d = tx - m.x;
+    if (Math.abs(d) > 1 || Math.abs(ty - m.floor) > 1) {
+      const step = Math.min(Math.abs(d), WALK * dt);
+      if (Math.abs(d) <= 1) m.floor = ty;
+      else { m.floor += (ty - m.floor) * Math.min(1, step / Math.abs(d)); m.x += Math.sign(d) * step; m.walked += step; m.facing = Math.sign(d); }
+      return true;
+    }
+    const target = p.back ? 0 : last;
+    if (m.pi !== target) { m.pi += target > m.pi ? 1 : -1; return true; }
+    if (p.back) { op.prospect = null; m.state = 'toFace'; m.floor = op.floor; m.pi = 0; return false; }
+    m.facing = p.dir;
+    while (T.time >= p.at) {
+      p.at += DIG_EVERY * (op.slow || 1);
+      const r = prospectStep(world, op, p);
+      if (r === 'on') continue;
+      if (r === 'stop') { (op.tried = op.tried || new Set()).add(p.node); }
+      p.back = true;
+      (op.prospects = op.prospects || []).push(p);
+      break;
+    }
+    return true;
+  }
+  // ---- N129: out from a core's own shaft ---------------------------------------------------------
+  // The user's (2026-11-24): a city's tunnel grows from the bottom of its core, straight down, then
+  // out sideways to the ore. At the shaft's foot a miner sets out as the prospectors do (a trip:
+  // no face of its own yet); reaching ore he opens a mine there - its own miner and prospector -
+  // and his trip is over. With nothing to smell he waits at the foot and smells again.
+  function trips(world) { return world.miningTrips || (world.miningTrips = []); }
+  function expedition(world, net, x, floor, dir = 1, opts = {}) {
+    const all = trips(world);
+    const trip = { id: 1000 + all.length, net: net.id, side: net.side, node: null, floor, dir, trip: true, slow: opts.slow || 1,
+      room: { x0: x - 20, x1: x + 20 }, miners: [{ x, floor, state: 'toFace', facing: dir, timer: 0, load: 0, value: 0, lane: 1, walked: 0, carry: 0 }],
+      by: opts.by || null };
+    all.push(trip);
+    return trip;
+  }
+  // ---- N96: the HM store ----------------------------------------------------------------------------
+  // The user's (2026-11-22): an HM storage room, where the surplus is kept until it is needed. Past
+  // HM_KEEP in hand, a side's surplus goes down into its store - a strongroom dug off its first
+  // mine's storage, the ore heaped on its floor two HM a cell - STORE_RATE a second; when the side
+  // runs short (under HM_LOW) it comes back up at the same pace. The store is real ground: a blast
+  // into it scatters the ore, and what is lost is lost.
+  const HM_KEEP = 1200, HM_LOW = 300, STORE_RATE = 12, STORE_W = 120, STORE_H = 40;
+  function storeOf(world, side) {
+    const all = world.hmStores || (world.hmStores = {});
+    if (all[side] !== undefined) return all[side];
+    const op = list(world).find((o) => o.side === side && o.storage);
+    if (!op) return null;
+    const net = PW.tunnels.state(world).networks[op.net - 1];
+    if (!net) return null;
+    const s = op.storage, out = -op.dir;   // (beyond the mine's own storage, away from the face)
+    const x0 = out > 0 ? s.x1 + 4 : s.x0 - 4 - STORE_W, x1 = x0 + STORE_W;
+    const floor = s.bottom;
+    const dug = PW.tunnels.digBox(world, net, x0, floor - STORE_H, x1, floor, { kind: 'room', keepOre: true, exact: true });
+    if (!dug.ok) { all[side] = null; return null; }
+    // a strongroom: a banded steel door frame at its mouth, amber lamps, hazard chevrons on its floor
+    const mouth = out > 0 ? x0 : x1;
+    for (let y = floor - STORE_H + 2; y <= floor; y += 1) for (const d of [0, 1, 2]) {
+      const x = mouth + out * d;
+      PW.setLayer(world, 'back', x, y, rgb(d === 1 ? STEEL : STEEL_DARK));
+      PW.setFlag(world, x, y, FLAG.FIXTURE);
+    }
+    for (let x = x0 + 8; x < x1 - 8; x += 1) if (((x >> 2) & 1) === 0) { PW.setLayer(world, 'back', x, floor - 1, rgb([188, 158, 48])); PW.setFlag(world, x, floor - 1, FLAG.FIXTURE); }
+    for (const lx of [x0 + 20, x1 - 20]) for (let dx = -1; dx <= 1; dx += 1) PW.setLayer(world, 'back', lx + dx, floor - STORE_H + 3, rgb([255, 196, 90]));
+    all[side] = { side, net: net.id, op: op.id, x0, x1, floor, stored: 0, heap: [], moved: 0 };
+    return all[side];
+  }
+  function stepStores(world, dt) {
+    // (a match's economy: the sandbox's and the labs' stocks are free)
+    if (!world.stock || !(world.capitalGrowth && world.capitalGrowth.manual)) return;
+    for (const side of ['left', 'right']) {
+      const purse = world.stock[side];
+      if (!purse) continue;
+      const want = purse.hm > HM_KEEP ? Math.min(purse.hm - HM_KEEP, STORE_RATE * dt) : 0;
+      const st = want > 0 || (world.hmStores && world.hmStores[side]) ? storeOf(world, side) : null;
+      if (!st) continue;
+      st.carry = (st.carry || 0);
+      if (want > 0) {
+        st.carry += want;
+        while (st.carry >= 2) {
+          // two HM a cell of ore on the heap (a store full to its roof keeps the rest in hand)
+          if (!heapOn(world, st)) break;
+          st.carry -= 2; purse.hm -= 2; st.stored += 2; st.moved += 2;
+        }
+      } else if (purse.hm < HM_LOW && st.stored > 0) {
+        st.carry -= STORE_RATE * dt;
+        while (st.carry <= -2 && st.stored > 0) {
+          st.carry += 2;
+          if (heapOff(world, st)) { purse.hm += 2; st.stored -= 2; } else { st.stored = 0; break; }
+        }
+      }
+    }
+  }
+  function heapOn(world, st) {
+    const mid = Math.round((st.x0 + st.x1) / 2);
+    const height = (x) => { let h = 0; while (h < STORE_H - 6 && (PW.get(world, x, st.floor - h) & ID_MASK) !== M.AIR) h += 1; return h; };
+    for (let r = 0; r < (STORE_W >> 1) - 8; r += 1) {
+      for (const x of r ? [mid - r, mid + r] : [mid]) {
+        const h = height(x);
+        if (h >= STORE_H - 8 || h + 1 > Math.min(height(x - 1), height(x + 1)) + 1) continue;
+        const y = st.floor - h;
+        if ((PW.get(world, x, y) & ID_MASK) !== M.AIR) continue;
+        PW.set(world, x, y, M.ORE | (1 + (PW.hash2(x, y) & 1)) << 6, { quiet: true });
+        st.heap.push(y * world.width + x);
+        return true;
+      }
+    }
+    return false;
+  }
+  function heapOff(world, st) {
+    while (st.heap.length) {
+      const i = st.heap.pop();
+      if ((world.mat[i] & ID_MASK) === M.ORE) { PW.set(world, i % world.width, (i / world.width) | 0, M.AIR, { quiet: true }); return true; }
+    }
+    return false;
+  }
   function step(world, dt) {
+    stepStores(world, dt);
+    for (const t of trips(world)) {
+      if (t.over) continue;
+      const m = t.miners[0];
+      stepProspect(world, t, m, dt);
+      if ((t.prospects || []).some((p) => p.opened) && !t.prospect) t.over = true;
+    }
     for (const op of list(world)) {
-      for (const m of op.miners) stepMiner(world, op, m, dt);
+      for (const m of op.miners) {
+        // (N125: the second miner is the prospector while there is ore to smell)
+        if (m.lane === 1 && (m.state === 'prospect' || m.state === 'toFace' || m.state === 'idle') && stepProspect(world, op, m, dt)) continue;
+        stepMiner(world, op, m, dt);
+      }
       const length = Math.abs(op.belt.head - op.belt.tail);
       for (let k = op.belt.cargo.length - 1; k >= 0; k -= 1) {
         const c = op.belt.cargo[k];
@@ -370,7 +631,34 @@
     // The belt runs along the back wall: its cleats and its load show only where nothing stands in
     // front of it (crates, drums, sandbags and the like hide it).
     const backCell = (x, y, color) => { if (PW.mat.open[PW.get(world, x, y) & ID_MASK]) cell(x, y, color); };
+    // N125: ore no one has reached sparkles - a few glints at a time wink on its edges
+    for (const node of (world.layout && world.layout.nodes) || []) {
+      const b = node.box;
+      if (node.found || !b || b.x1 < vx0 || b.x0 > vx1 || b.y1 < vy0 || b.y0 > vy1) continue;
+      const edge = outline(world, node), n = edge.length >> 1;
+      if (!n) continue;
+      const glints = Math.min(7, 2 + (n >> 6));
+      for (let g = 0; g < glints; g += 1) {
+        const t = time * 1.3 + g / glints, round = Math.floor(t), ph = t - round;
+        const k = PW.hash2(node.x * 3 + g, round * 7 + node.y) % n, x = edge[k * 2], y = edge[k * 2 + 1];
+        const a = Math.sin(ph * Math.PI);
+        if (a < 0.15) continue;
+        ctx.fillStyle = `rgba(255,248,255,${a.toFixed(2)})`;
+        ctx.fillRect(Math.round((x - camera.x) * z), Math.round((y - camera.y) * z), size, size);
+        if (a > 0.55) {
+          ctx.fillStyle = `rgba(226,196,255,${(a * 0.7).toFixed(2)})`;
+          for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) ctx.fillRect(Math.round((x + dx - camera.x) * z), Math.round((y + dy - camera.y) * z), size, size);
+        }
+      }
+    }
+    for (const t of world.miningTrips || []) {
+      const tm = t.miners[0];
+      if (!t.over && tm && tm.x > vx0 && tm.x < vx1 && (tm.floor ?? t.floor) > vy0 && (tm.floor ?? t.floor) - ROOM_H < vy1) drawMiner(renderer, world, t, tm, time, cell);
+    }
     for (const op of world.miningOps || []) {
+      // (the prospector is drawn wherever his drift has taken him)
+      const pr = op.miners.find((m) => m.state === 'prospect');
+      if (pr && pr.x > vx0 && pr.x < vx1 && pr.floor > vy0 && pr.floor - ROOM_H < vy1) drawMiner(renderer, world, op, pr, time, cell);
       if (op.room.x1 + 200 < vx0 || op.room.x0 - 200 > vx1 || op.floor < vy0 || op.floor - ROOM_H > vy1) continue;
       // Belt: moving cleats on the rubber, and the ore lumps riding it.
       const { tail, head } = op.belt, d = Math.sign(head - tail) || 1;
@@ -383,22 +671,26 @@
         for (let dy = 0; dy < 2; dy += 1) for (let dx = -1; dx <= 1; dx += 1) backCell(x + dx, op.floor - 8 - dy, dy ? 'rgb(176,112,226)' : `rgb(${ORE_LUMP})`);
       }
       // Miners, with their lamps and loads.
-      for (const m of op.miners) {
-        let clip = 'walk', frame = 0;
-        const moving = m.state.startsWith('to') || m.state === 'idle';
-        if (moving) frame = Math.floor(m.walked / 5);
-        if (m.state === 'load' || m.state === 'pickup') { clip = 'crouch'; frame = Math.min(3, Math.floor((m.timer < 0.4 ? m.timer : 0.8 - m.timer) / 0.1)); }
-        const s = PW.unitArt.sprite('miner', clip, frame, world.styles ? world.styles[op.side] : '');
-        if (!s) continue;
-        const jitter = m.state === 'drill' && ((time * 30) | 0) & 1 ? 1 : 0;
-        PW.unitArt.lampCone(renderer, s, m.x + jitter, op.floor, m.facing);
-        PW.unitArt.draw(renderer, s, m.x + jitter, op.floor, m.facing);
-        if (m.state === 'drill' && ((time * 20 + m.lane) | 0) % 3 === 0) cell(m.x + m.facing * 13, op.floor - 11, 'rgb(255,236,170)');
-        if (m.load || m.carry) {
-          // The ore load carried at the chest, in front.
-          for (let dy = 0; dy < 3; dy += 1) for (let dx = 0; dx < 4; dx += 1) cell(m.x + m.facing * (4 + dx), op.floor - 13 - dy, dy === 2 ? 'rgb(190,130,240)' : `rgb(${ORE_LUMP})`);
-        }
-      }
+      for (const m of op.miners) if (m.state !== 'prospect') drawMiner(renderer, world, op, m, time, cell);
+    }
+  }
+  function drawMiner(renderer, world, op, m, time, cell) {
+    const floor = Math.round(m.state === 'prospect' ? m.floor : op.floor);
+    let clip = 'walk', frame = 0;
+    const p = op.prospect, digging = m.state === 'prospect' && p && !p.back && m.pi === p.path.length / 2 - 1;
+    const moving = m.state.startsWith('to') || m.state === 'idle' || (m.state === 'prospect' && !digging);
+    if (moving) frame = Math.floor(m.walked / 5);
+    if (m.state === 'load' || m.state === 'pickup') { clip = 'crouch'; frame = Math.min(3, Math.floor((m.timer < 0.4 ? m.timer : 0.8 - m.timer) / 0.1)); }
+    const s = PW.unitArt.sprite('miner', clip, frame, world.styles ? world.styles[op.side] : '');
+    if (!s) return;
+    const drilling = m.state === 'drill' || digging;
+    const jitter = drilling && ((time * 30) | 0) & 1 ? 1 : 0;
+    PW.unitArt.lampCone(renderer, s, m.x + jitter, floor, m.facing);
+    PW.unitArt.draw(renderer, s, m.x + jitter, floor, m.facing);
+    if (drilling && ((time * 20 + m.lane) | 0) % 3 === 0) cell(m.x + m.facing * 13, floor - 11, 'rgb(255,236,170)');
+    if (m.load || m.carry) {
+      // The ore load carried at the chest, in front.
+      for (let dy = 0; dy < 3; dy += 1) for (let dx = 0; dx < 4; dx += 1) cell(m.x + m.facing * (4 + dx), floor - 13 - dy, dy === 2 ? 'rgb(190,130,240)' : `rgb(${ORE_LUMP})`);
     }
   }
   // Highlight a vein's outline (pulsing) while planning a tunnel that would reach it.
@@ -418,6 +710,6 @@
     ctx.fill();
   }
 
-  PW.mining = { REACH, ROOM_H, veinNear, outline, open, openFromWorkings, afterDig, step, draw, drawHighlight, list };
+  PW.mining = { REACH, ROOM_H, SNIFF, veinNear, outline, open, openFromWorkings, afterDig, step, draw, drawHighlight, list, prospectFor, expedition, trips, storeOf, crossesRoad, HM_KEEP, HM_LOW };
   void ops;
 })();

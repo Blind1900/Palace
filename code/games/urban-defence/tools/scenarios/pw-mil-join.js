@@ -29,6 +29,17 @@ pwLab.stepWorld(60 * 30);
 for (const b of world.buildings) if (b && b.canvas) world.repair.notify(b.id);
 pwLab.setSpeed(1);
 pwLab.stepWorld(60 * 30);
+// (N121: towers with the tall gate halls take longer to rise - and a weld waits for both buildings
+// standing; a little longer for the last of them)
+for (let s = 0; s < 60; s += 1) {
+  const waiting = [...city.rings.left, ...city.rings.right].some((l) => {
+    const r = l.placed && world.buildings[l.owner - 1];
+    return r && (r.underConstruction || r.growing);
+  });
+  if (!waiting) break;
+  pwLab.stepWorld(60);
+}
+pwLab.stepWorld(60 * 5);
 
 const owned = (x, y) => PW.getOwner(world, x, y) > 0 && PW.getOwner(world, x, y) < 50000;
 const open = (x, y) => (PW.get(world, x, y) & 63) === PW.M.AIR && !PW.getLayer(world, 'back', x, y) && !owned(x, y);
@@ -58,7 +69,13 @@ for (const l of mils) {
         const a = PW.getOwner(world, x - 1, y), c = PW.getOwner(world, e, y);
         // (only the wing's own joins: the tower to its wing, the wing to the building beside it)
         if (a === l.owner && c === l.owner) { inner += 1; if (where.length < 6) where.push(`in ${l.side[0]}${l.ring} ${x}-${e - 1}@${y}`); }
-        else if (a === l.owner || c === l.owner) { between += 1; if (where.length < 6) where.push(`by ${l.side[0]}${l.ring} ${x}-${e - 1}@${y}`); }
+        else if (a === l.owner || c === l.owner) {
+          // (over the neighbour's roof is its crown in the open sky, not a gap between the two)
+          const other = a === l.owner ? c : a, orec = world.buildings[other - 1];
+          if (orec && orec.body && y < orec.body.top) { x = e; continue; }
+          between += 1;
+          if (where.length < 6) where.push(`by ${l.side[0]}${l.ring} ${x}-${e - 1}@${y} (owners ${a}|${c}, wing ${l.owner}, welds ${JSON.stringify([l.weldL && l.weldL.span, l.weldR && l.weldR.span])}, wing top ${wing[0].y}, ground ${b.ground}, lots ${l.placed.worksL}..${l.placed.worksR})`);
+        }
       }
       x = e;
     }

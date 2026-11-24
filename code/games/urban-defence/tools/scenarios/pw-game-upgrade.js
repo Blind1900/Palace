@@ -5,6 +5,7 @@
 const checks = [];
 const check = (ok, text) => checks.push(`${ok ? 'PASS' : 'FAIL'} ${text}`);
 const info = (t) => checks.push(`INFO ${t}`);
+const shots = [];
 const { world } = pwApp;
 const m = pwApp.match(), G = PW.game, eng = world.capitalGrowth, T = PW.tunnels;
 const canvas = document.getElementById('world-canvas');
@@ -33,20 +34,25 @@ const rose = mine().filter((c) => before.has(c.id) && c.level > before.get(c.id)
 check(mine().length > 0 && rose.length === 0, `in 60 s with ${Math.round(G.purse(m, 'left').hm)} HM in store, no city of the side levelled by itself (${rose.map((c) => `${c.kind} ${c.id}`).join(', ') || 'none'})`);
 if (base) check(base.level === 1 && base.actions >= 6, `its military base stayed at level 1 through ${base.actions} growth actions (before N116: a level every third)`);
 
-// 2. The UPGRADE tool: a click on one of its cities raises it a level, for its price.
+// 2. N122: the button over its main building raises a city a level, for its price.
 const city = mine().filter((c) => c.level < eng.topLevel(c) && c.main && c.main.placed)
   .sort((a, b) => (a.kind === 'capital' ? -1 : 1) - (b.kind === 'capital' ? -1 : 1))[0];
 check(!!city, `a city of the side's to raise (${city ? `${city.kind} ${city.id} lv${city.level}` : 'none'})`);
 if (!city) return { checks };
 const lv0 = city.level, hm0 = G.purse(m, 'left').hm, price = G.upgradeCost(city);
-pwApp.focus(city.x, world.groundTop[city.x] - 60, 2);
-await sleep(150);
-await tool('upgrade');
-const cx = Math.round((city.main.placed.x0 + city.main.placed.x1) / 2), cy = Math.round((city.main.placed.y0 + city.main.placed.y1) / 2);
-clickAt(cx, cy);
-await sleep(40);
+const mp = city.main.placed;
+pwApp.focus(Math.round((mp.x0 + mp.x1) / 2), mp.y0 + 40, 2);
+await sleep(200);
+const ub = document.querySelector(`#gm-upg button[data-city="${city.id}"]`);
+check(!!ub && !ub.disabled && new RegExp(`UPGRADE LV ${lv0}>${lv0 + 1} · ${price} HM`).test(ub.textContent),
+  `a button over its main building offers the level (${ub ? `"${ub.textContent}"${ub.disabled ? ' - dimmed' : ''}` : 'none'})`);
+if (ub) {
+  const r = ub.getBoundingClientRect(), mainAt = pwApp.toClient((mp.x0 + mp.x1) / 2, mp.y0);
+  check(Math.abs(r.left + r.width / 2 - mainAt.x) < 4 && r.bottom <= mainAt.y + 2, `it stands over the main building (button ${Math.round(r.left + r.width / 2)},${Math.round(r.bottom)}; the main's top ${Math.round(mainAt.x)},${Math.round(mainAt.y)})`);
+  const c = centre(ub); await click(c.x, c.y); await sleep(60);
+}
 check(city.level === lv0 + 1 && Math.round(hm0 - G.purse(m, 'left').hm) === price,
-  `a click with UPGRADE on ${city.kind} ${city.id} raises it to level ${city.level} for ${price} HM (paid ${Math.round(hm0 - G.purse(m, 'left').hm)})`);
+  `a click raises ${city.kind} ${city.id} to level ${city.level} for ${price} HM (paid ${Math.round(hm0 - G.purse(m, 'left').hm)})`);
 info(`prices a level: ${Object.entries(G.UPGRADE).map(([k, v]) => `${k} ${v}x level`).join(', ')}`);
 // (refused: short of HM, another side's city)
 world.stock.left.hm = 5;
@@ -54,6 +60,32 @@ check(!G.canUpgrade(m, 'left', city).ok && /HM/.test(G.canUpgrade(m, 'left', cit
 world.stock.left.hm = 6000;
 const theirs = eng.cities.find((c) => c.faction === 'right' && !c.fallen);
 if (theirs) check(!G.upgrade(m, 'left', theirs).ok, `another side's city cannot be raised (${G.upgrade(m, 'left', theirs).note})`);
+
+// 2b. N122: the seed's building grows whole in its kind's time (a base 2 min, a capital 3, a farm
+// 1.5) - its button saying GROWING meanwhile, and still offering the next level (the user's "both":
+// that is also the window it may be raised in).
+if (base && base.main && base.main.placed) {
+  const r = G.upgrade(m, 'left', base);
+  const rec = r.ok ? world.buildings[base.main.owner - 1] : null;
+  check(!!rec && rec.underConstruction && rec.paceSecs === eng.GROW_SECS.military,
+    `a level bought, the base's main building grows at the pace of ${eng.GROW_SECS.military} s (${rec ? `paced ${rec.paceSecs} s` : r.note})`);
+  if (rec) {
+    const mpb = base.main.placed;
+    pwApp.focus(Math.round((mpb.x0 + mpb.x1) / 2), mpb.y0 + 40, 2);
+    pwApp.stepWorld(60);
+    await sleep(150);
+    const gb = document.querySelector(`#gm-upg button[data-city="${base.id}"]`);
+    check(!!gb && !gb.disabled && /GROWING/.test(gb.textContent) && /UPGRADE LV/.test(gb.textContent), `meanwhile its button reads "${gb ? gb.textContent : 'none'}"${gb && gb.disabled ? ', dimmed' : ', still on offer'}`);
+    let t = 1, half = null;
+    for (; t < 200 && rec.underConstruction; t += 1) { pwApp.stepWorld(60); if (half === null && t === 60) half = rec.health ?? 0; }
+    const want = eng.GROW_SECS.military;
+    check(!rec.underConstruction && Math.abs(t - want) <= want * 0.25,
+      `it stands whole after ${t} s (wanted ${want} s; half-way it was ${half === null ? '-' : Math.round(half * 100)}% built)`);
+    await sleep(150);
+    const gb2 = document.querySelector(`#gm-upg button[data-city="${base.id}"]`);
+    check(!!gb2 && !gb2.disabled && /UPGRADE LV/.test(gb2.textContent), `then its next level is on offer again ("${gb2 ? gb2.textContent : 'none'}")`);
+  }
+}
 
 // 3. Every unit costs HM and SM both.
 const K = G.UNIT_KINDS.trooper;
@@ -79,8 +111,9 @@ const due = (net, within) => {
     if (seg.net !== net.id) continue;
     for (let y = seg.y0; y <= seg.y1; y += 1) for (let x = seg.x0; x <= seg.x1; x += 1) {
       if (T.networkAt(world, x, y) !== net || !(PW.getFlags(world, x, y) & PW.FLAG.RAW)) continue;
+      // (still raw, and due by then - a rush brings some due at once: those count, not drop out)
       const t = T.devAt(world, x, y);
-      if (t > S.time && t <= S.time + within) n += 1;
+      if (t <= S.time + within) n += 1;
     }
   }
   return n;
@@ -116,4 +149,24 @@ world.stock.right.hm = 6000; world.stock.right.sm = 600;
 const ai = m.sides.right.ai;
 for (let s = 0; s < 90 && !((ai && ai.brain.upgrades) > 0); s += 1) pwApp.stepWorld(60);
 check(!!ai && ai.brain.upgrades > 0, `the computer raises a city of its own (${ai ? `${ai.brain.upgrades || 0} upgrades; last: ${ai.brain.last}` : 'no computer side'})`);
-return { checks };
+
+// 6. N96 (the user's): an HM storage room - the surplus past what a side keeps in hand goes down
+// into its strongroom as a heap of ore, and comes back up when the side runs short.
+{
+  const MN = PW.mining;
+  world.stock.left.hm = MN.HM_KEEP + 400;
+  for (let s = 0; s < 40; s += 1) pwApp.stepWorld(60);
+  const st = world.hmStores && world.hmStores.left;
+  check(!!st && st.stored > 0 && st.heap.length > 0 && G.purse(m, 'left').hm < MN.HM_KEEP + 400,
+    `past ${MN.HM_KEEP} in hand, the surplus goes down into the side's HM store (${st ? `${st.stored} HM stored as ${st.heap.length} cells of ore, ${Math.round(G.purse(m, 'left').hm)} in hand` : 'no store'})`);
+  if (st) {
+    const stored0 = st.stored;
+    world.stock.left.hm = 40;
+    for (let s = 0; s < 10; s += 1) pwApp.stepWorld(60);
+    check(st.stored < stored0 && G.purse(m, 'left').hm > 40, `short of HM, it comes back up (store ${stored0} -> ${st.stored}, in hand 40 -> ${Math.round(G.purse(m, 'left').hm)})`);
+    pwApp.focus((st.x0 + st.x1) / 2, st.floor - 20, 5);
+    await sleep(400);
+    shots.push(await shot('n96-hm-store'));
+  }
+}
+return { checks, shots };

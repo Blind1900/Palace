@@ -13,7 +13,19 @@ const isOre = (x, y) => (cell(x, y) & 63) === M.ORE;
 const nodes = layout.nodes || [];
 const forms = {};
 for (const n of nodes) (forms[n.form] = forms[n.form] || []).push(n);
-check(Object.keys(forms).length >= 5, `deposits take many forms (${Object.entries(forms).map(([f, list]) => `${f} ${list.length}`).join(', ')})`);
+// N125 (the user's, 2026-11-23): every deposit is a beast's silhouette - koi, hawk, wolf, bull, eel
+const BEASTS = ['koi', 'hawk', 'wolf', 'bull', 'eel'];
+// (one that would lie mostly in a cave's air keeps the form it was drawn as - a rare few)
+const beasts = nodes.filter((n) => BEASTS.includes(n.form)).length;
+check(beasts >= nodes.length * 0.9 && new Set(nodes.filter((n) => BEASTS.includes(n.form)).map((n) => n.form)).size >= 4,
+  `deposits are beasts' silhouettes, of four kinds or more (${beasts} of ${nodes.length}: ${Object.entries(forms).map(([f, list]) => `${f} ${list.length}`).join(', ')})`);
+// Lit as a body in the round: each beast shows its lit faces, its shadowed ones and a pale rim.
+const shading = nodes.filter((n) => n.amount > 200).map((n) => {
+  const v = [0, 0, 0, 0];
+  for (let y = n.box.y0; y <= n.box.y1; y += 1) for (let x = n.box.x0; x <= n.box.x1; x += 1) if (isOre(x, y)) v[cell(x, y) >> 6] += 1;
+  return v;
+});
+check(shading.length > 0 && shading.every((v) => v[0] > 0 && v[1] > 0 && v[2] > 0 && v[3] > 0), `the big ones are shaded as solid bodies - rim, lit, shadowed and bright (${shading.slice(0, 4).map((v) => v.join('/')).join(', ')})`);
 check(nodes.every((n) => n.amount >= 20), `every deposit holds ore (smallest ${Math.min(...nodes.map((n) => n.amount))} cells, at least 20)`);
 // Ore grows with depth: the deep bands hold more per deposit than the shallow ones.
 const mean = (tier) => { const list = nodes.filter((n) => n.tier === tier); return list.length ? list.reduce((s, n) => s + n.amount, 0) / list.length : 0; };

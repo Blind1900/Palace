@@ -49,6 +49,13 @@
         }
       }
     }
+    // N121: the canvas's ladders (the gate hall's up to its first floor) are climbable in the world
+    for (const l of canvas.ladders || []) {
+      for (let y = Math.max(0, l.y0); y <= Math.min(height - 1, l.y1); y += 1) for (let x = l.x0; x <= l.x1; x += 1) {
+        const wx = ox + x, wy = oy + y;
+        if (wx >= 0 && wx < world.width && wy >= 0 && wy < world.height) PW.setFlag(world, wx, wy, PW.FLAG.LADDER);
+      }
+    }
     return { x: ox, y: oy, width, height, canvas };
   }
 
@@ -73,7 +80,7 @@
       hatches: (canvas.hatches || []).map((h) => ({ x0: h.x0 + ox, x1: h.x1 + ox, y0: h.y0 + oy, y1: h.y1 + oy })),
       // N3 vehicle rule: the gate piers at grade (kept structure a friendly hull may pass;
       // the pass-through physics is the tanks' half, keyed off these spans)
-      gates: (canvas.gates || []).map((q) => ({ x: q.x + ox, y0: q.y0 + oy, y1: q.y1 + oy })),
+      gates: (canvas.gates || []).map((q) => ({ x: q.x + ox, y0: q.y0 + oy, y1: q.y1 + oy })).concat(stamp.posts || []),   // (N124: and the posts under a raised deck)
       hangar: canvas.hangar && { ...box(canvas.hangar), door: { x: canvas.hangar.door.x + ox, top: canvas.hangar.door.top + oy, bottom: canvas.hangar.door.bottom + oy },
         spawn: pt(canvas.hangar.spawn) },
       // (N111: the spawn pad in the hangar floor - y its deck row; every unit the base deploys comes up on it)

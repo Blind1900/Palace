@@ -18,8 +18,10 @@ const lake = layout.lakes.find((item) => !item.pond) || layout.lakes[0];
 await view('pw-04-lake', lake.x, lake.level + 40, 4);
 const node = layout.nodes[0];
 await view('pw-05-ore', node.x, node.y, 6);
-const middle = layout.sites[2];
+const middle = layout.sites[1];
 await view('pw-06-surface-close', middle.x0 + 200, surfaceAt(middle.x0 + 200) - 20, 7);
+// (N124: the centre's great mountain or lake)
+if (layout.centre) await view(`n124-centre-${layout.centre.kind}`, layout.centre.x, surfaceAt(layout.centre.x) + (layout.centre.kind === 'lake' ? 40 : 300), 2);
 const vegetation = layout.vegetation || [];
 const tallTree = vegetation.filter((item) => item.kind === 'tree').sort((a, b) => b.height - a.height)[3];
 if (tallTree) await view('pw-08-trees', tallTree.x + tallTree.width / 2, tallTree.y + tallTree.height / 2, 5);

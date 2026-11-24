@@ -84,15 +84,20 @@ pipeOver('with the city grown on past it');
 await view('n104-bore-developed', Math.round((t.a + t.b) / 2), t.floorAt(Math.round((t.a + t.b) / 2)) - 50, 5);
 // (each set down on the road just inside the far portal from the city - the city's own streets are
 // another matter)
-const start = t.b - 30, goal = t.a + 40;
-const tank = PW.tanks ? PW.tanks.create(world, { style: 'modern', side: t.side, x: start, facing: -1 }) : null;
+// (inside the far mouth, on the road itself: just outside it the road may run on into a town's
+// street up its bank, which is the town's ground, not the tunnel's)
+const mouthB = t.portals.find((p) => p.end === 'b');
+const start = mouthB ? Math.min(t.b - 30, mouthB.x - 40) : t.b - 30, goal = t.a + 40;
+// (set down on the road itself: given no height, a unit is put on its column's top - the mountain's)
+const tank = PW.tanks ? PW.tanks.create(world, { style: 'modern', side: t.side, x: start, y: t.floorAt(start), facing: -1 }) : null;
 if (tank) PW.tanks.drive(tank, -1);
 pwLab.setSpeed(1);
 for (let s = 0; s < 60 * 90 && tank && tank.x > goal; s += 30) pwLab.stepWorld(30);
 // (a vehicle keeps out of tunnels unless its tunnel is a road - the user's rule, PS's half: until the
 // hulls know a road tunnel, it is noted, not failed)
 const vehiclesIn = !!(PW.tanks && PW.tanks.roadTunnels);
-const tankLine = `a tank drives through, portal to portal (at ${tank ? Math.round(tank.x) : '-'}, the far portal ${t.a}${tank && tank.blocked ? `, stopped: ${tank.blocked}` : ''})`;
+if (tank && tank.x > goal) await view('n104-tank-stuck', Math.round(tank.x), Math.round(tank.y) - 30, 6);
+const tankLine = `a tank drives through, portal to portal (at ${tank ? Math.round(tank.x) : '-'}, the far portal ${t.a}${tank && tank.blocked ? `, stopped: ${tank.blocked}` : ''}${tank && tank.x > goal ? ` - set down at ${start},${t.floorAt(start)}, y ${Math.round(tank.y)}, stopAt ${JSON.stringify(tank.stopAt || null)}, v ${(tank.v || 0).toFixed(1)}, dead ${!!tank.dead}` : ''})`;
 if (vehiclesIn) check(!!tank && tank.x <= goal, tankLine); else info(`(PS's road-tunnel driving not in yet) ${tankLine}`);
 if (tank) world.tanks.splice(world.tanks.indexOf(tank), 1);
 const man = PW.troops.create(world, { x: start + 0.5, y: t.floorAt(start), side: t.side, style: 'modern', facing: -1 });
@@ -105,7 +110,7 @@ if (man.x > goal + 10) {
   await view('n104-man-stopped', mx, mf - 40, 6);
 }
 check(man.x <= goal + 10, `a man walks through (at ${Math.round(man.x)})`);
-const mech = PW.mechs ? PW.mechs.create(world, { x: start, side: t.side, style: 'modern', facing: -1 }) : null;
+const mech = PW.mechs ? PW.mechs.create(world, { x: start, y: t.floorAt(start) - 1, side: t.side, style: 'modern', facing: -1 }) : null;
 if (mech) PW.mechs.walk(mech, -1);
 for (let s = 0; s < 60 * 120 && mech && mech.x > goal; s += 30) pwLab.stepWorld(30);
 const mechLine = `a mech walks through (at ${mech ? Math.round(mech.x) : '-'})`;
@@ -121,4 +126,23 @@ check(dug.ok, `a miners' drift of another side crosses it (${dug.ok ? 'dug throu
 const n0 = world.roadTunnels.length;
 const again = RT.forMountain(world, t.a + 100, t.b - 100, { side: 'east' });
 check(again.ok && again.tunnel === t && world.roadTunnels.length === n0, 'another side asking finds the one road there is - anyone may use it');
+
+// 5. N121 (the user's): each mouth an entrance, not a cut - the arch ring standing out over the
+// road, the stone face and its stepped wing walls behind; and the towns' gate halls as tall as it.
+for (const p of t.portals) {
+  const out = p.end === 'a' ? -1 : 1;
+  let ring = 0, face = 0;
+  for (let k = 1; k <= 12; k += 1) for (let y = p.top - 20; y < p.top; y += 1) if (id(p.x + out * k, y) === PW.M.REINFORCED || (PW.getLayer(world, 'back', p.x + out * k, y) && PW.mat.open[id(p.x + out * k, y)])) ring += 1;
+  for (let k = 0; k <= 40; k += 1) for (let y = p.top - 40; y < p.floor; y += 1) if (PW.getLayer(world, 'back', p.x + out * k, y) && PW.mat.open[id(p.x + out * k, y)]) face += 1;
+  const clear = (() => { let n = 0; for (let y = p.floor - 1; y > p.floor - 120 && PW.mat.open[id(p.x + out * 6, y)]; y -= 1) n += 1; return n; })();
+  // (a mouth opening where a town has grown up to it meets the town's works: its ring gives way to
+  // them, and a building's doorway right there is joined to it by a covered way)
+  let byTown = !!t.joined;
+  for (let k = 1; k <= 14 && !byTown; k += 1) for (let y = p.top - 20; y < p.top && !byTown; y += 2) { const o = PW.getOwner(world, p.x + out * k, y); if (o > 0 && o < 50000) byTown = true; }
+  check((ring > 60 || byTown) && face > 200 && clear >= 95, `the ${p.end} mouth has its arch ring out over the road (${ring} cells${byTown ? `, a town's works at it${t.joined ? `, joined to building ${t.joined}` : ''}` : ''}), its face and wing walls behind (${face}), and the road's full height under the ring (${clear} rows)`);
+  await view(`n121-portal-${p.end}`, p.x + out * 30, p.top + 20, 4);
+}
+const halls = world.buildings.filter((b) => b && b.canvas && b.canvas.meta && b.canvas.meta.undercroft);
+check(halls.length > 0 && halls.every((b) => b.canvas.meta.undercroft.height === PW.buildingKit.S.HALL),
+  `every gate hall stands as tall as the road tunnel (${[...new Set(halls.map((b) => b.canvas.meta.undercroft.height))].join(', ')} rows; the tunnel ${PW.roadTunnels.CLEAR})`);
 return { checks, shots };

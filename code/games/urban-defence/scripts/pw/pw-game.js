@@ -22,11 +22,14 @@
   function create(world, opts = {}) {
     const mode = opts.mode === 'watch' ? 'watch' : 'versus';
     const human = mode === 'versus' ? (opts.human === 'right' ? 'right' : 'left') : null;
-    // (N115: the gameplay test - no home towns; the match opens with each side placing its starting
-    // capital, and the clock starts when both stand)
+    // (N120, the user's: a side starts with no territory - no home town; the match opens with each
+    // side placing its first seed, the core bunker, and the clock starts when both stand. N115's
+    // gameplay test is the same opening at four times the build speed. A world made with its home
+    // towns - towns=1, the suites' fixtures - plays from them as before.)
     const test = !!opts.test;
+    const placing = SIDES.some((side) => !(world.settlements || []).some((s) => s.side === side));
     const match = { world, app: opts.app || null, mode, human, seed: opts.seed || 0, clock: 0,
-      over: false, winner: null, reason: '', view: human || 'both', log: [], sides: {}, test, phase: test ? 'placing' : 'play' };
+      over: false, winner: null, reason: '', view: human || 'both', log: [], sides: {}, test, phase: placing ? 'placing' : 'play' };
     for (const side of SIDES) {
       const home = (world.settlements || []).find((s) => s.side === side);
       const site = ((world.layout && world.layout.sites) || []).find((s) => s.side === side);
@@ -39,7 +42,7 @@
         dir: side === 'left' ? 1 : -1,
         controller: side === human ? 'human' : 'ai',
         ai: null,
-        placed: !test,
+        placed: !placing,
       };
       const stock = world.stock || (world.stock = {});
       const purse = stock[side] || (stock[side] = { sm: 0, hm: 0, water: 0 });
@@ -52,7 +55,7 @@
     // N115: and each side's military faces the enemy's end
     if (world.capitalGrowth) { world.capitalGrowth.manual = true; world.capitalGrowth.factionFacing = true; }
     for (const side of SIDES) if (match.sides[side].controller === 'ai' && PW.ai) match.sides[side].ai = PW.ai.create(match, side);
-    if (test) world.visionExtra = SIDES.map((side) => { const [x0, x1] = thirdOf(world, side); return { side, x0, x1, start: true }; });
+    if (placing) world.visionExtra = SIDES.map((side) => { const [x0, x1] = thirdOf(world, side); return { side, x0, x1, start: true }; });
     current = match;
     // N103/N114: every turret, launcher and interceptor base that stands takes its piece now, in the
     // match's hands (one already seated, silent, before the match - freed)
@@ -61,7 +64,7 @@
       PW.mounts.relay(world);   // (a plate the passes just dug through is laid again by it)
       PW.mounts.sweep(world, { armed: true });
     }
-    alert(match, null, test ? (human ? `Place your starting capital: click flat ground in the ${human} third of the map.` : 'Each side places its starting capital.')
+    alert(match, null, placing ? (human ? `Place your first seed, your core: click flat ground in the ${human} third of the map. It's free.` : 'Each side places its first seed.')
       : mode === 'watch' ? 'The computer plays both sides. Take either chair from the top bar.'
       : `You hold the ${human} capital. Destroy the enemy, then raise your capital over their ruins.`, '');
     return match;
@@ -74,10 +77,7 @@
   function placeStart(match, side, x) {
     const st = match.sides[side];
     if (match.phase !== 'placing' || !st || st.placed) return { ok: false, note: 'no starting capital to place' };
-    x = Math.round(x);
-    const [a, b] = thirdOf(match.world, side);
-    if (x < a || x > b) return { ok: false, note: `your capital starts in the ${side} third of the map` };
-    const r = seed(match, side, 'capital', x, { start: true });
+    const r = seed(match, side, 'capital', Math.round(x), { start: true });
     if (!r.ok) return r;
     st.placed = true;
     st.home = r.city.x;
@@ -418,7 +418,8 @@
   const standing = (b) => b && b.body && !b.coresOpen && !b.dismantled && (b.health ?? 1) > 0.25;
   // A side's military buildings that stand, and what each may deploy.
   function bases(match, side) {
-    return (match.world.buildings || []).filter((b) => b.type === 'military' && ownerOf(b) === side && standing(b));
+    // (N89: a base's smaller buildings - its watchtower, barracks, bunker - are garrisons, not bases)
+    return (match.world.buildings || []).filter((b) => b.type === 'military' && ownerOf(b) === side && standing(b) && !(b.canvas && b.canvas.meta && b.canvas.meta.post));
   }
   // What kind of unit a list entry is (the lists hold several: the batteries' types).
   const kindOf = (u) => (u.kind === 'trooper' ? 'trooper' : u.kind === 'mech' ? 'mech' : u.kind === 'jet' ? 'jet'
@@ -449,8 +450,10 @@
     if (!K) return { ok: false, note: `no such unit: ${kind}` };
     if (match.over) return { ok: false, note: 'the match is over' };
     const from = b ? [b] : bases(match, side);
-    const able = from.filter((q) => standing(q) && ownerOf(q) === side && (q.level || 1) >= K.level);
-    if (!able.length) return { ok: false, note: b ? `needs a level ${K.level} base` : `no base of level ${K.level}` };
+    const leveled = from.filter((q) => standing(q) && ownerOf(q) === side && (q.level || 1) >= K.level);
+    if (!leveled.length) return { ok: false, note: b ? `needs a level ${K.level} base` : `no base of level ${K.level}` };
+    const able = leveled.filter((q) => wayOut(match.world, q));
+    if (!able.length) return { ok: false, note: 'no way down from the mountain yet (its road tunnel is still to come)' };
     const p = purse(match, side);
     if (p.hm < K.hm) return { ok: false, note: `needs ${K.hm} HM` };
     if (p.sm < (K.sm || 0)) return { ok: false, note: `needs ${K.sm} SM` };
@@ -482,6 +485,11 @@
       if (x > 40 && x < world.width - 40) gate = x;
     }
     if (b.pad && onPad(kind)) return { x: Math.round((b.pad.x0 + b.pad.x1) / 2), y: b.pad.y, pad: b.pad, gate };
+    // N130 (the user's, 2026-11-24): every unit comes up from the base's core - on the floor over
+    // it, where a base has no pad - and heads out by the town's gate where it has one
+    const core = (b.cores || []).find((k) => k.vault && !k.dead) || (b.cores || [])[0];
+    // (a hull out of a core's floor only once PS's spawnPoint finds it room there - N131)
+    if (core && (kind === 'trooper' || (kind !== 'guard' && PW.units && PW.units.spawnPoint))) return { x: Math.round(core.x), y: b.ground, core, gate };
     if (gate !== null) return { x: gate, y: world.groundTop[gate] };
     if (kind === 'trooper' || kind === 'guard') {
       const door = (b.doors || []).filter((d) => Math.abs(d.bottom - b.ground) < 6).sort((p, q) => (q.x - p.x) * dir)[0];
@@ -490,6 +498,19 @@
     if (b.hangar && b.hangar.spawn && kind !== 'trooper' && kind !== 'guard') return { x: b.hangar.spawn.x, y: b.hangar.spawn.y };
     const x = Math.round(dir > 0 ? b.body.right + 70 : b.body.left - 70);
     return { x, y: world.groundTop[Math.max(0, Math.min(world.width - 1, x))] };
+  }
+  // N130 (the user's): a base up on a mountain sends out no one until it has a way down - its
+  // road tunnel bored through (or another's within reach of it); no unit is left stranded at a
+  // mountain's foot or on its top.
+  function onMountain(world, b) {
+    if (perched(world, b)) return true;
+    const L = world.layout, x = Math.round((b.body.left + b.body.right) / 2);
+    return !!(L && L.relief && L.relief[x] > 0.2);
+  }
+  function wayOut(world, b) {
+    if (!onMountain(world, b)) return true;
+    const x = (b.body.left + b.body.right) / 2;
+    return (world.roadTunnels || []).some((t) => t.done && x > t.a - 900 && x < t.b + 900);
   }
   // (a mountain outpost or bunker: a base, but a long climb down - the army leaves from the towns)
   const perched = (world, b) => [...(world.outposts || []), ...(world.bunkers || [])].some((o) => o.building === b);
@@ -505,13 +526,21 @@
     const padded = onPad(kind) ? pool.filter((q) => q.pad) : [];
     const base = (padded.length ? padded : pool).sort((p, q) => ((q.body.left + q.body.right) - (p.body.left + p.body.right)) * dir)[0];
     const at = exitOf(match, base, kind);
+    // (N131/N130, with PS: the room a kind needs round the core's exit - headroom, ground that
+    // bears it, a tank's no steeper than it climbs - or no deploy)
+    if (PW.units && PW.units.spawnPoint && !at.pad) {
+      const p = PW.units.spawnPoint(world, kind, at.x, at.y);
+      if (!p) return { ok: false, note: 'no room at its core\'s exit' };
+      at.x = p.x; at.y = p.y;
+    }
     // (on the pad: a man's, a mech's or a drone's feet on its deck, a tank's wheels; elsewhere
-    // each finds its ground as before)
-    const feet = at.pad ? at.y - 1 : at.y;
+    // each on the floor at the exit)
+    const placed = !!(at.pad || at.core);
+    const feet = placed ? at.y - 1 : at.y;
     let u = null;
     if (kind === 'trooper' && PW.troops) u = PW.troops.create(world, { x: at.x + 0.5, y: feet, side, style, facing: dir });
-    else if (kind === 'tank' && PW.tanks) u = PW.tanks.create(world, { x: at.x, y: at.pad ? at.y : undefined, side, style, facing: dir });
-    else if (kind === 'mech' && PW.mechs) u = PW.mechs.create(world, { x: at.x, y: at.pad ? feet : undefined, side, style, facing: dir });
+    else if (kind === 'tank' && PW.tanks) u = PW.tanks.create(world, { x: at.x, y: placed ? at.y : undefined, side, style, facing: dir });
+    else if (kind === 'mech' && PW.mechs) u = PW.mechs.create(world, { x: at.x, y: placed ? feet : undefined, side, style, facing: dir });
     else if (kind === 'jet' && PW.jets) {
       u = at.pad ? PW.jets.create(world, { x: at.x, y: feet, side, style, facing: dir, pad: at.pad })
         : PW.jets.takeOff(world, runwayOf(match, side), style, side);
@@ -520,7 +549,7 @@
     world.stock[side].hm -= K.hm;
     world.stock[side].sm -= K.sm || 0;
     // (each goes its own way at the next look - one up on a town base's pad by way of the town's gate)
-    const via = at.pad && at.gate !== null && kind !== 'jet' ? at.gate : undefined;
+    const via = placed && at.gate !== null && at.gate !== undefined && kind !== 'jet' ? at.gate : undefined;
     u.game = { side, kind, base: base.id, order: { type: 'auto' }, goal: null, born: match.clock, via };
     if (via !== undefined) carry(world, u, { type: 'move', x: via });
     else match.autoClock = Math.min(match.autoClock || 0, 0.1);
@@ -604,6 +633,8 @@
     if (!eng || !city) return { ok: false, note: 'no city of yours there' };
     if (city.faction !== side) return { ok: false, note: 'not your city' };
     if (city.level >= eng.topLevel(city)) return { ok: false, note: `level ${city.level} is its top` };
+    // (N122, the user's "both": its building takes its kind's time to grow whole, and it may be
+    // raised again while it grows - each raise starts that time over)
     const cost = upgradeCost(city);
     if (purse(match, side).hm < cost) return { ok: false, note: `needs ${cost} HM`, cost };
     return { ok: true, cost };
@@ -776,6 +807,9 @@
         // map at once is more than a man's way-finding should be asked; one that has stood still
         // since the last look tries a shorter stretch)
         const g = u.game;
+        // (one the computer has taken in hand for a fight - a target to focus, a fall back - is left
+        // to it till then: PW.ai)
+        if ((g.handUntil || 0) > match.clock) continue;
         // (N111: one up on a town base's pad makes for the town's gate first - there, or given
         // time, it goes its own way)
         if (g.via !== undefined) {
@@ -829,15 +863,18 @@
   // A side casts a seed where it can see open, gentle ground: a capital, a farm or a military base
   // grows from it by the growth rules (PW.capitalGrowth), in the side's style, threaded onto its
   // bundle. The same rule for a person and the computer.
-  // (opts.start - N115: a side's starting capital, placed before it can see anything)
-  function seed(match, side, kind, x, opts = {}) {
+  // (the match's own rules for a seed at x - before the engine's: the opening, sight, the standing
+  // towns and the mountain posts)
+  function seedRules(match, side, kind, x, opts = {}) {
     const world = match.world, eng = world.capitalGrowth;
     if (match.over) return { ok: false, note: 'the match is over' };
     if (!eng) return { ok: false, note: 'no growth engine' };
     if (!KINDS[kind]) return { ok: false, note: `no such seed: ${kind}` };
     if (match.phase === 'placing' && !opts.start) return { ok: false, note: 'place your starting capital first' };
-    x = Math.round(x);
-    if (!opts.start && PW.vision && !PW.vision.sees(world, side, x)) return { ok: false, note: 'beyond your vision' };
+    if (opts.start) {
+      const [a, b] = thirdOf(world, side);
+      if (x < a || x > b) return { ok: false, note: `your capital starts in the ${side} third of the map` };
+    } else if (PW.vision && !PW.vision.sees(world, side, x)) return { ok: false, note: 'beyond your vision' };
     // (the standing towns not yet in the engine, and the mountain outposts and bunkers, hold their
     // ground - the engine knows its own cities' claims)
     for (const s of world.settlements || []) {
@@ -846,6 +883,22 @@
     for (const o of [...(world.outposts || []), ...(world.bunkers || [])]) {
       for (const f of o.footprints || []) if (x > f[0] - 90 && x < f[1] + 90) return { ok: false, note: 'claimed by the military' };
     }
+    return { ok: true };
+  }
+  // N120/N112 (the user's): where a seed in hand would go - green where it can, red where it can't -
+  // and, where it can, the building that would stand there (the core bunker for the first).
+  function seedPreview(match, side, kind, x, opts = {}) {
+    x = Math.round(x);
+    const rules = seedRules(match, side, kind, x, opts);
+    if (!rules.ok) return { ...rules, x };
+    return { ...match.world.capitalGrowth.canDrop(x, kind, match.sides[side].style, side, opts), x };
+  }
+  // (opts.start - N115/N120: a side's starting capital, placed before it can see anything)
+  function seed(match, side, kind, x, opts = {}) {
+    const world = match.world, eng = world.capitalGrowth;
+    x = Math.round(x);
+    const rules = seedRules(match, side, kind, x, opts);
+    if (!rules.ok) return rules;
     const fallen = ruinsAt(match, side, x);
     const r = eng.drop(x, kind, match.sides[side].style, side, { start: !!opts.start });
     if (r.ok && opts.start) return { ok: true, note: 'starting capital placed', city: r.city };
@@ -859,6 +912,6 @@
   PW.game = { create, step, alert, takeOver, handBack, purse, frontOf, seed, ownerOf, other, SIDES,
     UNIT_KINDS, bases, unitsOf, kindOf, fielded, armyCap, canDeploy, deploy, order, standing, ruinsAt, buildingsOf, livingCore,
     HACK_TIME, rules, cover, standAt, TURRET, canTurret, placeTurret, turretCap, adopt, current: () => current,
-    UPGRADE, RUSH, upgradeCost, cityAt, canUpgrade, upgrade, tunnelAt, rushTunnel, placeStart, thirdOf,
+    UPGRADE, RUSH, upgradeCost, cityAt, canUpgrade, upgrade, tunnelAt, rushTunnel, placeStart, thirdOf, seedPreview,
     ARTILLERY, canArtillery, placeArtillery, artilleryCap };
 })();

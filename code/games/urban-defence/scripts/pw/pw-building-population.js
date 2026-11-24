@@ -43,7 +43,9 @@
     const interior = Math.max(INTERIOR_MIN, soldiers * S.SLOT + BAND * 0.6 | 0);
     const extra = { slab: 0, crown: 0, setback: 30, tapered: 30, spire: 30, needle: 30, offset: 56 }[variant] || 0;
     const bodyWidth = interior + 2 * S.WALL + extra;
-    const bodyHeight = storeys * S.FLOOR + S.SLAB;
+    // (N121: the ground storey a gate hall as tall as the road tunnels - the floors above it raised)
+    const raise = PW.NO_UNDERCROFT || PW.NO_HALL_RAISE ? 0 : S.HALL_RAISE;
+    const bodyHeight = storeys * S.FLOOR + S.SLAB + raise;
     const modern = style === 'modern';
     const crownLength = Math.min(150, Math.max(modern ? 72 : 54, Math.round(bodyHeight * (modern ? 0.32 : 0.28))));
     const margin = 20, coreDepth = K.VAULT_DEPTH + 3;
@@ -51,8 +53,8 @@
     const height = bodyHeight + crownLength + 44 + coreDepth;
     const ground = height - coreDepth - 1;
     const c = K.createCanvas(width, height, ground);
-    c.meta = { type: 'population', style, level, variant, storeys, bodyWidth, margin, crownLength, seed, facing };
-    const floorRow = (k) => ground - k * S.FLOOR;
+    c.meta = { type: 'population', style, level, variant, storeys, bodyWidth, margin, crownLength, seed, facing, hallRaise: raise };
+    const floorRow = (k) => ground - k * S.FLOOR - (k > 0 ? raise : 0);
     const maxIn = Math.max(0, Math.floor((bodyWidth - (INTERIOR_MIN + 2 * S.WALL)) / 2));
     // Mirror a column about the body's centre line (identity when facing right).
     const mx = (x) => facing > 0 ? x : 2 * margin + bodyWidth - 1 - x;
@@ -84,7 +86,7 @@
     const lit = spans.map((span) => (PW.hash2(seed, span.k) & 3) !== 0);
     // Back walls, windows, furniture, lamps.
     for (const span of spans) {
-      const fRow = floorRow(span.k), top = fRow - S.CLEAR;
+      const fRow = floorRow(span.k), top = floorRow(span.k + 1) + S.SLAB;
       const innerLeft = span.left + span.wall, innerRight = span.right - span.wall;
       K.rect(c, innerLeft, top, innerRight, fRow - 1, (x, y) =>
         K.back(c, x, y, K.backWallColor(style, x, y, fRow - 1 - y, innerLeft, innerRight)));
@@ -152,11 +154,53 @@
       }
     }
 
+    // N121: the tall gate hall's columns - square piers of the frame standing floor to first slab at
+    // a third and two thirds of the hall (clear of the ladder and the core), carrying the tower over
+    // the hall (its side walls are opened by the doors at the foot; the stair that tied the storeys
+    // is a ladder now). The undercroft marks them gate piers: its own side's hulls pass them.
+    if (raise) {
+      // (laid out facing right, then mirrored - a left-facing tower is the right-facing one's mirror)
+      const hall = spans[0];
+      const hL = facing > 0 ? hall.left : mx(hall.right), hR = facing > 0 ? hall.right : mx(hall.left);
+      const inL = hL + hall.wall, inR = hR - hall.wall;
+      const bL = facing > 0 ? bandLeft : mx(bandLeft) - (BAND - 1);
+      const coreX = margin + Math.round(bodyWidth / 2);
+      for (const f of [1 / 3, 2 / 3]) {
+        let px = Math.round(inL + (inR - inL) * f);
+        // (clear of the ladder's band and the core under the middle)
+        const band = [bL, bL + S.LANDING + S.STAIR_RUN + S.LANDING];
+        if (px > band[0] - 6 && px < band[1] + 6) px = f < 0.5 ? band[0] - 8 : band[1] + 8;
+        if (Math.abs(px - coreX) < 14) px += px < coreX ? -14 : 14;
+        if (px < inL + 4 || px > inR - 7) continue;
+        for (let y = floorRow(1) + S.SLAB; y < floorRow(0); y += 1) {
+          for (let d = 0; d < 4; d += 1) K.solid(c, mx(px + d), y, M.CONCRETE, tone(P.frame, d === 0 ? 1.1 : d === 3 ? 0.75 : 0.92), ROLE.FRAME);
+        }
+      }
+    }
     // Switchback stairs (one-way platforms) and stairwell openings in the slab above.
     for (let k = 0; k < storeys - 1; k += 1) {
       const dir = (k % 2 === 0 ? 1 : -1) * facing;
       const fRow = floorRow(k);
       const flightStart = dir > 0 ? bandLeft + S.LANDING : bandLeft + S.LANDING + S.STAIR_RUN - 1;
+      // (N121: up out of the tall gate hall by a ladder on its back wall, through a hatch in the
+      // first floor's slab - a flight would have to run two and a half times as far)
+      if (k === 0 && raise) {
+        const lx = dir > 0 ? flightStart + 4 : flightStart - 4, upper = floorRow(1);
+        const rail = tone(P.ornament, 0.62), rung = tone(P.ornament, 0.82);
+        for (let y = upper; y < fRow; y += 1) {
+          K.back(c, lx - 2, y, rail); K.back(c, lx + 2, y, rail);
+          if ((fRow - y) % 4 === 0) for (let x = lx - 1; x <= lx + 1; x += 1) K.back(c, x, y, rung);
+        }
+        for (let x = lx - 3; x <= lx + 3; x += 1) {
+          for (let row = 0; row < S.SLAB; row += 1) {
+            const i = (upper + row) * c.width + x;
+            if (c.role[i] === ROLE.SLAB) { c.mat[i] = M.PLATFORM; c.paint[i] = K.pack(tone(K.slabColor(style, row, x, upper + row), 0.86)); }
+          }
+        }
+        (c.ladders = c.ladders || []).push({ x0: lx - 1, x1: lx + 1, y0: upper - 2, y1: fRow - 1 });
+        c.stairs.push({ storey: 0, dir, from: lx, to: lx, floorRow: fRow, upperRow: upper, ladder: true });
+        continue;
+      }
       const steps = S.STAIR_RUN / S.STEP;
       const stairColor = tone(P.frame, 0.78);
       for (let i = 0; i < steps; i += 1) {

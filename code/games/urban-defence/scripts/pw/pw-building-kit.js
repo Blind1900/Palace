@@ -18,6 +18,11 @@
     STAIR_THICK: 4,
     LANDING: 10,
     SLOT: 26,         // spacing between guard positions
+    // N121 (the user's: surface doorways as tall as the mountain road tunnels - raised): a ground
+    // storey that is a vehicle GATE HALL stands HALL clear (the road tunnels' 96), its floors above
+    // raised by HALL_RAISE over the plain pitch (the hall's 37 rows, slab absorbed, plus this)
+    HALL: 96,
+    HALL_RAISE: 59,
   });
 
   // Faction styles from the building style lab (frame colour, ornament colour, lamp light).
@@ -343,7 +348,8 @@
     // one slab course is absorbed into the hall: 37 clear rows, so the tallest hull (35
     // rows, needing its height plus one) passes with a true row to spare - at exactly 36
     // the Abrams kissed the slab's bottom edge mid-hall and stopped
-    const top = g - (S.FLOOR - S.SLAB + 1);
+    // (N121: a canvas built with the raised hall carries its raise - the hall then stands HALL clear)
+    const top = g - (S.FLOOR - S.SLAB + 1) - ((c.meta && c.meta.hallRaise) || 0);
     const L = boundL ?? c.body.left, R = boundR ?? c.body.right;
     const GATE = [172, 150, 58], GATE_DK = [60, 56, 40];
     c.gates = c.gates || [];
@@ -708,14 +714,17 @@
         for (let dx = -2; dx <= 2; dx += 1) if (isSolid(c, core.x + dx, y)) { top = y; break; }
       }
       if (top >= lid - 2) continue;   // nothing standing over this core
+      // N94 (the user's): the pillar is in the BACKGROUND - a broad column on the back wall,
+      // thicker than it was, behind everything (no unit, deco or fitting is ever stopped by or
+      // drawn under it); a capital and base where it meets a slab, darker flutes at its edges
       for (let y = top + 1; y < lid; y += 1) {
-        for (let dx = -1; dx <= 1; dx += 1) {
+        for (let dx = -3; dx <= 3; dx += 1) {
           const x = core.x + dx;
-          if (isSolid(c, x, y)) continue;
-          // A capital and base where the pillar meets a slab; darker flutes at the edges.
-          const joint = isSolid(c, x, y - 1) || isSolid(c, x, y + 1);
-          const color = tone(dx === 0 ? s.frame : s.trim, (joint ? 1.18 : 1) * (grain(x, y) < 3 ? 0.9 : 1));
-          solid(c, x, y, M.PILLAR, color, ROLE.FRAME);
+          if (!inside(c, x, y) || isSolid(c, x, y) || c.deco[y * c.width + x]) continue;
+          const joint = isSolid(c, x, y - 1) || isSolid(c, x, y + 1) || isSolid(c, x, y - 2) || isSolid(c, x, y + 2);
+          const edge = Math.abs(dx) === 3, flute = Math.abs(dx) === 2;
+          const color = tone(dx === 0 || Math.abs(dx) === 1 ? s.frame : s.trim, (joint ? 1.12 : 1) * (edge ? 0.62 : flute ? 0.8 : 0.92) * (grain(x, y) < 3 ? 0.94 : 1));
+          back(c, x, y, color);
         }
       }
     }

@@ -123,5 +123,5 @@ else info(`the cap was not reached here - flat ground open to the sky ran out ne
 world.stock.right.hm = 6000; world.stock.right.sm = 1000;
 const ai = m.sides.right.ai;
 for (let s = 0; s < 150 && !((ai && ai.brain.artillery) > 0); s += 1) pwApp.stepWorld(60);
-check(!!ai && ai.brain.artillery > 0, `the computer sets artillery on bases of its own (${ai ? `${ai.brain.artillery || 0}; last: ${ai.brain.last}` : 'no computer'})`);
+check(!!ai && ai.brain.artillery > 0, `the computer sets artillery on bases of its own (${ai ? `${ai.brain.artillery || 0}; last: ${ai.brain.last}; its artillery's last: ${ai.brain.lastArt || '-'}; can: ${['launcher', 'dome', 'patriot'].map((k) => `${k} ${G.canArtillery(m, 'right', k).note || 'ok'}`).join(', ')}` : 'no computer'})`);
 return { checks, shots };

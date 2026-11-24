@@ -471,7 +471,11 @@
         }
       }
     }
-    return { cols: cols.length, stages };
+    // N124 (the user's: units pass poles): the space under the deck - its posts, piers, ties and
+    // braces - is the building's to let its own side through, as its gate piers are (record.gates)
+    const posts = [];
+    for (const x of cols) { const g = ground(world, x); if (g - 1 >= G + D) posts.push({ x, y0: G + D, y1: g - 1 }); }
+    return { cols: cols.length, stages, posts };
   }
 
   // ---- Steep ground -----------------------------------------------------------------------------------
@@ -810,7 +814,8 @@
     // N73 (options.grow): cores first - only the gift is stamped; the body stays blueprint.
     const stamp = options.grow ? stampGift(world, canvas, worldX, G, owner)
       : PW.stampBuilding(world, canvas, worldX, G, { owner });
-    const beds = canvas.cores.filter((k) => !k.standing && k.vault)
+    if (stamp && under && under.posts) stamp.posts = under.posts;   // (N124: see underStructure)
+    const beds =canvas.cores.filter((k) => !k.standing && k.vault)
       .map((k) => ({ x0: worldX + k.vault.x0, x1: worldX + k.vault.x1, bottom: G + k.vault.bottom - canvas.ground + 11 })).sort((u, v) => u.x0 - v.x0);
     bedUnderbody(world, beds, G, p.natural, owner);
     for (const k of canvas.cores) {

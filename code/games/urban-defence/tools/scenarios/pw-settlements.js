@@ -8,7 +8,43 @@ const shots = [];
 const view = async (name, x, y, zoomIndex) => { pwApp.focus(x, y, zoomIndex); await settle(); shots.push(await shot(name)); };
 
 const settlements = world.settlements || [];
-check(settlements.length === 5, `5 settlements (got ${settlements.length})`);
+// (N124: the middle town gave the centre to the map's great mountain or lake - two bases, two towns)
+check(settlements.length === 4, `4 settlements (got ${settlements.length})`);
+// N124 (the user's): open country at both ends - no mountain within 22% of either end - and the
+// centre the map's great barrier, a larger mountain than any other or a wide lake; a lake near
+// each end.
+{
+  const L = pwApp.layout, W = world.width, [fl, fr] = L.flatEnd;
+  const intrude = L.mountains.filter((m) => m.x - m.half < fl || m.x + m.half > fr);
+  check(Math.abs(fl - W * 0.22) < 2 && intrude.length === 0, `no mountain within 22% of either end (${fl} and ${W - fr} cells of open country; ${intrude.length} intruding)`);
+  let flatL = 0, flatR = 0;
+  for (let x = 80; x < fl; x += 16) if (Math.abs(world.groundTop[x] - world.groundTop[x - 16]) <= 12) flatL += 1;
+  for (let x = W - 80; x > fr; x -= 16) if (Math.abs(world.groundTop[x] - world.groundTop[x + 16]) <= 12) flatR += 1;
+  const nL = Math.floor((fl - 80) / 16), nR = Math.floor((W - 80 - fr) / 16);
+  check(flatL > nL * 0.85 && flatR > nR * 0.85, `and it is flat: ${Math.round(flatL / nL * 100)}% / ${Math.round(flatR / nR * 100)}% of its 16-cell steps rise 12 or less`);
+  const c = L.centre;
+  const tallest = Math.max(...L.mountains.filter((m) => !m.centre).map((m) => m.height), 0);
+  check(!!c && Math.abs(c.x - W / 2) < W * 0.04 && (c.kind === 'lake' ? c.half >= 800 : c.height > tallest),
+    `the centre is the great barrier: a ${c ? c.kind : 'nothing'} at ${c ? c.x : '-'} (${c && c.kind === 'mountain' ? `${Math.round(c.height)} high, the next tallest ${Math.round(tallest)}` : c ? `${Math.round(c.half * 2)} wide` : ''})`);
+  // N133 (the user's): one or two high mountains; three lakes at most (the ends', and the centre's
+  // if it is a lake); every slope one a tank can climb (43 degrees), the land's own profile
+  // measured over 8 columns at a time, lakes' bowls aside
+  const lakes = L.lakes.filter((l) => !l.river);
+  check(L.mountains.length >= 1 && L.mountains.length <= 2 && lakes.length <= 3 && !L.lakes.some((l) => l.river),
+    `${L.mountains.length} high mountain(s), ${lakes.length} lakes, no rivers (${L.hills.length} ranges worn to hills)`);
+  const S = L.surface, wetAt = (x) => L.lakes.some((l) => Math.abs(x - l.x) < l.half * 1.3);
+  let steep = 0, worst = 0, at = 0;
+  for (let x = 8; x < W; x += 4) {
+    if (wetAt(x) || wetAt(x - 8)) continue;
+    const g = Math.abs(S[x] - S[x - 8]) / 8;
+    if (g > worst) { worst = g; at = x; }
+    if (g > Math.tan(43 * Math.PI / 180)) steep += 1;
+  }
+  check(steep === 0, `no slope steeper than a tank climbs (steepest ${Math.round(Math.atan(worst) * 180 / Math.PI)} degrees, at ${at})`);
+  const ends = L.lakes.filter((l) => l.pond);
+  const wet = (l) => { let n = 0; for (let x = Math.round(l.x - l.half); x <= l.x + l.half; x += 4) { const y = world.groundTop[x]; for (let k = -6; k < 4; k += 1) if ((PW.get(world, x, y + k) & 63) === PW.M.WATER) { n += 1; break; } } return n; };
+  check(ends.length === 2 && ends.every((l) => wet(l) > 20) && ends[0].x < W * 0.05 && ends[1].x > W * 0.95, `a lake near each end (${ends.map((l) => `at ${Math.round(l.x)}, ${wet(l)} wet columns`).join('; ')})`);
+}
 const styles = world.styles || {};
 check(new Set([styles.left, styles.right, styles.neutral]).size === 3, `three distinct styles ${JSON.stringify(styles)}`);
 for (const s of settlements) {

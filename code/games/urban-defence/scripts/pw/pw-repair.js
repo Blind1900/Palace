@@ -313,6 +313,63 @@
     // across its way home. Once the cores settle, the corridor is scanned like everything else.
     const inUnit = (b, x, y) => !!b.coresOpen && (b.cores || []).some((core) => !core.orb && !core.settled && !core.lost && Math.abs(x - core.x) <= 14
       && y >= Math.min(core.y, core.homeY ?? core.y) - 18 && y <= (core.homeY ?? core.y) + 11);
+    // ---- N98 (the user's, 2026-11-22): the work vents through the building's top --------------------
+    // While the crews work, the dust and the gas of the work go out through vents in the roof, as a
+    // ventilation system's would. A building's vents (b.vents, found once per blueprint) are the
+    // open cells over its highest roof near each end of its body; the roof cell under each carries
+    // FLAG.VENT and world.vents maps its index to the building - the outlet PS's air (PW.air.vents)
+    // lets the inside's gas out by. Every VENT_EVERY cells of work, a puff goes up out of one.
+    const VENT_EVERY = 5;
+    function ventsOf(b) {
+      if (b.vents && b.vents.canvas === b.canvas) return b.vents.list;
+      const list = [];
+      const { left, right, top, bottom } = b.body;
+      const roofAt = (x) => { for (let y = Math.max(1, top - 2); y <= bottom; y += 1) if (PW.getOwner(world, x, y) === b.id && !PW.mat.open[PW.get(world, x, y) & ID_MASK]) return y; return -1; };
+      const span = right - left;
+      for (const f of span > 60 ? [0.22, 0.78] : [0.5]) {
+        let best = null;
+        for (let d = 0; d < Math.max(8, span * 0.12) && !best; d += 1) {
+          for (const x of [Math.round(left + span * f) + d, Math.round(left + span * f) - d]) {
+            const y = roofAt(x);
+            if (y > 1 && PW.mat.open[PW.get(world, x, y - 1) & ID_MASK] && PW.mat.open[PW.get(world, x, y - 2) & ID_MASK]) { best = { x, y: y - 1, roof: y }; break; }
+          }
+        }
+        if (best) list.push(best);
+      }
+      const map = world.vents || (world.vents = new Map());
+      for (const v of list) {
+        PW.setFlag(world, v.x, v.roof, PW.FLAG.VENT || 0);
+        map.set(v.roof * world.width + v.x, b.id);
+      }
+      b.vents = { canvas: b.canvas, list };
+      return list;
+    }
+    function vent(b, job, n) {
+      if (!particles || !F || !n) return;
+      job.ventWork = (job.ventWork || 0) + n;
+      if (job.ventWork < VENT_EVERY) return;
+      job.ventWork %= VENT_EVERY;
+      const list = ventsOf(b);
+      if (!list.length) return;
+      const v = list[(job.ventN = ((job.ventN || 0) + 1)) % list.length];
+      const h = PW.hash2(v.x * 7 + (job.ventN || 0), (world.tick || 0) & 1023);
+      // the work's gas - a grey breath rising out of the vent - and now and then a fleck of its dust
+      const g = 112 + (h & 31);
+      particles.spawn(v.x + 0.5, v.y - 0.5, ((h >>> 5 & 31) - 16) * 0.4, -34 - (h >>> 10 & 15), 0, PW.abgr(g, g - 2, g - 6, 170), F.SMOKE | F.THIN, 2.6 + (h >>> 14 & 7) * 0.3);
+      if ((h >>> 17 & 3) === 0) particles.spawn(v.x + 0.5, v.y - 0.5, ((h >>> 19 & 31) - 16) * 0.6, -40, M.DUST | 1 << 6, 0, 0, 2);
+    }
+    // (N122: the seconds a paced building has been growing - world time, at the build speed)
+    const paceElapsed = (b) => ((world.tick || 0) - (b.paceAt || 0)) / 60 * (world.buildSpeed || 1);
+    // (N122: the cells of a paced building's blueprint a second - counted once per build)
+    function paceOf(b) {
+      const c = b.canvas;
+      if (!b.paceCells && c) {
+        let n = 0;
+        for (let i = 0; i < c.mat.length; i += 1) n += (c.mat[i] ? 1 : 0) + (c.back && c.back[i] ? 1 : 0);
+        b.paceCells = Math.max(1, n);
+      }
+      return (b.paceCells || 1) / b.paceSecs;
+    }
     function scan(b, job) {
       const c = b.canvas, W = c.width;
       for (let n = 0; n < SCAN_COLS && job.scanCol < W; n += 1, job.scanCol += 1) {
@@ -623,6 +680,8 @@
               if ((world.tick || 0) >= (job.sinkAt || 0)) job.sinkAt = (world.tick || 0) + SINK_EVERY;
             } else if (b.mound && homeOf(b) <= b.ground + 3 && clearMound(b, job)) {
               // (home: the rest of the mound goes)
+            } else if (b.paceSecs && b.buildFree && paceElapsed(b) < b.paceSecs) {
+              // (N122: built, it is not whole till its kind's time is up - the last touches)
             } else {
               if (b.mound && homeOf(b) <= b.ground + 3) b.mound = null;
               const stock = world.stock && world.stock[b.side];
@@ -649,7 +708,12 @@
           job.recycleBudget = (job.recycleBudget || 0) + dt * rate;
           if (job.recycleBudget >= 1) { recycle(b, job, Math.floor(job.recycleBudget)); job.recycleBudget %= 1; }
         }
-        job.budget = Math.min(alive * CELLS_PER_HM * 2, (job.budget || 0) + dt * alive * CELLS_PER_HM / RATE);
+        // N122: a match's seed building on its first build grows at the pace that makes it whole in
+        // its kind's time (b.paceSecs, set by the growth), whatever its cores
+        // (a little ahead of its time, then held whole-but-for-the-touches until the time is up)
+        const pace = b.paceSecs && b.buildFree ? paceOf(b) * 1.15 : 0;
+        if (pace) job.budget = Math.min(pace * dt * 2 + 2, (job.budget || 0) + dt * pace);
+        else job.budget = Math.min(alive * CELLS_PER_HM * 2, (job.budget || 0) + dt * alive * CELLS_PER_HM / RATE);
         const before = stats.restored + stats.backRestored + stats.recycled + (stats.dug || 0);
         // N100: the stuff from the heap running low - the next rows from under the bed, and the
         // building comes down onto what is left (a few times a second at most); home, what is left
@@ -664,7 +728,9 @@
         }
         // Starved and still for half a minute - no cell placed, cleared or recycled, no HM in
         // the pool or the stock - the crews stand down and the job's memory is let go.
-        if (stats.restored + stats.backRestored + stats.recycled + (stats.dug || 0) !== before) job.idle = 0;
+        const worked = stats.restored + stats.backRestored + stats.recycled + (stats.dug || 0) - before;
+        if (worked > 0) vent(b, job, worked);   // N98: the work's dust and gas out through the roof
+        if (worked !== 0) job.idle = 0;
         else if ((job.idle = (job.idle || 0) + 1) > 1800 && job.pool < 1 / CELLS_PER_HM
           && !(world.stock && world.stock[b.side] && world.stock[b.side].hm >= 1)) {
           job.queue = []; job.seen = new Set(); job.dead = 0; job.rot = 0; job.sinceReady = 0;

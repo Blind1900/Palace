@@ -107,5 +107,38 @@ for (let y = rightOp.floor - 60; y <= rightOp.floor + 10 && !lining; y += 1) {
 }
 if (lining) pwApp.planDig('left', lining);
 check(lining && /Blocked/.test(pwApp.preview.note), `planning into the other side's developed tunnels says it is blocked ("${lining ? pwApp.preview.note : 'no developed lining found'}")`);
+
+// 5. N125 (the user's): one miner mines while the other goes out after more ore - he smells the
+// nearest body no one has reached, drives a drift to it, and a mine opens there; caves on the way
+// are made rooms with no gaps; ore no one has reached sparkles.
+const out = () => ops.filter((o) => o.prospect || (o.prospects || []).length);
+for (let s = 0; s < 60 && !ops.some((o) => o.foundBy); s += 1) pwApp.stepWorld(60 * 5);
+const sent = out();
+// (a mine with no ore left unreached within smell keeps both its men at the face)
+check(sent.length >= 1, `prospectors have gone out from ${sent.length} mines (${sent.map((o) => `${o.side} #${o.id}`).join(', ')})`);
+const busy = ops.filter((o) => o.prospect && !o.prospect.back);
+check(busy.every((o) => o.miners.some((m) => m.state !== 'prospect')), `while one is out, the other miner of each of those mines works on (${busy.length} out now)`);
+const found = ops.filter((o) => o.foundBy);
+check(found.length >= 1, `a prospector's drift reaches ore and a mine opens there (${found.map((o) => `#${o.id} ${o.node.form} ${o.node.tier}, found from #${o.foundBy}`).join('; ') || 'none yet'})`);
+const drifts = ops.flatMap((o) => [o.prospect, ...(o.prospects || [])]).filter(Boolean);
+const caves = drifts.filter((p) => p.caves > 0);
+checks.push(`INFO drifts: ${drifts.map((p) => `${p.steps} steps${p.caves ? `, ${p.caves} cave(s)` : ''}${p.opened ? ', opened' : ''}`).join(' | ')}`);
+if (caves.length) {
+  // (the floor the drift ran across the cave on: solid all along)
+  let gaps = 0, cols = 0;
+  for (const p of caves) for (let k = 0; k + 3 < p.path.length; k += 2) {
+    const [x0, y] = [p.path[k], p.path[k + 1]], x1 = p.path[k + 2];
+    if (Math.abs(x1 - x0) < 20 || p.path[k + 3] !== y) continue;
+    for (let x = Math.min(x0, x1); x <= Math.max(x0, x1); x += 1) { cols += 1; if (PW.mat.open[PW.get(world, x, y + 1) & 63]) gaps += 1; }
+  }
+  check(gaps === 0, `a cave on the way is a room with no gaps in its floor (${gaps} open cells under ${cols} columns of it)`);
+}
+const unfound = layout.nodes.filter((n) => !n.found), reached = layout.nodes.filter((n) => ops.some((o) => o.node === n));
+check(unfound.length > 0 && reached.every((n) => n.found), `ore no one has reached sparkles (${unfound.length} bodies), ore reached does not (${reached.length})`);
+const pr = ops.map((o) => o.miners.find((m) => m.state === 'prospect')).find(Boolean);
+if (pr) await view('n125-prospector', pr.x, pr.floor - 20, 6);
+if (found.length) await view('n125-found-mine', (found[0].room.x0 + found[0].room.x1) / 2, found[0].floor - 22, 5);
+const glint = unfound.find((n) => n.tier === 'vein' || n.tier === 'lode') || unfound[0];
+if (glint) await view(`n125-ore-${glint.form}`, (glint.box.x0 + glint.box.x1) / 2, (glint.box.y0 + glint.box.y1) / 2, 7);
 pwApp.setPaused(false);
 return { checks, shots: shots.length, ops: ops.map((o) => `${o.side} ${o.node.tier}: mined ${o.mined}, delivered ${o.delivered}, stored ${o.stored}`), pipes: pipes.stats };
