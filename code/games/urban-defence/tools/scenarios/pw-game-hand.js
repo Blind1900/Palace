@@ -1,7 +1,7 @@
 // N102 (part of N6) - the unit in hand, on the game page (mode=game&start=versus&side=left). One unit
 // of one's own selected is the person's: it stands while no key is held - whatever it was doing -
-// and moves only while A / D or the arrows are held; Space, W or Up jumps; a left click fires at the
-// spot, a right click is its second fire (a trooper's grenade); a click on an enemy is a shot, not a
+// and moves only while A / D or the arrows are held; Space, W or Up jumps; a left click aims and fires
+// at the spot (the mouse alone turns nothing), a right click is its second fire (a trooper's grenade); a click on an enemy is a shot, not a
 // selection; Shift+right-click still sends it on an order; P pauses; Q lets it go its own way.
 // (Keys go in as keyboard events on the window, clicks as pointer events on the canvas - the same
 // handlers a keyboard and a mouse reach.)
@@ -99,16 +99,25 @@ check(PW.gameUI.command().sel.length === 1 && PW.gameUI.command().sel[0] === u &
   'a click on an enemy is a shot at it - the selection stays');
 foe.dead = true;
 
-// 4b. Its shots go where the mouse is: the pointer moved over the world, its aim follows it - and F
-// fires there too.
+// 4b. The aim is the left click's (the user's change to N102): the pointer moving over the world turns
+// nothing; a left click lays the aim on the spot and fires there - and F fires where it was laid.
 const spot = { x: Math.round(u.x - 90 * dir), y: u.y - 40 };
+const aim0 = u.aim ? { ...u.aim } : null, face0 = u.facing;
 ptr('pointermove', spot.x, spot.y, { buttons: 0 });
 await sleep(80);
-check(!!u.aim && Math.abs(u.aim.x - spot.x) < 3 && Math.abs(u.aim.y - spot.y) < 3,
-  `its aim follows the mouse (aim ${u.aim ? `${Math.round(u.aim.x)},${Math.round(u.aim.y)}` : 'none'}, mouse ${spot.x},${spot.y})`);
-const r1 = (u.mag ?? 0) + (u.ammo ?? 0);
+pwApp.stepWorld(10);
+check(Math.sign(u.facing) === Math.sign(face0) && (!aim0 || (u.aim && Math.abs(u.aim.x - aim0.x) < 3 && Math.abs(u.aim.y - aim0.y) < 3)),
+  `the mouse moving over the world does not turn it (aim ${u.aim ? `${Math.round(u.aim.x)},${Math.round(u.aim.y)}` : 'none'}, mouse ${spot.x},${spot.y})`);
+let r1 = (u.mag ?? 0) + (u.ammo ?? 0);
+clickAt(spot.x, spot.y, 0);
+pwApp.stepWorld(20);
+check(!!u.aim && Math.abs(u.aim.x - spot.x) < 3 && Math.abs(u.aim.y - spot.y) < 3 && Math.sign(u.facing) === -dir && (u.mag ?? 0) + (u.ammo ?? 0) < r1,
+  `a left click aims it at the spot and fires there - it turns to it (aim ${u.aim ? `${Math.round(u.aim.x)},${Math.round(u.aim.y)}` : 'none'})`);
+ptr('pointermove', Math.round(u.x + 140 * dir), u.y - 20, { buttons: 0 });
+pwApp.stepWorld(30);
+r1 = (u.mag ?? 0) + (u.ammo ?? 0);
 tap('KeyF', 20);
-check((u.mag ?? 0) + (u.ammo ?? 0) < r1 && Math.sign(u.facing) === -dir, 'F fires at the mouse - it turns to it');
+check((u.mag ?? 0) + (u.ammo ?? 0) < r1 && Math.sign(u.facing) === -dir && Math.abs(u.aim.x - spot.x) < 3, 'F fires where the last click aimed, not where the mouse has gone');
 
 // 5. Shift+right-click still sends it on an order.
 let goal = Math.round(u.x + 200 * dir);

@@ -24,8 +24,8 @@ The game runs straight from its files. There's no server or install, and it does
   - **One unit is in your hands** as soon as you select it. It drops what it was doing and stands still until you press a key. Its panel shows its keys, and the view follows it as it moves.
     - **Move**: hold A/D or the left/right arrows. It moves only while the key is held.
     - **Jump**: Space, W or the up arrow. A drone climbs instead, and S or the down arrow dives it.
-    - **Aim**: it aims wherever the mouse is.
-    - **Fire**: left-click fires its weapon at the spot. Right-click fires its second weapon: a grenade, the other shell, or a missile.
+    - **Aim and fire**: left-click aims its weapon at the spot and fires there. Moving the mouse doesn't turn it; F fires where your last click aimed.
+    - **Alt fire**: right-click fires its second weapon at the spot: a grenade, the other shell, or a missile.
     - **Trooper**: S or the down arrow crouches, 1 2 3 pick its item, F uses it, R reloads.
     - **Clicking other units**: clicking an enemy shoots at it; clicking another of your own units takes that one instead.
     - **Orders**: Shift+right-click still sends it on an order (go, attack, or hack an enemy building).

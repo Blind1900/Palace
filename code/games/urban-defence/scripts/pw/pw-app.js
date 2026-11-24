@@ -369,7 +369,7 @@
         `<div class="keys">` +
         `<div><kbd>A</kbd><kbd>D</kbd><kbd>←</kbd><kbd>→</kbd> drive (held)</div>` +
         `<div><kbd>S</kbd><kbd>↓</kbd> stop</div>` +
-        `<div>left click: fire</div><div>right click: other round</div>` +
+        `<div>left click: aim + fire there</div><div>right click: other round</div>` +
         `<div><kbd>F</kbd> fire <kbd>R</kbd> HE/AP</div>` +
         `<div><kbd>P</kbd> pause <kbd>Esc</kbd> free</div>` +
         `</div>`;
@@ -387,7 +387,7 @@
         `<div><kbd>A</kbd><kbd>D</kbd><kbd>←</kbd><kbd>→</kbd> walk (held)</div>` +
         `<div><kbd>Space</kbd><kbd>W</kbd><kbd>↑</kbd> jump/climb</div>` +
         `<div><kbd>S</kbd><kbd>↓</kbd> crouch</div>` +
-        `<div>left click: fire</div><div>right click: grenade</div>` +
+        `<div>left click: aim + fire there</div><div>right click: grenade</div>` +
         `<div><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> item <kbd>F</kbd> use</div>` +
         `<div><kbd>R</kbd> reload <kbd>P</kbd> pause</div><div><kbd>Esc</kbd> free</div>` +
         `</div>`;
@@ -402,7 +402,7 @@
         `<div><kbd>A</kbd><kbd>D</kbd><kbd>←</kbd><kbd>→</kbd> walk (held)</div>` +
         `<div><kbd>Space</kbd><kbd>W</kbd><kbd>↑</kbd> leap / jets</div>` +
         `<div><kbd>S</kbd><kbd>↓</kbd> jets off <kbd>E</kbd> dash</div>` +
-        `<div>left click: cannon</div><div>right click: missile</div>` +
+        `<div>left click: aim + cannon there</div><div>right click: missile</div>` +
         `<div><kbd>R</kbd> reload <kbd>P</kbd> pause</div><div><kbd>Esc</kbd> free</div>` +
         `</div>`;
     } else if (selected.kind === 'jet') {
@@ -416,7 +416,7 @@
         `<div><kbd>A</kbd><kbd>D</kbd><kbd>←</kbd><kbd>→</kbd> turn about</div>` +
         `<div><kbd>Space</kbd><kbd>W</kbd><kbd>↑</kbd> climb (held)</div>` +
         `<div><kbd>S</kbd><kbd>↓</kbd> dive (held)</div>` +
-        `<div>left click: cannon</div><div>right click: missile</div>` +
+        `<div>left click: aim + cannon there</div><div>right click: missile</div>` +
         `<div><kbd>P</kbd> pause <kbd>Esc</kbd> free</div>` +
         `</div>`;
     } else if (selected.kind === 'defence') {
@@ -440,21 +440,10 @@
     const mod = sel && MODULE_OF[sel.kind] && MODULE_OF[sel.kind]();
     return !!(mod && mod.click && mod.click(world, p.x, p.y, button));
   }
-  // N102: the shots of the unit in hand go where the mouse is - each frame its aim is laid on the
-  // world under the pointer (where the view has gone since it last moved, too): the gun turns to it,
-  // and a key's fire (F, G) goes there as a click's does. (PS's units think nothing of their own
-  // while held, so nothing else lays it.) In a match: the sandbox's hand aims by its clicks, and its
-  // suites lay aims of their own.
-  const mouse = { x: 0, y: 0, on: false };
-  function aimHeld() {
-    if (!selected || !mouse.on || !renderer || !match || !match.human) return;
-    const u = selected.t;
-    if (!u || u.dead) return;
-    const rect = canvas.getBoundingClientRect();
-    const p = renderer.screenToWorld(mouse.x - rect.left, mouse.y - rect.top);
-    if (selected.kind === 'tank') { if (PW.tanks && PW.tanks.aimAt) PW.tanks.aimAt(u, p.x, p.y); }
-    else if (selected.kind !== 'defence' || u.type === 'launcher') u.aim = { x: p.x, y: p.y };
-  }
+  // (N102, the user's change: the aim is the left click's - a left click lays the gun on the spot
+  // and fires there, a right click its second fire; the pointer moving over the world turns
+  // nothing, and a key's fire (F, G) goes where the last click laid it - each module's click()
+  // lays the aim before it fires)
   // Selecting takes the unit in hand in its own module (PS's hold()), and lets go of
   // whatever any other module held - so the keys follow exactly one unit.
   function select(next) {
@@ -561,8 +550,11 @@
       return;
     }
     // N102: with a unit in hand and the hand empty (PAN), a click that lands on no other unit is
-    // the unit's - left its weapon at the spot, right its second (PS's module.click)
-    if (selected && tool === 'pan' && (event.button === 0 || event.button === 2)) {
+    // the unit's - left its weapon at the spot, right its second (PS's module.click). With a unit
+    // tool up, its tool() takes the left click (it aims and fires as well); the right is still the
+    // unit's second fire, not a pan.
+    const unitToolUp = tool === 'tank' || !!UNIT_TOOLS[tool];
+    if (selected && ((tool === 'pan' && event.button === 0) || ((tool === 'pan' || unitToolUp) && event.button === 2))) {
       const p = toWorld(event);
       if (!unitAt(p.x, p.y) && clickUnit(selected, p, event.button)) return;
     }
@@ -605,7 +597,6 @@
   });
   canvas.addEventListener('pointermove', (event) => {
     if (!renderer) return;
-    mouse.x = event.clientX; mouse.y = event.clientY; mouse.on = true;
     if (match && PW.gameUI) PW.gameUI.pointerMove(event, toWorld(event));
     if (tool === 'digL' || tool === 'digR') planDig(tool === 'digL' ? 'left' : 'right', toWorld(event));
     if (!drag.active) return;
@@ -700,7 +691,6 @@
     last = now;
     // (the frame's own costs from here: whatever ticks a test ran between frames are not this one's)
     for (const k in perf.frame) perf.frame[k] = 0;
-    aimHeld();
     // A heavy moment runs the world a touch slow instead of stuttering: once the ticks this
     // frame have eaten ~12 ms the rest of the backlog is dropped, so one expensive tick can
     // never snowball into owing two or three more next frame (the perf pass's blast hitch).
