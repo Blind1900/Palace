@@ -876,7 +876,7 @@
             const corridor = digLeg(wayX, wayY, wayX + dir * rw, h, 'drift');
             if (corridor) {
               const [roomY, roomDir] = [wayY, dir];
-              plans.push({ at: planAt, fn: () => {
+              plans.push({ at: planAt, net: net.id, fn: () => {
                 // (a chamber never widens up into the surface: fields, streets and the wild
                 // above stay whole - a shallow stretch keeps its plain drift)
                 let gt = 1e9;
@@ -904,7 +904,7 @@
       // not only ladders), a narrow drift running along the new level from its foot.
       if (dug) {
         const [bx2, by2, bd] = [Math.round((dug[0] + dug[1]) / 2), wayY, dir];
-        plans.push({ at: planAt + 85 + ((bx2 % 7) * 6), fn: () => {
+        plans.push({ at: planAt + 85 + ((bx2 % 7) * 6), net: net.id, fn: () => {
           const yA = by2 - 2, yB = by2 + 54;
           const dxTotal = Math.ceil((yB - by2) / 2) * 3 + 6;
           const ix0 = Math.min(bx2, bx2 + bd * dxTotal), ix1 = Math.max(bx2, bx2 + bd * dxTotal);

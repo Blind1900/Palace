@@ -42,6 +42,8 @@ const SUITES = [
   { name: 'pw-turret-mounts', params: 'mode=game&start=versus&side=left&det=1' },
   // N111: the spawn pad in every hangar floor over the base's armoured core; units come up on it
   { name: 'pw-spawn-pad', params: 'mode=game&start=versus&side=left&det=1' },
+  // N116: levels bought by hand, units priced in HM and SM, HM to rush a tunnel's works
+  { name: 'pw-game-upgrade', params: 'mode=game&start=versus&side=left&det=1' },
   // N8: the game is the main page, opened from disk as a downloaded copy is; the old beta still loads
   { name: 'pw-main-page', page: 'index.html', file: true, alone: true, ready: "!!document.getElementById('gm-menu')" },
   // (the old beta makes its world from Math.random: seeded, the same world each run - unseeded it

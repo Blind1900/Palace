@@ -31,8 +31,10 @@ The game runs straight from its files. There's no server or install, and it does
     - **Orders**: Shift+right-click still sends it on an order (go, attack, or hack an enemy building).
     - **Letting go**: Q lets it go its own way, and Esc lets it go. Left alone for a few seconds, it carries on with its orders.
 - **Pause**: P (or PAUSE on the top bar).
-- **Build**: SEED CAPITAL, SEED FARM and SEED MILITARY plant seeds, only where your side can see. Cities, farms and bases grow from them by themselves.
-- **Deploy**: the unit buttons on the bottom bar deploy from your front base, or from the base you've selected. A base's level decides what it can deploy. Each unit costs HM, and your army can't outgrow your population.
+- **Build**: SEED CAPITAL, SEED FARM and SEED MILITARY plant seeds, only where your side can see. Cities, farms and bases spread from them by themselves, but they never go up a level by themselves.
+- **Upgrade**: UPGRADE, then click one of your cities, farms or bases to raise it a level. The pointer shows the price: capital 120 HM × its level, military base 80 × level, farm 60 × level. Its spread and its towers then grow on up to the new level.
+- **Rush a tunnel**: RUSH TUNNEL (50 HM), then click inside one of your tunnels. Its next 4 minutes of digging and finishing happen in 1.
+- **Deploy**: the unit buttons on the bottom bar deploy from your front base, or from the base you've selected. A base's level decides what it can deploy. Each unit costs HM and SM (the button shows both, HM+SM), and your army can't outgrow your population.
   - A base with a hangar has a **spawn pad** in its floor, over its armoured core. Troopers, tanks and mechs come up on it and leave by the hangar door. In a town, they head for the town's gate first. Batteries (rockets, Iron Dome, Patriot) don't use the pad: they're set down where they always were, since they can't drive out.
   - The jets are being replaced by smaller **avenger drones** (the DRONE button). Until the drones are in, they still take off from the runway.
 - **Turrets**: TURRET (60 HM), then click flat ground your side can see, or the floor of a tunnel room. A turret base is laid there and a turret seated on it. You can have 3 per level of your military bases. Turrets don't take population.

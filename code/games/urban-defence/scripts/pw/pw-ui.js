@@ -139,6 +139,9 @@
     { id: 'seed:military', label: 'SEED MILITARY', tip: 'Plant a military seed in your vision' },
     // N103: a turret set on its base on flat ground (or a tunnel room's floor) in your vision
     { id: 'turret', label: 'TURRET 60', tip: 'Set a turret on its base on flat ground in your vision (60 HM)' },
+    // N116: no city levels by itself - click the one to raise, and pay; HM rushes a tunnel's works
+    { id: 'upgrade', label: 'UPGRADE', tip: 'Click one of your cities to raise it a level (HM by its kind and level)' },
+    { id: 'rush', label: 'RUSH TUNNEL 50', tip: 'Click one of your tunnels: its next 4 minutes of growth in 1 (50 HM)' },
   ];
 
   let cmd = null, attachedAt = 0, slowTold = false, fpsSum = 0, fpsN = 0;
@@ -217,7 +220,7 @@
       }
     }
     // (the seed and deploy tools are for the side a person plays)
-    bar.querySelectorAll('[data-tool^="seed:"], [data-tool="turret"], [data-deploy]').forEach((b) => { if (!match.human) b.disabled = true; else if (b.dataset.tool) b.disabled = false; });
+    bar.querySelectorAll('[data-tool^="seed:"], [data-tool="turret"], [data-tool="upgrade"], [data-tool="rush"], [data-deploy]').forEach((b) => { if (!match.human) b.disabled = true; else if (b.dataset.tool) b.disabled = false; });
     refreshDeploys();
     renderSel();
   }
@@ -228,7 +231,8 @@
     const K = PW.game.UNIT_KINDS;
     bar.innerHTML = TOOLS.map((t) => `<button data-tool="${t.id}" title="${t.tip}" class="${gameTool === t.id ? 'on' : ''}">${t.label}</button>`).join('') +
       '<span style="width:10px"></span>' +
-      Object.keys(K).map((k) => `<button data-deploy="${k}" title="Deploy a ${K[k].label.toLowerCase()} (${K[k].hm} HM)">${K[k].label} ${K[k].hm}</button>`).join('');
+      // (N116: each costs HM and SM both - shown HM+SM)
+      Object.keys(K).map((k) => `<button data-deploy="${k}" title="Deploy a ${K[k].label.toLowerCase()} (${K[k].hm} HM, ${K[k].sm || 0} SM)">${K[k].label} ${K[k].hm}+${K[k].sm || 0}</button>`).join('');
     deployKey = '';
   }
   let deployKey = '';
@@ -300,6 +304,15 @@
       if (r.ok) setTool('select');
       return true;
     }
+    // N116: a city raised a level, a tunnel's works rushed - each paid in HM
+    if (event.button === 0 && (gameTool === 'upgrade' || gameTool === 'rush')) {
+      if (!match.human) return true;
+      const r = gameTool === 'upgrade' ? PW.game.upgrade(match, match.human, p.x) : PW.game.rushTunnel(match, match.human, p.x, p.y);
+      if (PW.notify) PW.notify.flash(r.ok ? (gameTool === 'upgrade' ? `${r.city.kind} raised to level ${r.level}` : 'Tunnel works rushed')
+        : `${gameTool === 'upgrade' ? 'Upgrade' : 'Rush'}: ${r.note}`, r.ok ? 'good' : 'bad', 2.5);
+      if (r.ok) setTool('select');
+      return true;
+    }
     // N102: the unit in hand fires where the person clicks - left its weapon, right its second (a
     // grenade, the other round, a missile); a click on an enemy is a shot at it, on another unit of
     // one's own takes that one instead. Shift keeps the hand's other ways: Shift+click and
@@ -330,6 +343,21 @@
       const sees = !PW.vision || PW.vision.sees(match.world, match.human, Math.round(p.x));
       const can = PW.game.canTurret(match, match.human);
       if (PW.notify) PW.notify.cursor(!sees ? 'Beyond your vision' : can.ok ? 'Set a turret here (flat ground)' : `Turret: ${can.note}`, sees && can.ok ? '' : 'bad');
+      return;
+    }
+    if (gameTool === 'upgrade' && match.human) {
+      const city = PW.game.cityAt(match, p.x, match.human);
+      const can = PW.game.canUpgrade(match, match.human, city);
+      const name = city ? `${city.kind.toUpperCase()} ${city.id}` : '';
+      if (PW.notify) PW.notify.cursor(!city ? 'Point at one of your cities' : can.ok ? `Raise ${name} to level ${city.level + 1}: ${can.cost} HM`
+        : `${name}: ${can.note}`, city && can.ok ? '' : 'bad');
+      return;
+    }
+    if (gameTool === 'rush' && match.human) {
+      const net = PW.game.tunnelAt(match, match.human, p.x, p.y);
+      const rushed = net && net.rushUntil > PW.tunnels.state(match.world).time;
+      if (PW.notify) PW.notify.cursor(!net ? 'Point into one of your tunnels' : rushed ? 'Rushed already'
+        : `Rush these works: ${PW.game.RUSH.hm} HM`, net && !rushed ? '' : 'bad');
       return;
     }
     if (!gameTool.startsWith('seed:') || !match.human) return;

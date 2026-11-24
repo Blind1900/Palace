@@ -25,6 +25,8 @@
   const SALVO_REACH = 2400;     // cells a launcher is sent to lay a salvo at most
   const WAVE = 6;               // gathered units that make a wave
   const HACK_EVERY = [70, 110]; // s between hack attempts
+  const UPGRADE_EVERY = [30, 55]; // s between looks at which city to raise (N116)
+  const UPGRADE_FIRST = 60;     // s into the match before its first look
   const MIX = ['trooper', 'trooper', 'trooper', 'tank', 'trooper', 'trooper', 'launcher', 'trooper', 'tank', 'dome', 'trooper', 'mech', 'jet', 'patriot'];
 
   function create(match, side) {
@@ -77,6 +79,35 @@
           if (r.ok) { brain.rebuilt += 1; brain.last = `capital over the ruins at ${x}`; return true; }
           brain.last = `ruins: ${r.note}`;
         }
+      }
+      return false;
+    }
+
+    // Upgrade (N116: no city levels by itself in a match): every so often it buys a level for the
+    // city that holds it back most - a capital when its army is at its population, a farm when its
+    // soft materials run low, else a military base (the highest, for the units it opens), then the
+    // cheapest - keeping back what its growth needs (a level bought in the first seconds left it too
+    // poor ever to plant a seed again: the matrix's catch) - and not before its first minute.
+    function upgrade() {
+      const eng = world.capitalGrowth;
+      if (!eng.manual || match.clock < (brain.upgradeAt ?? UPGRADE_FIRST)) return false;
+      brain.upgradeAt = match.clock + between(UPGRADE_EVERY);
+      const mine = eng.cities.filter((c) => c.faction === side && !c.fallen && c.level < eng.topLevel(c));
+      if (!mine.length) return false;
+      const p = G.purse(match, side);
+      const pick = (kind) => mine.filter((c) => c.kind === kind).sort((a, b) => (kind === 'military' ? b.level - a.level : a.level - b.level))[0];
+      const order = [];
+      if (G.fielded(match, side) + 3 > G.armyCap(match, side)) order.push('capital');
+      if (p.sm < 120) order.push('farm');
+      order.push('military', 'capital', 'farm');
+      for (const kind of order) {
+        const c = pick(kind);
+        if (!c) continue;
+        const can = G.canUpgrade(match, side, c);
+        if (!can.ok || p.hm < can.cost + KEEP_HM) continue;
+        const r = G.upgrade(match, side, c);
+        if (r.ok) { brain.upgrades = (brain.upgrades || 0) + 1; brain.last = `${c.kind} ${c.id} to level ${c.level}`; return true; }
+        brain.last = `upgrade ${c.kind} ${c.id}: ${r.note}`;
       }
       return false;
     }
@@ -203,6 +234,7 @@
       else if (attack()) brain.doing = 'attack';
       else if (bombard()) brain.doing = 'bombard';
       else if (hack()) brain.doing = 'hack';
+      else if (upgrade()) brain.doing = 'upgrade';
       else if (grow()) brain.doing = 'grow';
       else if (arm()) brain.doing = 'arm';
     }

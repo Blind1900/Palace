@@ -624,13 +624,46 @@
     return true;
   }
 
+  // N116 (the user's): a side spends HM to rush a network's growth. The next `span` seconds of its
+  // work - the development wave still to come and the digs planned for it - come in 1/factor of
+  // the time (what lies beyond comes that much sooner too), and what it digs while rushed develops
+  // `factor` times as fast. (The cells' old entries in the queue find them done and pass.)
+  const RUSH = { factor: 4, span: 240 };
+  const rushOf = (T, net) => (net && net.rushUntil > T.time ? net.rushFactor || RUSH.factor : 1);
+  // (how fast a network's work goes now: rushed, and the world's build speed - N115's test)
+  function paceOf(world, net) { return rushOf(state(world), net) * (world.buildSpeed || 1); }
+  function rush(world, net, factor = RUSH.factor, span = RUSH.span) {
+    const T = state(world), now = T.time, W = world.width;
+    const squeeze = (t) => (t <= now ? t : t <= now + span ? now + (t - now) / factor : t - span + span / factor);
+    let cells = 0;
+    for (const seg of T.segments) {
+      if (seg.net !== net.id) continue;
+      for (let y = Math.max(0, seg.y0 - 4); y <= Math.min(world.height - 1, seg.y1 + 4); y += 1) {
+        for (let x = Math.max(0, seg.x0 - 4); x <= Math.min(W - 1, seg.x1 + 4); x += 1) {
+          if (netAt(world, x, y) !== net.id || !(PW.getFlags(world, x, y) & FLAG.RAW)) continue;
+          const t = devAtOf(world, x, y);
+          if (!(t > now)) continue;
+          const t2 = squeeze(t);
+          setL(world, 'tunnelDev', Float32Array, x, y, t2);
+          T.pending.push(t2, y * W + x);
+          cells += 1;
+        }
+      }
+    }
+    let plans = 0;
+    for (const p of world.minePlans || []) if (p.net === net.id && p.at > now) { p.at = squeeze(p.at); plans += 1; }
+    if (plans) world.minePlans.sort((p, q) => p.at - q.at);
+    net.rushUntil = Math.max(net.rushUntil || 0, now + span / factor);
+    net.rushFactor = factor;
+    return { cells, plans, until: net.rushUntil };
+  }
   // When each new cell develops: the wave reaches it one step (1 / rate s) after its neighbour,
   // and never before now, so a new branch is developed from where it joins, at the same pace.
   function schedule(world, net, fresh) {
     if (!fresh.length) return;
     const T = state(world);
     const W = world.width;
-    const step = 1 / net.rate;
+    const step = 1 / (net.rate * rushOf(T, net));
     const best = new Map();
     const queue = createHeap();
     const inFresh = new Set(fresh);
@@ -825,7 +858,7 @@
   }
   function step(world, dt, budget = 2000) {
     const T = state(world);
-    T.time += dt;
+    T.time += dt * (world.buildSpeed || 1);   // (N115: the test's build speed runs the workings' clock faster)
     runPlans(world, T);
     repairStep(world, dt);
     let n = 0;
@@ -1155,6 +1188,6 @@
     return null;
   }
 
-  PW.tunnels = { RATE, LINE, SET_PITCH, RIB_PITCH, PROFILES, createNetwork, digBox, claimCell, step, advanceTo, networkAt, networkOfOwner, stats, state, damaged,
+  PW.tunnels = { RATE, LINE, SET_PITCH, RIB_PITCH, PROFILES, createNetwork, digBox, claimCell, step, advanceTo, networkAt, networkOfOwner, stats, state, damaged, rush, paceOf, RUSH, devAt: devAtOf,
     netAt, devAtOf, rawBack, devBack, caveBase, planTunnel, carveTunnel, HALLS, ROOMS };
 })();

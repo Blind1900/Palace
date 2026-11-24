@@ -41,6 +41,8 @@
       // (the towns' first count comes a little into the match: till then, the design doc's POP)
       if (!purse.pop) { purse.pop = START.pop; purse.workers = START.pop; }
     }
+    // N116 (the user's): no city levels by itself in a match - its side buys each level (upgrade)
+    if (world.capitalGrowth) world.capitalGrowth.manual = true;
     for (const side of SIDES) if (match.sides[side].controller === 'ai' && PW.ai) match.sides[side].ai = PW.ai.create(match, side);
     armDevices(match);
     passes(match);
@@ -417,17 +419,19 @@
 
   // ---- The army ------------------------------------------------------------------------------------
   // What a side's military buildings deploy, by the building's level (the user's design doc): what
-  // it costs in HM, and how much of the side's POP it takes up while it lives - a side fields no more
+  // it costs, and how much of the side's POP it takes up while it lives - a side fields no more
   // than its population. Jets roll out from a runway; mechs only from the top bases, two at most.
+  // N116 (the user's): every unit costs HM and SM both - the men lean on the soft materials (kit,
+  // rations), the machines on the hard.
   const UNIT_KINDS = {
-    trooper: { label: 'TROOPER', hm: 10, pop: 1, level: 1, list: 'troops' },
-    tank: { label: 'TANK', hm: 80, pop: 3, level: 2, list: 'tanks' },
-    launcher: { label: 'ROCKETS', hm: 70, pop: 2, level: 2, list: 'defence' },
-    dome: { label: 'IRON DOME', hm: 90, pop: 2, level: 3, list: 'defence' },
+    trooper: { label: 'TROOPER', hm: 10, sm: 10, pop: 1, level: 1, list: 'troops' },
+    tank: { label: 'TANK', hm: 80, sm: 20, pop: 3, level: 2, list: 'tanks' },
+    launcher: { label: 'ROCKETS', hm: 70, sm: 15, pop: 2, level: 2, list: 'defence' },
+    dome: { label: 'IRON DOME', hm: 90, sm: 15, pop: 2, level: 3, list: 'defence' },
     // (N111: the jets give way to PS's avenger drones - kind 'jet' and world.jets kept, the drone's name shown)
-    jet: { label: 'DRONE', hm: 140, pop: 2, level: 3, list: 'jets', runway: true },
-    patriot: { label: 'PATRIOT', hm: 120, pop: 2, level: 4, list: 'defence' },
-    mech: { label: 'MECH', hm: 240, pop: 4, level: 5, list: 'mechs', most: 2 },
+    jet: { label: 'DRONE', hm: 140, sm: 20, pop: 2, level: 3, list: 'jets', runway: true },
+    patriot: { label: 'PATRIOT', hm: 120, sm: 20, pop: 2, level: 4, list: 'defence' },
+    mech: { label: 'MECH', hm: 240, sm: 40, pop: 4, level: 5, list: 'mechs', most: 2 },
   };
   const UNIT_LISTS = ['troops', 'tanks', 'mechs', 'jets', 'defence'];
   const AUTO_EVERY = 3;        // s between looks for where the units on their own should head
@@ -473,6 +477,7 @@
     if (!able.length) return { ok: false, note: b ? `needs a level ${K.level} base` : `no base of level ${K.level}` };
     const p = purse(match, side);
     if (p.hm < K.hm) return { ok: false, note: `needs ${K.hm} HM` };
+    if (p.sm < (K.sm || 0)) return { ok: false, note: `needs ${K.sm} SM` };
     if (fielded(match, side) + K.pop > armyCap(match, side)) return { ok: false, note: 'the army is as big as the population' };
     if (K.most && unitsOf(match, side).filter((u) => kindOf(u) === kind).length >= K.most) return { ok: false, note: `${K.most} at most` };
     // (a drone off a pad once PS's drones lift off one, else off a runway)
@@ -537,6 +542,7 @@
     } else if (PW.defence && (kind === 'launcher' || kind === 'dome' || kind === 'patriot')) u = PW.defence.create(world, { type: kind, x: at.x, side, style, facing: dir });
     if (!u) return { ok: false, note: `${kind}: no room to deploy` };
     world.stock[side].hm -= K.hm;
+    world.stock[side].sm -= K.sm || 0;
     // (batteries stand and fight where they are put; the rest go their own way at the next look -
     // one up on a town base's pad by way of the town's gate)
     const battery = kind === 'launcher' || kind === 'dome' || kind === 'patriot';
@@ -597,6 +603,70 @@
     alert(match, side, 'TURRET set on its base', '', m.x);
     return { ok: true, mount: m };
   }
+  // ---- Upgrades and rushes (N116) -------------------------------------------------------------------
+  // No city levels by itself in a match (the user's): the side picks which to raise and pays HM for
+  // it, by the city's kind and the level it rises from; its spread and its towers coming of age then
+  // follow on their own up to that level. HM also rushes one of the side's tunnel networks: its
+  // next four minutes of growth in one (PW.tunnels.rush).
+  const UPGRADE = { capital: 120, military: 80, farm: 60 };
+  const RUSH = { hm: 50 };
+  const upgradeCost = (city) => (UPGRADE[city.kind] || 100) * city.level;
+  // (the side's city whose ground x is in - or any side's, with side null)
+  function cityAt(match, x, side = null) {
+    const eng = match.world.capitalGrowth;
+    if (!eng) return null;
+    let best = null;
+    for (const c of eng.cities) {
+      if (c.fallen || (side && c.faction !== side)) continue;
+      const l = Math.min(c.edge.left, c.capEdge.left) - 30, r = Math.max(c.edge.right, c.capEdge.right) + 30;
+      if (x < l || x > r) continue;
+      const d = Math.abs(x - c.x);
+      if (!best || d < best.d) best = { c, d };
+    }
+    return best ? best.c : null;
+  }
+  function canUpgrade(match, side, city) {
+    const eng = match.world.capitalGrowth;
+    if (match.over) return { ok: false, note: 'the match is over' };
+    if (!eng || !city) return { ok: false, note: 'no city of yours there' };
+    if (city.faction !== side) return { ok: false, note: 'not your city' };
+    if (city.level >= eng.topLevel(city)) return { ok: false, note: `level ${city.level} is its top` };
+    const cost = upgradeCost(city);
+    if (purse(match, side).hm < cost) return { ok: false, note: `needs ${cost} HM`, cost };
+    return { ok: true, cost };
+  }
+  function upgrade(match, side, at) {
+    const city = typeof at === 'object' ? at : cityAt(match, at, side);
+    const can = canUpgrade(match, side, city);
+    if (!can.ok) return can;
+    const r = match.world.capitalGrowth.upgrade(city);
+    if (!r.ok) return r;
+    match.world.stock[side].hm -= can.cost;
+    alert(match, side, `${city.kind.toUpperCase()} ${city.id} raised to level ${city.level}`, 'good', city.x);
+    return { ok: true, city, level: city.level, cost: can.cost };
+  }
+  // (the side's tunnel network at (x, y), and its rush)
+  function tunnelAt(match, side, x, y) {
+    const T = PW.tunnels;
+    if (!T) return null;
+    for (const [dx, dy] of [[0, 0], [0, -6], [0, 6], [-6, 0], [6, 0]]) {
+      const net = T.networkAt(match.world, Math.round(x + dx), Math.round(y + dy));
+      if (net && net.side === side) return net;
+    }
+    return null;
+  }
+  function rushTunnel(match, side, x, y) {
+    if (match.over) return { ok: false, note: 'the match is over' };
+    const net = tunnelAt(match, side, x, y);
+    if (!net) return { ok: false, note: 'no tunnel of yours there' };
+    if (purse(match, side).hm < RUSH.hm) return { ok: false, note: `needs ${RUSH.hm} HM` };
+    if (net.rushUntil > PW.tunnels.state(match.world).time) return { ok: false, note: 'already rushed' };
+    const r = PW.tunnels.rush(match.world, net);
+    match.world.stock[side].hm -= RUSH.hm;
+    alert(match, side, 'Tunnel works rushed', 'good', x);
+    return { ok: true, net, ...r };
+  }
+
   // (a turret seated by the mounts sweep joins the match: its side's, holding where it stands)
   function adopt(u) {
     const match = current;
@@ -768,5 +838,6 @@
 
   PW.game = { create, step, alert, takeOver, handBack, purse, frontOf, seed, ownerOf, other, SIDES,
     UNIT_KINDS, bases, unitsOf, kindOf, fielded, armyCap, canDeploy, deploy, order, standing, ruinsAt, buildingsOf, livingCore,
-    HACK_TIME, rules, cover, standAt, TURRET, canTurret, placeTurret, turretCap, adopt, current: () => current };
+    HACK_TIME, rules, cover, standAt, TURRET, canTurret, placeTurret, turretCap, adopt, current: () => current,
+    UPGRADE, RUSH, upgradeCost, cityAt, canUpgrade, upgrade, tunnelAt, rushTunnel };
 })();

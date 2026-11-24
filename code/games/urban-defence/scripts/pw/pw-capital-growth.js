@@ -47,6 +47,7 @@
     // no faction and grow free, as a design lab should.
     const COST_HM = { lot: 24, level: 50, mil: 40 };
     const RESERVE_HM = 60;       // the war chest the growth never spends into
+    let manual = false;          // N116: in a match the levels are bought by hand (see upgrade)
     const purseOf = (city) => (city && city.faction && world.stock && world.stock[city.faction]) || null;
     function pay(city, kind) {
       const purse = purseOf(city);
@@ -1185,7 +1186,7 @@
         // N4: a tower coming of age is a level-up - it is paid for. An unfunded town stops
         // aging (so its re-seats stop churning its bundle: the mend then drains the cuts
         // instead of racing free age-ups for ever - the adoption era's bundle-break fix).
-        if (!pay(city, 'level')) continue;
+        if (!manual && !pay(city, 'level')) continue;
         lot.level += 1;
         lot.canvas = canvasFor(city, lot);
         seatChain(city, lot.side, lot.ring);
@@ -1689,22 +1690,25 @@
 
     // ---- Military ----------------------------------------------------------------------------
     const MIL_MAIN = ['compound', 'fortress', 'command', 'bastion'];
+    // A base digs in deeper: a level up, its main re-stamped the bigger variant.
+    function militaryLevelUp(city) {
+      city.level += 1;
+      eraseLot(city.main);
+      city.main.level = city.level;
+      city.main.variant = MIL_MAIN[Math.min(3, (city.level - 1) >> 1)];
+      city.main.canvas = null;
+      if (!placeLot(city, city.main, city.main.x)) { city.main.level -= 1; city.main.canvas = null; placeLot(city, city.main, city.main.x); }
+      city.capEdge = { left: city.main.placed.worksL - 2, right: city.main.placed.worksR + 2 };
+      city.edge = { left: Math.min(city.edge.left, city.capEdge.left), right: Math.max(city.edge.right, city.capEdge.right) };
+      layRunway(city);          // N57: the door moved with the bigger base - the strip follows
+      adaptNeighbours(city);    // N57: the neighbours' bases adapt to the reshaped ground
+      note(city, `dug in deeper: level ${city.level}`);
+      mountainRoad(city);
+      return true;
+    }
     function militaryAct(city) {
-      if (city.actions % 3 === 2 && city.level < MIL_TOP && !nearBlast(city.capEdge.left, city.capEdge.right)) {
-        city.level += 1;
-        eraseLot(city.main);
-        city.main.level = city.level;
-        city.main.variant = MIL_MAIN[Math.min(3, (city.level - 1) >> 1)];
-        city.main.canvas = null;
-        if (!placeLot(city, city.main, city.main.x)) { city.main.level -= 1; city.main.canvas = null; placeLot(city, city.main, city.main.x); }
-        city.capEdge = { left: city.main.placed.worksL - 2, right: city.main.placed.worksR + 2 };
-        city.edge = { left: Math.min(city.edge.left, city.capEdge.left), right: Math.max(city.edge.right, city.capEdge.right) };
-        layRunway(city);          // N57: the door moved with the bigger base - the strip follows
-        adaptNeighbours(city);    // N57: the neighbours' bases adapt to the reshaped ground
-        note(city, `dug in deeper: level ${city.level}`);
-        mountainRoad(city);
-        return true;
-      }
+      // (N116: in a match a base levels only when its side pays for it - see upgrade)
+      if (!manual && city.actions % 3 === 2 && city.level < MIL_TOP && !nearBlast(city.capEdge.left, city.capEdge.right)) return militaryLevelUp(city);
       const side = city.actions % 2 ? 'left' : 'right';
       if (city.rings[side].length >= 2) return false;
       const dir = side === 'left' ? -1 : 1;
@@ -2064,12 +2068,37 @@
     }
 
     // ---- The clock ---------------------------------------------------------------------------
+    function farmLevelUp(city) {
+      city.level += 1;
+      eraseLot(city.main);
+      city.main.level = Math.min(7, city.level + 1);
+      city.main.variant = city.level >= 4 ? 'silos' : 'homestead';
+      city.main.canvas = null;
+      if (!placeLot(city, city.main, city.main.x)) { city.main.level -= 1; city.main.canvas = null; placeLot(city, city.main, city.main.x); }
+      city.capEdge = { left: city.main.placed.worksL - 2, right: city.main.placed.worksR + 2 };
+      note(city, `the farm grows: level ${city.level}`);
+      return true;
+    }
+    // N116 (the user's): in a match no city levels by itself - its side chooses which to raise and
+    // pays for it (PW.game.upgrade); the spread and the towers coming of age follow on their own up
+    // to the level it has (the towers' ages then free: the upgrade paid for them). (`manual` is
+    // declared with the purse rules, above.)
+    const topLevel = (city) => (city.kind === 'military' ? MIL_TOP : city.kind === 'farm' ? 7 : (city.levelCap || MAX_LEVEL));
+    function upgrade(city) {
+      if (!city || city.fallen) return { ok: false, note: 'no such city' };
+      if (city.level >= topLevel(city)) return { ok: false, note: `level ${city.level} is its top` };
+      if (!city.main || !city.main.placed) return { ok: false, note: 'still building its main' };
+      const span = city.kind === 'capital' ? city.edge : city.capEdge || city.edge;
+      if (nearBlast(span.left, span.right)) return { ok: false, note: 'too near a fresh blast' };
+      const ok = city.kind === 'capital' ? levelUp(city) : city.kind === 'farm' ? farmLevelUp(city) : militaryLevelUp(city);
+      return ok ? { ok: true, level: city.level } : { ok: false, note: 'no room to grow' };
+    }
     function act(city) {
       city.actions += 1;
       if (city.kind === 'capital') {
         const lots = city.rings.left.length + city.rings.right.length;
-        if (lots >= city.level * 2 && city.level < (city.levelCap || MAX_LEVEL)
-          && !nearBlast(city.edge.left, city.edge.right)) { if (!pay(city, 'level')) return false; return levelUp(city); }   // N60 fire gate; N4 paid; N33 rank cap
+        if (!manual && lots >= city.level * 2 && city.level < (city.levelCap || MAX_LEVEL)
+          && !nearBlast(city.edge.left, city.edge.right)) { if (!pay(city, 'level')) return false; return levelUp(city); }   // N60 fire gate; N4 paid; N33 rank cap; N116 by hand in a match
         // The edge creeps out on its own slow clock; the towers level by age, not here (N48).
         const sides = city.rings.left.length <= city.rings.right.length ? ['left', 'right'] : ['right', 'left'];
         for (const s of sides) {
@@ -2085,17 +2114,7 @@
       }
       if (city.kind === 'farm') {
         if (city.actions % 5 === 4) {
-          if (city.level < 7 && city.actions % 10 === 9 && pay(city, 'level')) {   // N69 cap; N4 paid
-            city.level += 1;
-            eraseLot(city.main);
-            city.main.level = Math.min(7, city.level + 1);
-            city.main.variant = city.level >= 4 ? 'silos' : 'homestead';
-            city.main.canvas = null;
-            if (!placeLot(city, city.main, city.main.x)) { city.main.level -= 1; city.main.canvas = null; placeLot(city, city.main, city.main.x); }
-            city.capEdge = { left: city.main.placed.worksL - 2, right: city.main.placed.worksR + 2 };
-            note(city, `the farm grows: level ${city.level}`);
-            return true;
-          }
+          if (!manual && city.level < 7 && city.actions % 10 === 9 && pay(city, 'level')) return farmLevelUp(city);   // N69 cap; N4 paid; N116 by hand in a match
           const s1 = city.actions % 2 ? 'left' : 'right';
           return farmOutbuilding(city, s1) || farmOutbuilding(city, s1 === 'left' ? 'right' : 'left');
         }
@@ -2238,7 +2257,9 @@
 
     const api = { cities, barriers, drop, adoptSettlements, step, draw, describe, dbg, regrades: () => regradeCount,
       _adapt: adaptNeighbours,     // (test hook: the N57 neighbour re-seat, called by the harness)
-      _levelUp: levelUp, mountainRange };   // (N104: a level-up by hand for the suites; the massif a barrier is part of)
+      _levelUp: levelUp, mountainRange,   // (N104: a level-up by hand for the suites; the massif a barrier is part of)
+      upgrade, topLevel,   // N116: a level bought by the city's side
+      get manual() { return manual; }, set manual(v) { manual = !!v; } };
     world.capitalGrowth = api;     // N2: vision reads the engine's cities off the world
     return api;
   }

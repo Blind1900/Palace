@@ -298,7 +298,8 @@
     const list = world.roadTunnels;
     if (!list || !list.length) return;
     world.roadClock = (world.roadClock || 0) + dt;
-    for (const t of list) if (!t.done) advance(world, t, BORE_RATE * dt);
+    // (N116: a bore its side has paid to rush goes at the rushed pace; N115: the test's build speed)
+    for (const t of list) if (!t.done) advance(world, t, BORE_RATE * dt * PW.tunnels.paceOf(world, netOf(world, t)));
     if (world.roadClock - (world.roadKeptAt || 0) >= KEEP_EVERY) {
       world.roadKeptAt = world.roadClock;
       for (const t of list) if (t.done) keep(world, t, world.roadClock);
