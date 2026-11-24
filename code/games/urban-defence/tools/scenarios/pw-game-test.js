@@ -161,6 +161,17 @@ if (lm) {
   const b0 = G.bases(m, 'left')[0];
   const d = b0 ? G.deploy(m, 'left', 'trooper', b0) : { ok: false, note: 'no base' };
   check(d.ok && d.unit.facing === 1, `a unit of the left side faces right (${d.ok ? d.unit.facing : d.note})`);
+  // N4 (the user's design doc): a hurt man by his side's base is patched up; one far from any of his
+  // side's buildings - out on the centre's barrier - is not.
+  if (d.ok) {
+    const man = d.unit, mid = Math.round(world.width / 2);
+    const lone = PW.troops.create(world, { x: mid + 0.5, side: 'left', facing: 1 });
+    man.hp = 40; lone.hp = 40;
+    secs(2);
+    check(!man.dead && man.hp >= 48, `a hurt man by his side's base is patched up (40 -> ${Math.round(man.hp)} in 2 s)`);
+    check(lone.dead || lone.hp <= 40, `a hurt man far from his side's buildings is not (40 -> ${Math.round(lone.hp)})`);
+    lone.dead = true;
+  }
   if (lm.main && lm.main.placed) await view('n115-left-base-faces-right', lm.x, world.groundTop[lm.x] - 80, 3);
   // N89 (the user's): the base spreads over smaller buildings round its main - a watchtower, a
   // barracks, a bunker - and fences and T-walls across the ways in, that stop men and not hulls

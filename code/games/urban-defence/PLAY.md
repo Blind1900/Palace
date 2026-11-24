@@ -65,6 +65,7 @@ The game runs straight from its files. There's no server or install, and it does
 - **Hack**: select one trooper and Shift+right-click an enemy base or tower. It goes up to the control panel on the top floor, and hacks it if it stays there 15 seconds. (You can also drive it there yourself.)
   - A military base: some of its defences go silent for a while.
   - A tower: you see what the enemy sees for a while.
+- **Healing**: a hurt trooper heals by one of your housing towers or military bases (5 health a second). Tanks and mechs are mended more slowly (2 a second), at your military bases only.
 - **F3** shows what each part of the game costs per frame.
 
 ## Other pages

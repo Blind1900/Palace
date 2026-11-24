@@ -169,6 +169,34 @@
     hacks(match, ids);
     recover(match);
     ruins(match, ids);
+    heal(match);
+  }
+
+  // ---- Healing (N4, the user's design doc): a man passing his side's housing is patched up, and
+  // every unit on the ground by its side's standing military base - its posts' medics and fitters
+  // too. Under fire or not: the reach is the building's walls and a short way round them.
+  const HEAL_MAN = 5;          // hp a second for a trooper (of his 100)
+  const HEAL_HULL = 2;         // a second for a tank's or mech's armour (of 100), at a base only
+  const HEAL_REACH = 40;       // cells beyond a building's walls
+  const HP_FULL = 100;         // (troopers, tanks and mechs all start at 100)
+  function heal(match) {
+    const world = match.world, at = { left: [], right: [] };
+    for (const b of world.buildings || []) {
+      const side = ownerOf(b);
+      if (at[side] && (b.type === 'military' || b.type === 'population') && standing(b)) at[side].push(b);
+    }
+    for (const list of ['troops', 'tanks', 'mechs']) {
+      const man = list === 'troops';
+      for (const u of world[list] || []) {
+        if (u.dead || !at[u.side] || !(u.hp < HP_FULL)) continue;
+        const by = at[u.side].find((b) => (man || b.type === 'military')
+          && u.x >= b.body.left - HEAL_REACH && u.x <= b.body.right + HEAL_REACH
+          && u.y >= b.body.top - HEAL_REACH && u.y <= b.body.bottom + HEAL_REACH);
+        if (!by) continue;
+        u.hp = Math.min(HP_FULL, u.hp + (man ? HEAL_MAN : HEAL_HULL));
+        u.healedAt = match.clock;
+      }
+    }
   }
 
   // ---- The capitals' levy: each standing capital pays its side HM by its level, a second at a
