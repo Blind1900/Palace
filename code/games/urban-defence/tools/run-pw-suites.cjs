@@ -58,7 +58,7 @@ const SUITES = [
   // N123: black where never seen, grey and held where seen before, circles cut only by mountains; the view on the unit
   { name: 'pw-vision', params: 'mode=game&start=versus&side=left&det=1&towns=1' },
   // N129: a city's tunnel - a shaft down from under its core at level 3, then out sideways to the ore
-  { name: 'pw-core-shaft', params: 'det=1' },
+  { name: 'pw-core-shaft', limit: 480, params: 'det=1' },
   // N8: the game is the main page, opened from disk as a downloaded copy is; the old beta still loads
   { name: 'pw-main-page', page: 'index.html', file: true, alone: true, ready: "!!document.getElementById('gm-menu')" },
   // (the old beta makes its world from Math.random: seeded, the same world each run - unseeded it

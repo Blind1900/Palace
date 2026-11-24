@@ -368,6 +368,7 @@
     const taken = new Set();
     for (const o of list(world)) { taken.add(o.node); if (o.prospect) taken.add(o.prospect.node); }
     for (const o of trips(world)) if (o.prospect) taken.add(o.prospect.node);
+    for (const n of world.miningClaims || []) taken.add(n);   // (N129: a core shaft's branch is on its way)
     let best = null, bestD = SNIFF;
     for (const n of nodes) {
       if (taken.has(n) || n.found || (op.tried && op.tried.has(n)) || (n.amount || 0) < 40) continue;
@@ -417,6 +418,15 @@
   function prospectStep(world, op, p) {
     const net = PW.tunnels.state(world).networks[op.net - 1];
     if (!net) return 'stop';
+    const r = driveStep(world, net, p);
+    if (r === 'done') p.opened.foundBy = op.id;
+    return r;
+  }
+  // One step of a drive towards p.node on the network net (p: {node, x, y, dir, steps, caves, path}):
+  // a drift, a flight of stairs where the ore lies above or below, a cave on the way taken as a room;
+  // where it comes within REACH of ore it opens a mine there ('done'). Shared by the prospectors and
+  // the branches out of a core's shaft (N129).
+  function driveStep(world, net, p) {
     {
       // (the next step's reach, before anything is dug: a road tunnel in it stops the drift there)
       const dir0 = Math.sign(p.node.x - p.x) || p.dir;
@@ -455,7 +465,7 @@
     if (hit) {
       const made = open(world, net, hit.node, { contact: { x: Math.round((box.x0 + box.x1) / 2), floor: box.y1, oreX: hit.x } });
       if (made && !made.blocked) {
-        p.opened = made; made.foundBy = op.id;
+        p.opened = made;
         if (world.pipes && world.pipes.attach) world.pipes.attach(made);   // (its riser joins the side's line)
         return 'done';
       }
@@ -710,6 +720,6 @@
     ctx.fill();
   }
 
-  PW.mining = { REACH, ROOM_H, SNIFF, veinNear, outline, open, openFromWorkings, afterDig, step, draw, drawHighlight, list, prospectFor, expedition, trips, storeOf, crossesRoad, HM_KEEP, HM_LOW };
+  PW.mining = { REACH, ROOM_H, SNIFF, veinNear, outline, open, openFromWorkings, afterDig, step, draw, drawHighlight, list, prospectFor, driveStep, expedition, trips, storeOf, crossesRoad, HM_KEEP, HM_LOW };
   void ops;
 })();

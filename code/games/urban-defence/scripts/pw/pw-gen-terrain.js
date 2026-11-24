@@ -1071,33 +1071,9 @@
         placed += 1;
       }
     }
-    for (const node of nodes) oreTendrils(world, node);
+    // (the user's, 2026-11-24: no black dots round the ore - the shadow tendrils once painted on the
+    // host rock round every deposit are gone; the beast stands clean in its stone)
     return nodes;
-  }
-  // The dead god machine's shadow tendrils grip every deposit: a few black wisps curling in over
-  // the host rock towards the ore, a white glint where one catches the light. Painted on the rock
-  // round the vein, never on the crystal itself; drawn from hashes, so the random sequence that
-  // lays the world is unchanged.
-  function oreTendrils(world, node) {
-    const { mat, width: W, height: H } = world;
-    const INK = PW.abgr(10, 10, 12), GLINT = PW.abgr(152, 158, 164);
-    const h = (k) => (PW.hash2(node.x, node.y ^ (k * 0x9e37)) & 1023) / 1023;
-    const strands = 2 + (PW.hash2(node.x, node.y) & 1);
-    const R = Math.max(8, node.radius * 0.9 + 3);
-    for (let s = 0; s < strands; s += 1) {
-      const a0 = h(s * 3 + 1) * Math.PI * 2, turn = 0.3 + h(s * 3 + 2) * 0.18;
-      const len = 9 + Math.round(h(s * 3 + 3) * 9);
-      for (let t = 0; t <= len; t += 0.2) {
-        const r = R * (1 - t / len * 0.5) * (1 + 0.18 * Math.sin(t * 1.7 + s * 2.4)), a = a0 + t * turn;
-        const x = Math.round(node.x + Math.cos(a) * r), y = Math.round(node.y + Math.sin(a) * r * 0.8);
-        if (x < 2 || y < 2 || x >= W - 2 || y >= H - 2) continue;
-        for (const dx of [0, 1]) {
-          const id = mat[y * W + x + dx] & 63;
-          if (id === M.ORE || id === M.AIR || id === M.WATER || id === M.BEDROCK) continue;
-          PW.setLayer(world, 'paint', x + dx, y, Math.round(t) % 9 === 4 && !dx ? GLINT : INK);
-        }
-      }
-    }
   }
 
   function carveCaves(world, layout, top, random) {

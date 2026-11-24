@@ -2350,51 +2350,117 @@
       return false;
     };
     let stepTick = 0;
-    // N129 (the user's, 2026-11-24): a city's tunnel grows from the bottom of its core - a shaft
-    // straight down, a box at a time as the workings' clock goes on (the rock under the core's bed
-    // left to carry it), to the depth of the nearest ore it smells; from its foot a miner sets out
-    // sideways to that ore (PW.mining's trip) and opens a mine there. A mountain base digs its own
-    // three times slower. (Towns laid at the world's making have their own starter mines.)
-    const SHAFT_STEP = 12, SHAFT_EVERY = 1.6, SHAFT_UNDER = 44;
+    // N129 (the user's, 2026-11-24): a city's tunnel grows from the centre bottom of its core - a
+    // lined neck through the hatch in the core's casing, then a shaft straight down, a box at a time
+    // as the workings' clock goes on, to the depth of the ore it is bound for; then it branches out
+    // sideways, a drive to each body of ore in reach, and where a branch comes to the ore a mine opens
+    // there. A city digs from TUNNEL_LEVEL, with BRANCHES_AT3 branches and one more a level. A
+    // military base on a mountain digs its own from its first level, three times slower, and its
+    // tunnel goes on growing: another branch every BRANCH_GAP while ore is in reach. (Towns laid at
+    // the world's making have their own starter mines.)
+    const SHAFT_STEP = 12, SHAFT_EVERY = 1.6, NECK = 4, BRANCHES_AT3 = 2, BRANCH_GAP = 150, BRANCH_MAX = 6;
+    const mountainBase = (city) => city.kind === 'military' && city.setting === 'mountain';
+    const claims = () => world.miningClaims || (world.miningClaims = new Set());
+    // How many branches the tunnel may have by now.
+    function branchesDue(city, s, now) {
+      if (mountainBase(city)) return Math.min(BRANCH_MAX, 1 + Math.floor((now - s.born) / (BRANCH_GAP * s.slow)));
+      return Math.min(BRANCH_MAX, BRANCHES_AT3 + Math.max(0, city.level - TUNNEL_LEVEL));
+    }
+    // The next body of ore for a branch: the nearest one in reach not yet reached, nor sought. Depth
+    // costs the shaft little - it goes on down - so ore is judged mostly by how far out it lies.
+    const BRANCH_REACH = 1400;
+    function nextOre(s) {
+      const taken = new Set(claims());
+      for (const o of PW.mining.list(world)) { taken.add(o.node); if (o.prospect) taken.add(o.prospect.node); }
+      for (const o of PW.mining.trips(world)) if (o.prospect) taken.add(o.prospect.node);
+      let node = null, best = Infinity;
+      for (const n of (world.layout && world.layout.nodes) || []) {
+        if (n.found || taken.has(n) || s.tried.has(n) || (n.amount || 0) < 40) continue;
+        const dx = Math.abs(n.x - s.x);
+        if (dx > BRANCH_REACH || n.y < world.groundTop[n.x] + 220 || n.y > world.height - 150) continue;
+        const d = dx + 0.5 * Math.abs(n.y - (s.bottom || s.top + 300));
+        if (d < best) { best = d; node = n; }
+      }
+      if (node) { s.tried.add(node); claims().add(node); }
+      return node;
+    }
     function coreShaft(city) {
       if (!PW.tunnels || !PW.mining || !city.faction || city.adopted || city.kind === 'farm' || !city.main || !city.main.placed) return false;
       const T = PW.tunnels.state(world);
       let s = city.shaft;
       if (!s) {
-        // (the user's: a seed makes no tunnel at once - its city starts digging at TUNNEL_LEVEL)
-        if (city.level < TUNNEL_LEVEL) return false;
+        // (the user's: a seed makes no tunnel at once - its city starts digging at TUNNEL_LEVEL; a
+        // mountain base from the first)
+        if (city.level < TUNNEL_LEVEL && !mountainBase(city)) return false;
         const rec = world.buildings[city.main.owner - 1];
         if (!rec || rec.underConstruction || !rec.cores || !rec.cores.length) return false;
         const core = rec.cores.find((k) => k.vault) || rec.cores[0];
         const x = Math.round(core.vault ? (core.vault.x0 + core.vault.x1) / 2 : core.x);
-        const top = Math.round((core.vault ? core.vault.bottom : core.y) + SHAFT_UNDER), g = world.groundTop[x];
-        const node = PW.mining.prospectFor(world, {}, { x, y: g + 300 });
-        const bottom = Math.min(world.height - 140, Math.max(top + 160, g + 240, node ? node.y + 8 : g + 360));
-        const net = PW.tunnels.createNetwork(world, { side: city.faction, x, y: top, building: city.main.owner });
-        s = city.shaft = { x, top, y: top, bottom, net: net.id, at: T.time + SHAFT_EVERY, node: node || null,
-          slow: city.kind === 'military' && city.setting === 'mountain' ? 3 : 1, done: false };
+        // (the hatch: the first row under the core's own casing - its steel and plate are left whole)
+        let top = Math.round(core.vault ? core.vault.bottom : core.y + 6);
+        const casing = (id) => id !== M.AIR && id !== M.FOUNDATION;
+        while (top < world.height - 200 && PW.getOwner(world, x, top) === city.main.owner && casing(PW.get(world, x, top) & 63)) top += 1;
+        const g = world.groundTop[x], tried = new Set();
+        s = { x, top, y: top, bottom: 0, net: 0, at: T.time + SHAFT_EVERY, tried, branches: [], born: T.time, level: city.level,
+          slow: mountainBase(city) ? 3 : 1, done: false, sunk: false };
+        const first = [];
+        for (let k = 0; k < branchesDue(city, s, T.time); k += 1) { const n = nextOre(s); if (n) first.push(n); }
+        // (deep enough for the deepest ore it is bound for, its floor a little under the body's middle)
+        s.bottom = Math.min(world.height - 140, Math.max(top + 160, g + 240, ...first.map((n) => n.y + 8)));
+        s.targets = first;
+        s.net = PW.tunnels.createNetwork(world, { side: city.faction, x, y: top, building: city.main.owner }).id;
+        city.shaft = s;
       }
       if (s.done || T.time < s.at) return false;
       s.at = T.time + SHAFT_EVERY * s.slow;
       const net = T.networks[s.net - 1];
-      const y1 = Math.min(s.bottom, s.y + SHAFT_STEP);
-      // (a shaft stops short of a mountain's road tunnel: its foot is where it stands then)
-      if (PW.mining.crossesRoad && PW.mining.crossesRoad(world, s.x - 34, s.y, s.x + 34, y1 + 34)) {
-        if (s.y - s.top < 40) { s.done = true; s.why = 'a road tunnel under it'; return false; }
-        s.bottom = s.y;
-      } else {
-        if (!net || !PW.tunnels.digBox(world, net, s.x - 11, s.y, s.x + 11, y1, { kind: 'shaft', keepOre: true }).ok) { s.done = true; s.why = 'blocked'; return false; }
-        if (ST.ladder) ST.ladder(world, s.x - 6, s.y, y1 - 1);
-        s.y = y1;
+      if (!net) { s.done = true; s.why = 'no network'; return false; }
+      if (!s.sunk) {
+        // ---- straight down ----
+        const y1 = Math.min(s.bottom, s.y + SHAFT_STEP);
+        // (a shaft stops short of a mountain's road tunnel: its foot is where it stands then)
+        if (PW.mining.crossesRoad && PW.mining.crossesRoad(world, s.x - 34, s.y, s.x + 34, y1 + 34)) {
+          if (s.y - s.top < 40) { s.done = true; s.why = 'a road tunnel under it'; return false; }
+          s.bottom = s.y;
+        } else {
+          // (the neck: narrow through the made ground the core stands in, the shaft's full width below)
+          const half = s.y - s.top < 40 ? NECK : 11;
+          if (!PW.tunnels.digBox(world, net, s.x - half, s.y, s.x + half, y1, { kind: 'shaft', keepOre: true }).ok) { s.done = true; s.why = 'blocked'; return false; }
+          if (ST.ladder) ST.ladder(world, s.x - 2, s.y, y1 - 1);
+          s.y = y1;
+        }
+        if (s.y >= s.bottom) {
+          // the shaft's foot: a landing, and the branches set out from the shaft
+          PW.tunnels.digBox(world, net, s.x - 34, s.bottom - 30, s.x + 34, s.bottom + 2, { kind: 'room', keepOre: true });
+          s.sunk = true; s.sunkAt = T.time;
+        }
+        return true;
       }
-      if (s.y >= s.bottom) {
-        // the shaft's foot: a landing, and a miner sets out from it towards the ore
-        PW.tunnels.digBox(world, net, s.x - 34, s.bottom - 30, s.x + 34, s.bottom + 2, { kind: 'room', keepOre: true });
-        const dir = s.node ? Math.sign(s.node.x - s.x) || 1 : (city.x < world.width / 2 ? 1 : -1);
-        s.trip = PW.mining.expedition(world, net, s.x, s.bottom + 2, dir, { slow: s.slow, by: city.id });
-        s.done = true;
+      // ---- out sideways: each branch a step ----
+      const live = s.branches.filter((b) => !b.end);
+      for (const t of s.targets.splice(0)) live.push(branch(s, t, T.time));
+      if (s.branches.length < branchesDue(city, s, T.time) && T.time >= (s.sniffAt || 0)) {
+        const n = nextOre(s);
+        if (n) live.push(branch(s, n, T.time)); else s.sniffAt = T.time + 30;   // (no ore in reach: look again later)
+      }
+      if (!live.length) return false;
+      for (const b of live) {
+        if (b.node.found && !b.opened) { b.end = 'reached by another'; continue; }
+        const r = PW.mining.driveStep(world, net, b);
+        if (r === 'done') b.end = 'mine';
+        else if (r === 'stop') b.end = 'stopped';
+        if (b.end) claims().delete(b.node);
       }
       return true;
+    }
+    // A branch leaves the shaft at the row nearest its ore's depth, through the shaft's side wall.
+    function branch(s, node, born) {
+      const dir = Math.sign(node.x - s.x) || 1;
+      const y = Math.max(s.top + 80, Math.min(s.bottom, Math.round(node.y + 8)));
+      const x = s.x + dir * 11;
+      const b = { node, x, y, dir, steps: 0, caves: 0, path: [x, y], from: { x, y }, born, end: null, opened: null };
+      s.branches.push(b);
+      return b;
     }
     function step(dt) {
       // Idle engine, idle cost: with no city grown (the live world before any seed lands)
