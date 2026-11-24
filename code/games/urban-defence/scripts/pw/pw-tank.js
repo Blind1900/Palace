@@ -420,6 +420,18 @@
                                 // farm's storeys hold some 6000-7800 against it, a tower's 11000-16000 - the
                                 // one goes over the way it drives, the other stands, its ground floor smashed
   const RAM_SWEEPS = 24;        // trees' and furniture's cells it knocks down a tick, at most
+  // (N105, the user's: a tank goes by most trees - drawn side on, they stand nearer or further than
+  // its track - and knocks over only the one in TREE_LANE standing in its way: which, each tree's own,
+  // the same every time; grass and flowers it rolls over and they stand)
+  const TREE_LANE = 5;
+  const treeInWay = (r) => !!r && (PW.hash2(r.anchorX ?? r.x, (r.row ?? r.y) ^ 0x7a1) % TREE_LANE) === 0;
+  // (the standing plant whose stem rises in column x - by its stem, not its box: crowns overlap)
+  function trunkAt(world, x, y) {
+    if (!PW.flora || !world.flora) return null;
+    PW.flora.recordAt(world, x, y);   // (a plant's cell: the plants' index made, if it is not yet)
+    for (const r of (world.floraIndex && world.floraIndex.get(x >> 7)) || []) if (!r.felled && Math.abs((r.anchorX ?? r.x) - x) <= 3) return r;
+    return null;
+  }
   function ram(world, t) {
     const fr = world.fragments, dir = Math.sign(t.v);
     if (!fr || !fr.crush || !dir) return;
@@ -429,8 +441,31 @@
       const [wx, wy] = toWorld(t, u, v), x = Math.floor(wx), y = Math.floor(wy);
       if (x < 1 || y < 1 || x >= W - 1 || y >= H - 1) continue;
       const m = mat[y * W + x];
-      // (a tree, a lamp, a railing - not its own side's)
-      if (sweeps < RAM_SWEEPS && fr.sweep && PW.getLayer(world, 'deco', x, y) && meets(world, t, x, y, m) !== GHOST && !(PW.getFlags(world, x, y) & PW.FLAG.FIXTURE)) { fr.sweep(x, y, 8); sweeps += 1; }
+      // (a tree, a lamp, a railing - not its own side's; N105: not a tree it goes by - see treeInWay)
+      if (sweeps < RAM_SWEEPS && fr.sweep && PW.getLayer(world, 'deco', x, y) && meets(world, t, x, y, m) !== GHOST) {
+        const f = PW.getFlags(world, x, y);
+        if (f & PW.FLAG.FLORA) {
+          // (a tree in its way: its trunk snapped where the hull meets it, low down, and the tree
+          // goes over away from it - the plants' own way of coming down; one it goes by, untouched)
+          const r = trunkAt(world, x, y);
+          if (treeInWay(r) && !r.rammed && PW.flora.cut && PW.flora.settle) {
+            // (its trunk in this column at the hull's height, over its roots' flare - the hull goes on
+            // through its leaves till it meets it)
+            const row = r.row ?? (r.y + r.height);
+            for (let yy = row - 10; yy >= row - 40; yy -= 1) {
+              if (!(PW.getFlags(world, x, yy) & PW.FLAG.WOOD) || !PW.getLayer(world, 'deco', x, yy)) continue;
+              r.rammed = true;
+              const from = { x: t.x - dir * 40, y: yy - 10 };
+              PW.flora.cut(world, world.particles, x, yy);
+              PW.flora.settle(world, world.particles, r, from);
+              // (still held - snapped where a bough or its roots' flare holds it up: down all the same,
+              // the hull driving on into it)
+              if (!r.felled && PW.flora.fell) PW.flora.fell(world, world.particles, r, from);
+              break;
+            }
+          }
+        } else if (!(f & PW.FLAG.FIXTURE)) { fr.sweep(x, y, 8); sweeps += 1; }
+      }
       if (!isSupport(m) || meets(world, t, x, y, m) !== RAMS) continue;
       const o = PW.getOwner(world, x, y);
       fr.crush(x, y, o, x - dir * 60);
@@ -1435,5 +1470,6 @@
     fire, hurt, blast, target, stats, poseOf, pixel, part: () => PART, PARTS: { GUN, TURRET, HULL, RUNNING }, touches, struck,
     turretFrame: (style, f) => turnFrame(artOf(style), f), TURN_FRAMES,
     VMAX, ACCEL, GUN_UP, GUN_DOWN, MAX_SLOPE, STEP, SPRING_UP, SPRING_DOWN, TURN, RELOAD, ARMOUR,
-    roadTunnels: true };   // (N104: it drives into a road tunnel - no other - and its barricades are its side's to pass or another's to run over)
+    roadTunnels: true,   // (N104: it drives into a road tunnel - no other - and its barricades are its side's to pass or another's to run over)
+    treeInWay };         // (N105: whether a plant's record stands in a tank's way - knocked over - or by it)
 })();

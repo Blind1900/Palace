@@ -513,6 +513,83 @@ else {
   }
 }
 
+// 5d. Through a wood (N105, the user's): a tank drives through a stand of ten trees and goes by
+// most of them - they stand untouched - knocking over only those in its way, and keeps its pace.
+{
+  const W8 = site(820);
+  if (!W8 || !PW.flora) check(false, 'a stretch of the wilds for the wood');
+  else {
+    // (ten trees 50 apart, the stand set along until two of them stand in a tank's way - one in
+    // five does, each tree its own)
+    const { x0, g } = W8, kinds = ['broadleaf', 'conifer', 'birch'];
+    let trees = [];
+    for (let shift = 0; shift < 40; shift += 1) {
+      const want = Array.from({ length: 10 }, (_, k) => ({ anchorX: x0 + 230 + k * 50 + shift, row: g }));
+      if (want.filter(T.treeInWay).length >= 2) { trees = want.map((w, k) => PW.flora.plant(world, kinds[k % 3], w.anchorX, { row: g, size: 96 + (k % 3) * 12, seed: 977 + k * 31 })); break; }
+    }
+    // (a tree's own cells, by the mask it was drawn with - its crown overlaps its neighbours' boxes)
+    const cellsOf = (r) => {
+      let n = 0;
+      for (let sy = 0; sy < r.height; sy += 1) for (let sx = 0; sx < r.width; sx += 1) {
+        const k = sy * r.width + sx;
+        if (r.mask && (r.mask[k >> 3] >> (k & 7) & 1) && PW.getLayer(world, 'deco', r.x + sx, r.y + sy) && (PW.getFlags(world, r.x + sx, r.y + sy) & PW.FLAG.FLORA)) n += 1;
+      }
+      return n;
+    };
+    const n0 = trees.map(cellsOf);
+    const t = T.create(world, { style: 'modern', x: x0 + 110, y: g, facing: 1 });
+    T.drive(t, 1);
+    let slowest = Infinity;
+    // (the world stepped, not the tanks alone: a tree it strikes comes down by the plants' own step)
+    for (let k = 0; k < 18 * 60; k += 1) { pwApp.stepWorld(1); if (t.x > x0 + 280 && t.x < x0 + 700) slowest = Math.min(slowest, Math.abs(t.v)); }
+    const n1 = trees.map(cellsOf);
+    // (knocked over: its trunk snapped or the whole of it down; standing: neither, and the most of it
+    // there still - a neighbour coming down past it may take a few of its twigs)
+    const inWay = trees.map(T.treeInWay), hit = trees.map((r, k) => !!r.felled || n1[k] < n0[k] * 0.5);
+    const standing = hit.filter((h, k) => !h && n1[k] >= n0[k] * 0.75).length, knocked = hit.filter(Boolean).length;
+    // (every one in its way down; any other down only by a neighbour falling on it - a tree coming
+    // down can bring down the next - and most standing)
+    const asRuled = inWay.every((w, k) => !w || hit[k]) && standing >= trees.length - 4;
+    await view('n105-tank-through-wood', x0 + 560, g - 80, 3);
+    // (over the trunks it brought down it slows a little, pressing them flat)
+    check(trees.length === 10 && t.x > x0 + 760 && knocked >= 1 && knocked <= 4 && asRuled && slowest > T.VMAX * 0.7,
+      `through a wood of ${trees.length} trees a tank goes by most of them - ${standing} stand untouched - and knocks over those in its way (${inWay.filter(Boolean).length}; ${knocked} down in all, a neighbour or so brought down by one falling) (${asRuled ? 'as ruled' : `not as ruled: ${trees.map((r, k) => `${inWay[k] ? 'W' : '-'}${r.rammed ? 'r' : ''}${r.felled ? 'f' : ''}${Math.round(100 * n1[k] / Math.max(1, n0[k]))}`).join(' ')}`}), at its pace (${slowest === Infinity ? '-' : slowest.toFixed(0)} cells/s at the slowest of its ${T.VMAX})`);
+    world.tanks.length = 0;
+  }
+}
+
+// 5e. Where a unit comes up (N131, the user's rule: troopers, mechs and tanks only at a military
+// building's core spawner - WGM's N130 hands its point on): a base's hall cut into the rock, its core
+// spawner's point in it. PW.units.spawnPoint, asked for a tank, a mech and a man there, gives the
+// hall's floor - not the ground's top over the rock - and each made there stands in the hall; asked
+// where there is only solid rock round the point, it gives nothing, and the deploy is refused.
+{
+  if (!PW.units) await new Promise((resolve) => { const s = document.createElement('script'); s.src = 'scripts/pw/pw-units.js'; s.onload = s.onerror = resolve; document.head.appendChild(s); });
+  for (const [m, src] of [['troops', 'pw-troops'], ['mechs', 'pw-mechs']]) if (!PW[m]) await new Promise((resolve) => { const s = document.createElement('script'); s.src = `scripts/pw/${src}.js`; s.onload = s.onerror = resolve; document.head.appendChild(s); });
+  const R = site(700);
+  if (!R || !PW.units || !PW.units.spawnPoint) check(false, 'a stretch of the wilds and PW.units.spawnPoint for the spawn');
+  else {
+    const { x0, g } = R, mx = x0 + 350;
+    // (a mountain 500 wide and 240 high, a hall 200 wide and 70 high in its foot)
+    for (let x = x0 + 100; x <= x0 + 600; x += 1) { const h = Math.round(240 * (1 - Math.abs(x - mx) / 250)); fill(x, g - h, x, g - 1, M.STONE); }
+    fill(mx - 100, g - 70, mx + 100, g - 1, M.AIR);
+    let top = 0; while (top < g && !(PW.mat.phase[PW.get(world, mx, top) & 63] >= PW.PHASE.POWDER)) top += 1;
+    const spT = PW.units.spawnPoint(world, 'tank', mx, g - 30), spM = PW.units.spawnPoint(world, 'mech', mx, g - 30), spR = PW.units.spawnPoint(world, 'trooper', mx, g - 30);
+    const rock = PW.units.spawnPoint(world, 'tank', mx, g - 150);
+    const t = spT && T.create(world, { style: 'modern', x: spT.x, y: spT.y, facing: 1 });
+    if (t) run(t, 1);
+    const mm = spM && PW.mechs && PW.mechs.create(world, { x: spM.x + 0.5, y: spM.y, side: 'left', facing: 1 });
+    const tr = spR && PW.troops && PW.troops.create(world, { x: spR.x + 0.5, y: spR.y, side: 'left', facing: 1 });
+    const inRoom = (y) => y > g - 70 && y <= g;
+    await view('n131-spawn-in-the-mountain', mx, g - 90, 4);
+    check(spT && spT.y === g && t && inRoom(t.y) && !t.falling && spM && spM.y === g - 1 && mm && inRoom(mm.y) && spR && spR.y === g - 1 && tr && inRoom(tr.y) && rock === null && top < g - 200,
+      `where a unit comes up - at its core spawner, in a base's hall cut into the rock (the ground's top ${g - top} cells over the hall's floor): a tank, a mech and a man are given the hall's floor (${spT ? g - spT.y : '-'}, ${spM ? g - 1 - spM.y : '-'}, ${spR ? g - 1 - spR.y : '-'} off it) and stand in the hall (${t ? g - Math.round(t.y) : '-'} / ${mm ? g - 1 - Math.round(mm.y) : '-'} / ${tr ? g - 1 - Math.round(tr.y) : '-'}), never on the rock over it; with only solid rock round the point, nothing - the deploy refused (${rock ? `${rock.x},${rock.y}` : 'none'})`);
+    world.tanks.length = 0;
+    if (world.mechs) world.mechs.length = 0;
+    if (world.troops) world.troops.length = 0;
+  }
+}
+
 // 4. What it costs: one tank's tick, and drawing it.
 {
   const D = used.length ? used[0] : null;

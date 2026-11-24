@@ -70,8 +70,15 @@
     const m = world.mat[y * world.width + x], id = m & ID_MASK;
     if (!(phase[id] >= POWDER && !passable[id] && id !== M.PLATFORM)) return false;
     if (passing && (id === M.CONCRETE || id === M.STEEL) && world.barricades && world.barricades.length) { const b = PW.barricadeAt(world, x, y, m); if (b && b.side === passing) return false; }
+    // (N124, the user's: units pass poles - the piers and stilts under its own side's buildings, each
+    // building's PIER spans as the vehicle lanes have them: see PW.tanks.gatesOf)
+    if (passing && PW.tanks && PW.tanks.gatesOf) {
+      const a = PW.tanks.gatesOf(world).get(x);
+      if (a) for (let k = 0; k < a.length; k += 5) if (a[k + 3] === PIER && a[k + 2] === passing && y >= a[k] && y <= a[k + 1]) return false;
+    }
     return true;
   };
+  const PIER = 0;               // (a gate span's kind: a pier's cells - PW.tanks' gatesOf)
   // (... nor does he climb it: no step up onto another side's barricade - rows y0 to y1 under his
   // body at x - he must blow it apart)
   function barricadeIn(world, x, y0, y1) {

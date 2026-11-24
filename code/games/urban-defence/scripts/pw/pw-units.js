@@ -264,5 +264,62 @@
     for (const k of ['troops', 'tanks', 'mechs', 'jets']) for (const u of world[k] || []) if (!u.dead && u.order) think(world, u, dt);
   }
 
-  PW.units = { all, order, disable, disabled, sees, spot, step, eyes, body, stats, SIGHT, BORE_SEEN };
+  // ---- Where a unit comes up (N131, the user's rule: troopers, mechs and tanks come up only at a
+  // military building's core spawner - WGM's N130 gives its point; drones alone are launched, from a
+  // missile launcher, N126) ---------------------------------------------------------------------------
+  // The nearest place to (x, y) - the core spawner's way out: its hall's floor, a pad, a room cut in
+  // the rock round a base's core - where a unit of `kind` stands: ground under it that bears it - no
+  // further below (x, y) than DROP_TO, nor further over it than a step - room over it for its height,
+  // its body's width clear, and for a tank the ground under its tracks no steeper than
+  // PW.tanks.MAX_SLOPE. Looked for column by column out to REACH either side, the nearest first; null
+  // where there is none (the deploy is then refused) - never the ground's top in that column, the
+  // rock over a base cut into it. { x, y } as that kind's create takes them: a tank's y the top row
+  // of what bears it, a man's, a mech's or a drone's the row its feet are in.
+  const SPAWN = {
+    trooper: { half: 3, height: 25, step: 9 },
+    mech: { half: 12, height: 48, step: 18 },
+    tank: { half: 56, height: 36, step: 15 },
+    jet: { half: 12, height: 20, step: 9 },
+  };
+  const SPAWN_REACH = 60, DROP_TO = 40;
+  function spawnPoint(world, kind, x, y) {
+    const K = { ...(SPAWN[kind] || SPAWN.trooper) }, W = world.width, H = world.height;
+    const blocks = (xx, yy) => xx < 0 || yy < 0 || xx >= W || yy >= H || (phase[world.mat[yy * W + xx] & ID_MASK] >= POWDER && !passable[world.mat[yy * W + xx] & ID_MASK]);
+    if (kind === 'mech' && PW.mechs) { K.half = PW.mechs.HALF; K.height = PW.mechs.HEIGHT; K.step = PW.mechs.STEP_UP; }
+    if (kind === 'tank' && PW.tanks) K.step = PW.tanks.STEP;
+    // (the top of what bears a body in column cx near row y: the ground the point is in, if no more
+    // than a step deep in it, or the first under it within DROP_TO)
+    const floorAt = (cx, from) => {
+      let yy = Math.round(from);
+      if (blocks(cx, yy)) { let up = 0; while (up <= K.step && blocks(cx, yy - 1)) { yy -= 1; up += 1; } return up > K.step ? -1 : yy; }
+      for (let d = 0; d <= DROP_TO; d += 1) if (blocks(cx, yy + d + 1)) return yy + d + 1;
+      return -1;
+    };
+    const fits = (cx, f) => {
+      // (room for its height over it, its width clear)
+      for (let yy = f - K.height; yy < f; yy += 1) for (let xx = cx - Math.min(K.half, 6); xx <= cx + Math.min(K.half, 6); xx += 1) if (blocks(xx, yy)) return false;
+      if (kind !== 'tank') { for (let xx = cx - K.half; xx <= cx + K.half; xx += 1) if (floorAt(xx, f - 1) < 0) return false; return true; }
+      // (a tank: the ground under its tracks, end to end, bearing it - no steeper than it climbs, no
+      // gap it would tip into)
+      const tanMax = Math.tan((PW.tanks ? PW.tanks.MAX_SLOPE : 43) * Math.PI / 180);
+      let lo = f, hi = f;
+      for (let u = -K.half; u <= K.half; u += 4) {
+        const g = floorAt(cx + u, f - 1);
+        if (g < 0) return false;
+        lo = Math.min(lo, g); hi = Math.max(hi, g);
+        for (let yy = g - K.height; yy < g; yy += 3) if (blocks(cx + u, yy)) return false;
+      }
+      return (hi - lo) <= K.step || (hi - lo) / (2 * K.half) <= tanMax;
+    };
+    for (let d = 0; d <= SPAWN_REACH; d += 2) for (const s of d ? [-1, 1] : [1]) {
+      const cx = Math.round(x) + s * d;
+      if (cx < K.half + 2 || cx > W - K.half - 3) continue;
+      const f = floorAt(cx, y);
+      if (f < 0 || !fits(cx, f)) continue;
+      return { x: cx, y: kind === 'tank' ? f : f - 1 };
+    }
+    return null;
+  }
+
+  PW.units = { all, order, disable, disabled, sees, spot, step, eyes, body, stats, SIGHT, BORE_SEEN, spawnPoint, SPAWN };
 })();

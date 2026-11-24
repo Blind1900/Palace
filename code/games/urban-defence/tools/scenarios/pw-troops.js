@@ -289,6 +289,29 @@ const fresh = () => { world.troops = []; world.grenades = []; };
   }
 }
 
+// 6b. Poles (N124, the user's: units pass poles): a pier under a raised deck - three columns of steel
+// 30 high, its building's PIER spans (as WGM's raised decks list their stilts) - a man of the
+// building's side walks through it; a man of the other side is stopped by it.
+{
+  const S = site(500);
+  if (!S || !PW.tanks || !PW.tanks.gatesOf) check(false, 'a stretch of the wilds and the gate spans for the pier');
+  else {
+    const { x0, g } = S, px = x0 + 250;
+    fill(px, g - 30, px + 2, g - 1, M.STEEL);
+    const id = world.buildings.length + 1;
+    world.buildings.push({ id, faction: 'left', side: 'left', type: 'test-deck', gates: [0, 1, 2].map((d) => ({ x: px + d, y0: g - 30, y1: g - 1 })) });
+    fresh();
+    const a = U.create(world, { x: x0 + 200.5, y: g - 1, side: 'left', facing: 1 }), z = U.create(world, { x: x0 + 200.5, y: g - 1, side: 'right', facing: 1 });
+    U.walk(a, 1); U.walk(z, 1);
+    run(3);
+    const through = a.x > px + 20, stopped = z.x < px && z.x > px - 10;
+    world.buildings.pop();
+    fill(px, g - 30, px + 2, g - 1, M.AIR);
+    fresh();
+    check(through && stopped, `poles: a man of the building's side walks through the pier under its deck (${through ? `${(a.x - px).toFixed(0)} cells past it` : 'stopped'}); a man of the other side is stopped by it (${stopped ? `${(px - z.x).toFixed(0)} cells short` : `at ${(z.x - px).toFixed(0)}`})`);
+  }
+}
+
 // 7. What they cost: twenty troopers walking, a tick; and drawing them.
 {
   const S = site(600);
