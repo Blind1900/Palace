@@ -21,6 +21,29 @@ const asset = (file) => {
 };
 const HOPPER = asset('assets/hopper-reference.js'), BULLET = asset('assets/bullet-reference.js');
 const pixelsOf = (frame) => { const px = []; for (const [x, y, n, argb] of frame.runs) for (let k = 0; k < n; k += 1) px.push([x + k, y, argb]); return px; };
+// (N126, the user's: the mech a quarter bigger than the drawing - 60 cells tall, not 48. Each frame
+// drawn again at SCALE: a cell is the mech's where at least half of what it covers of the drawing is,
+// looked at 4 x 4 points in it - its outline as drawn, its thin parts kept - each its nearest pixel's)
+const SCALE = 1.25;
+function scaled(px) {
+  if (SCALE === 1) return px;
+  const at = new Map(px.map(([x, y, c]) => [y * 4096 + x, c]));
+  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+  for (const [x, y] of px) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
+  const out = [];
+  for (let Y = Math.floor(y0 * SCALE) - 1; Y <= Math.ceil((y1 + 1) * SCALE); Y += 1) {
+    for (let X = Math.floor(x0 * SCALE) - 1; X <= Math.ceil((x1 + 1) * SCALE); X += 1) {
+      let n = 0, c = 0;
+      for (let sy = 0; sy < 4; sy += 1) for (let sx = 0; sx < 4; sx += 1) {
+        const u = Math.floor((X + (sx + 0.5) / 4) / SCALE), v = Math.floor((Y + (sy + 0.5) / 4) / SCALE), k = v * 4096 + u;
+        if (at.has(k)) { n += 1; if (sx === 1 && sy === 1 || !c) c = at.get(k); }
+      }
+      if (n >= 8) out.push([X, Y, c]);
+    }
+  }
+  return out;
+}
+const framePixels = (frame) => scaled(pixelsOf(frame));
 
 // ---- The frames, about their body points ----------------------------------------------------------
 function bodyOf(px) {
@@ -28,7 +51,9 @@ function bodyOf(px) {
   let best = -1, bx = 0, by = 0;
   for (const [x, y] of px) {
     let n = 0;
-    for (let dy = -6; dy <= 6; dy += 1) for (let dx = -6; dx <= 6; dx += 1) if (dx * dx + dy * dy <= 36 && set.has((y + dy) * 1000 + x + dx)) n += 1;
+    // (the same reach of the drawing, drawn bigger: 6 of its own cells)
+    const r = Math.round(6 * SCALE);
+    for (let dy = -r; dy <= r; dy += 1) for (let dx = -r; dx <= r; dx += 1) if (dx * dx + dy * dy <= r * r && set.has((y + dy) * 1000 + x + dx)) n += 1;
     if (n > best) { best = n; bx = x; by = y; }
   }
   return [bx, by];
@@ -40,7 +65,7 @@ function feetOf(px) {
   const clumps = [];
   for (const x of low) { const c = clumps[clumps.length - 1]; if (c && x - c[c.length - 1] <= 4) c.push(x); else clumps.push([x]); }
   clumps.sort((a, b) => b.length - a.length);
-  return { bottom: yMax, ankles: clumps.slice(0, 2).map((c) => [Math.round(c.reduce((s, x) => s + x, 0) / c.length), yMax - 3]) };
+  return { bottom: yMax, ankles: clumps.slice(0, 2).map((c) => [Math.round(c.reduce((s, x) => s + x, 0) / c.length), yMax - Math.round(3 * SCALE)]) };
 }
 const CLIPS = { idle: 'idle', jump: 'jump', boost: 'boost', glide: 'fall' };
 // (the ground each clip's drawings stand on: the first frame's feet; a drawing whose feet are
@@ -50,8 +75,8 @@ const GROUND = { idle: [0, 1, 2, 3, 4], jump: [0, 1], boost: [0, 1, 2, 3], glide
 const frames = [], clips = {}, byKey = new Map();
 for (const [clip, src] of Object.entries(CLIPS)) {
   clips[clip] = HOPPER.clips[src].frames.map((fr) => {
-    const raw = pixelsOf(fr), [bx, by] = bodyOf(raw), feet = feetOf(raw), i = HOPPER.clips[src].frames.indexOf(fr);
-    const ground = feetOf(pixelsOf(HOPPER.clips[src].frames[0])).bottom;
+    const raw = framePixels(fr), [bx, by] = bodyOf(raw), feet = feetOf(raw), i = HOPPER.clips[src].frames.indexOf(fr);
+    const ground = feetOf(framePixels(HOPPER.clips[src].frames[0])).bottom;
     const rel = raw.map(([x, y]) => [x - bx, y - by]).sort((a, b) => a[1] - b[1] || a[0] - b[0]);
     // (the same drawing in two clips - the crouch the idle, the jump and the boost start from - is one frame)
     const key = rel.map((p) => p.join(',')).join(';');
@@ -62,7 +87,7 @@ for (const [clip, src] of Object.entries(CLIPS)) {
       lift: GROUND[clip].includes(i) ? Math.max(ground - by, feet.bottom - by) : 0,
       feet: feet.ankles.map(([x, y]) => [x - bx, y - by]),
       // (the pod under its wing - the cannon pointing forward, the jet back: under the body, behind its middle)
-      pod: [5, 4] });
+      pod: [Math.round(5 * SCALE), Math.round(4 * SCALE)] });
     byKey.set(key, id);
     return id;
   });
@@ -151,6 +176,8 @@ const bullet = BULLET.clips.fly.frames.map((fr, i) => {
 const head = (() => { const f0 = bullet[0]; const x = Math.min(...f0.map(([x]) => x)); const ys = f0.filter(([xx]) => xx <= x + 1).map(([, y]) => y); return [x, Math.round(ys.reduce((s, y) => s + y, 0) / ys.length)]; })();
 
 // ---- Written out ----------------------------------------------------------------------------------------------
+// (each cell kept as a byte about its body point, +64: the drawing must lie within -64..191 of it)
+for (const f of frames) for (const [x, y] of f.px) if (x < -64 || y < -64 || x > 191 || y > 191) throw new Error(`${f.label}: cell ${x},${y} past what a byte holds`);
 const ART = {
   frames: frames.map((f) => ({ label: f.label, lift: f.lift, hang: f.hang, feet: f.feet, pod: f.pod, px: b64(Uint8Array.from(f.px.flatMap(([x, y]) => [x + 64, y + 64])).buffer) })),
   clips, track: { idle: track(clips.idle), boost: [frames[clips.boost[1]].at[0] - frames[clips.boost[0]].at[0], ...track(clips.boost.slice(1))] },
@@ -166,7 +193,9 @@ const text = `  // ---- generated by tools/mech-art.cjs from the user's drawings
   }).join('\n')}\n  };\n  // ---- end generated ----\n`;
 const file = path.join(root, 'scripts/pw/pw-mechs.js');
 const src = fs.readFileSync(file, 'utf8');
-const re = /  \/\/ ---- generated by tools\/mech-art\.cjs[\s\S]*?\/\/ ---- end generated ----\n/;
+// (the file's own line endings kept: a Windows checkout's are CRLF)
+const re = /  \/\/ ---- generated by tools\/mech-art\.cjs[\s\S]*?\/\/ ---- end generated ----\r?\n/;
 if (!re.test(src)) throw new Error('pw-mechs.js has no generated block to fill');
-fs.writeFileSync(file, src.replace(re, text));
+const eol = src.includes('\r\n') ? '\r\n' : '\n';
+fs.writeFileSync(file, src.replace(re, () => text.replace(/\n/g, eol)));
 console.log(`frames ${frames.length} (${frames.map((f) => `${f.label} ${f.px.length}`).join(', ')}); tracks ${JSON.stringify(ART.track)}; lifts ${frames.map((f) => f.lift).join(',')}; ${(text.length / 1024).toFixed(0)} KB`);

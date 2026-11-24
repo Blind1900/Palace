@@ -246,18 +246,21 @@
     // (a missile at armour)
     if ((f.kind === 'tank' || f.kind === 'mech') && m.missiles > 0 && (world.tick % 240) === 0) X.launch(world, m);
   }
+  // (N126, the user's: a drone has no guns. Sent to attack - a unit, a building's spot, a place - it
+  // dives into it, its warhead going off there; told to move, it circles over the place; to hold,
+  // over where it is; left to itself, it roams)
   function jet(world, j, o) {
-    const J = PW.jets, f = j.foe;
-    if (j.down || j.onGround) return;
-    const gx = o.type === 'attack' && o.target && !o.target.dead ? o.target.x : o.x;
-    if ((o.type === 'move' || o.type === 'attack') && Number.isFinite(gx) && Math.abs(gx - j.x) > 600) j.want = Math.sign(gx - j.x);
-    if (!f || f.dead || !j.foeInSight) { if (!f || f.dead) j.foe = null; return; }
-    // (a missile at what it sees; its cannon when its nose is on it)
-    const p = body(f), h = J.heading(j), want = Math.atan2(-(p.y - j.y), p.x - j.x);
-    let dd = Math.abs(want - h);
-    if (dd > Math.PI) dd = 2 * Math.PI - dd;
-    if (dd < 0.08 && j.burst === 0) J.fire(world, j);
-    if (j.missiles > 0 && (world.tick % 180) === 0) { j.aim = { x: p.x, y: p.y }; J.launch(world, j); }
+    const J = PW.jets;
+    if (j.down || j.pod || j.boost > 0) return;
+    if (o.type === 'attack') {
+      const p = o.target && !o.target.dead ? body(o.target)
+        : Number.isFinite(o.x) ? { x: o.x, y: Number.isFinite(o.y) ? o.y : world.groundTop[Math.max(0, Math.min(world.width - 1, Math.round(o.x)))] } : null;
+      if (p && (!j.strike || Math.hypot(j.strike.x - p.x, j.strike.y - p.y) > 4)) J.strike(world, j, p);
+      return;
+    }
+    if (o.type === 'move' && Number.isFinite(o.x)) { if (!j.loiter || j.loiter.x !== o.x) J.loiter(world, j, { x: o.x }); return; }
+    if (o.type === 'hold') { if (!j.loiter) J.loiter(world, j, { x: j.x }); return; }
+    if (j.loiter) J.loiter(world, j, null);
   }
   function step(world, dt) {
     current = world;
@@ -277,7 +280,7 @@
   // of what bears it, a man's, a mech's or a drone's the row its feet are in.
   const SPAWN = {
     trooper: { half: 3, height: 25, step: 9 },
-    mech: { half: 12, height: 48, step: 18 },
+    mech: { half: 15, height: 60, step: 22 },
     tank: { half: 56, height: 36, step: 15 },
     jet: { half: 12, height: 20, step: 9 },
   };

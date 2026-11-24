@@ -158,6 +158,65 @@
     }
     if (u.ammo <= 0 && !(u.reloadT > 0)) u.reloadT = TYPES[u.type].reload;
   }
+  // ---- A drone off it (N126, the user's: drones go up off a side's missile launcher at 45-85 degrees,
+  // on a booster - see PW.jets) ---------------------------------------------------------------------------
+  // The drone made in its pod, the pod turned the way it is to go and raised to the angle - steeper
+  // over high ground near ahead - then fired off it; the pod held up a moment, then back at rest.
+  const DRONE_LO = 45 * Math.PI / 180, DRONE_HI = 85 * Math.PI / 180;
+  const DRONE_CLEAR = 80;       // cells it climbs over the ground ahead with to spare
+  const DRONE_HOLD = 0.8;       // s the pod stays up after
+  // (the angle its way: as steep as clearing the highest of the ground ahead within reach needs)
+  function droneAngle(world, u, f) {
+    const t = tubeOf(u, f), W = world.width;
+    let a = 55 * Math.PI / 180;
+    for (let d = 30; d <= 700; d += 10) {
+      const x = Math.round(t.x + f * d);
+      if (x < 0 || x >= W) break;
+      a = Math.max(a, Math.atan2(t.y - (world.groundTop[x] - DRONE_CLEAR), d));
+    }
+    return Math.max(DRONE_LO, Math.min(DRONE_HI, a));
+  }
+  // (open along it: nothing solid over the pod's mouth that way for CLEAR_RUN cells)
+  function wayOpen(world, u, f, a) {
+    const t = tubeOf(u, f), dx = Math.cos(a) * f, dy = -Math.sin(a);
+    for (let d = 4; d < CLEAR_RUN; d += 2) {
+      const x = Math.round(t.x + dx * d), y = Math.round(t.y + dy * d);
+      if (y < 0) return true;
+      if (blocks(world, x, y)) return false;
+    }
+    return true;
+  }
+  function canLaunch(world, u) {
+    return !!(u && !u.dead && u.type === 'launcher' && !u.launching && !(u.salvo > 0) && PW.jets && PW.jets.create
+      && !((u.disabledUntil || 0) > (world.tick || 0)));
+  }
+  // Launch a drone off launcher u - its side's, in its paint unless told (opts.style, opts.side;
+  // opts.facing: the way it goes, else the way the launcher faces - and if that way is shut over it,
+  // the other). The drone - waiting in the pod until it is fired - or null.
+  function launchDrone(world, u, opts = {}) {
+    if (!canLaunch(world, u)) return null;
+    let f = opts.facing === -1 || opts.facing === 1 ? opts.facing : u.facing, a = droneAngle(world, u, f);
+    if (!wayOpen(world, u, f, a)) {
+      const b = droneAngle(world, u, -f);
+      if (!wayOpen(world, u, -f, b)) return null;
+      f = -f; a = b;
+    }
+    const j = PW.jets.create(world, { pod: u, style: opts.style || u.style, side: opts.side || u.side, facing: f, x: u.x, y: u.y - 20, pitch: a, radians: true });
+    u.facing = f; u.launching = j; u.launchA = a; u.launchHold = 0;
+    stats.drones = (stats.drones || 0) + 1;
+    return j;
+  }
+  function stepLaunch(world, u, dt) {
+    const j = u.launching;
+    if (!j || j.dead) { u.launching = null; return; }
+    if (j.pod) {
+      // (round to its way and raised to the angle first)
+      if (u.turnT > 0 || u.headF !== u.facing || Math.abs(u.el - u.launchA) > 0.02) return;
+      PW.jets.leavePod(world, j, tubeOf(u), u.launchA, u.headF);
+      return;
+    }
+    if ((u.launchHold += dt) >= DRONE_HOLD) u.launching = null;
+  }
   // ---- What a round costs (N114, the user's: firing a rocket or an interceptor costs its side HM,
   // and with none an interceptor does not go) ----------------------------------------------------------
   // (the side's stock - world.stock - in a match on this world; out of one - the physics sandbox, the
@@ -237,7 +296,7 @@
       threats.push({ s, soon });
     }
     if (T.jets) for (const j of world.jets || []) {
-      if (j.dead || j.down || !j.side || j.side === u.side || Math.hypot(j.x - u.x, j.y - u.y) > T.range) continue;
+      if (j.dead || j.down || j.pod || !j.side || j.side === u.side || Math.hypot(j.x - u.x, j.y - u.y) > T.range) continue;
       if ((u.engaged.get(j) || 0) < T.perThreat) threats.push({ s: j, soon: Math.hypot(j.x - u.x, j.y - u.y) / 1000 });
     }
     // (what will strike soonest first, one at a time, its interceptors a moment apart)
@@ -344,6 +403,7 @@
       }
       if (u.type === 'turret') { turretStep(world, u, dt); continue; }
       artStep(world, u, dt);
+      if (u.launching) stepLaunch(world, u, dt);
       if (u.salvo > 0) stepSalvo(world, u, dt);
       if (u.type !== 'launcher') watch(world, u, dt);
     }
@@ -376,8 +436,8 @@
     // (round on its turntable to the side asked - half way round, it faces it)
     if (u.headF !== u.facing && !(u.turnT > 0)) u.turnT = ART_TURN;
     if (u.turnT > 0) { u.turnT = Math.max(0, u.turnT - dt); if (u.turnT <= ART_TURN / 2) u.headF = u.facing; }
-    // (its box raised to the laid angle for a salvo, else at rest)
-    const want = u.type === 'launcher' && u.salvo > 0 && Number.isFinite(u.laid) ? u.laid : B.stow;
+    // (its box raised to the laid angle for a salvo, or to a drone's - N126 - else at rest)
+    const want = u.launching ? u.launchA : u.type === 'launcher' && u.salvo > 0 && Number.isFinite(u.laid) ? u.laid : B.stow;
     if (!u.turnT) { const d = want - u.el, s = B.slew * dt; u.el += Math.abs(d) <= s ? d : Math.sign(d) * s; }
     artPose(u);
   }
@@ -787,6 +847,8 @@
     // (N114: the artillery's build - its base's width WGM lays: BUILD[type].ring[0] at least - what a
     // round costs its side, and whether it can pay for one)
     BUILD, PRICE, canPay, affordable, tubeOf,
+    // (N126: a drone off a launcher - see PW.jets)
+    canLaunch, launchDrone, droneAngle,
     // (N126: the cursor's world point each frame - null off the view - for the aiming line; the surface under a point)
     pointer, surfaceUnder };
 })();

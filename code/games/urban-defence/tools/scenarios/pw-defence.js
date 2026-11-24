@@ -95,7 +95,7 @@ const along = (x0, step, n) => Array.from({ length: n }, (_, k) => x0 + step * k
     let downAt = -1;
     steps(10, (k) => { if (j.down && downAt < 0) downAt = k; });
     check(downAt >= 0 && (j.hurtBy === 'blast' || j.hurtBy === 'patriot'),
-      `a Patriot battery brings down a jet of the other side flying at it (${downAt >= 0 ? `down at ${(downAt / 60).toFixed(1)} s, by ${j.hurtBy}` : `still up, ${j.hp.toFixed(0)} of its armour left`}; ${P.ammo} missiles left)`);
+      `a Patriot battery brings down a drone of the other side flying at it (${downAt >= 0 ? `down at ${(downAt / 60).toFixed(1)} s, by ${j.hurtBy}` : `still up, ${j.hp.toFixed(0)} of its armour left`}; ${P.ammo} missiles left)`);
   }
 }
 
