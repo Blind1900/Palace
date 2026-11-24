@@ -33,7 +33,7 @@ function site(len) {
     used.push([x, x + len]);
     fill(x, g - 200, x + len, g - 1, M.AIR);
     // (firm: a block of stone 40 deep under the whole of it - no lake under a crust, no cave)
-    for (let xx = x; xx <= x + len; xx += 1) for (let y = g; y <= world.groundTop[xx] + 3 || y <= g + 40; y += 1) PW.set(world, xx, y, M.STONE, { quiet: true });
+    for (let xx = x; xx <= x + len; xx += 1) for (let y = g; y <= tops[xx - x] + 3 || y <= g + 40; y += 1) PW.set(world, xx, y, M.STONE, { quiet: true });
     return { x0: x, g };
   }
   return null;
@@ -321,6 +321,70 @@ let duel = null;
     check(ownHoles === 0 && own.covered >= 20 && own.struck >= 18 && ownAsked >= 20 && otherHoles > 0 && !other.covered && !asked.some((o) => o !== 4321),
       `a side's rounds pass its own wall untouched (${own.covered} cells passed, ${ownHoles} knocked out; ${own.struck} stopped on the steel past it); the other side's chip it (${otherHoles} cells knocked out); the rule asked only of the building's cells (${asked.length} asks)`);
     fill(x0 + 200, g - 60, x0 + 302, g - 21, M.AIR);
+  }
+}
+
+// 11. Through trees and ornaments (N117, the user's: some rounds are stopped by trees and an enemy's
+// deco, not all passing): rifle rounds fired level through a tree's trunk nearly all stop in it;
+// through its crown, some do - not all, not none; through the ornaments of a building of the other
+// side most stop, of its own side's none; a cannon round bursts on the trunk; a tank's dart and an
+// HE shell fly on through the tree as before.
+{
+  const C = site(700);
+  if (!C || !PW.flora) check(false, 'a stretch of the wilds for the trees');
+  else {
+    const { x0, g } = C;
+    world.tanks = []; world.shots = [];
+    // (the plants that stood here before the course was cleared leave their cells' flags: cleared
+    // with them, or the new tree's leaves would lie on old wood)
+    for (let y = g - 200; y < g; y += 1) for (let x = x0; x <= x0 + 700; x += 1) PW.setFlag(world, x, y, PW.FLAG.FLORA | PW.FLAG.WOOD | PW.FLAG.CHARRED, false);
+    const r = PW.flora.plant(world, 'broadleaf', x0 + 300, { row: g, size: 110, seed: 4117 });
+    fill(x0 + 660, g - 200, x0 + 670, g - 1, M.STEEL);
+    const along = (y) => { let wood = 0, leaf = 0; for (let x = r.x; x < r.x + r.width; x += 1) { const f = PW.getFlags(world, x, y); if (!PW.getLayer(world, 'deco', x, y) || !(f & PW.FLAG.FLORA)) continue; if (f & PW.FLAG.WOOD) wood += 1; else leaf += 1; } return { wood, leaf }; };
+    let trunkY = -1, crownY = -1, best = 0;
+    for (let y = g - 4; y > g - 40; y -= 1) { const a = along(y); if (a.wood > best) { best = a.wood; trunkY = y; } }
+    // (the crown's row with the most leaves on the line and little wood)
+    let mostLeaves = 0;
+    for (let y = r.y + 2; y < r.y + r.height * 0.6; y += 1) { const a = along(y); if (a.wood <= 2 && a.leaf > mostLeaves) { mostLeaves = a.leaf; crownY = y; } }
+    const crownLine = crownY > 0 ? along(crownY) : null;
+    const past = r.x + r.width + 2;
+    const stopsAt = {};
+    const volley = (kind, y, side = 'left', n = 100) => {
+      const list = [];
+      for (let k = 0; k < n; k += 1) list.push(S.fire(world, { kind, side, x: x0 + 60, y: y + 0.5, dx: 1, dy: 0 }));
+      fly(2);
+      world.shots = [];
+      const st = list.filter((s) => s.x < past);
+      if (st.length) { const xs = st.map((s) => Math.round(s.x - r.x)).sort((a, b) => a - b); stopsAt[`${kind}@${y}`] = `${xs[0]}..${xs[xs.length - 1]} from the tree's left (${r.width} wide)`; }
+      return st.length / n;
+    };
+    const trunk = trunkY > 0 ? volley('bullet', trunkY) : -1, crown = crownY > 0 ? volley('bullet', crownY) : -1;
+    const b0 = S.stats.burst || 0;
+    // (a cannon round: the first bursts on the trunk - and blows a hole in it the next may go through)
+    const cannonStopped = trunkY > 0 ? volley('cannon', trunkY, 'left', 1) : -1, cannonBursts = (S.stats.burst || 0) - b0;
+    const apThrough = trunkY > 0 ? 1 - volley('ap', trunkY, 'left', 6) : -1, heThrough = crownY > 0 ? 1 - volley('he', crownY, 'left', 6) : -1;
+    // (ornaments over open air - a band 12 cells deep - of a building of the right's side, stood in
+    // for by a record of its own)
+    const id = world.buildings.length + 1;
+    world.buildings.push({ id, faction: 'right', side: 'right', type: 'test-ornaments' });
+    for (let y = g - 60; y <= g - 41; y += 1) for (let x = x0 + 480; x < x0 + 492; x += 1) { PW.setFlag(world, x, y, PW.FLAG.FLORA | PW.FLAG.WOOD, false); PW.setLayer(world, 'deco', x, y, PW.abgr(150, 140, 120)); PW.setOwner(world, x, y, id); }
+    let ownStop = '';
+    const deco = (side) => {
+      const list = [];
+      for (let k = 0; k < 100; k += 1) list.push(S.fire(world, { kind: 'bullet', side, x: x0 + 400, y: g - 59.5 + (k % 20), dx: 1, dy: 0 }));
+      fly(2); world.shots = [];
+      const stopped = list.filter((s) => s.x < x0 + 494);
+      if (side === 'right' && stopped.length) { const s = stopped[0], cx = Math.floor(s.x + 1), cy = Math.floor(s.y); ownStop = ` - stopped at ${Math.round(s.x - x0)},${Math.round(g - s.y)} up, by cell ${idAt(cx, cy)} owner ${PW.getOwner(world, cx, cy)} deco ${PW.getLayer(world, 'deco', cx, cy) ? 1 : 0}`; }
+      return stopped.length / 100;
+    };
+    const enemyDeco = deco('left'), ownDeco = deco('right');
+    world.buildings.pop();
+    for (let y = g - 60; y <= g - 41; y += 1) for (let x = x0 + 480; x < x0 + 492; x += 1) { PW.setLayer(world, 'deco', x, y, 0); PW.setOwner(world, x, y, 0); }
+    await view('n117-tree-struck', x0 + 300, g - r.height / 2, 4);
+    const pct = (v) => `${Math.round(v * 100)}%`;
+    check(trunk >= 0.9 && crown >= 0.05 && crown <= 0.75 && enemyDeco >= 0.6 && ownDeco === 0 && cannonStopped === 1 && cannonBursts >= 1 && apThrough === 1 && heThrough === 1,
+      `through a tree rifle rounds are stopped by its trunk (${pct(trunk)} of 100, ${best} cells of wood on the line) and some by its crown (${pct(crown)}, ${crownLine ? `${crownLine.leaf} leaves and ${crownLine.wood} of wood on the line` : 'no crown row'}); by an enemy building's ornaments most (${pct(enemyDeco)}), by its own side's none (${pct(ownDeco)}${ownStop}); a cannon round bursts on the trunk (${cannonStopped === 1 ? "it did" : "it went through"}), a tank's dart and an HE shell fly on through (${pct(apThrough)}, ${pct(heThrough)})${crown > 0.75 || trunk < 0.9 ? ` [stops: ${JSON.stringify(stopsAt)}]` : ''}`);
+    fill(x0 + 660, g - 200, x0 + 670, g - 1, M.AIR);
   }
 }
 

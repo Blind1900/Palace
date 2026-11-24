@@ -724,6 +724,7 @@
     // ways: on the way it rises or sinks, straight or slipping either side; sideways into empty
     // air; a thick cell pouring down; carried up or down by a blast's wind?)
     function stuck(i, id, density) {
+      if (ventsOn && (ventOut(i) >= 0 || draft(i % W, (i / W) | 0))) return false;
       const up = RISE[id] > 0, v = up ? -W : W;
       if (passesAt(i + v, id, up) || passesAt(i + v - 1, id, up) || passesAt(i + v + 1, id, up)) return false;
       if (emptyAt(i - 1, id) || emptyAt(i + 1, id)) return false;
@@ -760,6 +761,37 @@
       PW.wake(world, nx, ny);
       stats.moves += 1;
     }
+    // N98, the user's: a building being repaired vents the dust and gas of the work out through its
+    // top, as a ventilation system does. Its vents (WGM's: roof cells flagged FLAG.VENT, world.vents
+    // the roof cell -> its building) are outlets: a gas rising under one goes up through the roof - its
+    // duct, VENT_THROUGH rows at most - into the open over it; and while the building is being worked
+    // on (PW.isGrowing) its fans draw the gas inside it - dust too, which would settle - up and over to
+    // the nearest vent (DRAFT: the share of its steps it is drawn).
+    const VENT_THROUGH = 10, DRAFT = 0.7;
+    let ventsOn = false;
+    // (the open cell over the vent just over i that a gas leaving by it comes out into, or -1)
+    function ventOut(i) {
+      const VENT = PW.FLAG.VENT;
+      if (!VENT || i < 2 * W) return -1;
+      const x = i % W, y = (i / W) | 0;
+      if (!(PW.getFlags(world, x, y - 1) & VENT)) return -1;
+      for (let k = 2; k <= VENT_THROUGH && y - k > 0; k += 1) {
+        const j = i - k * W;
+        if (isEmpty(mat[j])) return j;
+        if (!(PW.getFlags(world, x, y - k) & VENT)) return -1;
+      }
+      return -1;
+    }
+    // (inside a building being repaired that has vents: the way to its nearest vent - [side, up] - or
+    // null)
+    function draft(x, y) {
+      const o = PW.getOwner(world, x, y), b = o > 0 && o < 50000 && world.buildings ? world.buildings[o - 1] : null;
+      const list = b && b.vents && b.vents.list;
+      if (!list || !list.length || !PW.isGrowing || !PW.isGrowing(world, b)) return null;
+      let best = list[0];
+      for (const v of list) if (Math.abs(v.x - x) < Math.abs(best.x - x)) best = v;
+      return [Math.sign(best.x - x), best.y < y ? 1 : 0];
+    }
     // (the eddies' and the parcels' pace are the same over a patch of cells for a while: kept for
     // the run of cells along a row that share them)
     let eddyKey = -1, eddyVal = 0, paceKey = -1, paceVal = 0;
@@ -781,6 +813,16 @@
         density -= 1;
         mat[i] = id | density << 6;
         PW.markDirty(world, x, y, PW.DIRTY_BASE, true);
+      }
+      // (N98: out through a vent over it; drawn to one, inside a building under repair)
+      if (ventsOn && x > 0 && y > 1 && x < W - 1 && y < H - 1) {
+        const out = ventOut(i);
+        if (out >= 0) { moveGas(i, x, y, out, x, (out / W) | 0); stats.vented = (stats.vented || 0) + 1; return true; }
+        const d = draft(x, y);
+        if (d && (PW.hash3(x, y, world.tick + 11) & 1023) / 1023 < DRAFT) {
+          if (d[1] && passesAt(i - W, id, true)) { moveGas(i, x, y, i - W, x, y - 1); return true; }
+          if (d[0] && emptyAt(i + d[0], id)) { moveGas(i, x, y, i + d[0], x + d[0], y); return true; }
+        }
       }
       // (nowhere it can go, by any of the ways below - the inside of a room full of smoke, a layer
       // of dust on a floor: it only thins)
@@ -920,6 +962,7 @@
       const t = world.tick / 60;
       world.wind = 14 * windNoise(t / 45) + 6 * gustNoise(t / 4);
       airBusy = !!(world.air && world.air.busy());
+      ventsOn = !!(PW.FLAG.VENT && world.vents && world.vents.size);
       eddyKey = -1; paceKey = -1;
       const list = world.activeList;
       // Bottom chunk rows first so falling cells are not processed twice.

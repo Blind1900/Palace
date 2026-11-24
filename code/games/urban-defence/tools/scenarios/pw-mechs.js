@@ -29,7 +29,7 @@ function site(len, sky = 700) {
     if (Math.max(...tops) - g > 80 || g - sky < 20) continue;
     used.push([x, x + len]);
     fill(x, Math.max(1, g - sky), x + len, g - 1, M.AIR);
-    for (let xx = x; xx <= x + len; xx += 1) for (let y = g; y <= world.groundTop[xx] + 3 || y <= g + 30; y += 1) PW.set(world, xx, y, M.STONE, { quiet: true });
+    for (let xx = x; xx <= x + len; xx += 1) for (let y = g; y <= tops[xx - x] + 3 || y <= g + 30; y += 1) PW.set(world, xx, y, M.STONE, { quiet: true });
     return { x0: x, g };
   }
   return null;

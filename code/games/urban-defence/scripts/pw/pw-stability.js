@@ -28,6 +28,9 @@
   const RAIN_DEPTH = 4;      // ground breaking over a void deeper than this falls as a particle
   const CELLS_PER_TICK = 16000;   // cells of a look worked through per tick
   const BREAKS_PER_TICK = 1200;   // cells broken loose per tick
+  const SAG_LOOKS_PER_TICK = 3000;   // cells about to break, and open cells under them, looked at for a
+                                     // hollow to sag into per tick (a great mountain's flank: ten
+                                     // thousand of them, over a few ticks)
   const GROW = 200;          // rows a look reaches higher when the slide goes on above its box
   const GROW_SIDE = 160;     // columns it reaches further out when the slide goes on past its sides
   // A cut face stands only so tall: a free face taller than FACE x the ground's cohesion (soil about
@@ -251,13 +254,20 @@
       // (what broke loose comes away a share at a time, from the bottom up)
       stats.stage = `break ${out.length}`;
       if (region.scan.done === undefined) {
-        region.scan.done = 0; stats.looked += bw * bh;
-        // (what would break over a hollow under a thick cover is left to it to sag - see ROOF_THIN)
+        // (what would break over a hollow under a thick cover is left to it to sag - see ROOF_THIN:
+        // looked at SAG_LOOKS_PER_TICK cells a tick)
         if (out.length) {
           const t0 = performance.now();
-          const kept = sagOver(out); out.length = 0; for (const i of kept) out.push(i);
+          const s = region.scan.sagging;
+          stats.stage = s ? `sag over ${out.length}` : `sag start ${out.length}`;
+          if (!s) region.scan.sagging = sagOverStart(out);
+          else sagOverStep(s, SAG_LOOKS_PER_TICK);
           stats.sagOverMax = Math.max(stats.sagOverMax || 0, performance.now() - t0);
+          if (!s || s.k < s.kept.length || s.found) return -1;
+          const kept = sagOverFinish(s); out.length = 0; for (const i of kept) out.push(i);
+          region.scan.sagging = null;
         }
+        region.scan.done = 0; stats.looked += bw * bh;
       }
       const until = Math.min(out.length, region.scan.done + BREAKS_PER_TICK);
       // (still ground that can break: something else - a rising core, a landing piece - may have
@@ -400,9 +410,12 @@
     // that hollow's sag (started here), as is whatever lies in a sag already under way. Returns the
     // cells that break as they would.
     const queue = new Int32Array(HOLLOW_MAX + 8);
-    function sagOver(out) {
-      let kept = out.filter((i) => !inSag(i % W, (i / W) | 0));
-      if (!kept.length) return kept;
+    // (in steps: started over the whole list - what is not in a sag already, and one marker for
+    // every open space looked at - then its cells looked at a share a tick, by the open cells their
+    // hollows took looking through, then what is left)
+    function sagOverStart(out) {
+      const kept = out.filter((i) => !inSag(i % W, (i / W) | 0));
+      if (!kept.length) return { kept, k: 0, box: null, started: false };
       // (one marker for every open space looked at here - the cells over a crater open to the sky
       // are many, and each is looked at once - over the cells about to break and round them as far
       // as a hollow may reach)
@@ -411,25 +424,38 @@
       const box = { x0: Math.max(1, bx0 - HOLLOW_REACH), y0: Math.max(1, by0 - 2), x1: Math.min(W - 2, bx1 + HOLLOW_REACH), y1: Math.min(H - 2, by1 + HOLLOW_REACH) };
       box.w = box.x1 - box.x0 + 1;
       box.mark = new Uint8Array(box.w * (box.y1 - box.y0 + 1));
-      let started = false;
-      for (const i of kept) {
-        const x = i % W, y = (i / W) | 0, j = i + W;
-        if (y + 2 >= H || box.mark[(y + 1 - box.y0) * box.w + x - box.x0] || !open[mat[j] & ID_MASK] || y + 1 <= world.groundTop[x] || tunnelAt(x, y + 1) || (PW.getFlags(world, x, y + 1) & BORE)) continue;
-        const hollow = findHollow(x, y + 1, box);
-        if (!hollow.open && startSag(hollow)) started = true;
-      }
-      if (started) kept = kept.filter((i) => !inSag(i % W, (i / W) | 0));
-      return kept;
+      return { kept, k: 0, box, started: false };
     }
+    // (a great hollow found is set sagging the tick after: the looking and the setting each a tick's work)
+    function sagOverStep(s, budget) {
+      const { kept, box } = s;
+      if (s.found) { budget -= s.found.size; if (startSag(s.found)) s.started = true; s.found = null; }
+      for (; s.k < kept.length && budget > 0; s.k += 1, budget -= 1) {
+        const i = kept[s.k], x = i % W, y = (i / W) | 0, j = i + W;
+        if (y + 2 >= H || box.mark[(y + 1 - box.y0) * box.w + x - box.x0] || !open[mat[j] & ID_MASK] || y + 1 <= world.groundTop[x] || tunnelAt(x, y + 1) || (PW.getFlags(world, x, y + 1) & BORE)) continue;
+        const t0 = performance.now();
+        const hollow = findHollow(x, y + 1, box);
+        const ms = performance.now() - t0;
+        if (ms > (stats.hollowMs || 0)) { stats.hollowMs = ms; stats.hollowN = hollow.size; stats.hollowOpen = hollow.open; }
+        budget -= hollow.size;
+        if (hollow.open) continue;
+        if (hollow.size > SAG_LOOKS_PER_TICK) { s.found = hollow; s.k += 1; return; }
+        if (startSag(hollow)) s.started = true;
+      }
+    }
+    const sagOverFinish = (s) => (s.started ? s.kept.filter((i) => !inSag(i % W, (i / W) | 0)) : s.kept);
     // The hollow open cell (x, y) is part of: the open cells joined to it under the ground line -
     // not a tunnel (its timbering holds its roof up), a building's rooms, nor the bore of a supply
     // line (open inside its steel casing). `open` when it opens
     // to the sky (an overhang, a crater: that is the ordinary breaking's) or reaches too far.
+    // (each column's top kept by column over the box while it is looked through - a Map of them made
+    // for a hollow shut in, and the columns it took cleared again for the next)
+    const NO_TOP = 0x7fffffff;
     function findHollow(sx, sy, box) {
       const { mark, w, x0: ox, y0: oy, x1: ex, y1: ey } = box;
+      const tops = box.tops || (box.tops = new Int32Array(w).fill(NO_TOP));
       let n = 0, minX = sx, maxX = sx, maxY = sy, isOpen = false;
       mark[(sy - oy) * w + sx - ox] = 1; queue[n++] = sy * W + sx;
-      const top = new Map();
       const visit = (nx, ny) => {
         if (nx < ox || ny < oy || nx > ex || ny > ey) { isOpen = true; return; }
         const k = (ny - oy) * w + nx - ox;
@@ -446,12 +472,14 @@
       for (let q = 0; q < n && !isOpen; q += 1) {
         const i = queue[q], x = i % W, y = (i / W) | 0;
         if (y <= world.groundTop[x]) { isOpen = true; break; }
-        const t = top.get(x);
-        if (t === undefined || y < t) top.set(x, y);
+        if (y < tops[x - ox]) tops[x - ox] = y;
         if (x < minX) minX = x; if (x > maxX) maxX = x; if (y > maxY) maxY = y;
         visit(x + 1, y); visit(x - 1, y); visit(x, y + 1); visit(x, y - 1);
       }
-      return { cells: isOpen ? null : Array.from(queue.subarray(0, n)), open: isOpen, minX, maxX, maxY, top };
+      // (a hollow's columns run on unbroken: it is one piece)
+      const top = isOpen ? null : new Map();
+      for (let x = minX; x <= maxX; x += 1) { if (top && tops[x - ox] !== NO_TOP) top.set(x, tops[x - ox]); tops[x - ox] = NO_TOP; }
+      return { cells: isOpen ? null : queue.slice(0, n), open: isOpen, size: n, minX, maxX, maxY, top };
     }
     // Set the ground over a hollow sagging into it - or, too small a hollow for it to show at the
     // surface (see CHOKE), let it fill with its own broken roof. False for a cover thin enough to
@@ -466,7 +494,7 @@
       // loose stone would hold nothing up)
       const mx = Math.round(xc), roof = mat[((h.top.get(mx) ?? slip) - 1) * W + mx] & ID_MASK;
       const loose = breaksTo[roof] || M.LOOSE_STONE, rubble = PW.mat.settlesTo[loose] || M.GRAVEL;
-      const fill = h.cells.sort((a, b) => b - a);   // (deepest first)
+      const fill = h.cells.sort().reverse();   // (deepest first)
       // (a bowl of cos^2 across 2 x reach holds reach cells of sinking per cell of its depth)
       if (h.cells.length * (1 - BULK) / reach < 1.5 || cover > CHOKE * (h.maxY - roofTop + 1)) {
         // (it chokes: the hollow is left to fill with its broken roof, a share a tick)

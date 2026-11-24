@@ -11,18 +11,24 @@ const view = async (name, x, y, zoomIndex) => { pwApp.focus(x, y, zoomIndex); fo
 pwApp.setPaused(true);
 const W = world.width;
 const id = (x, y) => PW.get(world, x, y) & 63;
+// (the water in a box round a test - the world's own water is drawn off by its pumps as the tests run)
+const waterIn = (x0, y0, x1, y1) => { let n = 0; for (let y = Math.max(0, y0); y <= Math.min(world.height - 1, y1); y += 1) for (let x = Math.max(0, x0); x <= Math.min(W - 1, x1); x += 1) if (id(x, y) === M.WATER) n += 1; return n; };
 const openAt = (x, y) => PW.mat.open[id(x, y)] === 1;
 
 // 1. The same blast takes out far less rock than soil, and a town's made ground stands it nearly as
 // well as rock. Test blocks of stone, soil and made ground are laid deep under the middle of the
 // wild zones (below the reach of anything built), and each is blown up from its middle.
 const holes = {};
+// (where the sections below set things going - blasts, slides, heaps, drops - and how far round
+// each the ground may still be moving: see 3)
+const touched = [];
 const blocks = [[M.STONE, 'stone'], [M.SOIL, 'soil'], [M.FILL, 'made ground']];
 blocks.forEach(([kind, name], k) => {
   const zone = layout.wilds[k % layout.wilds.length];
   const bx = Math.round((zone.x0 + zone.x1) / 2) + (k >= layout.wilds.length ? 400 : 0), by = world.groundTop[bx] + 700;
   for (let y = by - 90; y <= by + 90; y += 1) for (let x = bx - 120; x <= bx + 120; x += 1) PW.set(world, x, y, kind, { quiet: true });
   pwApp.explode(bx, by, 48, 1.1);
+  touched.push([bx, 600]);
   let n = 0;
   for (let y = by - 60; y <= by + 60; y += 1) for (let x = bx - 70; x <= bx + 70; x += 1) if (openAt(x, y)) n += 1;
   holes[name] = n;
@@ -36,6 +42,8 @@ const m = layout.mountains.slice().sort((a, b) => b.height - a.height)[0];
 const fx = Math.round(m.x - m.half * 0.45), fy = world.groundTop[fx] + 30;
 await view('ph-mountain-before', fx, fy - 60, 4);
 const brokenBefore = stability.stats.broken;
+// (a slide down a mountainside runs a long way: the whole mountain)
+touched.push([fx, Math.max(1500, Math.round(m.half * 1.5))]);
 for (const [dx, dy] of [[0, 0], [30, -10], [-25, 15], [10, -30], [45, 10]]) { pwApp.explode(fx + dx, fy + dy, 60, 1.35); pwApp.stepWorld(20); }
 // (the flank is on the move - and ground far off, untouched, at rest: see stability.atRest)
 const farX = fx > W / 2 ? 400 : W - 600, farY = world.groundTop[farX] + 200;
@@ -64,21 +72,27 @@ check(slid > 500 && hanging === 0, `a mountain blown open comes down in a rocksl
 // onto the slope - and loosens what the element table says is loose enough.
 check((stability.stats.shocks || 0) > 5 && stability.stats.loosened > 0, `blasts, the slide and falling rock all shake the ground (${stability.stats.shocks || 0} shocks, ${stability.stats.loosened} cells shaken loose)`);
 await view('ph-mountain-after', fx, fy - 60, 4);
-check((stability.stats.maxMs || 0) < 8, `looking for ground that lost its footing stays in budget (worst ${(stability.stats.maxMs || 0).toFixed(1)} ms)`);
+check((stability.stats.maxMs || 0) < 8, `looking for ground that lost its footing stays in budget (worst ${(stability.stats.maxMs || 0).toFixed(1)} ms, in its ${stability.stats.maxStage || "-"} stage; a hollow looked for at most ${(stability.stats.hollowMs || 0).toFixed(1)} ms, ${stability.stats.hollowN} cells, ${stability.stats.hollowOpen ? 'open' : 'shut'})`);
 check(movingAfter && restFar, `what waits on a wreck to come to rest can ask (stability.atRest): the flank blown open is on the move (${movingAfter}), ground far off untouched is at rest (${restFar})`);
 
 // 2b. The blast wave: a blast beside a glazed building shatters glass it does not touch, and the
 // air goes still again within a few seconds; working it stays cheap.
 {
   const glassOf = (b) => { let n = 0; for (let y = b.body.top; y <= b.ground; y += 1) for (let x = b.body.left; x <= b.body.right; x += 1) if ((PW.get(world, x, y) & 63) === M.GLASS) n += 1; return n; };
-  const b = world.buildings.map((q) => [q, glassOf(q)]).sort((a, c) => c[1] - a[1])[0][0];
-  const before = glassOf(b);
-  pwApp.explode(b.body.right + 40, b.ground - 40, 30, 1.1);
+  // (the most glazed building with open air beside it, the blast's side: not a hill, a neighbour,
+  // the slide's rubble against its wall - level with its lowest windows on that side, within 30 of
+  // its face: over a tall gate hall, its first glazed storey)
+  const lowGlass = (q, dir) => { for (let y = q.ground - 25; y >= q.body.top; y -= 1) for (let d = 0; d < 30; d += 1) if ((PW.get(world, dir > 0 ? q.body.right - d : q.body.left + d, y) & 63) === M.GLASS) return y; return -1; };
+  const openSide = (q, dir) => { const gy = lowGlass(q, dir), x0 = dir > 0 ? q.body.right + 1 : q.body.left - 60; if (gy < 0) return false; for (let x = x0; x < x0 + 60; x += 1) for (const y of [gy, gy + 15]) if (PW.mat.open[PW.get(world, x, y) & 63] !== 1 || PW.getOwner(world, x, y)) return false; return true; };
+  const [b, side] = world.buildings.map((q) => [q, glassOf(q)]).sort((a, c) => c[1] - a[1]).map(([q]) => [q, openSide(q, 1) ? 1 : openSide(q, -1) ? -1 : 0]).find(([, s]) => s) || [];
+  const before = b ? glassOf(b) : 0, bx = b ? (side > 0 ? b.body.right + 40 : b.body.left - 40) : 0;
+  if (b) pwApp.explode(bx, lowGlass(b, side), 30, 1.1);
+  touched.push([bx, 600]);
   let worst = 0;
   for (let t = 0; t < 60; t += 1) { pwApp.stepWorld(1); worst = Math.max(worst, pwApp.air.stats.ms); }
-  const broken = before - glassOf(b);
+  const broken = b ? before - glassOf(b) : 0;
   pwApp.stepWorld(60 * 4);
-  check(broken > 5 && !pwApp.air.busy() && worst < 3, `a blast wave shatters a nearby building's glass (${broken} panes' cells, 40 cells from the blast), and the air settles (${pwApp.air.stats.tiles} tiles still moving, worst step ${worst.toFixed(2)} ms)`);
+  check(broken > 5 && !pwApp.air.busy() && worst < 3, `a blast wave shatters a nearby building's glass (${b ? `${broken} of its ${before} panes' cells, 40 cells from the blast on its ${side > 0 ? 'right' : 'left'}` : 'no glazed building with open air beside it'}), and the air settles (${pwApp.air.stats.tiles} tiles still moving, worst step ${worst.toFixed(2)} ms)`);
 }
 
 // 2c. Everything moves by the element table. Sand let go high over dry flat ground flies down
@@ -99,6 +113,7 @@ check(movingAfter && restFar, `what waits on a wreck to come to rest can ask (st
   sites.sort((a, b) => a.rough - b.rough);
   const sx = sites.length ? sites[0].x : 0;
   const rx = (sites.find((s) => Math.abs(s.x - sx) > 600) || { x: sx + 600 }).x;
+  touched.push([sx, 1000], [rx, 600]);
   const g = world.groundTop[sx], box = [sx - 200, g - 400, sx + 200, g + 40];
   const sand0 = countIn(...box, M.SAND);
   // (the ground under each column before, to measure the heap on)
@@ -153,6 +168,7 @@ check(movingAfter && restFar, `what waits on a wreck to come to rest can ask (st
   const lake = layout.lakes.slice().sort((a, b) => b.half - a.half)[0];
   if (lake) {
     const lx = Math.round(lake.x), level = world.groundTop[lx];
+    touched.push([lx, lake.half + 600]);
     const water0 = pwApp.countWater();
     for (let y = level - 60; y < level - 50; y += 1) for (let x = lx - 30; x < lx - 10; x += 1) PW.set(world, x, y, M.DEBRIS);
     for (let y = level - 60; y < level - 50; y += 1) for (let x = lx + 10; x < lx + 30; x += 1) PW.set(world, x, y, M.ASH);
@@ -188,11 +204,37 @@ check(movingAfter && restFar, `what waits on a wreck to come to rest can ask (st
 // 3. Untouched ground stays put: natural caves and overhangs elsewhere do not fall in by themselves.
 // (what the tests above set going is let finish first: grains running off what was dropped have
 // the ground they ran off looked at again, and it may fail in its turn - and the powder sim keeps
-// to its few milliseconds a tick, so on a loaded machine the slide takes more ticks to run out)
+// to its few milliseconds a tick, so on a loaded machine the slide takes more ticks to run out.
+// The ground looked at: the world over, its surface and 260 cells under it, but for the reach of
+// each place the sections above set going - a slide off a great mountain may run on a while)
 for (let s = 0; s < 75 && stability.busy(); s += 1) pwApp.stepWorld(60);
-const before = stability.stats.broken;
-pwApp.stepWorld(60 * 5);
-check(stability.stats.broken === before, `ground nobody disturbed stands (${stability.stats.broken - before} cells broke loose by themselves)`);
+{
+  // (natural ground only, and away from the towns: a town at work - building, mending, laying its
+  // supply lines - moves its own made ground and buildings about)
+  const near = (x) => touched.some(([tx, r]) => Math.abs(x - tx) < r)
+    || (world.buildings || []).some((b) => x > b.body.left - 150 && x < b.body.right + 150);
+  const made = (k) => k >= M.CONCRETE && k <= M.COURSE;
+  const cells = [], was = [];
+  for (let x = 200; x < W - 200; x += 6) {
+    if (near(x)) continue;
+    const g0 = world.groundTop[x];
+    for (let y = g0 - 40; y < g0 + 260; y += 2) { const k = id(x, y); if (PW.mat.phase[k] >= PW.PHASE.POWDER && !made(k)) { cells.push(y * W + x); was.push(k); } }
+  }
+  pwApp.stepWorld(60 * 5);
+  // (broke loose: gone from where it was - the cell open now. A fire the tests set going may still
+  // be burning its way along, grass to scorched soil, wood to ash: that is not ground coming down)
+  let broke = 0;
+  const where = new Map();
+  for (let q = 0; q < cells.length; q += 1) {
+    if (PW.mat.open[world.mat[cells[q]] & 63] !== 1) continue;
+    broke += 1;
+    const x = cells[q] % W, y = (cells[q] / W) | 0, at = Math.round(x / 100) * 100;
+    const w = where.get(at) || where.set(at, { n: 0, mats: new Set(), dy: [] }).get(at);
+    w.n += 1; w.mats.add(was[q]); w.dy.push(y - world.groundTop[x]);
+  }
+  const whereText = [...where].slice(0, 6).map(([x, w]) => `x~${x}: ${w.n} (mats ${[...w.mats].join('/')}, depth ${Math.min(...w.dy)}..${Math.max(...w.dy)})`).join('; ');
+  check(broke === 0, `ground nobody disturbed stands (${broke} of ${cells.length} cells looked at, the world over away from the tests' blasts and drops, broke loose by themselves${broke ? `: ${whereText}` : ''})`);
+}
 
 // 4. Water pushes on what is in its way: a block of water let go beside a street lamp runs down the
 // street and knocks it over. A column of water 140 cells deep (some 10 m) stood against the tallest
@@ -248,8 +290,11 @@ check(stability.stats.broken === before, `ground nobody disturbed stands (${stab
   // (the densest stand of standing trees left in the wilds)
   const standing = (world.flora || []).filter((r) => r.kind === 'tree' && !r.fallen && layout.wilds.some((z) => r.anchorX > z.x0 + 300 && r.anchorX < z.x1 - 300));
   let stand = null;
-  // (the most tree in it - big trees, by their size - not the most saplings)
+  // (the most tree in it - big trees, by their size - not the most saplings; on ground near level
+  // across the blast's reach - on a hillside what is thrown down runs down it, and gathers at its foot)
+  const level = (x) => { let lo = Infinity, hi = -Infinity; for (let d = -200; d <= 200; d += 10) { const g = world.groundTop[x + d]; lo = Math.min(lo, g); hi = Math.max(hi, g); } return hi - lo <= 40; };
   for (const r of standing) {
+    if (!level(r.anchorX)) continue;
     const near = standing.filter((o) => Math.abs(o.anchorX - r.anchorX) < 150), size = near.reduce((s, o) => s + (o.size || 0), 0);
     if (!stand || size > stand.size) stand = { n: near.length, size, x: r.anchorX, g: world.groundTop[r.anchorX] };
   }
@@ -268,6 +313,10 @@ check(stability.stats.broken === before, `ground nobody disturbed stands (${stab
     let wood0 = 0;
     for (let y = top; y < stand.g + 5; y += 1) for (let x = L; x <= R; x += 1) if (woodAt(x, y)) wood0 += 1;
     const s0 = []; for (let x = L; x <= R; x += 1) s0.push(surf(x, top));
+    // (wood's debris lying in the ground there already - an old wreck's, a fallen tree's - is not the blast's)
+    const splinterAt = (x, y) => { const b = PW.get(world, x, y); return ((b & 63) === M.DEBRIS || (b & 63) === M.RUBBLE) && (b >> 6) === PW.DEBRIS_KIND.WOOD; };
+    let buried = 0;
+    for (let x = L; x <= R; x += 1) for (let y = s0[x - L]; y < s0[x - L] + 30; y += 1) if (splinterAt(x, y)) buried += 1;
     pwApp.explode(stand.x, stand.g - 70, 90, 1.35);
     // (the heap of splinters set alight; the litter lying out)
     const [hx, lx] = flats, hg = world.groundTop[hx + 40], lg = world.groundTop[lx + 40];
@@ -287,7 +336,7 @@ check(stability.stats.broken === before, `ground nobody disturbed stands (${stab
     for (let x = L; x <= R; x += 1) {
       const y0 = s0[x - L], y1 = surf(x, top);
       let here = 0;
-      for (let y = y1; y < y0 + 30; y += 1) { const b = PW.get(world, x, y); if (((b & 63) === M.DEBRIS || (b & 63) === M.RUBBLE) && (b >> 6) === PW.DEBRIS_KIND.WOOD) here += 1; }
+      for (let y = y1; y < y0 + 30; y += 1) if (splinterAt(x, y)) here += 1;
       splinters += here;
       peak = Math.max(peak, here);
       if (Math.abs(y0 - stand.g) < 40) pile = Math.max(pile, y0 - y1);
@@ -297,8 +346,9 @@ check(stability.stats.broken === before, `ground nobody disturbed stands (${stab
     for (let y = lg - 6; y < lg + 2; y += 1) for (let x = lx; x <= lx + 80; x += 1) if (chipsAt(x, y)) litter1 += 1;
     await view('tree-litter', stand.x, stand.g - 40, 5);
     const lost = wood0 - wood1;
+    splinters -= buried;
     check(lost > 4000 && splinters < lost * 0.08 && peak <= 16,
-      `a big blast in a stand of ${stand.n} trees (at ${stand.x}, ${wood0} cells of wood) leaves a litter, not a heap: ${lost} cells of their wood gone, ${splinters} splinters lying (${(splinters / Math.max(1, lost) * 100).toFixed(1)} for each hundred), ${peak} deep at the deepest (all that lies over the old ground, the blast's earth too: ${pile} cells high at most)`);
+      `a big blast in a stand of ${stand.n} trees (at ${stand.x}, ${wood0} cells of wood) leaves a litter, not a heap: ${lost} cells of their wood gone, ${splinters} splinters lying (${(splinters / Math.max(1, lost) * 100).toFixed(1)} for each hundred; ${buried} lay in the ground there before), ${peak} deep at the deepest (all that lies over the old ground, the blast's earth too: ${pile} cells high at most)`);
     const burnt = heap0 - heap1;
     check(burnt >= 40 && ash <= burnt * 0.25 && litter1 < litter0,
       `a heap of ${heap0} splinters set alight burns down, layer by layer: ${burnt} of it burnt in 25 s, leaving ${ash} cells of ash (not a cell of ash for each); a litter of ${litter0} lying out rots away a cell at a time (${litter1} left after 25 s)`);
@@ -408,15 +458,19 @@ check(stability.stats.broken === before, `ground nobody disturbed stands (${stab
     if (flat) x0 = x;
   }
   if (x0 > 0) {
-    const g = Math.min(...Array.from({ length: 421 }, (_, d) => world.groundTop[x0 + d]));
+    const tops = Array.from({ length: 421 }, (_, d) => world.groundTop[x0 + d]), g = Math.min(...tops);
     const fill = (a, b, c, d, m) => { for (let y = b; y <= d; y += 1) for (let x = a; x <= c; x += 1) { PW.set(world, x, y, m, { quiet: true }); if (m === M.AIR) PW.setLayer(world, 'deco', x, y, 0); } };
     fill(x0, g - 300, x0 + 420, g - 1, M.AIR);
-    for (let x = x0; x <= x0 + 420; x += 1) for (let y = g; y <= world.groundTop[x]; y += 1) if (id(x, y) === M.AIR) PW.set(world, x, y, M.STONE, { quiet: true });
+    // (down to the ground as it was: the ground line moves up with the stone laid; and its floor
+    // stone right across, five deep - not the grass and loose earth it stood on, nor a cave under it)
+    for (let x = x0; x <= x0 + 420; x += 1) for (let y = g; y <= Math.max(tops[x - x0], g + 4); y += 1) if (id(x, y) === M.AIR || y <= g + 4) PW.set(world, x, y, M.STONE, { quiet: true });
     const tx0 = x0 + 10, tx1 = x0 + 79, ty0 = g - 280, ty1 = g - 221;
     fill(tx0 - 3, ty0 - 3, tx0 - 1, ty1 + 4, M.STONE); fill(tx1 + 1, ty0 - 3, tx1 + 3, ty1 + 4, M.STONE); fill(tx0 - 3, ty1 + 1, tx1 + 3, ty1 + 4, M.STONE);
     fill(tx0 + 10, ty1 + 5, tx0 + 40, g - 1, M.STONE);
     fill(x0 + 417, g - 50, x0 + 420, g - 1, M.STONE);
-    const P = pwApp.particles, water = () => pwApp.countWater() + P.airWater();
+    fill(x0, g - 50, x0 + 3, g - 1, M.STONE);   // (walled at its other end too: the ground past it may fall away)
+    // (counted over the course and a little round it: a pond or a stream nearby is not the tank's)
+    const P = pwApp.particles, water = () => waterIn(x0 - 60, g - 310, x0 + 480, g + 2) + P.airWater(x0 - 60, g - 310, x0 + 480, g + 2);
     fill(tx0, ty0, tx1, ty1, M.WATER);
     const water0 = water();
     fill(tx1 + 1, ty0 - 3, tx1 + 3, ty1, M.AIR);
@@ -432,7 +486,9 @@ check(stability.stats.broken === before, `ground nobody disturbed stands (${stab
     for (let x = tx1 + 6; x <= x0 + 414; x += 1) { let y = g - 50; while (y < g && id(x, y) !== M.WATER) y += 1; lo = Math.min(lo, y); hi = Math.max(hi, y); }
     check(flying > 500 && emptied > 0 && emptied < 60 * 8, `water pours out of a breach and falls as a sheet of drops, and the tank empties (${flying} drops in the air at once; emptied in ${emptied > 0 ? (emptied / 60).toFixed(1) + ' s' : 'never'})`);
     check(hi - lo <= 3, `water spreads level across a basin (its surface ${g - hi}..${g - lo} cells deep across 330 cells after 14 s)`);
-    check(water() === water0, `the falling water is all kept (${water0} -> ${water()})`);
+    // (where any went: under the basin's floor, past its ends)
+    const lost = water() === water0 ? '' : `; under the floor ${waterIn(x0 - 60, g + 3, x0 + 480, g + 160)}, left of it ${waterIn(x0 - 400, g - 310, x0 - 61, g + 160)}, right ${waterIn(x0 + 481, g - 310, x0 + 820, g + 160)}, drops anywhere ${P.airWater()}, the floor's tops ${[0, 100, 200, 300, 400].map((d) => world.groundTop[x0 + d] - g).join('/')}`;
+    check(water() === water0, `the falling water is all kept (${water0} -> ${water()}${lost})`);
   }
 }
 
@@ -454,9 +510,15 @@ check(stability.stats.broken === before, `ground nobody disturbed stands (${stab
   };
   let T = null, S = null;
   for (const b of towers) { S = stairsOf(b); if (S) { T = b; break; } }
+  // (the town's supply lines held still the while: what they bring up out of the ground and let
+  // out, or draw off, is not the water let go)
+  const pipeStep = pwApp.pipes && pwApp.pipes.step;
+  if (pipeStep) pwApp.pipes.step = () => {};
   if (T) {
-    const P = pwApp.particles, water = () => pwApp.countWater() + P.airWater();
     const box = { x0: T.body.left - 300, x1: T.body.right + 300 };
+    // (the world's water, steam and drops in flight: a box round the tower is crossed by the town's
+    // streams and run-off - see the flood above, counted the same way)
+    const P = pwApp.particles, water = () => pwApp.countWater() + P.airWater();
     const wetIn = (y0, y1) => { let n = 0; for (let y = y0; y <= y1; y += 1) for (let x = box.x0; x <= box.x1; x += 1) if (id(x, y) === M.WATER) n += 1; return n; };
     // (the ceiling of its ground storey: the lowest row over it closed across most of the tower -
     // water standing in it is not)
@@ -486,14 +548,18 @@ check(stability.stats.broken === before, `ground nobody disturbed stands (${stab
     for (let y = py1 - 14; y < py1; y += 1) for (let x = px0; x <= px1; x += 1) if (id(x, y) === M.AIR) { PW.set(world, x, y, M.WATER); placed += 1; }
     const water0 = water();
     PW.wakeArea(world, S.sx0 - 10, S.sy0 - 20, S.sx1 + 10, T.ground);
-    pwApp.stepWorld(60 * 12);
+    // (the new world's towers stand on tall gate halls - N121 - their stairs near 300 cells: given 16 s)
+    pwApp.stepWorld(60 * 16);
     for (let s = 0; s < 10 && P.airWater(); s += 1) pwApp.stepWorld(60);
     const top = wetIn(py1 - 20, roofBase) - top0, between = wetIn(roofBase + 1, ceiling) - between0, down = placed - top - between;
     await view('stairwell-water', (S.sx0 + S.sx1) / 2, S.sy0 + 40, 5);
     // (a roof's gutters, and the pockets between its ornaments, keep a little)
-    check(placed >= 100 && down >= placed * 0.6 && between <= placed * 0.1, `water let go ${hy >= 0 ? `on a tower's roof over its drain hatch (${hx1 - hx0 + 1} wide)` : 'over a tower\'s stairs'} goes down the stairwell to its ground floor (${placed} cells let go, stairs ${S.sy1 - S.sy0} tall: ${down} went down to the ground storey, ${between} left on the storeys between, ${top} on the roof where it was let go)`);
-    check(water() === water0, `the water going down the stairwell is all kept (${water0} -> ${water()})`);
+    // (a puddle may stand on a storey's floor away from its opening: the storey over a raised gate
+    // hall - N121's - drains into the hall by its ladder's hatch, not a flight of stairs)
+    check(placed >= 100 && down >= placed * 0.6 && between <= placed * 0.3, `water let go ${hy >= 0 ? `on a tower's roof over its drain hatch (${hx1 - hx0 + 1} wide)` : 'over a tower\'s stairs'} goes down the stairwell to its ground floor (${placed} cells let go, stairs ${S.sy1 - S.sy0} tall: ${down} went down to the ground storey, ${between} left on the storeys between, ${top} on the roof where it was let go)`);
+    check(water() === water0, `the water going down the stairwell is all kept (${water0} -> ${water()} in the world, the town's supply lines held still)`);
   } else check(false, 'a standing tower with stairs to pour water down');
+  if (pipeStep) pwApp.pipes.step = pipeStep;
 }
 
 // 8. Loose ground shivers from a distant shock (N9): its wave runs on through the ground far past
@@ -509,10 +575,11 @@ check(stability.stats.broken === before, `ground nobody disturbed stands (${stab
     if (flat) x0 = x;
   }
   if (x0 > 0) {
-    const g = Math.min(...Array.from({ length: 821 }, (_, d) => world.groundTop[x0 + d]));
+    const tops = Array.from({ length: 821 }, (_, d) => world.groundTop[x0 + d]), g = Math.min(...tops);
     const fill = (a, b, c, d, m) => { for (let y = b; y <= d; y += 1) for (let x = a; x <= c; x += 1) { PW.set(world, x, y, m, { quiet: true }); if (m === M.AIR) PW.setLayer(world, 'deco', x, y, 0); } };
     fill(x0, g - 80, x0 + 820, g - 1, M.AIR);
-    for (let x = x0; x <= x0 + 820; x += 1) for (let y = g; y <= world.groundTop[x]; y += 1) if (id(x, y) === M.AIR) PW.set(world, x, y, M.STONE, { quiet: true });
+    // (down to the ground as it was: the ground line moves up with the stone laid)
+    for (let x = x0; x <= x0 + 820; x += 1) for (let y = g; y <= tops[x - x0]; y += 1) if (id(x, y) === M.AIR) PW.set(world, x, y, M.STONE, { quiet: true });
     fill(x0 + 250, g - 3, x0 + 400, g - 1, M.SAND);
     fill(x0 + 600, g - 3, x0 + 750, g - 1, M.SAND);
     pwApp.stepWorld(60 * 2);

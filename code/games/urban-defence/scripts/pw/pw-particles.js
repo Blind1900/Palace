@@ -986,7 +986,12 @@
     }
     // (the drops of water in the air: what the world's water is short of while they fly - they are
     // never gathered or held, so they are all among the live particles)
-    const airWater = () => { let n = 0; for (let i = 0; i < count; i += 1) if (flags[i] & F.WATER) n += 1; return n; };
+    // (or those in a box: x0, y0, x1, y1)
+    const airWater = (x0 = -Infinity, y0 = -Infinity, x1 = Infinity, y1 = Infinity) => {
+      let n = 0;
+      for (let i = 0; i < count; i += 1) if ((flags[i] & F.WATER) && px[i] >= x0 && px[i] <= x1 + 1 && py[i] >= y0 && py[i] <= y1 + 1) n += 1;
+      return n;
+    };
     const api = { spawn, hold, step, draw, drainImpacts, flush: flushDebris, F, stats, listeners, get count() { return count + pend.n + held.n; }, airWater, capacity, px, py, vx, vy, flags };
     return api;
   }

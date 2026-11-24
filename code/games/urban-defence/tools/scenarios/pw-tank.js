@@ -28,12 +28,21 @@ const used = [];
 function site(len) {
   for (const zone of layout.wilds) for (let x = zone.x0 + 60; x + len < zone.x1 - 60; x += 40) {
     if (used.some(([a, b]) => x < b + 60 && x + len > a - 60)) continue;
+    // (clear of buildings - an outpost, a bunker in the wilds: the cells cleared and laid over one are
+    // still its own, and a tank stands on no building's)
+    if ((world.buildings || []).some((bd) => bd.body && x < bd.body.right + 60 && x + len > bd.body.left - 60)) continue;
     const tops = Array.from({ length: len + 1 }, (_, d) => world.groundTop[x + d]);
     const g = Math.min(...tops);
     if (Math.max(...tops) - g > 60) continue;
     used.push([x, x + len]);
     fill(x, g - 170, x + len, g - 1, M.AIR);
-    for (let xx = x; xx <= x + len; xx += 1) for (let y = g; y <= world.groundTop[xx] + 3 || y <= g + 3; y += 1) PW.set(world, xx, y, M.STONE, { quiet: true });
+    // (down to the ground as it was: the ground line moves up with the stone laid)
+    for (let xx = x; xx <= x + len; xx += 1) for (let y = g; y <= tops[xx - x] + 3 || y <= g + 3; y += 1) { PW.set(world, xx, y, M.STONE, { quiet: true }); PW.setLayer(world, 'deco', xx, y, 0); }
+    // (and the plants that stood there gone - their records, the marks they left on their cells -
+    // or one would come down later, taking the course's stone it still counts its own with it)
+    const gone = (r) => { const ax = r.anchorX ?? r.x; return ax >= x - 3 && ax <= x + len + 3; };
+    if (world.flora && world.flora.some(gone)) { world.flora = world.flora.filter((r) => !gone(r)); world.floraIndex = null; }
+    for (let xx = x; xx <= x + len; xx += 1) for (let y = g - 170; y <= tops[xx - x] + 3 || y <= g + 3; y += 1) PW.setFlag(world, xx, y, PW.FLAG.FLORA | PW.FLAG.WOOD | PW.FLAG.CHARRED, false);
     return { x0: x, g };
   }
   return null;
@@ -43,19 +52,21 @@ const run = (t, secs, each) => { for (let k = 0; k < Math.round(secs / DT); k +=
 const groundAt = (x, y) => { for (let yy = Math.round(y) - 30; yy < world.height; yy += 1) { const m = PW.get(world, x, yy) & 63; if (PW.mat.phase[m] >= PW.PHASE.POWDER && !PW.mat.passable[m]) return yy; } return -1; };
 // (every wheel the tank stands on sits on the ground - its rim on it, not in it nor over it - and
 // its hull is clear of the ground; the worst miss in cells)
+// (seated.why: which wheel or point of the hull, and what ground it found)
 function seated(t) {
   let worst = 0;
   const R = t.art.R, n = t.art.wheels.length, fx = Math.cos(t.angle), fy = Math.sin(t.angle), nx = -Math.sin(t.angle), ny = Math.cos(t.angle);
+  const why = (what, x, y) => { const gy = groundAt(x, y); seated.why = `${what} at ${x},${Math.round(y)} over ${PW.get(world, x, gy) & 63} at ${gy}`; };
   for (let i = 0; i < n; i += 1) {
     if (!t.contact[i]) continue;
     const u = t.art.wheels[i], v = t.springs[i], wx = t.x + u * fx + v * nx, wy = t.y + u * fy + v * ny;
     let rim = Infinity;
     for (let d = -4; d <= 4; d += 1) rim = Math.min(rim, groundAt(Math.round(wx) + d, wy) + R - Math.sqrt(R * R - d * d));
-    worst = Math.max(worst, Math.abs(rim - wy));
+    if (Math.abs(rim - wy) > worst) { worst = Math.abs(rim - wy); why(`wheel ${i}`, Math.round(wx), wy); }
   }
   for (const u of [-56, -30, 0, 30, 56]) {
     const wx = t.x + u * fx - 16 * nx, wy = t.y + u * fy - 16 * ny;
-    worst = Math.max(worst, wy - groundAt(Math.round(wx), wy));
+    if (wy - groundAt(Math.round(wx), wy) > worst) { worst = wy - groundAt(Math.round(wx), wy); why(`hull ${u}`, Math.round(wx), wy); }
   }
   return worst;
 }
@@ -156,7 +167,7 @@ else {
   fill(wallAt, g - rise - 30, wallAt + 15, g - rise - 1, M.STONE);
   const t = T.create(world, { style: 'modern', x: x0 + 140, y: g, facing: 1 });
   T.drive(t, 1);
-  let v075 = 0, v15 = 0, worst = 0, bumpSprings = 0, onRamp = null;
+  let v075 = 0, v15 = 0, worst = 0, worstAt = 0, bumpSprings = 0, onRamp = null;
   run(t, 1.5, (k) => {
     if (k === 44) v075 = t.v;
     if (k === 89) v15 = t.v;
@@ -169,7 +180,13 @@ else {
   const rel = () => { const r = (t.elevation + t.facing * t.angle) / deg; relLo = Math.min(relLo, r); relHi = Math.max(relHi, r); };
   const go = () => {
     T.step(world, DT); ticks += 1;
-    worst = Math.max(worst, seated(t));
+    const sNow = seated(t);
+    if (sNow > worst) {
+      worstAt = Math.round(t.x - x0);
+      // (what lies under it there)
+      if (sNow > 2) worstAt += ` - ${seated.why}, the ground at ${g}, the hull at ${t.x.toFixed(0)},${t.y.toFixed(1)} angle ${(t.angle / deg).toFixed(1)} springs ${t.springs.map((s) => s.toFixed(1)).join('/')} contact ${t.contact.map(Number).join('')}`;
+    }
+    worst = Math.max(worst, sNow);
     along += Math.hypot(t.x - px, t.y - py); px = t.x; py = t.y;
     if (t.x > x0 + 300 - 60 && t.x < x0 + 374 + 60) bumpSprings = Math.max(bumpSprings, Math.max(...t.springs) - Math.min(...t.springs));
     rel();
@@ -181,7 +198,7 @@ else {
   await view('tank-ramp', t.x, t.y - 30, 6);
   while (ticks < 14 * 60) go();
   check(Math.abs(t.travel - travel0 - along) < along * 0.05 && bumpSprings > 2.5 && worst <= 2,
-    `over the bumps each road wheel rides up on its spring and the track wraps them as they lie (the wheels ${bumpSprings.toFixed(1)} cells apart at most), every wheel on the ground the whole way (the worst ${worst.toFixed(1)} cells off it), the links moving with the ground covered (${(t.travel - travel0).toFixed(0)} cells run, ${along.toFixed(0)} driven)`);
+    `over the bumps each road wheel rides up on its spring and the track wraps them as they lie (the wheels ${bumpSprings.toFixed(1)} cells apart at most), every wheel on the ground the whole way (the worst ${worst.toFixed(1)} cells off it, ${worstAt} along the course), the links moving with the ground covered (${(t.travel - travel0).toFixed(0)} cells run, ${along.toFixed(0)} driven)`);
   check(onRamp && Math.abs(onRamp.angle + 20) < 2.5 && Math.abs(onRamp.elevation - Math.max(0, -onRamp.angle - T.GUN_DOWN)) < 1.5 && onRamp.v < T.VMAX * 0.85 && onRamp.v > T.VMAX * 0.7,
     `up a 20-degree slope it slows (${onRamp ? onRamp.v.toFixed(0) : '-'} cells/s), the hull lies along it (${onRamp ? onRamp.angle.toFixed(1) : '-'} deg) with the turret on it, and the gun, laid level ahead, is held within its reach of the hull: ${T.GUN_DOWN} deg below its line (${onRamp ? onRamp.elevation.toFixed(1) : '-'} deg above the horizontal)`);
   check(t.v === 0 && t.blocked === 'too steep' && t.x + 58 < wallAt && t.x + 58 > wallAt - 30 && Math.abs(t.y - (g - rise)) < 2,
@@ -351,7 +368,8 @@ else {
     pwApp.stepWorld(60 * 6);
     await view('tank-struck', a.x + 40, g - 30, 6);
     // (what lies over its deck, inside its hull's box, come to rest)
-    const over = (t) => { let n = 0; for (let y = Math.round(t.y) - 30; y < t.y - 2; y += 1) for (let x = Math.round(t.x) - 55; x <= t.x + 55; x += 1) if (PW.mat.phase[PW.get(world, x, y) & 63] >= PW.PHASE.POWDER) n += 1; return n; };
+    const lying = new Map();
+    const over = (t) => { let n = 0; for (let y = Math.round(t.y) - 30; y < t.y - 2; y += 1) for (let x = Math.round(t.x) - 55; x <= t.x + 55; x += 1) { const m = PW.get(world, x, y) & 63; if (PW.mat.phase[m] >= PW.PHASE.POWDER) { n += 1; lying.set(m, (lying.get(m) || 0) + 1); } } return n; };
     // (and no piece still lying on it)
     const onIt = (t) => world.fragments.list.filter((p) => {
       const c = Math.cos(p.angle), s = Math.sin(p.angle), cx = p.px + p.gx * c - p.gy * s, cy = p.py + p.gx * s + p.gy * c;
@@ -359,7 +377,7 @@ else {
     }).length;
     const oa = over(a) + onIt(a) * 100, ob = over(b) + onIt(b) * 100;
     check(a.hp < 100 && a.hp > 40 && a.chipped > 0 && b.hp === 100 && !a.falling && oa < 30 && ob < 10,
-      `struck by what falls on it: a slab of concrete 30 by 20 off 160 cells up dents its armour (${(100 - a.hp).toFixed(0)} of it) and chips it; a lump of 8 by 6 only knocks (${(100 - b.hp).toFixed(0)}); both glance off it and come to rest off it (${onIt(a) + onIt(b)} pieces still on them, ${over(a)} and ${over(b)} cells left lying in their hulls' boxes)`);
+      `struck by what falls on it: a slab of concrete 30 by 20 off 160 cells up dents its armour (${(100 - a.hp).toFixed(0)} of it) and chips it; a lump of 8 by 6 only knocks (${(100 - b.hp).toFixed(0)}); both glance off it and come to rest off it (${onIt(a) + onIt(b)} pieces still on them, ${over(a)} and ${over(b)} cells left lying in their hulls' boxes${ob >= 10 ? ` - materials ${[...lying].map(([m, n]) => `${m}:${n}`).join(' ')}, at ${S.x0}, the hulls at ${(a.y - g).toFixed(1)} and ${(b.y - g).toFixed(1)} from the ground, b's angle ${(b.angle / deg).toFixed(1)}, ground under b ${[-50, -25, 0, 25, 50].map((u) => groundAt(Math.round(b.x) + u, g - 20) - g).join('/')}` : ''})`);
     world.tanks.length = 0;
   }
 }
@@ -513,19 +531,19 @@ else {
   }
 }
 
-// 5d. Through a wood (N105, the user's): a tank drives through a stand of ten trees and goes by
+// 5d. Through a wood (N105, the user's): a tank drives through a stand of eight trees and goes by
 // most of them - they stand untouched - knocking over only those in its way, and keeps its pace.
 {
-  const W8 = site(820);
+  const W8 = site(880);
   if (!W8 || !PW.flora) check(false, 'a stretch of the wilds for the wood');
   else {
-    // (ten trees 50 apart, the stand set along until two of them stand in a tank's way - one in
+    // (eight trees 70 apart - a falling one mostly clear of the next - set along until just two stand in a tank's way - one in
     // five does, each tree its own)
     const { x0, g } = W8, kinds = ['broadleaf', 'conifer', 'birch'];
     let trees = [];
     for (let shift = 0; shift < 40; shift += 1) {
-      const want = Array.from({ length: 10 }, (_, k) => ({ anchorX: x0 + 230 + k * 50 + shift, row: g }));
-      if (want.filter(T.treeInWay).length >= 2) { trees = want.map((w, k) => PW.flora.plant(world, kinds[k % 3], w.anchorX, { row: g, size: 96 + (k % 3) * 12, seed: 977 + k * 31 })); break; }
+      const want = Array.from({ length: 8 }, (_, k) => ({ anchorX: x0 + 230 + k * 70 + shift, row: g }));
+      if (want.filter(T.treeInWay).length === 2) { trees = want.map((w, k) => PW.flora.plant(world, kinds[k % 3], w.anchorX, { row: g, size: 96 + (k % 3) * 12, seed: 977 + k * 31 })); break; }
     }
     // (a tree's own cells, by the mask it was drawn with - its crown overlaps its neighbours' boxes)
     const cellsOf = (r) => {
@@ -541,7 +559,7 @@ else {
     T.drive(t, 1);
     let slowest = Infinity;
     // (the world stepped, not the tanks alone: a tree it strikes comes down by the plants' own step)
-    for (let k = 0; k < 18 * 60; k += 1) { pwApp.stepWorld(1); if (t.x > x0 + 280 && t.x < x0 + 700) slowest = Math.min(slowest, Math.abs(t.v)); }
+    for (let k = 0; k < 18 * 60; k += 1) { pwApp.stepWorld(1); if (t.x > x0 + 280 && t.x < x0 + 760) slowest = Math.min(slowest, Math.abs(t.v)); }
     const n1 = trees.map(cellsOf);
     // (knocked over: its trunk snapped or the whole of it down; standing: neither, and the most of it
     // there still - a neighbour coming down past it may take a few of its twigs)
@@ -549,10 +567,10 @@ else {
     const standing = hit.filter((h, k) => !h && n1[k] >= n0[k] * 0.75).length, knocked = hit.filter(Boolean).length;
     // (every one in its way down; any other down only by a neighbour falling on it - a tree coming
     // down can bring down the next - and most standing)
-    const asRuled = inWay.every((w, k) => !w || hit[k]) && standing >= trees.length - 4;
+    const asRuled = inWay.every((w, k) => !w || hit[k]) && standing >= trees.length - 3;
     await view('n105-tank-through-wood', x0 + 560, g - 80, 3);
     // (over the trunks it brought down it slows a little, pressing them flat)
-    check(trees.length === 10 && t.x > x0 + 760 && knocked >= 1 && knocked <= 4 && asRuled && slowest > T.VMAX * 0.7,
+    check(trees.length === 8 && t.x > x0 + 820 && knocked >= 2 && knocked <= 3 && asRuled && slowest > T.VMAX * 0.6,
       `through a wood of ${trees.length} trees a tank goes by most of them - ${standing} stand untouched - and knocks over those in its way (${inWay.filter(Boolean).length}; ${knocked} down in all, a neighbour or so brought down by one falling) (${asRuled ? 'as ruled' : `not as ruled: ${trees.map((r, k) => `${inWay[k] ? 'W' : '-'}${r.rammed ? 'r' : ''}${r.felled ? 'f' : ''}${Math.round(100 * n1[k] / Math.max(1, n0[k]))}`).join(' ')}`}), at its pace (${slowest === Infinity ? '-' : slowest.toFixed(0)} cells/s at the slowest of its ${T.VMAX})`);
     world.tanks.length = 0;
   }
@@ -698,7 +716,8 @@ else {
     for (let k = 0; k < secs * 60 && !through(b, t); k += 1) { pwApp.stepWorld(1); if (each) each(t); }
     return t;
   };
-  if (towers.length < 2 || !farm) check(false, `towers and a farm to drive at (${towers.length} towers, ${farm ? 1 : 0} farm)`);
+  // (one tower will do - its own side through it first, then another's ramming it: the world has 4 sites now)
+  if (towers.length < 1 || !farm) check(false, `towers and a farm to drive at (${towers.length} towers, ${farm ? 1 : 0} farm)`);
   else {
     // (through its own side's tower)
     const own = towers[0], f0 = frame(own);

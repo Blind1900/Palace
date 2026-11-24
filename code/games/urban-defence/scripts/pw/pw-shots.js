@@ -31,13 +31,13 @@
   // colour and length in cells; life: seconds it flies at most).
   const KINDS = {
     // a rifle round (5.56 / 7.62 mm)
-    bullet: { speed: 2400, drag: 0.35, punch: 0.33, damage: 0, tracer: [255, 232, 160], len: 9, life: 2 },
+    bullet: { speed: 2400, drag: 0.35, punch: 0.33, damage: 0, tracer: [255, 232, 160], len: 9, life: 2, brush: true },
     // a tank's armour-piercing fin-stabilised dart (APFSDS): very fast, flat, boring through
     ap: { speed: 5200, drag: 0.02, punch: 9, damage: 60, tracer: [255, 222, 150], len: 30, life: 5 },
     // a tank's high-explosive shell
     he: { speed: 4000, drag: 0.04, blast: [9, 0.9], damage: 22, tracer: [255, 196, 120], len: 24, life: 6 },
     // a mech's (or a turret's) autocannon round: a small high-explosive one
-    cannon: { speed: 3000, drag: 0.1, blast: [3.5, 0.45], damage: 4, tracer: [255, 210, 140], len: 14, life: 4 },
+    cannon: { speed: 3000, drag: 0.1, blast: [3.5, 0.45], damage: 4, tracer: [255, 210, 140], len: 14, life: 4, brush: true },
     // a missile: thrown off its rail at `launch`, then flown on its motor (thrust, for burn seconds)
     // up to its speed, turning for its mark at up to `turn` rad/s; it leaves a trail of smoke
     missile: { speed: 1500, launch: 340, thrust: 2600, burn: 4, turn: 3.2, drag: 0.05, blast: [16, 1.3], damage: 45, len: 7, life: 12, missile: true },
@@ -46,9 +46,11 @@
     rocket: { speed: 1100, launch: 1100, thrust: 0, burn: 0.8, turn: 0, drag: 0.004, blast: [12, 1.1], damage: 40, len: 6, life: 30, missile: true },
     // interceptors (N90, the user's Iron Dome and Patriot): fast, turning hard for the threat they
     // were launched at - led, where it will be - and bursting beside it on their proximity fuse,
-    // destroying it more often than not (kill: the share of their bursts that do)
-    interceptor: { speed: 2000, launch: 500, thrust: 5000, burn: 4, turn: 7, drag: 0.02, blast: [5, 0.5], damage: 20, len: 6, life: 8, missile: true, prox: 16, kill: 0.85 },
-    patriot: { speed: 2400, launch: 400, thrust: 4000, burn: 6, turn: 4.5, drag: 0.01, blast: [9, 0.9], damage: 100, len: 9, life: 12, missile: true, prox: 22, kill: 0.85 },
+    // destroying it more often than not (kill: the share of their bursts that do). Each climbs off its
+    // launcher as it was laid for `climb` seconds before it pitches over for its mark - clear of the
+    // towers round a town's battery, as a vertical launch is
+    interceptor: { speed: 2000, launch: 500, thrust: 5000, burn: 4, turn: 7, drag: 0.02, blast: [5, 0.5], damage: 20, len: 6, life: 8, missile: true, prox: 16, kill: 0.85, climb: 0.45 },
+    patriot: { speed: 2400, launch: 400, thrust: 4000, burn: 6, turn: 4.5, drag: 0.01, blast: [9, 0.9], damage: 100, len: 9, life: 12, missile: true, prox: 22, kill: 0.85, climb: 0.45 },
   };
   const WATER_DRAG = 0.8;       // of a round's speed kept per cell of water it goes through
   const SINKS = 260;            // cells/s: slower than this in water, it has stopped
@@ -89,7 +91,7 @@
     const speed = spec.speed ?? (k.missile ? k.launch : k.speed);
     const shot = { kind, k, x: spec.x, y: spec.y, vx: dx * speed + (spec.vx0 || 0), vy: dy * speed + (spec.vy0 || 0),
       e: k.punch || 0, side: spec.side || null, from: spec.from || null, target: spec.target || null, aimDy: spec.aimDy || 0,
-      age: 0, fuel: k.burn || 0, run: 0, wet: false, done: false, n: seq, look: spec.look || null, x0: spec.x, y0: spec.y };
+      age: 0, fuel: k.burn || 0, run: 0, wet: false, done: false, n: seq, id: stats.fired, look: spec.look || null, x0: spec.x, y0: spec.y };
     (world.shots || (world.shots = [])).push(shot);
     stats.fired += 1;
     return shot;
@@ -218,8 +220,9 @@
     s.fuel -= dt;
     const sp = Math.hypot(s.vx, s.vy);
     let a = Math.atan2(s.vy, s.vx);
-    // (it clears its rail before it turns; an interceptor whose mark is gone flies on straight)
-    if (s.target && s.age > 0.2 && !(k.prox && (s.target.done || s.target.dead))) {
+    // (it clears its rail - an interceptor its launcher's surroundings - before it turns; an
+    // interceptor whose mark is gone flies on straight)
+    if (s.target && s.age > (k.climb || 0.2) && !(k.prox && (s.target.done || s.target.dead))) {
       const [tx, ty] = aimOf(s);
       let d = Math.atan2(ty - s.y, tx - s.x) - a;
       while (d > Math.PI) d -= Math.PI * 2;
@@ -270,7 +273,11 @@
       if (cx < 1 || cx >= W - 1 || cy >= H - 1) { s.done = true; stats.gone += 1; return false; }
       if (cy < 0) { lx = cx; ly = cy; continue; }            // (over the top of the world: open sky)
       const i = cy * W + cx, id = mat[i] & ID_MASK;
-      if (open[id]) { lx = cx; ly = cy; continue; }
+      if (open[id]) {
+        // (N117: a rifle round or a cannon round through a tree, or an enemy's ornament - see brush)
+        if (s.k.brush && brush(world, s, cx, cy, lx, ly)) return false;
+        lx = cx; ly = cy; continue;
+      }
       if (id === M.WATER) {
         if (!s.wet) { s.wet = true; splash(world, s, cx, cy); if (s.k.blast) { burst(world, s, lx + 0.5, ly + 0.5); return false; } }
         s.vx *= WATER_DRAG; s.vy *= WATER_DRAG;
@@ -362,6 +369,56 @@
     }
     const d = Math.hypot(nx, ny);
     return d ? [nx / d, ny / d] : [0, 0];
+  }
+  // ---- Through trees and ornaments (N117, the user's: some rounds are stopped by trees, and by an
+  // enemy's deco, instead of all passing through) ---------------------------------------------------
+  // A tree is drawn on open air, so a round used to pass it untouched. Now, a rifle round or a cannon
+  // round (brush) crossing one:
+  //   - its wood - trunk, boughs - takes its punch, WOOD_COST a cell: some 35 cm of trunk stops a
+  //     rifle round, a bough slows it; a cannon round bursts on a trunk (WOOD_BURST cells of wood);
+  //   - each of its leaves is a LEAF_STOP chance of stopping it - a leaf does little to a round, a
+  //     crown's depth of them some, its boughs the rest (their wood, as the trunk's);
+  //   - stopped, a chip of bark or a leaf knocked off flies.
+  // An ornament, a railing, an awning of a building of another side (deco over open air) is a
+  // DECO_STOP chance a cell, chipped now and then; its own side's rounds pass it, as they pass the
+  // building (see PW.game.cover). Street furniture of no side, and tank shells, missiles and rockets,
+  // pass as before. (Which round is stopped is its own, the same every run.)
+  const WOOD_COST = 0.07, WOOD_BURST = 3, LEAF_STOP = 0.004, DECO_STOP = 0.2;
+  // (each round its own: by its number among all fired - two fired alike still fare apart)
+  const chance = (s, x, y, salt) => (PW.hash3(s.id * 7 + salt, x, y) & 0xffff) / 65536;
+  function brush(world, s, x, y, lx, ly) {
+    const f = PW.getFlags(world, x, y), fl = PW.FLAG, owner = PW.getOwner(world, x, y);
+    let stop = false, burstNow = false;
+    // (a plant's cell: flagged one and nobody's - a building's ornament stamped where a plant once
+    // stood is the building's)
+    if ((f & fl.FLORA) && !(owner > 0 && owner < 50000)) {
+      if (!PW.getLayer(world, 'deco', x, y)) return false;
+      if (f & fl.WOOD) {
+        s.wood = (s.wood || 0) + 1;
+        if (s.k.blast) burstNow = s.wood >= WOOD_BURST;
+        else { s.e -= WOOD_COST; stop = s.e <= 0; }
+      } else if (chance(s, x, y, 1) < LEAF_STOP) { if (s.k.blast) burstNow = true; else stop = true; }
+      if (!stop && !burstNow) return false;
+      stats.byTrees = (stats.byTrees || 0) + 1;
+    } else {
+      const deco = PW.getLayer(world, 'deco', x, y);
+      if (!deco) return false;
+      const b = owner > 0 && owner < 50000 && world.buildings ? world.buildings[owner - 1] : null;
+      if (!b) return false;
+      const side = b.faction || b.side;
+      if (side && s.side && side === s.side) return false;
+      if (chance(s, x, y, 2) >= DECO_STOP) return false;
+      if (s.k.blast) burstNow = true; else stop = true;
+      stats.byDeco = (stats.byDeco || 0) + 1;
+    }
+    stats.struck += 1;
+    if (burstNow) { burst(world, s, lx + 0.5, ly + 0.5); return true; }
+    // (a chip of what stopped it, flying back; a leaf or an ornament's cell now and then knocked off)
+    const particles = world.particles, colour = PW.getLayer(world, 'deco', x, y);
+    if (particles && colour) particles.spawn(x + 0.5, y + 0.5, -s.vx * 0.02 + (rnd() - 0.5) * 50, -20 - rnd() * 40, 0, colour, (f & fl.WOOD) ? 0 : F().LEAF, (f & fl.WOOD) ? 0.6 : 1.5);
+    if (!(f & fl.WOOD) && chance(s, x, y, 3) < 0.5) PW.setLayer(world, 'deco', x, y, 0);
+    s.done = true; s.x = lx + 0.5; s.y = ly + 0.5;
+    return true;
   }
   function shatter(world, s, x, y) {
     const particles = world.particles;
