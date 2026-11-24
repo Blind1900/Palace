@@ -290,6 +290,45 @@ const drawnCells = (m) => { const P = m.P, out = new Set(); for (let y = P.box.y
   }
 }
 
+// 7c. A road tunnel's barricade (N104, the user's): its own side's mech walks through it untouched;
+// another side's does not step over it - lower than its stride as it is - but breaks through it,
+// slowed. (A jersey block and a hedgehog, a tunnel network's cells, as WGM lays them.)
+{
+  const S = site(700, 200);
+  if (!S) check(false, 'a stretch of the wilds for the barricade');
+  else {
+    const { x0, g } = S, at = x0 + 300;
+    const bar = { id: 'mech-course', side: 'left', x0: at, x1: at + 25, y0: g - 12, y1: g - 1, cells: [] };
+    const put = (x, y, mt) => { PW.set(world, x, y, mt, { quiet: true }); PW.setOwner(world, x, y, 50990); bar.cells.push(y * world.width + x); };
+    for (let h = 0; h < 12; h += 1) for (let dx = h < 4 ? 0 : 2; dx < (h < 4 ? 12 : 10); dx += 1) put(at + dx, g - 1 - h, M.CONCRETE);
+    for (let k = 0; k < 12; k += 1) { put(at + 14 + k, g - 1 - k, M.STEEL); put(at + 25 - k, g - 1 - k, M.STEEL); }
+    const bars0 = world.barricades;
+    world.barricades = [...(bars0 || []), bar];
+    const standing = () => bar.cells.filter((i) => { const id = world.mat[i] & 63; return id === M.CONCRETE || id === M.STEEL; }).length;
+    const n0 = standing();
+    fresh();
+    const own = X.create(world, { x: x0 + 150.5, y: g - 1, side: 'left', facing: 1 });
+    X.walk(own, 1);
+    run(6, () => (own.x > at + 120 ? false : undefined));
+    const ownPast = own.x > at + 26, n1 = standing();
+    fresh();
+    const foe = X.create(world, { x: x0 + 150.5, y: g - 1, side: 'right', facing: 1 });
+    X.walk(foe, 1);
+    let highest = g, slowest = Infinity;
+    run(12, (k) => {
+      if (foe.x + X.HALF > at && foe.x - X.HALF < at + 26) { highest = Math.min(highest, foe.y); if (k > 30) slowest = Math.min(slowest, Math.abs(foe.vx)); }
+      return foe.x > at + 120 ? false : undefined;
+    });
+    const n2 = standing();
+    await view('mech-barricade', at + 13, g - 30, 6);
+    world.barricades = bars0;
+    fresh();
+    // (what it breaks lies where it broke: it may climb the rubble, never the barricade standing)
+    check(ownPast && n1 === n0 && foe.x > at + 26 && n2 < n0 * 0.3 && slowest < X.WALK * 0.7,
+      `a road tunnel's barricade: its own side's mech walks through it (${ownPast ? 'past it' : 'stopped'}, ${n1} of its ${n0} cells standing); another side's breaks through it rather than stepping over (${n0 - n2} of its cells crushed - over their rubble ${g - 1 - highest} cells up at most - slowed to ${slowest === Infinity ? '-' : slowest.toFixed(0)} cells/s; ${foe.x > at + 26 ? 'through' : 'stopped short'})`);
+  }
+}
+
 // 8. Destroyed: its armour gone it falls apart where it stands, burning - its wreck's pieces thrown
 // down, flames, a wreck's fire left - and no blast: not a cell of the ground round it broken.
 {

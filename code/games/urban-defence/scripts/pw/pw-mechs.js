@@ -153,8 +153,8 @@
   }
 
   // ---- The cells ---------------------------------------------------------------------------------
-  // (N104: its own side's barricade across a road tunnel it walks through; another's it steps over -
-  // they stand lower than its stride - or blows apart)
+  // (N104: its own side's barricade across a road tunnel it walks through; another's it must break -
+  // it walks into it, crushing it, or blows it apart - see ramBarricade)
   let passing = null;
   const blocks = (world, x, y) => {
     if (x < 0 || y < 0 || x >= world.width || y >= world.height) return true;
@@ -170,6 +170,24 @@
     const cx = Math.floor(x);
     for (let yy = y - h + 1; yy <= y; yy += 1) for (let xx = cx - HALF; xx < cx + HALF; xx += 1) if (blocks(world, xx, yy)) return false;
     return true;
+  }
+  // (another side's barricade cells in column xx, over its soles at y, its height up: crushed as it
+  // walks into them - thrown on as debris - each costing it speed by its hardness; true if any were)
+  const RAM_COST = 3;           // cells/s of its pace a cell of hardness 1 costs it
+  function ramBarricade(world, m, xx, s) {
+    if (!world.barricades || !world.barricades.length || !world.fragments || !world.fragments.crush) return false;
+    let n = 0;
+    for (let yy = m.y - HEIGHT + 1; yy <= m.y; yy += 1) {
+      const c = PW.get(world, xx, yy), id = c & ID_MASK;
+      if (id !== M.CONCRETE && id !== M.STEEL) continue;
+      const b = PW.barricadeAt(world, xx, yy, c);
+      if (!b || b.side === passing) continue;
+      world.fragments.crush(xx, yy, PW.getOwner(world, xx, yy), xx - s * 20);
+      m.vx -= s * Math.min(Math.abs(m.vx), PW.mat.hardness[id] * RAM_COST);
+      n += 1;
+    }
+    if (n) m.rammed = (m.rammed || 0) + n;
+    return n > 0;
   }
   // (... and just the column it moves into, the rest of it clear already)
   function clearCol(world, xx, y, h = HEIGHT) {
@@ -338,6 +356,9 @@
       const s = Math.sign(dx), d = Math.abs(dx) >= 1 ? s : dx, nx = m.x + d;
       const lead = s > 0 ? Math.floor(nx) + HALF - 1 : Math.floor(nx) - HALF;
       if (Math.floor(nx) === Math.floor(m.x) || clearCol(world, lead, m.y)) { m.x = nx; dx -= d; continue; }
+      // (another side's barricade in its way - N104, the user's: it does not step over it, it breaks
+      // through it, slowed by what it breaks)
+      if (m.onGround && ramBarricade(world, m, lead, s)) break;
       let up = 0;
       if (m.onGround) for (let k = 1; k <= STEP_UP; k += 1) if (clear(world, nx, m.y - k)) { up = k; break; }
       if (up) { m.x = nx; m.y -= up; dx -= d; continue; }
