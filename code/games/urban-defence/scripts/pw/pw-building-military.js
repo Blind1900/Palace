@@ -415,25 +415,37 @@
       // Neutral compounds (deviceFacing 0) cover both directions until captured.
       const deviceFacing = options.deviceFacing ?? facing;
       const before = c.devices.length;
-      ornament.devices(c, style, [rearRoof], plan.slice(0, 2), deviceFacing, random, -facing);
+      // (N114: a launcher's or an interceptor's plate is wider than the old painted ones and wants its
+      // pods' room - the rear roof's middle is free where no crown stands on it, and a flat hangar
+      // roof takes one too)
+      const crowned = variant === 'command' || variant === 'fortress' || variant === 'bastion';
+      const deviceRoofs = [{ ...rearRoof, open: !crowned }];
+      if (hangar && !vault) deviceRoofs.push(hangarRoof);
+      ornament.devices(c, style, deviceRoofs, plan.slice(0, 2), deviceFacing, random, -facing);
       // Neutral compounds: the rear-roof device faces away from the compound's front and the hangar
       // turret guards its front, so each covers both ways. Where the rear roof took no device (a
       // crown or a turret tower stands there), the hangar mounts two turrets, one facing each way.
       const pair = !deviceFacing && c.devices.length === before;
       if (hangar && !vault) ornament.devices(c, style, [hangarRoof], pair ? ['turret', 'turret'] : ['turret'], deviceFacing || (pair ? 0 : facing), random, facing);
       else if (hangar) {
-        // Turret bases on the vault (N103): logical span [tx - 16, tx + 15], mirrored by X, at the
-        // crest's height on a steel mount built down to the curve of the roof.
+        // Turret bases on the vault (N103): logical span [tx - w/2, tx + w/2 - 1], mirrored by X, at
+        // the crest's height on a steel mount built down to the curve of the roof.
         const crest = wallTop - HANGAR.vaultRise;
-        const mount = (tx, turretFacing) => {
-          for (let lx = tx - 16; lx <= tx + 15; lx += 1) {
+        const mount = (tx, kind, turretFacing) => {
+          const w = ornament.PLATE_W[kind], l0 = tx - (w >> 1), l1 = l0 + w - 1;
+          for (let lx = l0; lx <= l1; lx += 1) {
             const u = (lx - hcx) / half, roof = wallTop - Math.round(HANGAR.vaultRise * Math.sqrt(Math.max(0, 1 - u * u)));
             for (let y = crest + 1; y < roof; y += 1) K.solid(c, X(lx), y, M.STEEL, tone(P.frame, 0.7), ROLE.DEVICE);
           }
-          ornament.DEVICE_DRAW.turret(c, P, Math.min(X(tx - 16), X(tx + 15)), crest, turretFacing);
+          ornament.DEVICE_DRAW[kind](c, P, Math.min(X(l0), X(l1)), crest, turretFacing);
         };
-        mount(Math.round(hcx) + 10, deviceFacing || facing);
-        if (pair) mount(Math.round(hcx) - 34, -facing);
+        mount(Math.round(hcx) + 10, 'turret', deviceFacing || facing);
+        if (pair) mount(Math.round(hcx) - 34, 'turret', -facing);
+        // (N114: the launcher or interceptor the rear roof had no room for stands on the vault too,
+        // well back from the turret - its pods' reach clear of the turret's head)
+        const placed = c.devices.slice(before).map((d) => d.kind);
+        const art = plan.slice(0, 2).find((k) => k !== 'turret' && !placed.includes(k));
+        if (art && !pair) mount(Math.round(hcx) - 80, art, deviceFacing || facing);
       }
     }
     // Extra cores in vaults under the floor.

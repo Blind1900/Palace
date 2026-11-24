@@ -349,8 +349,6 @@
   }
 
   // ---- Rooftop devices ----------------------------------------------------------------------------------
-  const DEVICE_STEEL = [70, 78, 86];
-  const ROLE_ACCENT = { turret: [239, 173, 103], launcher: [241, 126, 120], interceptor: [139, 217, 238] };
   // N103 (the user's turret redesign): the turret is no longer built into the roof - it stands on a
   // turret base, a low steel plate set on the flat of the roof (or of the land, or a tunnel room's
   // floor: pw-mounts lays those), its traversing ring on top. The turret itself is PS's (pw-defence):
@@ -359,81 +357,62 @@
   const BASE_W = 32, BASE_H = 6;
   // The plate's colour at (dx, dy) - dy up from its foot: a dark flange, the bolted body, a hazard
   // band, and the ring on top (the bearing dark in the middle, its lip lit at the ends).
-  function plateColor(dx, dy, tint = null) {
-    const end = dx === 0 || dx === BASE_W - 1;
+  function plateColor(dx, dy, tint = null, w = BASE_W) {
+    const end = dx === 0 || dx === w - 1;
     let c;
     if (dy === 0) c = [52, 56, 62];
-    else if (dy === BASE_H - 1) c = dx >= 6 && dx < BASE_W - 6 ? [70, 74, 80] : [124, 130, 138];
+    else if (dy === BASE_H - 1) c = dx >= 6 && dx < w - 6 ? [70, 74, 80] : [124, 130, 138];
     else if (dy === 3) c = ((dx + 64) >> 2) % 2 === 0 ? [214, 164, 40] : [40, 40, 44];
     else if (dy === 2 && dx % 6 === 3) c = [150, 156, 162];
     else c = dy === 4 ? [108, 114, 122] : [92, 98, 106];
     if (tint) c = mix(c, tint, 0.18);
     return end && dy !== 3 ? tone(c, 0.8) : c;
   }
-  function turret(c, P, x0, base, facing) {
-    for (let dy = 0; dy < BASE_H; dy += 1) for (let dx = 0; dx < BASE_W; dx += 1) orn(c, x0 + dx, base - dy, plateColor(dx, dy, P.ornament), ROLE.DEVICE);
-    const top = base - BASE_H + 1;
-    c.devices.push({ kind: 'turret', x: x0 + BASE_W / 2, y: top, facing, normal: [0, -1], base: { x0, x1: x0 + BASE_W - 1, y: top } });
-    return BASE_W;
+  // N114 (the user's): the missile launchers and interceptors follow the turret - stationary
+  // artillery built off a planted base, not vehicles - so a roof carries their plates, wider than a
+  // turret's, and PS's launcher or interceptor is seated on each (pw-mounts' sweep).
+  // (PS's turntables: launcher and Patriot 30, Iron Dome 22 - the plates a little wider)
+  const PLATE_W = { turret: BASE_W, launcher: 36, interceptor: 32 };
+  function plate(kind) {
+    const w = PLATE_W[kind];
+    return (c, P, x0, base, facing) => {
+      for (let dy = 0; dy < BASE_H; dy += 1) for (let dx = 0; dx < w; dx += 1) orn(c, x0 + dx, base - dy, plateColor(dx, dy, P.ornament, w), ROLE.DEVICE);
+      const top = base - BASE_H + 1;
+      c.devices.push({ kind, x: x0 + w / 2, y: top, facing, normal: [0, -1], base: { x0, x1: x0 + w - 1, y: top } });
+      return w;
+    };
   }
-  function launcher(c, P, x0, base, facing) {
-    const body = tone(P.frame, 0.8), w = 28;
-    for (let dy = 0; dy < 9; dy += 1) for (let dx = 0; dx < w; dx += 1) orn(c, x0 + dx, base - dy, dy === 8 ? P.ornament : lit(body, dx - w / 2, w / 2), ROLE.DEVICE);
-    // Two tubes raised at 45 degrees towards the enemy.
-    for (let k = 0; k < 24; k += 1) for (let t = 0; t < 7; t += 1) {
-      const x = x0 + (facing > 0 ? 4 + k : w - 5 - k) + (facing > 0 ? 0 : 0), y = base - 9 - k - t + 3;
-      const tip = k > 20;
-      orn(c, x, y, tip ? ROLE_ACCENT.launcher : t === 3 ? [50, 56, 60] : t < 3 ? [104, 112, 120] : DEVICE_STEEL, ROLE.DEVICE);
-    }
-    c.devices.push({ kind: 'launcher', x: x0 + w / 2, y: base - 30, facing });
-    return w;
-  }
-  function interceptor(c, P, x0, base, facing) {
-    const body = tone(P.frame, 0.8), w = 22;
-    for (let dy = 0; dy < 18; dy += 1) for (let dx = 0; dx < w; dx += 1) {
-      const hatch = dy > 12 && dy < 17 && dx % 6 > 1 && dx % 6 < 5;
-      orn(c, x0 + dx, base - dy, hatch ? ROLE_ACCENT.interceptor : dy === 17 ? P.ornament : lit(body, dx - w / 2, w / 2), ROLE.DEVICE);
-    }
-    // Radar mast and dish, centred on the 22-cell body (two cells wide so it mirrors exactly).
-    for (let dy = 18; dy < 30; dy += 1) { orn(c, x0 + 10, base - dy, DEVICE_STEEL, ROLE.DEVICE); orn(c, x0 + 11, base - dy, DEVICE_STEEL, ROLE.DEVICE); }
-    // The dish is a bowl seated on the mast top, its rim rising to either side; the feed arm
-    // holds the beacon over its centre.
-    for (let x = x0 + 2; x <= x0 + 19; x += 1) {
-      const dx = x - (x0 + 10.5);
-      const depth = Math.round(dx * dx / 16);
-      orn(c, x, base - 31 - depth, [196, 204, 212], ROLE.DEVICE);
-      orn(c, x, base - 30 - depth, DEVICE_STEEL, ROLE.DEVICE);
-    }
-    for (let dy = 32; dy < 37; dy += 1) { orn(c, x0 + 10, base - dy, DEVICE_STEEL, ROLE.DEVICE); orn(c, x0 + 11, base - dy, DEVICE_STEEL, ROLE.DEVICE); }
-    orn(c, x0 + 10, base - 37, BEACON); orn(c, x0 + 11, base - 37, BEACON);
-    c.devices.push({ kind: 'interceptor', x: x0 + 11, y: base - 30, facing });
-    return w;
-  }
-  const DEVICE_DRAW = { turret, launcher, interceptor };
-  const DEVICE_WIDTH = { turret: BASE_W, launcher: 28, interceptor: 22 };
+  const turret = plate('turret');
+  const DEVICE_DRAW = { turret, launcher: plate('launcher'), interceptor: plate('interceptor') };
+  const DEVICE_WIDTH = PLATE_W;
+  // (a launcher's pods and an interceptor's box overhang their plate as they lay: PS's ~60 cells
+  // ahead - no other device that near on the roof)
+  const DEVICE_GAP = { turret: 3, launcher: 60, interceptor: 60 };
   // Place devices on the highest, widest roofs, from the front edge, clear of crowns and each other.
   // facing 0 (neutral buildings) alternates the devices to cover both directions, starting with
   // `startFacing`.
   function devices(c, style, roofs, plan, facingOption, random, startFacing = 1) {
     const P = STYLES[style];
     const candidates = roofs.slice().sort((a, b) => a.y - b.y || (b.right - b.left) - (a.right - a.left));
-    const used = [];
+    // (the plates already on the building - an earlier call's - are kept clear of too: N114)
+    const used = (c.devices || []).filter((d) => d.base).map((d) => ({ x: d.base.x0, w: d.base.x1 - d.base.x0 + 1, y: d.base.y + BASE_H, gap: DEVICE_GAP[d.kind] || 3 }));
     for (const [deviceIndex, kind] of plan.entries()) {
       const facing = facingOption || (deviceIndex % 2 ? -startFacing : startFacing);
-      const w = DEVICE_WIDTH[kind];
+      const w = DEVICE_WIDTH[kind], gap = DEVICE_GAP[kind];
       let placed = false;
       for (const roof of candidates) {
-        const crownHalf = roof.top ? 30 : 0, mid = (roof.left + roof.right) / 2;
+        // (a top roof keeps its middle for a crown - unless it is one no crown stands on: roof.open)
+        const crownHalf = roof.top && !roof.open ? 30 : 0, mid = (roof.left + roof.right) / 2;
         const start = facing > 0 ? roof.right - w - 4 : roof.left + 4;
         for (let step = 0; step < 40 && !placed; step += 1) {
           const x = start - facing * step * 4;
           if (x < roof.left + 2 || x + w > roof.right - 2) break;
           if (crownHalf && x < mid + crownHalf && x + w > mid - crownHalf) continue;
-          if (used.some((u) => u.y === roof.y && x < u.x + u.w + 3 && x + w + 3 > u.x)) continue;
+          if (used.some((u) => u.y === roof.y && x < u.x + u.w + Math.max(gap, u.gap) && x + w + Math.max(gap, u.gap) > u.x)) continue;
           // (never over a roof's drain hatch, N64 - nor hard by it: the rain must reach it - N103)
           if ((c.hatches || []).some((h) => roof.y >= h.y0 - 2 && roof.y <= h.y1 + 2 && x < h.x1 + 8 && x + w + 8 > h.x0)) continue;
           DEVICE_DRAW[kind](c, P, x, roof.y - 1, facing);
-          used.push({ x, w, y: roof.y });
+          used.push({ x, w, y: roof.y, gap });
           placed = true;
         }
         if (placed) break;
@@ -442,5 +421,5 @@
   }
 
   PW.buildingOrnaments = { roof, crown, crownFor, devices, CROWNS, angel, lotus, sorin, dragonBody, DEVICE_DRAW, gothicPinnacle, asianEave,
-    plateColor, BASE_W, BASE_H };
+    plateColor, BASE_W, BASE_H, PLATE_W };
 })();

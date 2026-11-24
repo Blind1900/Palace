@@ -1,7 +1,8 @@
 (() => {
   'use strict';
 
-  const STORAGE_KEY = 'urban-defence-ui-lab';
+  // (N118: a fresh key - a theme saved before the phosphor look would hide it)
+  const STORAGE_KEY = 'urban-defence-ui-lab-n118';
   const ANCHORS = ['top-left', 'top-center', 'top-right', 'middle-left', 'middle-center', 'middle-right', 'bottom-left', 'bottom-center', 'bottom-right'];
   const SCREENS = [
     ['title', 'Title / main menu'], ['new-match', 'New match setup'], ['load', 'Load / save slots'], ['settings', 'Settings'],
@@ -12,9 +13,11 @@
     minimap: 'Minimap', timer: 'Match timer', fps: 'FPS'
   };
 
+  // (N118, the user's: phosphor green on black, a cold-war radar scope - the game's menu (pw-ui) in
+  // these tokens)
   const DEFAULT_THEME = {
-    bg: '#020202', text: '#d9d9d9', muted: '#7f7f7f', accent: '#b53201', highlight: '#ff9a4c', green: '#6ef08a',
-    core: '#ffa414', blue: '#6aa8ff', red: '#ff4d3d', panel: '#0b0807', panelBorder: '#6c3a21',
+    bg: '#020402', text: '#6ef08a', muted: '#3c9a58', accent: '#3c9a58', highlight: '#d8ffe0', green: '#6ef08a',
+    core: '#ffa414', blue: '#6aa8ff', red: '#ff4d3d', panel: '#030a05', panelBorder: '#3c9a58',
     panelAlpha: 0.82, fontScale: 1, titleSize: 150, lineHeight: 1.25, spacing: 0.06, borderWidth: 2, menuY: 52,
     font: 'Ithaca', textCase: 'uppercase', buttons: 'brackets', menuAlign: 'left'
   };
@@ -51,7 +54,8 @@
   }
 
   function defaults() {
-    return { version: 1, screen: 'title', resolution: '2560x1440', backdrop: 'city', theme: { ...DEFAULT_THEME }, layout: layoutFromPreset('classic') };
+    // (N119: text on a plain black screen - the backdrop off unless asked for)
+    return { version: 1, screen: 'title', resolution: '2560x1440', backdrop: 'none', theme: { ...DEFAULT_THEME }, layout: layoutFromPreset('classic') };
   }
 
   function sanitize(input) {
@@ -173,48 +177,43 @@
   const button = (label, attrs = '') => `<button type="button" class="game-button" ${attrs}>${label}</button>`;
   const go = target => `data-go="${target}"`;
 
+  // N118 (the user's): the start screen is the title and a START button, nothing else - the game's
+  // own (pw-ui) in the lab's tokens, phosphor green on black.
   function menuScreen() {
     return `<div class="screen-menu" data-region="menu">
-      <div class="eyebrow">PALACE · A PIXEL SIEGE</div>
-      <h2>URBAN<br>DEFENCE</h2>
-      <div class="subtitle">Every pixel is material. Build, mine, defend.</div>
-      <nav class="menu-list" aria-label="Main menu">
-        ${button('Continue', 'class="game-button selected" ' + go('hud'))}
-        ${button('New match', go('new-match'))}
-        ${button('Load game', go('load'))}
-        ${button('Tutorial', go('tutorial'))}
-        ${button('Settings', go('settings'))}
-        ${button('Quit to Palace')}
-      </nav></div>
-      <div class="screen-footer"><span>v0.1 PROTOTYPE</span><span>SEED 2417 · FULL MAP</span><span>PALACE / GAMES</span></div>`;
+      <h2>URBAN DEFENCE</h2>
+      <nav class="menu-list" aria-label="Start">
+        ${button('Start', 'class="game-button selected" ' + go('new-match'))}
+      </nav></div>`;
   }
 
   function select(name, options, selected) {
     return `<select name="${name}">${options.map(o => `<option${o === selected ? ' selected' : ''}>${o}</option>`).join('')}</select>`;
   }
 
+  // N118 (the user's): the game-mode menu - the match, the map size, the side, the aesthetic (R, B, P
+  // in place of asian, modern, gothic) - and no difficulty.
   function newMatchScreen() {
     return `<div class="form-screen panel" data-region="form">
-      <div class="eyebrow">NEW MATCH</div><h2>Match setup</h2>
-      <p class="screen-intro">Choose how you play and how the city is generated.</p>
+      <h2>Select mode</h2>
       <div class="form-grid">
-        <div class="field"><fieldset><legend>Player role</legend>
-          <label><input type="radio" name="role" checked> Commander (one faction)</label>
-          <label><input type="radio" name="role"> God-view builder</label>
-          <label><input type="radio" name="role"> Both</label></fieldset></div>
-        <div class="field"><fieldset><legend>Faction</legend>
-          <label><input type="radio" name="faction" checked> <span class="blue">West bloc</span></label>
-          <label><input type="radio" name="faction"> <span class="red">East bloc</span></label></fieldset></div>
-        <div class="field"><label>Building style</label>${select('style', ['Modern', 'Gothic', 'Asian', 'Mixed'], 'Mixed')}</div>
-        <div class="field"><label>Difficulty</label>${select('difficulty', ['Recruit', 'Regular', 'Veteran', 'Siege'], 'Regular')}</div>
-        <div class="field"><label>Map seed</label><div class="inline"><input value="2417" inputmode="numeric">${button('Random')}</div></div>
-        <div class="field"><label>Map width</label><div class="inline"><input type="range" min="800" max="4000" value="1100"><span>1100</span></div></div>
-        <div class="field full"><fieldset><legend>Win conditions</legend>
-          <label><input type="checkbox" checked> Destroy the enemy military core</label>
-          <label><input type="checkbox" checked> Enemy population collapse</label>
-          <label><input type="checkbox"> Hold the city for 30:00</label></fieldset></div>
+        <div class="field"><fieldset><legend>Match</legend>
+          <label><input type="radio" name="mode" checked> You vs computer</label>
+          <label><input type="radio" name="mode"> Computer vs computer</label>
+          <label><input type="radio" name="mode"> Gameplay test</label></fieldset></div>
+        <div class="field"><fieldset><legend>Side</legend>
+          <label><input type="radio" name="side" checked> Left</label>
+          <label><input type="radio" name="side"> Right</label></fieldset></div>
+        <div class="field"><fieldset><legend>Map size</legend>
+          <label><input type="radio" name="map"> Small <span class="muted">5-10 min</span></label>
+          <label><input type="radio" name="map" checked> Medium <span class="muted">10-20 min</span></label>
+          <label><input type="radio" name="map"> Large <span class="muted">20+ min</span></label></fieldset></div>
+        <div class="field"><fieldset><legend>Aesthetic</legend>
+          <label><input type="radio" name="look" checked> R</label>
+          <label><input type="radio" name="look"> B</label>
+          <label><input type="radio" name="look"> P</label></fieldset></div>
       </div>
-      <div class="screen-actions">${button('Start match', go('hud'))}${button('Back', go('title'))}</div></div>`;
+      <div class="screen-actions">${button('Back', go('title'))}${button('Start', go('hud'))}</div></div>`;
   }
 
   function loadScreen() {

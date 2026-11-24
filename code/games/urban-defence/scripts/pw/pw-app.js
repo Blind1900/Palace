@@ -49,7 +49,8 @@
       // Settlements first (pads, buildings, mines), then wild growth on the final ground, then cave
       // formations.
       { name: 'settlements', label: 'Founding the towns', when: () => wild() && PW.generateSettlements, run() {
-        PW.generateSettlements(world, layout, seed);
+        // (N115: the test's sides found their own; N118: the person's side in its chosen aesthetic)
+        PW.generateSettlements(world, layout, seed, { homes: !opts.test, style: opts.style || null });
         if (PW.bunkers) PW.bunkers.generate(world, layout, seed);
       } },
       { name: 'vegetation', label: 'Growing the wilds', when: () => wild() && PW.generateVegetation, run() {
@@ -199,6 +200,7 @@
   // Dig a raw tunnel box for a side: it joins that side's network if it touches one, otherwise it
   // starts a new network rooted here. Another side's developed lining blocks it.
   let devSpeed = 1, lastDig = '';
+  const TEST_BUILD_SPEED = 4;   // N115: the gameplay test builds four times as fast (the user's)
   function dig(side, x0, y0, x1, y1) {
     let net = null;
     for (let y = Math.min(y0, y1) - 2; y <= Math.max(y0, y1) + 2 && !net; y += 1) {
@@ -323,6 +325,8 @@
   // drive keys follow the selection.
   const unitPanel = document.getElementById('unit-panel');
   const TANK_NAMES = { modern: 'M1 ABRAMS', asian: 'TYPE 99', gothic: 'T-64' };
+  // (N118: in the game an aesthetic goes by its letter - R, B, P - the sandbox keeps the names)
+  const styleTag = (s) => (gameMode && PW.gameUI && PW.gameUI.STYLE_LETTER && PW.gameUI.STYLE_LETTER[s]) || (s || '').toUpperCase();
   const DEFENCE_NAMES = { launcher: 'ROCKET LAUNCHER', dome: 'IRON DOME', patriot: 'PATRIOT', turret: 'TURRET' };
   let selected = null;   // { kind: 'tank' | 'troop' | 'jet' | 'defence', t }
   // Every unit kind the selection knows (PS's modules, one API each): its list on the world,
@@ -395,7 +399,7 @@
       const m = selected.t, hp = Math.max(0, Math.round(m.hp ?? 100));
       const tone = hp < 30 ? 'grave' : hp < 60 ? 'hurt' : '';
       const state = !m.onGround ? (m.boosting ? 'boosting' : 'in the air') : (m.reload || 0) > 0.05 ? `reloading ${m.reload.toFixed(1)}s` : 'ready';
-      unitPanel.innerHTML = `<h3>MECH — ${(m.style || '').toUpperCase()} ${(m.side || '').toUpperCase()}</h3>` +
+      unitPanel.innerHTML = `<h3>MECH — ${styleTag(m.style)} ${(m.side || '').toUpperCase()}</h3>` +
         `<div>armour ${hp}/100 · ${state}</div><div class="bar"><i class="${tone}" style="width:${hp}%"></i></div>` +
         `<div>cannon <kbd>${m.mag ?? 0}/${m.ammo ?? 0}</kbd> · missiles <kbd>${m.missiles ?? 0}</kbd></div>` +
         `<div class="keys">` +
@@ -409,7 +413,7 @@
       const j = selected.t, hp = Math.max(0, Math.round(j.hp ?? 100));
       const tone = hp < 30 ? 'grave' : hp < 60 ? 'hurt' : '';
       const state = j.down ? 'going down' : j.onGround ? `rolling ${Math.round(j.v)}` : `${Math.round(j.v)} cells/s`;
-      unitPanel.innerHTML = `<h3>DRONE — ${(j.style || '').toUpperCase()} ${(j.side || '').toUpperCase()}</h3>` +
+      unitPanel.innerHTML = `<h3>DRONE — ${styleTag(j.style)} ${(j.side || '').toUpperCase()}</h3>` +
         `<div>airframe ${hp}/100 · ${state}</div><div class="bar"><i class="${tone}" style="width:${hp}%"></i></div>` +
         `<div>missiles <kbd>${j.missiles ?? 0}</kbd></div>` +
         `<div class="keys">` +
@@ -668,7 +672,9 @@
       charge('particles');
       if (PW.mining) PW.mining.step(world, DT);
       if (pipes) pipes.step();
-      if (repair) repair.step(DT);
+      // (N115: the test's build speed - the crews, the growth and the workings' clock, not the physics)
+      const build = world.buildSpeed || 1;
+      if (repair) repair.step(DT * build);
       // N103: a turret on every base that stands - in the game (the sandbox's roofs keep their bases
       // bare: it is the physics' bench; the capital lab shows them, silent)
       if (PW.mounts && gameMode) PW.mounts.step(world, { armed: !!match });
@@ -676,7 +682,7 @@
       if (PW.roadTunnels) PW.roadTunnels.step(world, DT * devSpeed);
       if (growth) growth.step(DT);
       // (seed cities grow at the dev speed, like the lab's controllable speeds)
-      if (capital) capital.step(DT * devSpeed);
+      if (capital) capital.step(DT * devSpeed * build);
       if (match) PW.game.step(match, DT);   // N6: the match's rules and its computer players
       life.step();
       charge('services');
@@ -807,9 +813,13 @@
 
   // N6: a match - the world the menu chose, made behind the loading screen, then the match's
   // rules and players set going on it, and the HUD and game bar over it.
+  // N115: the gameplay test - the sides' home towns are not built (each places its own starting
+  // capital) and everything is built four times as fast.
   async function startMatch(choice) {
     const ui = PW.gameUI;
-    await generateStaged({ seed: choice.seed, width: choice.width }, ui.loading);
+    const style = choice.style && choice.mode === 'versus' ? { side: choice.human, style: choice.style } : null;
+    await generateStaged({ seed: choice.seed, width: choice.width, test: !!choice.test, style }, ui.loading);
+    if (choice.test) world.buildSpeed = TEST_BUILD_SPEED;
     start();
     match = PW.game.create(world, { ...choice, app: window.pwApp });
     ui.attach(match, window.pwApp);

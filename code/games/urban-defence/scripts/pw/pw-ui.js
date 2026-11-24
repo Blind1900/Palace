@@ -65,65 +65,232 @@
     return el;
   };
 
-  // ---- The menu ------------------------------------------------------------------------------------
-  // A person against the computer (either side), or the computer against itself; the map (the full
-  // one, or a smaller one for a laptop); the seed. A URL can skip it (start=versus|watch, side=,
-  // map=, seed=) - the suites and a shared link do.
-  const MAPS = { standard: 36096, laptop: 24064 };
+  // ---- The start screen and the mode menu (N118) ---------------------------------------------------
+  // The user's: a start screen with a START button only, then the game-mode menu - the match, the map
+  // size, the side, the aesthetic (R, B and P in place of the styles' names) - no difficulty. Phosphor
+  // green text on a plain black screen (N119: no radar behind it, no scanlines, no glow): the UI lab's
+  // layout and pixel font in the references' colours, their corner-bracket frame and centre line
+  // drawn straight and even. A URL still skips
+  // it all (start=versus|watch|test, side=, map=, style=, seed=) - the suites and a shared link do.
+  // (maps: wide rectangles, four thousand cells tall - Terraria's shape; the old names still read)
+  const MAPS = { small: 24064, medium: 36096, large: 48128 };
+  const MAP_ALIAS = { laptop: 'small', standard: 'medium' };
+  const MAP_TIME = { small: '5-10 MIN', medium: '10-20 MIN', large: '20+ MIN' };
+  // (the aesthetics by letter - the user's: R for asian, B for modern, P for gothic)
+  const STYLE_LETTER = { asian: 'R', modern: 'B', gothic: 'P' };
+  const STYLE_OF = { R: 'asian', B: 'modern', P: 'gothic' };
+  const MENU_CSS = `
+  #gm-menu, #gm-loading { --ph: #6ef08a; --ph-dim: #3c9a58; --ph-faint: #173f26; --ph-bg: #020402;
+    position: fixed; inset: 0; z-index: 20; background: var(--ph-bg); color: var(--ph); font: 22px 'Ithaca', Consolas, monospace;
+    letter-spacing: 0.08em; text-transform: uppercase; -webkit-font-smoothing: none; user-select: none; }
+  .ph-frame { position: absolute; inset: 4vh 4vw; }
+  .ph-frame i { position: absolute; width: 56px; height: 56px; border-color: var(--ph); border-style: solid; border-width: 0; }
+  .ph-frame i.tl { left: 0; top: 0; border-left-width: 3px; border-top-width: 3px; }
+  .ph-frame i.tr { right: 0; top: 0; border-right-width: 3px; border-top-width: 3px; }
+  .ph-frame i.bl { left: 0; bottom: 0; border-left-width: 3px; border-bottom-width: 3px; }
+  .ph-frame i.br { right: 0; bottom: 0; border-right-width: 3px; border-bottom-width: 3px; }
+  .ph-frame b.rule { position: absolute; left: 80px; right: 80px; height: 3px; background: var(--ph-dim); }
+  .ph-frame b.rule.top { top: 0; } .ph-frame b.rule.bottom { bottom: 0; }
+  #gm-menu .ph-screen { position: absolute; inset: 0; display: none; }
+  #gm-menu .ph-screen.on { display: block; }
+  #gm-menu h1 { position: absolute; left: 0; right: 0; top: 13vh; margin: 0; text-align: center; font: 13vh 'Ithaca', Consolas, monospace;
+    letter-spacing: 0.14em; color: var(--ph); font-weight: normal; }
+  #gm-menu .ph-line { position: absolute; left: 0; right: 0; top: 56vh; display: flex; align-items: center; gap: 28px; }
+  #gm-menu .ph-line b { flex: 1; height: 3px; background: var(--ph-dim); }
+  #gm-menu button { font: inherit; letter-spacing: inherit; text-transform: inherit; color: var(--ph); background: none; border: 0;
+    padding: 4px 6px; cursor: pointer; box-shadow: none; }
+  #gm-menu button:before { content: '[ '; color: var(--ph-dim); }
+  #gm-menu button:after { content: ' ]'; color: var(--ph-dim); }
+  #gm-menu button:hover, #gm-menu button:focus-visible { color: #d8ffe0; outline: none; }
+  #gm-menu button:hover:before, #gm-menu button:hover:after, #gm-menu button:focus-visible:before, #gm-menu button:focus-visible:after { color: var(--ph); }
+  #gm-menu button.start { font-size: 44px; animation: ph-pulse 1.6s steps(2) infinite; }
+  @keyframes ph-pulse { 50% { color: var(--ph-dim); } }
+  #gm-menu .ph-mode { position: absolute; inset: 9vh 8vw 9vh 8vw; display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: auto 1fr auto;
+    column-gap: 7vw; row-gap: 3vh; }
+  #gm-menu .ph-mode h2 { grid-column: 1 / 3; margin: 0; font: 48px 'Ithaca', Consolas, monospace; letter-spacing: 0.14em; font-weight: normal; }
+  #gm-menu .ph-col { display: flex; flex-direction: column; gap: 3.2vh; min-width: 0; }
+  #gm-menu .ph-group > span { display: block; color: var(--ph); border-bottom: 3px solid var(--ph-dim); padding-bottom: 6px; margin-bottom: 10px; }
+  #gm-menu .ph-opts { display: flex; flex-direction: column; gap: 4px; }
+  #gm-menu .ph-opts.row { flex-direction: row; flex-wrap: wrap; gap: 4px 18px; }
+  #gm-menu .ph-opt { display: grid; grid-template-columns: 26px auto 1fr; align-items: center; column-gap: 12px; cursor: pointer; padding: 2px 0; }
+  #gm-menu .ph-opt:before { content: ''; width: 14px; height: 14px; border: 3px solid var(--ph-dim); justify-self: center; }
+  #gm-menu .ph-opt.on:before { background: var(--ph); border-color: var(--ph); }
+  #gm-menu .ph-opt:hover { color: #d8ffe0; }
+  #gm-menu .ph-opt small { grid-column: 2 / 4; color: var(--ph-dim); font-size: 16px; }
+  #gm-menu .ph-opt canvas { image-rendering: pixelated; justify-self: start; }
+  #gm-menu .ph-styles { display: flex; gap: 22px; }
+  #gm-menu .ph-style { display: flex; flex-direction: column; align-items: center; gap: 6px; cursor: pointer; padding: 8px 10px 4px;
+    border: 3px solid transparent; }
+  #gm-menu .ph-style.on { border-color: var(--ph); }
+  #gm-menu .ph-style b { font: 34px 'Ithaca', Consolas, monospace; font-weight: normal; }
+  #gm-menu .ph-style canvas { image-rendering: pixelated; width: 96px; height: 128px; }
+  #gm-menu .ph-foot { grid-column: 1 / 3; display: flex; justify-content: space-between; align-items: center; }
+  #gm-menu .ph-foot .go { font-size: 34px; }
+  #gm-menu .ph-hidden { visibility: hidden; }
+  #gm-loading .ph-load { position: absolute; left: 20vw; right: 20vw; top: 44vh; }
+  #gm-loading .ph-load h2 { margin: 0 0 18px; font: 40px 'Ithaca', Consolas, monospace; letter-spacing: 0.14em; font-weight: normal; }
+  #gm-loading .ph-bar { height: 18px; border: 3px solid var(--ph-dim); padding: 3px; }
+  #gm-loading .ph-bar i { display: block; height: 100%; width: 0; background: var(--ph);
+    background-image: repeating-linear-gradient(90deg, transparent 0 9px, var(--ph-bg) 9px 12px); }
+  #gm-loading [data-label] { margin-top: 12px; color: var(--ph-dim); font-size: 18px; }
+  `;
+  const FRAME = '<div class="ph-frame"><i class="tl"></i><i class="tr"></i><i class="bl"></i><i class="br"></i><b class="rule top"></b><b class="rule bottom"></b></div>';
+  // A style's look in phosphor: one of its towers, drawn from the building kit, each cell's light as
+  // the menu's green.
+  function stylePreview(canvas, style) {
+    const T = PW.buildingTypes;
+    if (!T || !T.population) return;
+    let c = null;
+    try { c = T.population({ style, level: 3, variant: 'slab', seed: 11, facing: 1, storeys: 4 }); } catch (e) { return; }
+    const x0 = Math.max(0, c.body.left - 4), x1 = Math.min(c.width - 1, c.body.right + 4), y1 = c.ground;
+    let y0 = 0;
+    for (; y0 < y1; y0 += 1) { let any = false; for (let x = x0; x <= x1 && !any; x += 1) if (c.mat[y0 * c.width + x]) any = true; if (any) break; }
+    const w = x1 - x0 + 1, h = y1 - y0 + 1;
+    canvas.width = w; canvas.height = h;
+    const ctx = canvas.getContext('2d'), img = ctx.createImageData(w, h);
+    for (let y = 0; y < h; y += 1) for (let x = 0; x < w; x += 1) {
+      const i = (y + y0) * c.width + (x + x0), o = (y * w + x) * 4;
+      const p = c.mat[i] ? c.paint[i] : c.back[i];
+      if (!p) continue;
+      const [r, g, b] = PW.unpack(p);
+      const lum = (0.3 * r + 0.59 * g + 0.11 * b) / 255 * (c.mat[i] ? 1 : 0.45);
+      const k = Math.round(Math.min(1, 0.25 + lum * 1.1) * 4) / 4;   // (four steps of phosphor)
+      img.data[o] = 110 * k; img.data[o + 1] = 240 * k; img.data[o + 2] = 138 * k; img.data[o + 3] = 255;
+    }
+    ctx.putImageData(img, 0, 0);
+    canvas.style.width = `${Math.round(128 * w / h)}px`;
+  }
+  // A map size as its own shape: the world a wide strip, the land's line across it.
+  function mapPreview(canvas, width) {
+    const w = Math.round(width / 300), h = Math.round(4096 / 300);
+    canvas.width = w; canvas.height = h;
+    canvas.style.width = `${w * 2}px`; canvas.style.height = `${h * 2}px`;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#173f26'; ctx.fillRect(0, 0, w, h);
+    ctx.fillStyle = '#6ef08a';
+    for (let x = 0; x < w; x += 1) {
+      const g = Math.round(h * 0.42 + Math.sin(x * 0.21) * 1.2 + Math.sin(x * 0.07 + 1) * 1.6);
+      ctx.fillRect(x, g, 1, 1);
+    }
+    ctx.fillRect(0, 0, w, 1); ctx.fillRect(0, h - 1, w, 1); ctx.fillRect(0, 0, 1, h); ctx.fillRect(w - 1, 0, 1, h);
+  }
   function menu({ seed, params, onStart }) {
     style();
-    const choice = { mode: 'versus', human: 'left', map: 'standard', seed };
+    const choice = { mode: 'versus', human: 'left', map: 'medium', seed, test: false, style: null };
     const fromUrl = params.get('start');
+    const mapOf = (name) => (MAPS[name] ? name : MAP_ALIAS[name] || 'medium');
     if (fromUrl) {
+      // (N115: start=test - the gameplay test: you against the computer, each placing its capital)
       choice.mode = fromUrl === 'watch' ? 'watch' : 'versus';
+      choice.test = fromUrl === 'test';
       choice.human = params.get('side') === 'right' ? 'right' : 'left';
-      choice.map = MAPS[params.get('map')] ? params.get('map') : 'standard';
+      choice.map = mapOf(params.get('map'));
+      const st = params.get('style');
+      choice.style = st ? (STYLE_OF[st.toUpperCase()] || (STYLE_LETTER[st] ? st : null)) : null;
       onStart({ ...choice, width: MAPS[choice.map] });
       return;
     }
-    const root = make('div', { id: 'gm-menu', class: 'gm' });
-    root.innerHTML = `<div class="card">
-      <h1>URBAN DEFENCE</h1>
-      <div class="sub">Destroy the enemy. Raise your capital over their ruins.</div>
-      <div class="row"><span>MATCH</span><button data-mode="versus" class="on">YOU vs COMPUTER</button><button data-mode="watch">COMPUTER vs COMPUTER</button></div>
-      <div class="row" data-for="side"><span>YOUR SIDE</span><button data-side="left" class="on">LEFT</button><button data-side="right">RIGHT</button></div>
-      <div class="row"><span>MAP</span><button data-map="standard" class="on">STANDARD</button><button data-map="laptop">LAPTOP (SMALLER)</button></div>
-      <div class="row"><span>SEED</span><input id="gm-seed" value="${seed}"><button data-act="reroll">NEW</button></div>
-      <button class="go" data-act="start">START</button>
-      <div class="sub" style="margin:14px 0 0;font-size:14px">Click selects · one unit: A/D move, Space jumps, clicks fire at the mouse ·
-        Shift+drag boxes · right-click sends a group · P pauses · F3 costs ·
-        <a href="beta-legacy.html" style="color:#7e9a70">old beta</a> · <a href="pixel-world.html" style="color:#7e9a70">sandbox</a></div>
-    </div>`;
+    if (!document.getElementById('gm-menu-css')) {
+      const el = document.createElement('style');
+      el.id = 'gm-menu-css'; el.textContent = MENU_CSS;
+      document.head.appendChild(el);
+    }
+    const root = make('div', { id: 'gm-menu' });
+    const opt = (attr, value, label, small = '', extra = '') => `<div class="ph-opt" data-${attr}="${value}" role="radio" tabindex="0">${extra}<span>${label}</span>${small ? `<small>${small}</small>` : ''}</div>`;
+    root.innerHTML = `${FRAME}
+      <section class="ph-screen ph-title on" data-screen="title">
+        <h1>URBAN DEFENCE</h1>
+        <div class="ph-line"><b></b><button class="start" data-act="enter">START</button><b></b></div>
+      </section>
+      <section class="ph-screen" data-screen="mode">
+        <div class="ph-mode">
+          <h2>SELECT MODE</h2>
+          <div class="ph-col">
+            <div class="ph-group"><span>MATCH</span><div class="ph-opts">
+              ${opt('mode', 'versus', 'YOU VS COMPUTER', 'Destroy the enemy, raise your capital over its ruins')}
+              ${opt('mode', 'watch', 'COMPUTER VS COMPUTER', 'Watch - take either side when you like')}
+              ${opt('mode', 'test', 'GAMEPLAY TEST', 'Place your own starting capital - builds 4x as fast')}
+            </div></div>
+            <div class="ph-group"><span>MAP SIZE</span><div class="ph-opts">
+              ${Object.keys(MAPS).map((k) => opt('map', k, k.toUpperCase(), MAP_TIME[k], '')).join('')}
+            </div></div>
+          </div>
+          <div class="ph-col">
+            <div class="ph-group" data-for="side"><span>SIDE</span><div class="ph-opts row">
+              ${opt('side', 'left', 'LEFT')}${opt('side', 'right', 'RIGHT')}
+            </div></div>
+            <div class="ph-group" data-for="style"><span>AESTHETIC</span><div class="ph-styles">
+              ${['R', 'B', 'P'].map((L) => `<div class="ph-style" data-style="${STYLE_OF[L]}" role="radio" tabindex="0"><canvas></canvas><b>${L}</b></div>`).join('')}
+            </div></div>
+          </div>
+          <div class="ph-foot"><button data-act="back">BACK</button><button class="go" data-act="start">START</button></div>
+        </div>
+      </section>`;
     document.body.appendChild(root);
-    const pick = (attr, value) => root.querySelectorAll(`[data-${attr}]`).forEach((b) => b.classList.toggle('on', b.dataset[attr] === value));
-    root.addEventListener('click', (event) => {
-      const b = event.target.closest('button');
-      if (!b) return;
-      if (b.dataset.mode) {
-        choice.mode = b.dataset.mode; pick('mode', choice.mode);
-        root.querySelector('[data-for="side"]').style.visibility = choice.mode === 'versus' ? 'visible' : 'hidden';
-      }
-      if (b.dataset.side) { choice.human = b.dataset.side; pick('side', choice.human); }
-      if (b.dataset.map) { choice.map = b.dataset.map; pick('map', choice.map); }
-      if (b.dataset.act === 'reroll') root.querySelector('#gm-seed').value = (Math.random() * 1e9) >>> 0;
-      if (b.dataset.act === 'start') {
-        choice.seed = Number(root.querySelector('#gm-seed').value) || ((Math.random() * 1e9) >>> 0);
-        root.remove();
-        onStart({ ...choice, width: MAPS[choice.map] });
-      }
-    });
+    // (each map size drawn to its own width, beside its name)
+    root.querySelectorAll('.ph-opt[data-map]').forEach((el) => { const cv = document.createElement('canvas'); el.insertBefore(cv, el.querySelector('small')); mapPreview(cv, MAPS[el.dataset.map]); });
+    root.querySelectorAll('.ph-style').forEach((el) => stylePreview(el.querySelector('canvas'), el.dataset.style));
+    // (the side's aesthetic: the one the world's dice give it, until chosen)
+    const pickAll = () => {
+      root.querySelectorAll('[data-mode]').forEach((e) => e.classList.toggle('on', e.dataset.mode === (choice.test ? 'test' : choice.mode)));
+      root.querySelectorAll('[data-map]').forEach((e) => e.classList.toggle('on', e.dataset.map === choice.map));
+      root.querySelectorAll('[data-side]').forEach((e) => e.classList.toggle('on', e.dataset.side === choice.human));
+      root.querySelectorAll('[data-style]').forEach((e) => e.classList.toggle('on', e.dataset.style === choice.style));
+      // (watching, no side is the person's - nor an aesthetic)
+      for (const g of root.querySelectorAll('[data-for]')) g.classList.toggle('ph-hidden', choice.mode === 'watch');
+    };
+    const show = (name) => {
+      root.querySelectorAll('.ph-screen').forEach((s) => s.classList.toggle('on', s.dataset.screen === name));
+      const first = root.querySelector(`[data-screen="${name}"] ${name === 'title' ? 'button' : '.go'}`);
+      if (first) first.focus();
+    };
+    const begin = () => {
+      root.remove();
+      document.removeEventListener('keydown', onKey);
+      onStart({ ...choice, width: MAPS[choice.map] });
+    };
+    const act = (el) => {
+      if (!el) return;
+      if (el.dataset.act === 'enter') show('mode');
+      else if (el.dataset.act === 'back') show('title');
+      else if (el.dataset.act === 'start') begin();
+      else if (el.dataset.mode) { choice.test = el.dataset.mode === 'test'; choice.mode = choice.test ? 'versus' : el.dataset.mode; }
+      else if (el.dataset.map) choice.map = el.dataset.map;
+      else if (el.dataset.side) choice.human = el.dataset.side;
+      else if (el.dataset.style) choice.style = el.dataset.style;
+      pickAll();
+    };
+    root.addEventListener('click', (event) => act(event.target.closest('button, .ph-opt, .ph-style')));
+    // (keys: Enter or Space on the start screen, or on what has the focus; Esc back)
+    const onKey = (event) => {
+      if (!root.isConnected) return;
+      const onTitle = root.querySelector('[data-screen="title"]').classList.contains('on');
+      if (event.key === 'Enter' || event.key === ' ') {
+        const f = document.activeElement && root.contains(document.activeElement) ? document.activeElement : null;
+        act(onTitle ? root.querySelector('[data-act="enter"]') : f || root.querySelector('[data-act="start"]'));
+        event.preventDefault();
+      } else if (event.key === 'Escape' && !onTitle) show('title');
+    };
+    document.addEventListener('keydown', onKey);
+    pickAll();
+    show('title');
   }
 
   // ---- The loading screen --------------------------------------------------------------------------
   let loadingEl = null;
   function loading(fraction, label) {
     style();
+    if (!document.getElementById('gm-menu-css')) {
+      const el = document.createElement('style');
+      el.id = 'gm-menu-css'; el.textContent = MENU_CSS;
+      document.head.appendChild(el);
+    }
     if (!loadingEl) {
-      loadingEl = make('div', { id: 'gm-loading', class: 'gm' }, `<div class="card"><h2>MAKING THE WORLD</h2>
-        <div class="bar"><i></i></div><div class="sub" data-label></div></div>`);
+      loadingEl = make('div', { id: 'gm-loading' }, `${FRAME}<div class="ph-load"><h2>MAKING THE WORLD</h2>
+        <div class="ph-bar"><i></i></div><div data-label></div></div>`);
       document.body.appendChild(loadingEl);
     }
-    loadingEl.querySelector('.bar i').style.width = `${Math.round(fraction * 100)}%`;
+    loadingEl.querySelector('.ph-bar i').style.width = `${Math.round(fraction * 100)}%`;
     loadingEl.querySelector('[data-label]').textContent = label;
     if (fraction >= 1) { loadingEl.remove(); loadingEl = null; }
   }
@@ -139,6 +306,10 @@
     { id: 'seed:military', label: 'SEED MILITARY', tip: 'Plant a military seed in your vision' },
     // N103: a turret set on its base on flat ground (or a tunnel room's floor) in your vision
     { id: 'turret', label: 'TURRET 60', tip: 'Set a turret on its base on flat ground in your vision (60 HM)' },
+    // N114: the missile artillery, set on a base like a turret - out under the sky
+    { id: 'art:launcher', label: 'ROCKETS 70+15', tip: 'Set a rocket launcher on its base on flat ground open to the sky, in your vision (70 HM, 15 SM)' },
+    { id: 'art:dome', label: 'IRON DOME 90+15', tip: 'Set an Iron Dome on its base on flat ground open to the sky, in your vision (90 HM, 15 SM)' },
+    { id: 'art:patriot', label: 'PATRIOT 120+20', tip: 'Set a Patriot on its base on flat ground open to the sky, in your vision (120 HM, 20 SM)' },
     // N116: no city levels by itself - click the one to raise, and pay; HM rushes a tunnel's works
     { id: 'upgrade', label: 'UPGRADE', tip: 'Click one of your cities to raise it a level (HM by its kind and level)' },
     { id: 'rush', label: 'RUSH TUNNEL 50', tip: 'Click one of your tunnels: its next 4 minutes of growth in 1 (50 HM)' },
@@ -161,6 +332,8 @@
     bar = make('div', { id: 'gm-bar', class: 'gm' });
     alerts = make('div', { id: 'gm-alerts', class: 'gm' });
     document.body.append(top, bar, alerts);
+    // (N115: the test opens with the capital seed in hand - the side's starting capital)
+    gameTool = match.phase === 'placing' && match.human ? 'seed:capital' : 'select';
     renderBar();
     top.addEventListener('click', onTopClick);
     bar.addEventListener('click', onBarClick);
@@ -189,7 +362,7 @@
       rates.at = match.clock; rates.last = p;
     }
     const rate = (r) => (rates.perMin[r] === undefined ? '' : ` <i>${rates.perMin[r] >= 0 ? '+' : ''}${fmt(rates.perMin[r])}/m</i>`);
-    top.querySelector('[data-info]').innerHTML = `<span class="side">${side.toUpperCase()} · ${st.style.toUpperCase()}${match.human === side ? ' (YOU)' : ' (COMPUTER)'}</span>` +
+    top.querySelector('[data-info]').innerHTML = `<span class="side">${side.toUpperCase()} · ${STYLE_LETTER[st.style] || st.style.toUpperCase()}${match.human === side ? ' (YOU)' : ' (COMPUTER)'}</span>` +
       `<span class="res">HM <b>${fmt(p.hm)}</b>${rate('hm')}</span><span class="res">SM <b>${fmt(p.sm)}</b>${rate('sm')}</span>` +
       `<span class="res">WATER <b>${fmt(p.water)}</b>${rate('water')}</span><span class="res">POP <b>${fmt(p.pop)}</b></span>` +
       `<span class="res">WORKERS <b>${fmt(p.workers)}</b></span>`;
@@ -216,11 +389,11 @@
       fpsSum += app.fps(); fpsN += 1;
       if (fpsN >= 20) {
         slowTold = true;
-        if (fpsSum / fpsN < 40 && app.world.width > MAPS.laptop) PW.game.alert(match, null, `Running at ${Math.round(fpsSum / fpsN)} fps here: for a smoother game start a new match on the LAPTOP (SMALLER) map`, 'bad');
+        if (fpsSum / fpsN < 40 && app.world.width > MAPS.small) PW.game.alert(match, null, `Running at ${Math.round(fpsSum / fpsN)} fps here: for a smoother game start a new match on the SMALL map`, 'bad');
       }
     }
     // (the seed and deploy tools are for the side a person plays)
-    bar.querySelectorAll('[data-tool^="seed:"], [data-tool="turret"], [data-tool="upgrade"], [data-tool="rush"], [data-deploy]').forEach((b) => { if (!match.human) b.disabled = true; else if (b.dataset.tool) b.disabled = false; });
+    bar.querySelectorAll('[data-tool^="seed:"], [data-tool^="art:"], [data-tool="turret"], [data-tool="upgrade"], [data-tool="rush"], [data-deploy]').forEach((b) => { if (!match.human) b.disabled = true; else if (b.dataset.tool) b.disabled = false; });
     refreshDeploys();
     renderSel();
   }
@@ -292,8 +465,10 @@
     if (event.button === 0 && gameTool.startsWith('seed:')) {
       if (!match.human) return true;
       const kind = gameTool.slice(5);
-      const r = PW.game.seed(match, match.human, kind, p.x);
-      if (PW.notify) PW.notify.flash(r.ok ? `${kind} seed planted` : `Seed refused: ${r.note}`, r.ok ? 'good' : 'bad', 2.5);
+      // (N115: the test's opening - the capital seed in hand is the side's starting capital)
+      const first = match.phase === 'placing' && kind === 'capital';
+      const r = first ? PW.game.placeStart(match, match.human, p.x) : PW.game.seed(match, match.human, kind, p.x);
+      if (PW.notify) PW.notify.flash(r.ok ? (first ? 'Your starting capital is placed' : `${kind} seed planted`) : `Seed refused: ${r.note}`, r.ok ? 'good' : 'bad', 2.5);
       if (r.ok) setTool('select');
       return true;
     }
@@ -301,6 +476,15 @@
       if (!match.human) return true;
       const r = PW.game.placeTurret(match, match.human, p.x, p.y);
       if (PW.notify) PW.notify.flash(r.ok ? 'Turret set on its base' : `Turret: ${r.note}`, r.ok ? 'good' : 'bad', 2.5);
+      if (r.ok) setTool('select');
+      return true;
+    }
+    // N114: a launcher or an interceptor set on its base
+    if (event.button === 0 && gameTool.startsWith('art:')) {
+      if (!match.human) return true;
+      const type = gameTool.slice(4), A = PW.game.ARTILLERY[type];
+      const r = PW.game.placeArtillery(match, match.human, type, p.x);
+      if (PW.notify) PW.notify.flash(r.ok ? `${A.label} set on its base` : `${A.label}: ${r.note}`, r.ok ? 'good' : 'bad', 2.5);
       if (r.ok) setTool('select');
       return true;
     }
@@ -345,6 +529,13 @@
       if (PW.notify) PW.notify.cursor(!sees ? 'Beyond your vision' : can.ok ? 'Set a turret here (flat ground)' : `Turret: ${can.note}`, sees && can.ok ? '' : 'bad');
       return;
     }
+    if (gameTool.startsWith('art:') && match.human) {
+      const type = gameTool.slice(4), A = PW.game.ARTILLERY[type];
+      const sees = !PW.vision || PW.vision.sees(match.world, match.human, Math.round(p.x));
+      const can = PW.game.canArtillery(match, match.human, type);
+      if (PW.notify) PW.notify.cursor(!sees ? 'Beyond your vision' : can.ok ? `Set ${A.label.toLowerCase()} here (flat ground, open sky)` : `${A.label}: ${can.note}`, sees && can.ok ? '' : 'bad');
+      return;
+    }
     if (gameTool === 'upgrade' && match.human) {
       const city = PW.game.cityAt(match, p.x, match.human);
       const can = PW.game.canUpgrade(match, match.human, city);
@@ -361,6 +552,12 @@
       return;
     }
     if (!gameTool.startsWith('seed:') || !match.human) return;
+    if (match.phase === 'placing') {
+      const [a, b] = PW.game.thirdOf(match.world, match.human), inThird = p.x >= a && p.x <= b;
+      if (PW.notify) PW.notify.cursor(gameTool !== 'seed:capital' ? 'Place your starting capital first (SEED CAPITAL)'
+        : inThird ? 'Start your capital here' : `Your capital starts in the ${match.human} third of the map`, gameTool === 'seed:capital' && inThird ? '' : 'bad');
+      return;
+    }
     const sees = !PW.vision || PW.vision.sees(match.world, match.human, Math.round(p.x));
     if (PW.notify) PW.notify.cursor(sees ? `Plant a ${gameTool.slice(5)} seed here` : 'Beyond your vision', sees ? '' : 'bad');
   }
@@ -569,5 +766,5 @@
   }
 
   PW.gameUI = { menu, loading, attach, pointerDown, pointerMove, pointerUp, key, tookControl, drawWorld, setTool,
-    tool: () => gameTool, command: () => cmd };
+    tool: () => gameTool, command: () => cmd, STYLE_LETTER };
 })();

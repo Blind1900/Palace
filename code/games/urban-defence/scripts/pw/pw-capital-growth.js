@@ -16,6 +16,7 @@
   const GROW_EVERY = 3.2;        // growth-seconds between a city's actions
   const MAX_LEVEL = 7;
   const UNLOCK = 5;              // N44: capitals cross water / climb mountains from this level
+  const TUNNEL_LEVEL = 3;        // the user's: a seed's city bores its road through a mountain from this level
   const TUNNEL_MAX = 560;        // N3: longest drive the crews bore through a mountain
   const TUNNEL_CLEAR = 38;       // ...headroom over its floor: the tallest hull and its margin
   const FARM_BRIDGE_LEVEL = 3;   // N46: farms bridge small water from this level...
@@ -48,6 +49,7 @@
     const COST_HM = { lot: 24, level: 50, mil: 40 };
     const RESERVE_HM = 60;       // the war chest the growth never spends into
     let manual = false;          // N116: in a match the levels are bought by hand (see upgrade)
+    let factionFacing = false;   // N115: in a match a side's military faces the enemy's end (canvasFor)
     const purseOf = (city) => (city && city.faction && world.stock && world.stock[city.faction]) || null;
     function pay(city, kind) {
       const purse = purseOf(city);
@@ -202,7 +204,11 @@
     function canvasFor(city, lot) {
       const level = lot.type === 'military' ? (lot.variant === 'tower' ? Math.max(1, Math.min(6, lot.level)) : Math.max(2, Math.min(5, 1 + lot.level))) :
         lot.type === 'farm' ? Math.max(1, Math.min(7, lot.level)) : Math.max(1, Math.min(7, lot.level));   // N69: farms reach as high as the rest
-      const opts = { style: city.style, level, variant: lot.variant, seed: lot.seedN, facing: lot.side === 'left' ? 1 : -1 };
+      // (N115, the user's: in a match a side's military buildings face the enemy's end - the left
+      // side's right, the right side's left - wherever they stand in their city)
+      const toFoe = factionFacing && (lot.type === 'military' || lot.type === 'core') && (city.faction === 'left' || city.faction === 'right');
+      const facing = toFoe ? (city.faction === 'left' ? 1 : -1) : lot.side === 'left' ? 1 : -1;
+      const opts = { style: city.style, level, variant: lot.variant, seed: lot.seedN, facing };
       if (lot.type === 'population' && lot.ring >= 0) opts.storeys = skylineStoreys(level);
       // N33: the capital's seat houses the MAIN core - the heart of the side's core tree.
       if (city.kind === 'capital' && lot.ring === -1 && lot.type === 'population') opts.mainCore = true;
@@ -549,7 +555,10 @@
       return Math.max(4, MAX_LEVEL - (rank - 1));
     }
 
-    function drop(xIn, kind, style, faction) {
+    // (opts.start - N115's gameplay test: a side's STARTING capital, its main the core bunker - the
+    // orb in its pit under the floating armoured block - standing fixed as a home town's does, the
+    // rings growing round it; a later capital's main is the capital building, as ever)
+    function drop(xIn, kind, style, faction, opts = {}) {
       const x = Math.round(xIn);
       if (x < 120 || x > world.width - 120) return { ok: false, note: 'off the map' };
       const b = barrierIn(x - 40, x + 40);
@@ -586,13 +595,15 @@
       // N2: the seed grows a core with a LEVEL-1 building - the seat is born modest
       // (core and gift first, the body raised by the crews) and re-seats grander with
       // every level-up, to its rank's cap (N33).
-      const main = { type: kind === 'capital' ? 'population' : kind, level: 1, ring: -1, side: 'right',
-        bornLevel: 1, variant: kind === 'capital' ? 'offset' : kind === 'farm' ? 'homestead' : 'compound',
+      const start = kind === 'capital' && !!opts.start;
+      const main = { type: start ? 'core' : kind === 'capital' ? 'population' : kind, level: 1, ring: -1, side: 'right',
+        bornLevel: 1, variant: start ? 'core' : kind === 'capital' ? 'offset' : kind === 'farm' ? 'homestead' : 'compound',
         seedN: seedN += 17, owner: allotOwner(), x };
       if (!placeLot(city, main, x)) {
         world.buildings.pop();
         return { ok: false, note: 'ground too steep for a seed' };
       }
+      if (start) { main.fixed = true; city.start = true; }
       city.main = main;
       city.capEdge = { left: main.placed.worksL - 2, right: main.placed.worksR + 2 };
       city.edge = { left: city.capEdge.left, right: city.capEdge.right };
@@ -920,6 +931,9 @@
       // (a city grown from a seed - the world's own standing towns, adopted, keep to their old ways:
       // the match's passes give the armies a road through the ranges between the capitals)
       if (b && b.kind === 'mountain' && PW.roadTunnels && !city.adopted && (city.kind === 'capital' || city.kind === 'military')) {
+        // (the user's: a seed never makes a tunnel at once - it builds its road at level 3, and
+        // till then its spread waits at the mountain's foot)
+        if (city.level < TUNNEL_LEVEL) { city.blocked[side] = 'mountain'; return false; }
         const [m0, m1] = mountainRange(b);
         const r = PW.roadTunnels.forMountain(world, m0, m1, { side: city.faction || 'neutral', style: city.style, by: city.id, from: dir > 0 ? 'a' : 'b' });
         if (!r.ok) { city.blocked[side] = 'mountain'; if (city.roadWhy !== r.note) { city.roadWhy = r.note; note(city, `the mountain: ${r.note}`); } return false; }
@@ -2259,7 +2273,8 @@
       _adapt: adaptNeighbours,     // (test hook: the N57 neighbour re-seat, called by the harness)
       _levelUp: levelUp, mountainRange,   // (N104: a level-up by hand for the suites; the massif a barrier is part of)
       upgrade, topLevel,   // N116: a level bought by the city's side
-      get manual() { return manual; }, set manual(v) { manual = !!v; } };
+      get manual() { return manual; }, set manual(v) { manual = !!v; },
+      get factionFacing() { return factionFacing; }, set factionFacing(v) { factionFacing = !!v; } };
     world.capitalGrowth = api;     // N2: vision reads the engine's cities off the world
     return api;
   }

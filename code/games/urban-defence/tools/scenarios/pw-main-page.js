@@ -7,6 +7,10 @@ const check = (ok, text) => checks.push(`${ok ? 'PASS' : 'FAIL'} ${text}`);
 check(location.protocol === 'file:', `opened from disk (${location.protocol}//)`);
 check(!!document.getElementById('gm-menu') && !window.pwApp, 'index.html opens on the match menu');
 check(!document.getElementById('world-tools'), 'the sandbox tools are the dev page\'s, not the game\'s');
+// (N118: the start screen's START, then the mode menu's START - its defaults: you against the computer,
+// the medium map, the left side)
+const pressAt = async (sel) => { const r = document.querySelector(sel).getBoundingClientRect(); await click(r.left + r.width / 2, r.top + r.height / 2); await sleep(60); };
+await pressAt('#gm-menu [data-act="enter"]');
 const btn = document.querySelector('#gm-menu [data-act="start"]');
 const r = btn.getBoundingClientRect();
 const started = performance.now();

@@ -18,12 +18,27 @@
 //
 // A mount record (the format agreed with PS): { kind: 'turret', x, y, facing, normal: [0, -1], side,
 // style, building, base: { x0, x1, y } } - y the plate's top row, where the turret's ring sits.
+// N114: kind 'launcher' or 'interceptor' (type 'dome' or 'patriot') - the missile artillery on its
+// planted base, out under the sky only (KINDS).
 (function () {
   const PW = window.PW;
   const { M, ID_MASK } = PW;
 
   const BASE_W = 32, BASE_H = 6;   // the plate (a trooper 12 x 27, a tank 128 x 58; plate and head ~32 x 30)
   const CLEAR = 40;                // open rows a base wants over the floor it stands on: plate, head, a margin
+  // N114 (the user's): the missile launchers and interceptors follow the turret - stationary artillery
+  // on a planted base - but only under the open sky: never in a tunnel's room, never under a roof.
+  // Their pods and boxes overhang the plate as they lay (PS's, ae0823a: up to ~60 cells ahead, ~85
+  // above): 90 open rows over it, and 60 clear either side above it. An interceptor is PS's Iron
+  // Dome, or a Patriot.
+  const KINDS = {
+    turret: { w: BASE_W, clear: CLEAR, side: 0, sky: false },
+    launcher: { w: 36, clear: 90, side: 60, sky: true },      // (PS's turntables: 30 and 22 wide)
+    interceptor: { w: 32, clear: 90, side: 60, sky: true },
+  };
+  const kindOf = (k) => KINDS[k] || KINDS.turret;
+  // (what PS's PW.defence seats on a base of this kind)
+  const typeFor = (rec, level = 1) => rec.type || (rec.kind === 'launcher' ? 'launcher' : rec.kind === 'interceptor' ? (level >= 3 ? 'patriot' : 'dome') : 'turret');
   const FLAT = 1;                  // rows of give along the stretch a base stands on
   const SPACING = 48;              // cells between two bases at the most crowded
   const SWEEP_EVERY = 60;          // ticks between looks over the bases
@@ -61,14 +76,36 @@
     }
     return true;
   }
-  // (a base already standing near)
-  const crowded = (world, x0, floor) => (world.mounts || []).some((m) => Math.abs(m.base.y - floor) < 80 && m.base.x0 < x0 + BASE_W + SPACING && m.base.x1 > x0 - SPACING)
-    || (world.buildings || []).some((b) => b && b.devices && b.devices.some((d) => d.base && Math.abs(d.base.y - floor) < 80 && d.base.x0 < x0 + BASE_W + 8 && d.base.x1 > x0 - 8));
+  // (a base already standing near - an artillery plate keeps its overhang's width from the next)
+  const crowded = (world, x0, floor, w, gap) => (world.mounts || []).some((m) => Math.abs(m.base.y - floor) < 80 && m.base.x0 < x0 + w + Math.max(gap, SPACING) && m.base.x1 > x0 - Math.max(gap, SPACING))
+    || (world.buildings || []).some((b) => b && b.devices && b.devices.some((d) => d.base && Math.abs(d.base.y - floor) < 80 && d.base.x0 < x0 + w + Math.max(gap, 8) && d.base.x1 > x0 - Math.max(gap, 8)));
+  // (N114: the room an artillery piece lays its pods in - the columns `side` either side of its plate
+  // open over it through its clear rows, nobody's. The pods are raised on their cradle before they
+  // swing out, so the low corners beside the plate are never swept: the reach starts OVERHANG_LOW
+  // rows up, and the land beside may rise that far.)
+  const OVERHANG_LOW = 20;
+  function overhangClear(world, x0, w, floor, K) {
+    if (!K.side) return true;
+    const top = floor - BASE_H;
+    for (const [a, b] of [[x0 - K.side, x0 - 1], [x0 + w, x0 + w + K.side - 1]]) {
+      for (let x = Math.max(1, a); x <= Math.min(world.width - 2, b); x += 2) {
+        for (let y = top - OVERHANG_LOW; y >= top - (K.clear - BASE_H); y -= 3) {
+          if (y < 1 || !openAt(world, x, y)) return false;
+          const owner = PW.getOwner(world, x, y);
+          if (owner && owner < TUNNEL_OWNER) return false;
+        }
+      }
+    }
+    return true;
+  }
 
-  // Flat ground for a base: a stretch BASE_W + 2 wide whose floor rises and falls no more than FLAT,
-  // firm all along, with CLEAR open rows over it - the one whose middle is nearest opts.near.
+  // Flat ground for a base: a stretch as wide as its kind's plate and 2 more, whose floor rises and
+  // falls no more than FLAT, firm all along, with its kind's open rows over it - the one whose middle
+  // is nearest opts.near. (opts.kind: 'turret' - the default - 'launcher' or 'interceptor'; those two
+  // only out under the sky, and with room for their overhang.)
   function find(world, x0, x1, opts = {}) {
-    const W = BASE_W + 2, room = !!opts.room, rows = opts.clear || CLEAR;
+    const K = kindOf(opts.kind), room = !!opts.room, rows = opts.clear || K.clear, pw = K.w, W = pw + 2;
+    if (K.sky && room) return null;
     x0 = Math.max(2, Math.round(x0)); x1 = Math.min(world.width - 3, Math.round(x1));
     if (x1 - x0 + 1 < W) return null;
     const n = x1 - x0 + 1, floor = new Int32Array(n).fill(-1);
@@ -89,12 +126,13 @@
         lo = Math.min(lo, floor[j]); hi = Math.max(hi, floor[j]);
       }
       if (!ok || hi - lo > FLAT) continue;
-      const sx = x0 + k + 1, d = Math.abs(sx + BASE_W / 2 - near);
-      if (d >= bestD || crowded(world, sx, lo)) continue;
+      const sx = x0 + k + 1, d = Math.abs(sx + pw / 2 - near);
+      if (d >= bestD || crowded(world, sx, lo, pw, K.side)) continue;
       // (not where a building stands over it, nor in the way of its doors)
-      if (!room && (world.buildings || []).some((b) => b && b.body && !b.dismantled && b.body.left < sx + BASE_W + 12 && b.body.right > sx - 12
+      if (!room && (world.buildings || []).some((b) => b && b.body && !b.dismantled && b.body.left < sx + pw + 12 && b.body.right > sx - 12
         && b.ground > lo - 400 && b.body.top < lo + 4)) continue;
-      best = { x0: sx, floor: lo, floors: Array.from(floor.subarray(k + 1, k + 1 + BASE_W)) };
+      if (!overhangClear(world, sx, pw, lo, K)) continue;
+      best = { x0: sx, floor: lo, floors: Array.from(floor.subarray(k + 1, k + 1 + pw)), kind: opts.kind || 'turret' };
       bestD = d;
     }
     return best;
@@ -105,12 +143,13 @@
   // lies a row lower, the plate reaches down to it.
   function lay(world, spot, info = {}) {
     const O = PW.buildingOrnaments;
+    const kind = info.kind || spot.kind || 'turret', w = kindOf(kind).w;
     const top = spot.floor - BASE_H, tint = STYLE_TINT[info.style] || STYLE_TINT.modern;
-    for (let dx = 0; dx < BASE_W; dx += 1) {
+    for (let dx = 0; dx < w; dx += 1) {
       const x = spot.x0 + dx, below = spot.floors ? spot.floors[dx] : spot.floor;
       for (let y = top; y < below; y += 1) {
         const dy = Math.max(0, spot.floor - 1 - y);
-        const c = O && O.plateColor ? O.plateColor(dx, Math.min(BASE_H - 1, dy), tint) : [92, 98, 106];
+        const c = O && O.plateColor ? O.plateColor(dx, Math.min(BASE_H - 1, dy), tint, w) : [92, 98, 106];
         PW.set(world, x, y, M.FOUNDATION, { quiet: true });
         PW.setLayer(world, 'paint', x, y, PW.abgr(c[0], c[1], c[2], 255));
         PW.setLayer(world, 'deco', x, y, 0);
@@ -119,9 +158,10 @@
       }
       if (PW.refreshGroundTop) PW.refreshGroundTop(world, x, Math.max(0, top - 4));
     }
-    const m = { id: ++seq, kind: 'turret', x: spot.x0 + BASE_W / 2, y: top, facing: info.facing || 1, normal: [0, -1],
+    const m = { id: ++seq, kind, x: spot.x0 + w / 2, y: top, facing: info.facing || 1, normal: [0, -1],
       side: info.side || 'neutral', style: info.style || 'modern', building: 0, at: info.at || (spot.room ? 'room' : 'land'),
-      base: { x0: spot.x0, x1: spot.x0 + BASE_W - 1, y: top } };
+      base: { x0: spot.x0, x1: spot.x0 + w - 1, y: top } };
+    if (info.type) m.type = info.type;   // (an interceptor's: 'dome' or 'patriot')
     (world.mounts || (world.mounts = [])).push(m);
     return m;
   }
@@ -195,7 +235,9 @@
       }
       if (!standing || rec.spent || !intact(world, rec.base, owner)) return;
       if (st.deadAt !== undefined && tick - st.deadAt < REARM * 60) return;
-      u = PW.defence.create(world, { type: 'turret', x: rec.x, y: rec.y, facing: rec.facing || 1, normal: rec.normal || [0, -1],
+      // (N114: a launcher's base takes PS's launcher, an interceptor's its Iron Dome - a Patriot on a
+      // level-3 building or up, or as placed)
+      u = PW.defence.create(world, { type: typeFor(rec, rec.level), x: rec.x, y: rec.y, facing: rec.facing || 1, normal: rec.normal || [0, -1],
         side: rec.side, style: rec.style, building: rec.building || 0, base: { ...rec.base }, hold: !armed });
       if (!u) return;
       u.mount = key;
@@ -206,11 +248,11 @@
     for (const b of world.buildings || []) {
       if (!b || !b.canvas || !b.body || b.dismantled || !b.devices) continue;
       b.devices.forEach((d, i) => {
-        if (d.kind !== 'turret' || !d.base) return;
+        if (!KINDS[d.kind] || !d.base) return;
         const key = `b${b.id}:${i}`;
         seen.add(key);
         const side = sideOf(b);
-        handle(key, !b.ruined && !b.coresOpen, { ...d, building: b.id, side, style: styleOf(side, b.style) }, b.id, true);
+        handle(key, !b.ruined && !b.coresOpen, { ...d, building: b.id, side, style: styleOf(side, b.style), level: b.level || 1 }, b.id, true);
       });
     }
     for (const m of world.mounts || []) {
@@ -270,5 +312,5 @@
     return place(world, x0 + 6, x1 - 6, { ...info, room: true, top: floor - height + 3, bottom: floor + 2, at: 'room' });
   }
 
-  PW.mounts = { find, lay, place, relay, room, intact, sweep, step, seed, BASE_W, BASE_H, CLEAR };
+  PW.mounts = { find, lay, place, relay, room, intact, sweep, step, seed, BASE_W, BASE_H, CLEAR, KINDS, typeFor };
 })();

@@ -35,6 +35,9 @@
     }
     // Bare planted cores, waiting to grow.
     for (const q of world.seedCores || []) if (same(q.side, side)) out.push([q.x - RANGE.core, q.x + RANGE.core]);
+    // (N115: ground a side is given sight of - the gameplay test's own third, while it chooses
+    // where its capital starts)
+    for (const g of world.visionExtra || []) if (same(g.side, side)) out.push([g.x0, g.x1]);
     // Units in the field carry sight forward.
     for (const [list, kind] of UNIT_LISTS) {
       const R = RANGE[kind];

@@ -1044,9 +1044,18 @@
   }
 
   // ---- Generation ------------------------------------------------------------------------------------------
-  function generateSettlements(world, layout, seed) {
+  // (opts.homes false - N115's gameplay test: the two sides' home towns are not built, each side
+  // places its own starting capital; the neutral towns are)
+  function generateSettlements(world, layout, seed, opts = {}) {
     const random = PW.createRandom(seed + 4242);
     const styles = shuffleStyles(random);
+    // (N118: the person's side in the aesthetic they chose - swapped with whichever side the dice gave
+    // it, so the dice and the world they lay are the same either way)
+    const want = opts.style;
+    if (want && want.side && want.style && styles[want.side] !== want.style) {
+      const holder = Object.keys(styles).find((k) => styles[k] === want.style);
+      if (holder) { styles[holder] = styles[want.side]; styles[want.side] = want.style; }
+    }
     world.styles = styles;
     world.buildings = [];
     world.settlements = [];
@@ -1064,6 +1073,7 @@
       const style = styles[side];
       const padY = Math.round(site.level);
       const neutral = side === 'neutral';
+      if (opts.homes === false && !neutral) continue;
       const dir = side === 'left' ? 1 : side === 'right' ? -1 : 0;
       const plan = neutral ? neutralPlan(random) : basePlan(random);
       // A neutral farm leads its town at the end with more ploughable land beyond it, where its

@@ -44,6 +44,12 @@ const SUITES = [
   { name: 'pw-spawn-pad', params: 'mode=game&start=versus&side=left&det=1' },
   // N116: levels bought by hand, units priced in HM and SM, HM to rush a tunnel's works
   { name: 'pw-game-upgrade', params: 'mode=game&start=versus&side=left&det=1' },
+  // N115: the gameplay test - each side places its starting capital, four times the build speed
+  { name: 'pw-game-test', params: 'mode=game&start=test&side=left&det=1' },
+  // N114: missile launchers and interceptors on planted bases, out under the sky
+  { name: 'pw-artillery-mounts', params: 'mode=game&start=versus&side=left&det=1' },
+  // N118: the start screen and the game-mode menu, by real clicks and keys
+  { name: 'pw-start-menu', ready: "!!document.getElementById('gm-menu')", params: 'mode=game&det=1' },
   // N8: the game is the main page, opened from disk as a downloaded copy is; the old beta still loads
   { name: 'pw-main-page', page: 'index.html', file: true, alone: true, ready: "!!document.getElementById('gm-menu')" },
   // (the old beta makes its world from Math.random: seeded, the same world each run - unseeded it

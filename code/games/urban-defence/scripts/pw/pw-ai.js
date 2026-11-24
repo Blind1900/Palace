@@ -134,6 +134,14 @@
       }
       for (let k = 0; k < MIX.length; k += 1) {
         const kind = MIX[(brain.mixN + k) % MIX.length];
+        // (N114: the rockets and the interceptors are set on bases behind its front, not deployed)
+        if (G.ARTILLERY[kind]) {
+          const A = G.ARTILLERY[kind];
+          if (G.purse(match, side).hm < A.hm + keep || !G.canArtillery(match, side, kind).ok) continue;
+          if (!placeArtillery(kind)) continue;
+          brain.mixN = (brain.mixN + k + 1) % MIX.length;
+          return true;
+        }
         const K = G.UNIT_KINDS[kind];
         if (G.purse(match, side).hm < K.hm + keep) continue;
         if (!G.canDeploy(match, side, kind).ok) continue;
@@ -141,12 +149,26 @@
         if (!r.ok) continue;
         brain.mixN = (brain.mixN + k + 1) % MIX.length;
         brain.deployed += 1;
-        // (fresh units gather at the rally point; batteries stand where they are)
-        if (!['launcher', 'dome', 'patriot'].includes(kind) && kind !== 'jet') {
+        // (fresh units gather at the rally point; a drone flies its own way)
+        if (kind !== 'jet') {
           G.order(match, [r.unit], { type: 'move', x: rally() });
           r.unit.game.order = { type: 'gather' };
         }
         return true;
+      }
+      return false;
+    }
+    // (a launcher a little behind its front, in reach of what the enemy holds; an interceptor further
+    // back, over its own ground - and where its town has built that ground up, out just ahead of the
+    // front, in its sight)
+    function placeArtillery(type) {
+      const front = G.frontOf(match, side, true), back = type === 'launcher' ? 120 : 360;
+      const spots = Array.from({ length: 10 }, (_, k) => front - dir() * (back + k * 120 + random() * 40))
+        .concat(Array.from({ length: 5 }, (_, k) => front + dir() * (60 + k * 90)));
+      for (const x of spots) {
+        const r = G.placeArtillery(match, side, type, x);
+        if (r.ok) { brain.artillery = (brain.artillery || 0) + 1; brain.last = `${type} at ${r.mount.x}`; return true; }
+        brain.last = `${type}: ${r.note}`;
       }
       return false;
     }
@@ -173,7 +195,8 @@
       if (match.clock < brain.bombardAt) return false;
       brain.bombardAt = match.clock + between(BOMBARD_EVERY);
       const foe = G.other(side);
-      const shooters = G.unitsOf(match, side).filter((u) => (u.kind === 'jet' || (u.kind === 'defence' && u.type === 'launcher')) && !u.building && !u.mount);
+      // (N114: a launcher stands on its base now - its own placed ones and its buildings' fire too)
+      const shooters = G.unitsOf(match, side).filter((u) => u.kind === 'jet' || (u.kind === 'defence' && u.type === 'launcher' && !u.hold));
       if (!shooters.length) return false;
       let fired = 0;
       for (const u of shooters) {

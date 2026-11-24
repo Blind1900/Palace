@@ -22,17 +22,24 @@
   function create(world, opts = {}) {
     const mode = opts.mode === 'watch' ? 'watch' : 'versus';
     const human = mode === 'versus' ? (opts.human === 'right' ? 'right' : 'left') : null;
+    // (N115: the gameplay test - no home towns; the match opens with each side placing its starting
+    // capital, and the clock starts when both stand)
+    const test = !!opts.test;
     const match = { world, app: opts.app || null, mode, human, seed: opts.seed || 0, clock: 0,
-      over: false, winner: null, reason: '', view: human || 'both', log: [], sides: {} };
+      over: false, winner: null, reason: '', view: human || 'both', log: [], sides: {}, test, phase: test ? 'placing' : 'play' };
     for (const side of SIDES) {
       const home = (world.settlements || []).find((s) => s.side === side);
+      const site = ((world.layout && world.layout.sites) || []).find((s) => s.side === side);
       match.sides[side] = {
-        side, style: home ? home.style : 'modern',
-        // (where its capital stands, and which way the enemy lies)
-        home: home ? Math.round((home.streetLeft + home.streetRight) / 2) : (side === 'left' ? 2000 : world.width - 2000),
+        side, style: home ? home.style : (world.styles && world.styles[side]) || 'modern',
+        // (where its capital stands, and which way the enemy lies - in the test, its empty home pad
+        // till its capital is placed)
+        home: home ? Math.round((home.streetLeft + home.streetRight) / 2) : site ? Math.round((site.x0 + site.x1) / 2)
+          : (side === 'left' ? 2000 : world.width - 2000),
         dir: side === 'left' ? 1 : -1,
         controller: side === human ? 'human' : 'ai',
         ai: null,
+        placed: !test,
       };
       const stock = world.stock || (world.stock = {});
       const purse = stock[side] || (stock[side] = { sm: 0, hm: 0, water: 0 });
@@ -41,102 +48,71 @@
       // (the towns' first count comes a little into the match: till then, the design doc's POP)
       if (!purse.pop) { purse.pop = START.pop; purse.workers = START.pop; }
     }
-    // N116 (the user's): no city levels by itself in a match - its side buys each level (upgrade)
-    if (world.capitalGrowth) world.capitalGrowth.manual = true;
+    // N116 (the user's): no city levels by itself in a match - its side buys each level (upgrade);
+    // N115: and each side's military faces the enemy's end
+    if (world.capitalGrowth) { world.capitalGrowth.manual = true; world.capitalGrowth.factionFacing = true; }
     for (const side of SIDES) if (match.sides[side].controller === 'ai' && PW.ai) match.sides[side].ai = PW.ai.create(match, side);
-    armDevices(match);
-    passes(match);
+    if (test) world.visionExtra = SIDES.map((side) => { const [x0, x1] = thirdOf(world, side); return { side, x0, x1, start: true }; });
     current = match;
-    // N103: every turret base that stands takes its turret now, in the match's hands (one already
-    // seated, silent, before the match - freed)
+    // N103/N114: every turret, launcher and interceptor base that stands takes its piece now, in the
+    // match's hands (one already seated, silent, before the match - freed)
     if (PW.mounts) {
       for (const u of world.defence || []) if (u.mount && !u.dead) { u.hold = false; adopt(u); }
       PW.mounts.relay(world);   // (a plate the passes just dug through is laid again by it)
       PW.mounts.sweep(world, { armed: true });
     }
-    alert(match, null, mode === 'watch' ? 'The computer plays both sides. Take either chair from the top bar.'
+    alert(match, null, test ? (human ? `Place your starting capital: click flat ground in the ${human} third of the map.` : 'Each side places its starting capital.')
+      : mode === 'watch' ? 'The computer plays both sides. Take either chair from the top bar.'
       : `You hold the ${human} capital. Destroy the enemy, then raise your capital over their ruins.`, '');
     return match;
   }
 
-  // The military buildings' defences come alive for the match: a live battery on each device the
-  // buildings carry - a turret where it sits (when PS's turret is in), a launcher or an Iron Dome
-  // on the ground beside its building. Each knows its building; it dies with it.
-  function armDevices(match) {
-    const world = match.world, D = PW.defence;
-    if (!D) return;
-    for (const b of world.buildings || []) {
-      if (!b || !b.body || !(b.devices || []).length) continue;
-      const side = ownerOf(b) || 'neutral', style = (match.sides[side] || {}).style || b.style || 'modern';
-      let ground = 0;
-      for (const d of b.devices) {
-        let u = null;
-        // (N103: the turrets are seated on their bases by the mounts sweep - below, and as bases rise)
-        if (d.kind === 'interceptor' || d.kind === 'launcher') {
-          // (wheeled batteries stand on the ground by the building, the side towards the enemy)
-          const dir = d.facing || (match.sides[side] ? match.sides[side].dir : 1);
-          const x = Math.round(dir > 0 ? b.body.right + 60 + ground * 120 : b.body.left - 60 - ground * 120);
-          if (x < 80 || x > world.width - 80) continue;
-          ground += 1;
-          u = D.create(world, { type: d.kind === 'interceptor' ? ((b.level || 1) >= 3 ? 'patriot' : 'dome') : 'launcher', x, side, style, facing: dir });
-        }
-        if (u) {
-          u.building = b.id;
-          u.game = { side, kind: u.type, base: b.id, order: { type: 'hold' }, goal: null, born: 0 };
-          if (PW.units && PW.units.order) PW.units.order(world, u, { type: 'hold' });
-        }
-      }
+  // ---- N115: the starting capitals ------------------------------------------------------------------
+  // In the gameplay test each side chooses where its capital starts, in its own third of the map:
+  // a capital seed whose main is the core bunker. The match's clock starts when both stand.
+  const thirdOf = (world, side) => (side === 'left' ? [200, Math.round(world.width / 3)] : [Math.round(world.width * 2 / 3), world.width - 200]);
+  function placeStart(match, side, x) {
+    const st = match.sides[side];
+    if (match.phase !== 'placing' || !st || st.placed) return { ok: false, note: 'no starting capital to place' };
+    x = Math.round(x);
+    const [a, b] = thirdOf(match.world, side);
+    if (x < a || x > b) return { ok: false, note: `your capital starts in the ${side} third of the map` };
+    const r = seed(match, side, 'capital', x, { start: true });
+    if (!r.ok) return r;
+    st.placed = true;
+    st.home = r.city.x;
+    st.capital = r.city.id;
+    alert(match, null, `${side.toUpperCase()} places its starting capital`, side === match.human ? 'good' : '', x);
+    return r;
+  }
+  // (the computer's: on its own home pad, the flattest ground of its third, or near it)
+  function placeAi(match, side) {
+    const st = match.sides[side];
+    for (let k = 0; k < 24; k += 1) {
+      const x = st.home + (k % 2 ? 1 : -1) * Math.ceil(k / 2) * 110;
+      if (placeStart(match, side, x).ok) return true;
+    }
+    return false;
+  }
+  function placing(match) {
+    const world = match.world;
+    // (each side sees its own third while it chooses - given at create)
+    for (const side of SIDES) if (!match.sides[side].placed && match.sides[side].controller === 'ai') placeAi(match, side);
+    if (SIDES.every((side) => match.sides[side].placed)) {
+      world.visionExtra = (world.visionExtra || []).filter((g) => !g.start);
+      match.phase = 'play';
+      alert(match, null, match.human ? `Both capitals stand. Destroy the enemy, then raise your capital over their ruins.` : 'Both capitals stand: the match begins.', 'good');
     }
   }
 
-  // The passes: a mountain between the capitals is too steep for an army over its top - its flanks,
-  // and the stepped terraces of a post on its summit, are more than a man climbs and a tank takes -
-  // so each is pierced at its foot by a road tunnel, dug raw as the match opens and lined by the
-  // crews as it goes on. From dry ground at one foot to dry ground at the other, high enough for a
-  // tank.
-  const PASS_HEIGHT = 50, PASS_STEP = 16;
-  function passes(match) {
-    const world = match.world, T = PW.tunnels, L = world.layout;
-    if (!T || !L || !L.mountains) return;
-    const lo = Math.min(match.sides.left.home, match.sides.right.home), hi = Math.max(match.sides.left.home, match.sides.right.home);
-    match.passes = [];
-    // (a range of humps one against the other is one mountain to an army: one pass under it all)
-    const ranges = [];
-    for (const mt of L.mountains.map((t) => [t.x - t.half, t.x + t.half]).sort((p, q) => p[0] - q[0])) {
-      const last = ranges[ranges.length - 1];
-      if (last && mt[0] < last[1] + 200) last[1] = Math.max(last[1], mt[1]); else ranges.push([mt[0], mt[1]]);
-    }
-    for (const [m0, m1] of ranges) {
-      // N104: the mountain road tunnel (pw-road-tunnels) - portals on the flats at each foot, tall
-      // enough for the whole army, the road its vehicles' only way underground - bored at once, no
-      // side's (no barricades: it is the match's own way through)
-      if (PW.roadTunnels) {
-        if (m0 < lo || m1 > hi) continue;
-        const r = PW.roadTunnels.forMountain(world, m0, m1, { side: 'neutral', instant: true, barricades: false });
-        if (r.ok) { match.passes.push({ x0: r.tunnel.a, x1: r.tunnel.b, net: r.tunnel.net, road: r.tunnel.id }); continue; }
-      }
-      // (the portals on the mountain's own dry foot: a lake against its flank stays a lake - the men
-      // swim it - and the way starts on the far side of it, never across it)
-      const a = dryAhead(world, Math.round(m0 - 30), 1), b = dryAhead(world, Math.round(m1 + 30), -1);
-      if (b - a < 200) continue;
-      if (a < lo || b > hi || b - a > 5000) continue;
-      const ya = world.groundTop[a], yb = world.groundTop[b];
-      const net = T.createNetwork(world, { side: 'neutral', style: 'modern', use: 'civic', x: a, y: ya });
-      const floorAt = (x) => Math.round(ya + (yb - ya) * (x - a) / (b - a));
-      // (where the way runs over a valley between two humps it is carried on an embankment of made
-      // ground - the valley's own flanks are as steep as the mountain's)
-      for (let x = a; x <= b; x += 1) {
-        const f = floorAt(x);
-        for (let y = f; y < world.groundTop[x]; y += 1) if ((PW.get(world, x, y) & PW.ID_MASK) === PW.M.AIR) PW.set(world, x, y, PW.M.FILL);
-        PW.refreshGroundTop(world, x);
-      }
-      for (let x = a; x < b; x += PASS_STEP) {
-        const floor = floorAt(x);
-        T.digBox(world, net, x, floor - PASS_HEIGHT, Math.min(b, x + PASS_STEP + 2), floor - 1, { kind: 'drift' });
-      }
-      match.passes.push({ x0: a, x1: b, net: net.id });
-    }
-  }
+  // The military buildings' defences come alive for the match: every turret, launcher and interceptor
+  // a building carries stands on its plate (N103, N114) and is seated by the mounts sweep - below in
+  // create, and as plates rise - each knowing its building, dying with it. (The wheeled batteries
+  // once set down beside a building are gone: the user's, N114 - artillery is not a vehicle.)
+
+  // (No passes: the match once bored a road through every mountain between the capitals as it
+  // opened. The user's rule now: a seed never makes a tunnel at once - a city builds its road through
+  // a mountain at level 3 (pw-capital-growth), and an army crosses a mountain only by such a tunnel.)
 
   // ---- The rules, looked at once a second ----------------------------------------------------------
   const HACK_TIME = 15;        // s at a panel (the user's design doc)
@@ -358,6 +334,7 @@
 
   function step(match, dt) {
     if (match.over) return;
+    if (match.phase === 'placing') { placing(match); return; }   // (N115: the clock waits for both capitals)
     match.clock += dt;
     for (const side of SIDES) {
       const s = match.sides[side];
@@ -423,14 +400,13 @@
   // than its population. Jets roll out from a runway; mechs only from the top bases, two at most.
   // N116 (the user's): every unit costs HM and SM both - the men lean on the soft materials (kit,
   // rations), the machines on the hard.
+  // (N114, the user's: the rockets, the Iron Dome and the Patriot are no longer deployed - they are
+  // stationary artillery set on a base: ARTILLERY, below)
   const UNIT_KINDS = {
     trooper: { label: 'TROOPER', hm: 10, sm: 10, pop: 1, level: 1, list: 'troops' },
     tank: { label: 'TANK', hm: 80, sm: 20, pop: 3, level: 2, list: 'tanks' },
-    launcher: { label: 'ROCKETS', hm: 70, sm: 15, pop: 2, level: 2, list: 'defence' },
-    dome: { label: 'IRON DOME', hm: 90, sm: 15, pop: 2, level: 3, list: 'defence' },
     // (N111: the jets give way to PS's avenger drones - kind 'jet' and world.jets kept, the drone's name shown)
     jet: { label: 'DRONE', hm: 140, sm: 20, pop: 2, level: 3, list: 'jets', runway: true },
-    patriot: { label: 'PATRIOT', hm: 120, sm: 20, pop: 2, level: 4, list: 'defence' },
     mech: { label: 'MECH', hm: 240, sm: 40, pop: 4, level: 5, list: 'mechs', most: 2 },
   };
   const UNIT_LISTS = ['troops', 'tanks', 'mechs', 'jets', 'defence'];
@@ -539,17 +515,14 @@
     else if (kind === 'jet' && PW.jets) {
       u = at.pad ? PW.jets.create(world, { x: at.x, y: feet, side, style, facing: dir, pad: at.pad })
         : PW.jets.takeOff(world, runwayOf(match, side), style, side);
-    } else if (PW.defence && (kind === 'launcher' || kind === 'dome' || kind === 'patriot')) u = PW.defence.create(world, { type: kind, x: at.x, side, style, facing: dir });
+    }
     if (!u) return { ok: false, note: `${kind}: no room to deploy` };
     world.stock[side].hm -= K.hm;
     world.stock[side].sm -= K.sm || 0;
-    // (batteries stand and fight where they are put; the rest go their own way at the next look -
-    // one up on a town base's pad by way of the town's gate)
-    const battery = kind === 'launcher' || kind === 'dome' || kind === 'patriot';
+    // (each goes its own way at the next look - one up on a town base's pad by way of the town's gate)
     const via = at.pad && at.gate !== null && kind !== 'jet' ? at.gate : undefined;
-    u.game = { side, kind, base: base.id, order: { type: battery ? 'hold' : 'auto' }, goal: null, born: match.clock, via };
-    if (battery) carry(world, u, { type: 'hold' });
-    else if (via !== undefined) carry(world, u, { type: 'move', x: via });
+    u.game = { side, kind, base: base.id, order: { type: 'auto' }, goal: null, born: match.clock, via };
+    if (via !== undefined) carry(world, u, { type: 'move', x: via });
     else match.autoClock = Math.min(match.autoClock || 0, 0.1);
     if (at.pad) padLift(match, at.pad, at.x);
     alert(match, side, `${K.label} deployed`, '', at.x);
@@ -573,7 +546,7 @@
   // floor: a base laid there (PW.mounts) and the turret seated on it. It costs HM, and a side keeps
   // as many as its military bases' levels allow; it is a work, not a man - it takes no POP.
   const TURRET = { label: 'TURRET', hm: 60, per: 3 };
-  const turretsOf = (match, side) => (match.world.mounts || []).filter((m) => m.placedBy === side && !m.spent).length;
+  const turretsOf = (match, side) => (match.world.mounts || []).filter((m) => m.placedBy === side && !m.spent && (m.kind || 'turret') === 'turret').length;
   const turretCap = (match, side) => Math.max(2, TURRET.per * bases(match, side).reduce((n, b) => n + (b.level || 1), 0));
   function canTurret(match, side) {
     if (match.over) return { ok: false, note: 'the match is over' };
@@ -667,11 +640,55 @@
     return { ok: true, net, ...r };
   }
 
+  // ---- Missile artillery (N114) ----------------------------------------------------------------------
+  // The user's: rockets, Iron Dome and Patriot follow the turret - stationary artillery set on a base,
+  // built on any flat roof or flat ground the side can see, out under the sky (never in a tunnel's room
+  // or under a roof). Each costs HM and SM, needs a military base of its level, and takes no POP; a
+  // side keeps one a level of its military bases, all three together. PS's launcher or interceptor
+  // is seated on the base by the mounts sweep and fires as PS's does.
+  const ARTILLERY = {
+    launcher: { label: 'ROCKETS', hm: 70, sm: 15, level: 2, kind: 'launcher' },
+    dome: { label: 'IRON DOME', hm: 90, sm: 15, level: 3, kind: 'interceptor' },
+    patriot: { label: 'PATRIOT', hm: 120, sm: 20, level: 4, kind: 'interceptor' },
+  };
+  const artilleryOf = (match, side) => (match.world.mounts || []).filter((m) => m.placedBy === side && !m.spent && m.kind !== 'turret').length;
+  const artilleryCap = (match, side) => Math.max(1, bases(match, side).reduce((n, b) => n + (b.level || 1), 0));
+  function canArtillery(match, side, type) {
+    const A = ARTILLERY[type];
+    if (!A) return { ok: false, note: `no such artillery: ${type}` };
+    if (match.over) return { ok: false, note: 'the match is over' };
+    if (!bases(match, side).some((b) => (b.level || 1) >= A.level)) return { ok: false, note: `needs a level ${A.level} base` };
+    const p = purse(match, side);
+    if (p.hm < A.hm) return { ok: false, note: `needs ${A.hm} HM` };
+    if (p.sm < A.sm) return { ok: false, note: `needs ${A.sm} SM` };
+    const cap = artilleryCap(match, side);
+    if (artilleryOf(match, side) >= cap) return { ok: false, note: `${cap} at most: more base levels, more artillery` };
+    return { ok: true };
+  }
+  function placeArtillery(match, side, type, x) {
+    const can = canArtillery(match, side, type);
+    if (!can.ok) return can;
+    const world = match.world, M = PW.mounts, A = ARTILLERY[type];
+    if (!M) return { ok: false, note: 'no artillery bases' };
+    x = Math.round(x);
+    if (x < 60 || x > world.width - 60) return { ok: false, note: 'off the map' };
+    if (PW.vision && !PW.vision.sees(world, side, x)) return { ok: false, note: 'beyond your vision' };
+    const st = match.sides[side];
+    const m = M.place(world, x - 90, x + 90, { kind: A.kind, type, near: x, side, style: st.style, facing: st.dir, road: true, at: 'land' });
+    if (!m) return { ok: false, note: 'no flat ground open to the sky there' };
+    m.placedBy = side;
+    world.stock[side].hm -= A.hm;
+    world.stock[side].sm -= A.sm;
+    M.sweep(world, { armed: true });
+    alert(match, side, `${A.label} set on its base`, '', m.x);
+    return { ok: true, mount: m };
+  }
+
   // (a turret seated by the mounts sweep joins the match: its side's, holding where it stands)
   function adopt(u) {
     const match = current;
     if (!match || !u) return;
-    u.game = { side: u.side, kind: 'turret', base: u.building || 0, order: { type: 'hold' }, goal: null, born: match.clock };
+    u.game = { side: u.side, kind: u.type || 'turret', base: u.building || 0, order: { type: 'hold' }, goal: null, born: match.clock };
     if (PW.units && PW.units.order) PW.units.order(match.world, u, { type: 'hold' });
   }
 
@@ -735,7 +752,7 @@
     const world = match.world;
     for (const side of SIDES) {
       const foe = other(side), dir = match.sides[side].dir;
-      const units = unitsOf(match, side).filter((u) => u.game && u.game.order.type === 'auto' && u.game.kind !== 'jet' && !['dome', 'patriot', 'launcher'].includes(u.game.kind));
+      const units = unitsOf(match, side).filter((u) => u.game && u.game.order.type === 'auto' && u.game.kind !== 'jet' && u.kind !== 'defence');
       if (!units.length) continue;
       const seen = (x) => !PW.vision || PW.vision.sees(world, side, x);
       const targets = [];
@@ -812,13 +829,15 @@
   // A side casts a seed where it can see open, gentle ground: a capital, a farm or a military base
   // grows from it by the growth rules (PW.capitalGrowth), in the side's style, threaded onto its
   // bundle. The same rule for a person and the computer.
-  function seed(match, side, kind, x) {
+  // (opts.start - N115: a side's starting capital, placed before it can see anything)
+  function seed(match, side, kind, x, opts = {}) {
     const world = match.world, eng = world.capitalGrowth;
     if (match.over) return { ok: false, note: 'the match is over' };
     if (!eng) return { ok: false, note: 'no growth engine' };
     if (!KINDS[kind]) return { ok: false, note: `no such seed: ${kind}` };
+    if (match.phase === 'placing' && !opts.start) return { ok: false, note: 'place your starting capital first' };
     x = Math.round(x);
-    if (PW.vision && !PW.vision.sees(world, side, x)) return { ok: false, note: 'beyond your vision' };
+    if (!opts.start && PW.vision && !PW.vision.sees(world, side, x)) return { ok: false, note: 'beyond your vision' };
     // (the standing towns not yet in the engine, and the mountain outposts and bunkers, hold their
     // ground - the engine knows its own cities' claims)
     for (const s of world.settlements || []) {
@@ -828,7 +847,8 @@
       for (const f of o.footprints || []) if (x > f[0] - 90 && x < f[1] + 90) return { ok: false, note: 'claimed by the military' };
     }
     const fallen = ruinsAt(match, side, x);
-    const r = eng.drop(x, kind, match.sides[side].style, side);
+    const r = eng.drop(x, kind, match.sides[side].style, side, { start: !!opts.start });
+    if (r.ok && opts.start) return { ok: true, note: 'starting capital placed', city: r.city };
     if (r.ok && fallen && r.city) {
       r.city.overRuins = fallen.id;   // (the win's half: a capital of ours over their ruins)
       alert(match, null, `${side.toUpperCase()} builds over the ruins of capital ${fallen.id}`, side === match.human ? 'good' : 'bad', x);
@@ -839,5 +859,6 @@
   PW.game = { create, step, alert, takeOver, handBack, purse, frontOf, seed, ownerOf, other, SIDES,
     UNIT_KINDS, bases, unitsOf, kindOf, fielded, armyCap, canDeploy, deploy, order, standing, ruinsAt, buildingsOf, livingCore,
     HACK_TIME, rules, cover, standAt, TURRET, canTurret, placeTurret, turretCap, adopt, current: () => current,
-    UPGRADE, RUSH, upgradeCost, cityAt, canUpgrade, upgrade, tunnelAt, rushTunnel };
+    UPGRADE, RUSH, upgradeCost, cityAt, canUpgrade, upgrade, tunnelAt, rushTunnel, placeStart, thirdOf,
+    ARTILLERY, canArtillery, placeArtillery, artilleryCap };
 })();

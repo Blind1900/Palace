@@ -22,6 +22,8 @@ const press = async (selector) => {
 const viaMenu = !window.pwApp;
 if (viaMenu) {
   check(!!document.getElementById('gm-menu'), 'the game page opens on the match menu');
+  // (N118: the start screen's START first, then the mode menu)
+  await press('#gm-menu [data-act="enter"]');
   await press('#gm-menu [data-mode="watch"]');
   await press('#gm-menu [data-act="start"]');
   for (let t = 0; t < 600 && !(window.pwApp && window.pwApp.ready); t += 1) await sleep(100);

@@ -12,10 +12,12 @@ The game runs straight from its files. There's no server or install, and it does
 
 ## Play
 
-- **Menu**:
-  - **YOU vs COMPUTER**: pick your side, left or right.
-  - **COMPUTER vs COMPUTER**: watch two computer players. **PLAY LEFT** or **PLAY RIGHT** takes over a side at any moment, and **HAND BACK** gives it back.
-  - **LAPTOP (SMALLER)**: a smaller map for slower machines.
+- **Start screen**: click **START** (or press Enter). The mode menu follows:
+  - **Match**: YOU vs COMPUTER; COMPUTER vs COMPUTER, where you watch and **PLAY LEFT** or **PLAY RIGHT** takes over a side at any moment (**HAND BACK** gives it back); or GAMEPLAY TEST (below).
+  - **Map size**: SMALL (about 5-10 minutes; best on slower machines), MEDIUM (10-20) or LARGE (20+). Each is drawn to its own shape.
+  - **Side**: LEFT or RIGHT.
+  - **Aesthetic**: your side's look. **R**, **B** or **P** (the game calls its styles by these letters).
+  - **START** begins; **BACK** or Esc returns to the start screen. Use the mouse, or Tab and Enter.
 - **Goal**: destroy every core of the enemy's capitals, then plant your own capital over their ruins. You win when its first tower rises.
 - **Camera**: drag to pan, or use WASD and the arrow keys (while no unit is in your hands). The mouse wheel zooms. Click the minimap (bottom right) to jump there.
 - **Units**:
@@ -31,15 +33,23 @@ The game runs straight from its files. There's no server or install, and it does
     - **Orders**: Shift+right-click still sends it on an order (go, attack, or hack an enemy building).
     - **Letting go**: Q lets it go its own way, and Esc lets it go. Left alone for a few seconds, it carries on with its orders.
 - **Pause**: P (or PAUSE on the top bar).
+- **Gameplay test**: choose GAMEPLAY TEST on the menu, or open `pixel-world.html?mode=game&start=test` (add `&side=right`, `&map=small|medium|large`, `&style=R|B|P` or `&seed=N` as you like).
+  - The two sides' home towns aren't built. The match opens with the capital seed in your hand: click flat ground in your third of the map to place your starting capital. The computer places its own, and the clock starts when both stand.
+  - A starting capital's main building is the core bunker. Capitals you seed later have the capital building.
+  - Everything builds four times as fast: the cities' growth, the crews and the tunnels.
+- **Facing**: the left side's units and military buildings face right, towards the other end; the right side's face left.
 - **Build**: SEED CAPITAL, SEED FARM and SEED MILITARY plant seeds, only where your side can see. Cities, farms and bases spread from them by themselves, but they never go up a level by themselves.
 - **Upgrade**: UPGRADE, then click one of your cities, farms or bases to raise it a level. The pointer shows the price: capital 120 HM × its level, military base 80 × level, farm 60 × level. Its spread and its towers then grow on up to the new level.
 - **Rush a tunnel**: RUSH TUNNEL (50 HM), then click inside one of your tunnels. Its next 4 minutes of digging and finishing happen in 1.
 - **Deploy**: the unit buttons on the bottom bar deploy from your front base, or from the base you've selected. A base's level decides what it can deploy. Each unit costs HM and SM (the button shows both, HM+SM), and your army can't outgrow your population.
-  - A base with a hangar has a **spawn pad** in its floor, over its armoured core. Troopers, tanks and mechs come up on it and leave by the hangar door. In a town, they head for the town's gate first. Batteries (rockets, Iron Dome, Patriot) don't use the pad: they're set down where they always were, since they can't drive out.
+  - A base with a hangar has a **spawn pad** in its floor, over its armoured core. Troopers, tanks and mechs come up on it and leave by the hangar door. In a town, they head for the town's gate first.
   - The jets are being replaced by smaller **avenger drones** (the DRONE button). Until the drones are in, they still take off from the runway.
 - **Turrets**: TURRET (60 HM), then click flat ground your side can see, or the floor of a tunnel room. A turret base is laid there and a turret seated on it. You can have 3 per level of your military bases. Turrets don't take population.
   - **Building turrets**: military buildings and big towers have turret bases on their roofs.
   - **Losing one**: if a base is blown, its turret is lost. A building's base comes back with the building, and its turret returns a little later.
+- **Missile artillery**: ROCKETS (70 HM + 15 SM), IRON DOME (90 + 15) and PATRIOT (120 + 20) aren't vehicles. Like turrets, each stands on its own base, but only out under the open sky, never in a tunnel or under a roof. Pick one, then click flat ground your side can see.
+  - Each needs a military base of its level (rockets 2, Iron Dome 3, Patriot 4). You can have one per level of your military bases, all three kinds together. They don't take population.
+  - Military roofs carry their own launcher and interceptor bases.
 - **Hack**: select one trooper and Shift+right-click an enemy base or tower. It goes up to the control panel on the top floor, and hacks it if it stays there 15 seconds. (You can also drive it there yourself.)
   - A military base: some of its defences go silent for a while.
   - A tower: you see what the enemy sees for a while.
