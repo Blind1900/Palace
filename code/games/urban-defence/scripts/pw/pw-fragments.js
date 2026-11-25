@@ -515,6 +515,7 @@
     const SNAP_REACH = 10, SNAP_REACH_GIRTH = 5;   // ...and its wood this far (+ per cell of girth)
     const FLORA_SPIN = 2.5;       // rad/s: a plant striking something turns no faster than this,
     const FLORA_DRAG = 1.5;       // ...and its turning slowed this much (per second) while it touches
+    const FLORA_TUMBLE = 4 * Math.PI;   // rad/s: a bough flying free tumbles no faster than twice a second
     function plantOf(p) {
       const { data, grid, gw, u0, v0, points } = p, girth = data.girth;
       const count = points.length / 2;
@@ -965,10 +966,15 @@
           p.omega += ((ax - p.hx) * fy - (ay - p.hy) * fx) / (p.inertia / p.mass + r2) * h;
         } else {
           p.vx += fx * h; p.vy += fy * h;
-          p.omega += ((ax - cx) * fy - (ay - cy) * fx) / Math.max(1, p.inertia / p.mass) * h;
+          // (turned by it no faster than brings the point it acts on to the air's speed: a twig
+          // whose weight is all in a cell of wood under a crown of leaves was spun up by it, step
+          // on step, without end - and thrown on its spin through the ground)
+          const lx = ax - cx, ly = ay - cy, most = 0.5 * rel / Math.max(1, Math.hypot(lx, ly));
+          p.omega += Math.max(-most, Math.min(most, (lx * fy - ly * fx) / Math.max(1, p.inertia / p.mass) * h));
         }
       }
       p.omega *= Math.max(0, 1 - SPIN_DRAG * h);
+      if (!pinned(p)) p.omega = Math.max(-FLORA_TUMBLE, Math.min(FLORA_TUMBLE, p.omega));
     }
 
     // A blast throws back what it breaks loose: a piece that comes away within a moment of a blast
