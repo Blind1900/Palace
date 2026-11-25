@@ -76,18 +76,20 @@
   const deg = Math.PI / 180;
 
   // ---- The look --------------------------------------------------------------------------------------
+  // (N128, the user's war-zone look: the colours of the war photos - paint dull, dark and low in
+  // colour; the 22% less colour over all is pw-look's, at draw time)
   const STYLES = {
     // (deck: the hull's roof, in cells over the track's bottom run; the turret stands 11 on it)
-    modern: { base: [196, 174, 126], dark: [148, 128, 90], wheel: [96, 92, 82], wheels: 7, span: 46, skirt: [-50, 50, -18, -9], barrel: 76, deck: 24,
+    modern: { base: [134, 126, 106], dark: [101, 93, 77], wheel: [68, 66, 62], wheels: 7, span: 46, skirt: [-50, 50, -18, -9], barrel: 76, deck: 24,
       turret: [[-34, -3], [-32, -10], [18, -11], [26, -5], [24, 0], [-25, 0]] },
-    asian: { base: [96, 112, 68], dark: [66, 80, 48], wheel: [76, 82, 66], wheels: 6, span: 42, skirt: [-47, 47, -17, -12], barrel: 80, deck: 23,
-      camo: { spots: [[64, 82, 48], [130, 126, 86], [102, 86, 58], [120, 144, 82]], density: 0.42 },
+    asian: { base: [71, 78, 60], dark: [49, 55, 42], wheel: [55, 58, 51], wheels: 6, span: 42, skirt: [-47, 47, -17, -12], barrel: 80, deck: 23,
+      camo: { spots: [[49, 56, 42], [91, 90, 74], [69, 62, 51], [90, 99, 74]], density: 0.42 },
       turret: [[-28, -2], [-25, -10], [10, -11], [31, -3], [25, 0], [-23, 0]], star: true },
-    gothic: { base: [64, 78, 52], dark: [44, 54, 36], wheel: [70, 76, 60], wheels: 6, span: 40, skirt: null, barrel: 74, deck: 21,
+    gothic: { base: [48, 54, 43], dark: [33, 37, 30], wheel: [51, 54, 47], wheels: 6, span: 40, skirt: null, barrel: 74, deck: 21,
       turret: null, era: true, cross: true },
   };
   const rgb = (c, k = 1) => PW.abgr(Math.min(255, c[0] * k), Math.min(255, c[1] * k), Math.min(255, c[2] * k));
-  const TRACK = [44, 42, 38], LINK = [74, 72, 66], RUBBER = [34, 33, 31], HUB = [104, 100, 92], ERA = [78, 94, 62];
+  const TRACK = [44, 42, 38], LINK = [74, 72, 66], RUBBER = [34, 33, 31], HUB = [104, 100, 92], ERA = [59, 65, 52];
   const inPoly = (poly, x, y) => {
     let inside = false;
     for (let i = 0, j = poly.length - 1; i < poly.length; j = i, i += 1) {

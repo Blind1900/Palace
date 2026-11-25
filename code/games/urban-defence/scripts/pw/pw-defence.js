@@ -42,10 +42,11 @@
   const ENGAGE_LAST = 1;        // s: ... and no later - its interceptor would meet it too low
   const LOOK_EVERY = 6;         // ticks between a battery's looks at the sky
   const COVER = 70;             // cells: a threat coming down this near its side's building or unit is a threat to it
+  // (each side's paint - N128: dulled to the war photos' olive and grey)
   const STYLES = {
-    modern: { body: [118, 120, 96], dark: [84, 86, 68], light: [150, 152, 124] },
-    asian: { body: [92, 108, 70], dark: [64, 78, 50], light: [122, 138, 96] },
-    gothic: { body: [70, 84, 58], dark: [48, 58, 40], light: [98, 112, 80] },
+    modern: { body: [100, 101, 87], dark: [71, 72, 62], light: [127, 128, 111] },
+    asian: { body: [80, 90, 67], dark: [56, 64, 48], light: [105, 115, 90] },
+    gothic: { body: [61, 70, 54], dark: [42, 48, 37], light: [85, 93, 74] },
   };
   const stats = { salvos: 0, rockets: 0, launched: 0, ignored: 0, destroyed: 0 };
   let current = null, seq = 0;

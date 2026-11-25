@@ -49,13 +49,14 @@
   let current = null, seq = 0;
 
   // ---- The look ---------------------------------------------------------------------------------------
-  // (its paint: the base grey and the camouflage's darker one, each side's)
+  // (its paint: the base grey and the camouflage's darker one, each side's - N128: dulled to the
+  // war photos' greys)
   const STYLES = {
-    modern: { base: [178, 182, 184], camo: [146, 150, 154] },
-    asian: { base: [150, 164, 176], camo: [120, 134, 148] },
-    gothic: { base: [138, 152, 170], camo: [104, 118, 138] },
+    modern: { base: [152, 154, 156], camo: [125, 127, 130] },
+    asian: { base: [130, 139, 146], camo: [105, 113, 122] },
+    gothic: { base: [120, 129, 139], camo: [91, 100, 112] },
   };
-  const DARK = [40, 42, 46], NOZZLE = [46, 44, 44], LENS = [30, 34, 44], PROBE = [196, 198, 200], BOOSTER = [150, 146, 132];
+  const DARK = [40, 42, 46], NOZZLE = [46, 44, 44], LENS = [30, 34, 44], PROBE = [196, 198, 200], BOOSTER = [126, 124, 116];
   const ELEV = 14 * deg;        // how far above it we see it from
   const SWEEP = 17 * deg, CANT = 38 * deg, FIN_LEAN = 0.45, FIN_LEN = 10;
   // Its body side on: the top and belly along it (u nose-wards from its middle, v down) - the

@@ -137,9 +137,10 @@
       burning.delete(i);
       PW.setHeat(world, x, y, Math.min(PW.heatAt(world, x, y), 90));
     }
+    // (N128: burnt to the war photos' dark grey-brown - soot and ash over it - not to black)
     function scorched(color, k = 0.45) {
       const c = PW.unpack(color);
-      return PW.abgr(c[0] * k + 6, c[1] * k + 4, c[2] * k + 2);
+      return PW.abgr(c[0] * k + 22, c[1] * k + 20, c[2] * k + 18);
     }
     // How thick the wood is at (x, y): the narrower of its runs across and up (a trunk's width, a
     // bough's depth, a twig's one or two cells). Leaves do not count; charcoal does.
@@ -202,15 +203,15 @@
       if (to === M.ASH) {
         PW.set(world, x, y, M.ASH | (PW.hash2(x, y) & 3) << 6);
       } else if (to) {
-        // (burnt turf: charred black, with its ash lying on it)
+        // (burnt turf: charred, with its ash lying on it)
         PW.set(world, x, y, to | (mat[i] & 0xc0));
         PW.setLayer(world, 'paint', x, y, scorched(palettes[to][(PW.hash2(x, y) & 3) * 2], CHAR));
         PW.setFlag(world, x, y, FLAG.SCORCH);
         if (id === M.GRASS && y > 0 && (mat[i - W] & ID_MASK) === M.AIR && !decoAt(x, y - 1) && (PW.hash2(x, y) & 1)) PW.set(world, x, y - 1, M.ASH | (PW.hash2(y, x) & 3) << 6);
       }
     }
-    // The ground under a plant that burnt is charred black (once: the life lane fades it in time).
-    const CHAR = 0.3;
+    // The ground under a plant that burnt is charred (once: the life lane fades it in time).
+    const CHAR = 0.45;
     // Bark scorched by the fire beside it, or burning: blackened (darker each time, to near black).
     const BARK_SCORCH = 330;          // °C
     function scorchBark(x, y, k) {
@@ -460,7 +461,7 @@
       }
       if (t >= SCORCH && terrain[id] && !(PW.getFlags(world, x, y) & FLAG.SCORCH) && hasAir(i, x, y)) {
         const paint = PW.getLayer(world, 'paint', x, y) || palettes[id][((mat[i] >> 6) * 2 + (PW.hash2(x, y) & 1)) & 7];
-        PW.setLayer(world, 'paint', x, y, scorched(paint, 0.42));
+        PW.setLayer(world, 'paint', x, y, scorched(paint, 0.5));
         PW.setFlag(world, x, y, FLAG.SCORCH);
       }
       // (wood the fire is beside is scorched black, even where it has not caught)

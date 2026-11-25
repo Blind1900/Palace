@@ -214,11 +214,12 @@
 
   // ---- A mech --------------------------------------------------------------------------------------
   // spec: { x, y (its soles' row; the ground under it if left out), side, style, facing }
-  // (each style's colours: the drawings' strokes in its plate, lit from above)
+  // (each style's colours: the drawings' strokes in its plate, lit from above - N128: dulled to the
+  // war photos' grey steel)
   const STYLES = {
-    modern: { base: [74, 80, 88], dark: [42, 46, 52], light: [128, 136, 146] },
-    asian: { base: [66, 82, 64], dark: [38, 48, 38], light: [116, 136, 110] },
-    gothic: { base: [64, 66, 86], dark: [36, 38, 52], light: [112, 116, 146] },
+    modern: { base: [64, 68, 73], dark: [37, 39, 43], light: [110, 115, 121] },
+    asian: { base: [58, 68, 57], dark: [34, 40, 34], light: [101, 113, 98] },
+    gothic: { base: [55, 57, 69], dark: [31, 33, 41], light: [97, 99, 117] },
   };
   function create(world, spec) {
     decode();

@@ -82,10 +82,16 @@ function picture(t) {
     const k = (y * 360 + x) * 4;
     if (!d[k + 3]) continue;
     x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y);
-    // (the paint: its coloured pixels, not the grey of its tracks and wheels)
-    if (Math.max(d[k], d[k + 1], d[k + 2]) - Math.min(d[k], d[k + 1], d[k + 2]) >= 18) { n += 1; sr += d[k]; sg += d[k + 1]; sb += d[k + 2]; }
     if (d[k] > 210 && d[k + 1] > 210 && d[k + 2] > 200) cross += 1;
     if (d[k] > 180 && d[k + 1] < 70) star += 1;
+  }
+  // (the paint: the hull's and the turret's pixels - over its running gear, the lower half of it;
+  // not its markings nor the near-grey of its fittings. N128 dulled the paint to the war photos',
+  // as grey as its tracks are, so its colour is told by where it is)
+  for (let y = y0; y < y0 + (y1 - y0) * 0.5; y += 1) for (let x = x0; x <= x1; x += 1) {
+    const k = (y * 360 + x) * 4;
+    if (!d[k + 3] || (d[k] > 210 && d[k + 1] > 210 && d[k + 2] > 200) || (d[k] > 180 && d[k + 1] < 70)) continue;
+    if (Math.max(d[k], d[k + 1], d[k + 2]) - Math.min(d[k], d[k + 1], d[k + 2]) >= 5) { n += 1; sr += d[k]; sg += d[k + 1]; sb += d[k + 2]; }
   }
   return { w: x1 - x0 + 1, h: y1 - y0 + 1, n, r: sr / n, g: sg / n, b: sb / n, cross, star };
 }
@@ -107,8 +113,8 @@ else {
     && tall[0] === 35 && tall[0] >= tall[1] && tall[1] >= tall[2] && tall[2] <= 33 && ratios.every((q) => q > 3.6 && q < 5.2),
     `a tank is a main battle tank's real size - about 8 m of hull, its gun reaching 2.5 m past its nose - and its own army's height: an M1 Abrams 2.44 m to its turret roof, ${tall[0]} cells with its cupola, a Type 99 ${tall[1]}, a low T-64 ${tall[2]} - under a gate hall's 36 clear (${ratios.map((q) => q.toFixed(2)).join(' / ')} long to tall, as a real one with its gun; ${sizes} cells)`);
   const { modern, asian, gothic } = Object.fromEntries(T.STYLES.map((s) => [s, looks[s].pic]));
-  check(modern.r > modern.g && modern.g > modern.b && modern.r > 140 && asian.g > asian.r && asian.g > asian.b && gothic.g > gothic.r && gothic.g < asian.g && gothic.cross > 8 && asian.star > 2,
-    `each side's tank in its army's colours: the M1 sand tan (${modern.r | 0},${modern.g | 0},${modern.b | 0}), the Type 99 olive with its red star (${asian.r | 0},${asian.g | 0},${asian.b | 0}; ${asian.star} star pixels), the T-64 dark green with its white cross (${gothic.r | 0},${gothic.g | 0},${gothic.b | 0}; ${gothic.cross} cross pixels)`);
+  check(modern.r > modern.g && modern.g > modern.b && modern.r > 110 && asian.g > asian.r && asian.g > asian.b && gothic.g > gothic.r && gothic.g < asian.g && gothic.cross > 8 && asian.star > 2,
+    `each side's tank in its army's colours: the M1 sand tan, dulled to the war photos' paint - N128 - (${modern.r | 0},${modern.g | 0},${modern.b | 0}), the Type 99 olive with its red star (${asian.r | 0},${asian.g | 0},${asian.b | 0}; ${asian.star} star pixels), the T-64 dark green with its white cross (${gothic.r | 0},${gothic.g | 0},${gothic.b | 0}; ${gothic.cross} cross pixels)`);
   const flat = T.STYLES.map((s) => looks[s].tank);
   check(flat.every((t) => Math.abs(t.angle) < 0.01 && t.contact.every((c) => c === 1) && t.springs.every((s) => Math.abs(s) < 0.6) && seated(t) <= 1.5),
     `on flat ground every wheel is on it and the hull lies level (${flat.map((t) => `${t.style}: ${t.contact.reduce((a, b) => a + b, 0)}/${t.contact.length} wheels down, ${(t.angle / deg).toFixed(1)} deg`).join('; ')})`);

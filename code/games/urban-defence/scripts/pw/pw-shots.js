@@ -466,7 +466,7 @@
     }
   }
   // (a puff of what it struck: dust off earth, grit off stone and brick - out of the face)
-  const DUST_TONES = [[160, 142, 112], [138, 122, 96], [118, 104, 84]], GRIT_TONES = [[150, 145, 139], [126, 121, 116], [104, 100, 96]];
+  const DUST_TONES = [[136, 121, 95], [117, 104, 82], [100, 88, 71]], GRIT_TONES = [[150, 145, 139], [126, 121, 116], [104, 100, 96]];
   function puff(particles, x, y, nx, ny, n, id) {
     const tones = PW.mat.terrain[id] ? DUST_TONES : GRIT_TONES;
     for (let k = 0; k < n; k += 1) {

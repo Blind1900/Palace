@@ -16,13 +16,15 @@
 (function () {
   const PW = window.PW;
 
+  // (N128, the user's war-zone look: the colours of the war photos - kit dull, dark and low in
+  // colour; the 22% less colour over all is pw-look's, at draw time)
   const DRESS = {
-    asian: { helmet: [74, 100, 58], boots: [30, 28, 26], tool: [30, 30, 32], goggles: [28, 30, 34], gogglesLit: [110, 124, 132], patch: [200, 42, 34],
-      camo: { base: [92, 118, 70], spots: [[56, 78, 44], [136, 132, 92], [102, 84, 56], [122, 150, 84]], cell: 1, density: 0.55 } },
-    gothic: { helmet: [56, 58, 62], boots: [44, 36, 30], tool: [70, 50, 34], vest: [126, 106, 76], vestDark: [98, 80, 56],
-      camo: { base: [130, 126, 96], spots: [[94, 102, 66], [106, 86, 60], [72, 76, 52]], cell: 2, density: 0.55 } },
-    modern: { helmet: [150, 134, 100], boots: [176, 148, 104], tool: [30, 30, 32], vest: [92, 98, 70], vestDark: [70, 76, 54], mount: [34, 34, 36],
-      camo: { base: [156, 144, 110], spots: [[108, 116, 78], [120, 98, 70], [188, 178, 142]], blob: 3, density: 0.5 } },
+    asian: { helmet: [56, 70, 47], boots: [30, 28, 26], tool: [30, 30, 32], goggles: [28, 30, 34], gogglesLit: [110, 124, 132], patch: [200, 42, 34],
+      camo: { base: [68, 83, 56], spots: [[42, 54, 36], [97, 94, 72], [71, 61, 45], [90, 105, 69]], cell: 1, density: 0.55 } },
+    gothic: { helmet: [41, 42, 44], boots: [31, 26, 23], tool: [48, 37, 28], vest: [88, 77, 60], vestDark: [68, 58, 45],
+      camo: { base: [93, 90, 74], spots: [[68, 72, 53], [73, 62, 48], [52, 54, 41]], cell: 2, density: 0.55 } },
+    modern: { helmet: [105, 97, 78], boots: [123, 107, 83], tool: [30, 30, 32], vest: [66, 70, 54], vestDark: [51, 54, 42], mount: [34, 34, 36],
+      camo: { base: [110, 104, 85], spots: [[78, 82, 61], [83, 71, 56], [133, 128, 108]], blob: 3, density: 0.5 } },
   };
   // Camouflage colour at GIF cell (x, y): digital pixels, pixel blocks, or soft blotches.
   function camoAt(camo, x, y) {
@@ -36,7 +38,7 @@
   }
 
   const LOOKS = {
-    trooper: { helmet: [70, 80, 56], face: [168, 128, 100], jacket: [88, 100, 68], trousers: [66, 74, 54], boots: [38, 34, 30], tool: [50, 52, 56] },
+    trooper: { helmet: [51, 57, 43], face: [168, 128, 100], jacket: [64, 71, 53], trousers: [48, 52, 41], boots: [38, 34, 30], tool: [50, 52, 56] },
     guard: { helmet: [150, 104, 168], face: [176, 134, 106], jacket: [214, 152, 232], trousers: [168, 116, 186], boots: [52, 40, 58], tool: [60, 56, 66] },
     miner: { helmet: [232, 184, 40], face: [170, 130, 102], jacket: [212, 108, 38], trousers: [50, 58, 82], boots: [36, 32, 28], tool: [104, 108, 116],
       stripe: [226, 228, 214], lamp: [255, 248, 206], brim: [196, 150, 30] },

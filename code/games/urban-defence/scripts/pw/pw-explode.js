@@ -396,7 +396,7 @@
   // have as smoke (or none, `smoke` the chance it leaves any). Its rim burns out first.
   const SOOT_TONES = [[122, 116, 110], [86, 81, 77], [56, 52, 50]];
   const GREY_TONES = [[150, 145, 139], [111, 106, 101], [74, 70, 67]];
-  const DUST_TONES = [[160, 142, 112], [124, 109, 87], [86, 74, 60]];
+  const DUST_TONES = [[136, 121, 95], [105, 93, 74], [73, 63, 51]];
   function billow(particles, random, x, y, vx, vy, size, fill, swell, fl, life, tones, alpha, smoke = 1) {
     const n = Math.max(3, Math.round(Math.PI * size * size * fill));
     for (let k = 0; k < n; k += 1) {
