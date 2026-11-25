@@ -10,6 +10,16 @@ const view = async (name, x, y, zoomIndex) => {
 };
 const surfaceAt = (x) => world.groundTop[Math.round(x)];
 await view('pw-01-fit', world.width / 2, world.height / 2, -1);
+// N137 (the user's): at the widest zoom the world sits centred in the view - the land's surface near
+// the middle of the screen, not pressed down to its foot under a sky three times its height
+const checks = [];
+{
+  const cam = pwApp.renderer.camera, vh = pwApp.renderer.view.height;
+  let s = 0, n = 0;
+  for (let x = 0; x < world.width; x += 64) { s += world.groundTop[x]; n += 1; }
+  const at = ((s / n) - cam.y) * cam.zoom / vh;
+  checks.push(`${at > 0.3 && at < 0.65 ? 'PASS' : 'FAIL'} at the widest zoom the land sits near the middle of the view (its mean surface ${Math.round(at * 100)}% down the screen)`);
+}
 const left = layout.sites[0];
 await view('pw-02-left-base', (left.x0 + left.x1) / 2, surfaceAt((left.x0 + left.x1) / 2) - 100, 2);
 const mountain = layout.mountains[0];
@@ -32,5 +42,5 @@ const forestView = vegetation.filter((item) => item.kind === 'tree')[Math.floor(
 if (forestView) await view('pw-11-forest', forestView.x, forestView.y + forestView.height * 0.6, 3);
 const cave = layout.caves[0];
 if (cave) await view('pw-07-cave', cave.points[Math.floor(cave.points.length / 2)].x, cave.points[Math.floor(cave.points.length / 2)].y, 4);
-return { views, timings: pwApp.timings, sites: layout.sites, lakes: layout.lakes.length, mountains: layout.mountains.length,
+return { checks, views, timings: pwApp.timings, sites: layout.sites, lakes: layout.lakes.length, mountains: layout.mountains.length,
   nodes: layout.nodes.length, caves: layout.caves.length, stats: pwApp.renderer.stats() };

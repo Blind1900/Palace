@@ -768,8 +768,16 @@
       camera.x = visibleW >= world.width ? (world.width - visibleW) / 2 : Math.max(0, Math.min(world.width - visibleW, camera.x));
       // The view may rise above the grid (open sky for jets and missiles) but never below bedrock.
       const top = -world.height * 0.3;
-      camera.y = visibleH >= world.height - top ? world.height - visibleH
-        : Math.max(top, Math.min(world.height - visibleH, camera.y));
+      // N137 (the user's): zoomed out past the world's whole height, the world sits centred in the
+      // view - the band from over its highest peak down to its bedrock in the middle of the screen,
+      // not pressed to its foot under a sky three times its own height
+      if (visibleH >= world.height - top) {
+        let peak = world.height;
+        const g = world.groundTop;
+        if (g) for (let x = 0; x < world.width; x += 16) if (g[x] < peak) peak = g[x];
+        const bandTop = Math.max(top, peak - world.height * 0.12);
+        camera.y = (bandTop + world.height) / 2 - visibleH / 2;
+      } else camera.y = Math.max(top, Math.min(world.height - visibleH, camera.y));
       // Snap so cell edges land on whole device pixels.
       if (camera.zoom >= 1) {
         camera.x = Math.round(camera.x * camera.zoom) / camera.zoom;
@@ -808,6 +816,16 @@
       ctx.fillStyle = gradient;
       ctx.fillRect(0, 0, view.width, view.height);
       sky.draw(ctx, camera, view, frame);
+      // (N137: zoomed out with the world centred, the view reaches under its bedrock - deep rock
+      // there, and behind the ground below the land's lowest surface, where the whole-map overview
+      // may not yet have drawn a chunk: never the sky's colour under the ground)
+      if (camera.zoom < 0.25) {
+        const s = world.surface0 || world.groundTop;
+        let deepest = 0;
+        for (let x = 0; x < world.width; x += 32) if (s[x] > deepest) deepest = s[x];
+        const under = Math.round((deepest + 60 - camera.y) * camera.zoom);
+        if (under < view.height) { ctx.fillStyle = 'rgb(30, 27, 24)'; ctx.fillRect(0, Math.max(0, under), view.width, view.height - Math.max(0, under)); }
+      }
     }
 
     // ---- Layers ---------------------------------------------------------------------------------
