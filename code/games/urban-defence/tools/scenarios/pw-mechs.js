@@ -363,7 +363,9 @@ const drawnCells = (m) => { const P = m.P, out = new Set(); for (let y = P.box.y
     const r = { ctx: document.createElement('canvas').getContext('2d'), world, camera: { x: x0, y: g - 300, zoom: 2 }, view: { width: 1600, height: 900 } };
     const drawMs = best(5, 8, () => X.draw(r));
     const ms = best(5, 30, () => X.step(world, DT));
-    check(ms < 0.4 && drawMs < 3, `four mechs cost little: ${ms.toFixed(3)} ms a tick, ${drawMs.toFixed(2)} ms to draw at 2x`);
+    // (the hopper stands 1.25 times as large since 9d6ab74 - its footing looked over that much more: 0.5 ms
+    // for four, and a side keeps two at most - N142)
+    check(ms < 0.5 && drawMs < 3, `four mechs cost little: ${ms.toFixed(3)} ms a tick, ${drawMs.toFixed(2)} ms to draw at 2x`);
   } else check(false, 'a stretch of the wilds for the cost');
   fresh();
 }
