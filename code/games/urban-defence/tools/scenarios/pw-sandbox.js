@@ -104,13 +104,21 @@ const natural = (x) => {
   const id = PW.get(world, x, g) & 63;
   return id === M.GRASS || id === M.TOPSOIL || id === M.SOIL || id === M.STONE || id === M.SAND;
 };
-let groundX = flatX !== null ? flatX + 80 : null;
-if (groundX === null || !natural(groundX)) {
+// (not on the pad just terraced: its cut edges are still settling, and keep the ground round them
+// stirring)
+let groundX = null;
+// (level - on a hillside the heap runs on down it - and away from water: a lake or a stream by it keeps
+// its ground stirring, and nothing settles)
+const levelAt = (x) => [-20, -10, 10, 20].every((d) => Math.abs(world.groundTop[x + d] - world.groundTop[x]) <= 2)
+  && !layout.lakes.some((l) => Math.abs(x - l.x) < l.half + 200)
+  && ![-150, -100, -50, 0, 50, 100, 150].some((d) => { const g = world.groundTop[x + d]; for (let y = g - 30; y <= g; y += 1) if ((PW.get(world, x + d, y) & 63) === M.WATER) return true; return false; });
+if (groundX === null || !natural(groundX) || !levelAt(groundX)) {
   groundX = null;
   for (let x = 600; x < world.width - 600 && groundX === null; x += 23) {
     if (built(x) || citied(x)) continue;
     if (layout.lakes.some((l) => Math.abs(x - l.x) < l.half + 200)) continue;
-    if (natural(x) && natural(x - 4) && natural(x + 4)) groundX = x;
+    if (flatX !== null && Math.abs(x - flatX) < 300) continue;
+    if (natural(x) && natural(x - 4) && natural(x + 4) && levelAt(x)) groundX = x;
   }
   if (groundX === null) groundX = tower.body.right + 300;   // (last resort, the old spot)
 }
@@ -122,7 +130,7 @@ const groundRubble = countIn(groundX - 20, groundY - 10, groundX + 20, groundY +
 const groundDebris = countIn(groundX - 20, groundY - 10, groundX + 20, groundY + 20, M.DEBRIS);
 const roofDebris = countIn(roofX - 30, roofY - 30, roofX + 30, roofY + 2, M.DEBRIS);
 const roofRubble = countIn(roofX - 30, roofY - 30, roofX + 30, roofY + 2, M.RUBBLE);
-check(groundRubble > 0 && groundDebris === 0, `ground debris compacted into rubble (${groundRubble} rubble, ${groundDebris} loose)`);
+check(groundRubble > 0 && groundDebris === 0, `ground debris compacted into rubble (${groundRubble} rubble, ${groundDebris} loose${groundDebris ? ` - at ${groundX}, on ${PW.get(world, groundX, world.groundTop[groundX]) & 63}, the ground round it ${[-20, -10, 0, 10, 20].map((d) => world.groundTop[groundX + d] - world.groundTop[groundX]).join("/")}, ${flatX === null ? "no pad" : "pad at " + flatX}` : ""})`);
 check(roofDebris > 0 && roofRubble === 0, `roof debris stays loose (${roofDebris} loose, ${roofRubble} rubble)`);
 await view('sb-roof-debris', roofX, roofY - 20, 6);
 

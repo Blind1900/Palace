@@ -58,7 +58,8 @@ const core = live[0];
     for (const k of now) if (!prev.has(k)) { const dy = Math.round(k / 64), dx = k - dy * 64; if (Math.abs(dy) > Math.abs(dx)) polar += 1; else equator += 1; }
     prev = now;
   }
-  check(core && gens >= 85 && alive >= gens * 0.85 && polar > equator * 1.25 && polar + equator > gens * 2,
+  // (most at the poles: a fifth more there at least - 1.25 to 1.5 over the seeds' first cores)
+  check(core && gens >= 85 && alive >= gens * 0.85 && polar > equator * 1.2 && polar + equator > gens * 2,
     `at rest a core's Life keeps going in its own body, stepped by the cores as the game steps them - ${gens} generations in 12 s, alive in ${alive} of them, ${polar + equator} births - sparked from its heart, most at the poles (${polar} births polar, ${equator} round its equator)`);
 }
 

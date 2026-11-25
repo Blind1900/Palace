@@ -4,7 +4,8 @@
 // taken into them; a man in a secret bore seen only close to; a guard holding its post, and a man
 // crouched creeping past it unseen; a turret's arc, and a turret put out of action a while; orders
 // to a trooper, a tank and a mech (over a cliff); a trooper at work at a panel; a skirmish in the
-// tunnels; a lake crossed swimming; a man sent quietly past a guard; and what the sentries cost.
+// tunnels; a lake not crossed (N124) and a man in it swimming out; a man sent quietly past a guard;
+// and what the sentries cost.
 const L = pwLab, { world } = L, U = PW.troops, N = PW.units;
 const checks = [];
 const check = (ok, text) => checks.push(`${ok ? 'PASS' : 'FAIL'} ${text}`);
@@ -224,8 +225,10 @@ const pocket = (x, floor) => {
   kill(...ours, ...theirs);
 }
 
-// 12. A lake across the way, no dry way round it: a trooper told to the far shore finds its way
-// across swimming - wading in, swimming over, its head kept above the water, walking out.
+// 12. A lake across the way, no dry way round it (N124, the user's: troopers do not swim across
+// lakes): a trooper told to the far shore finds no way there and goes to the near shore, the
+// nearest it can get on dry feet, and stops there - never in the water; and one thrown into the
+// lake swims out of it.
 {
   const xa = 5760, xb = 6060;
   let sL = 0;
@@ -235,15 +238,23 @@ const pocket = (x, floor) => {
     for (let y = world.groundTop[x]; y < sL + d; y += 1) PW.set(world, x, y, y < sL ? PW.M.AIR : PW.M.WATER, { quiet: true });
   }
   PW.rebuildGroundTop(world);
-  const t = U.create(world, { x: xa - 40 + 0.5, side: 'left' });
+  const t = U.create(world, { x: xa - 80 + 0.5, side: 'left' });
   run(0.5);
   const r = U.goTo(world, t, xb + 40, world.groundTop[xb + 40] - 1);
-  let swam = false, breath = Infinity, wettest = 0;
-  run(60, () => { swam = swam || t.swim; breath = Math.min(breath, t.breath); wettest = Math.max(wettest, t.wet); if (!t.route && t.x > xb) return false; });
-  await view('swim-across', (xa + xb) / 2, sL - 20, 5);
-  check(r && r.reached && swam && !t.dead && Math.abs(t.x - (xb + 40)) < 8 && t.onGround && breath > 19,
-    `a lake 300 across with no way round: told to the far shore, a way is found (${r ? r.reached : 'no route'}); the trooper wades in, swims (${swam}, ${(wettest * 100).toFixed(0)}% under at the most, its breath never short: ${breath.toFixed(1)} s left) and walks out, ${Math.abs(t.x - (xb + 40)).toFixed(0)} cells from where it was told, alive`);
-  kill(t);
+  let swam = false, wettest = 0;
+  run(20, () => { swam = swam || t.swim; wettest = Math.max(wettest, t.wet); });
+  await view('lake-shore', (xa + xb) / 2, sL - 20, 5);
+  // (thrown in the middle of it and told to the far shore: in the water already, it swims there and
+  // walks out)
+  const s = U.create(world, { x: (xa + xb) / 2 + 0.5, y: sL + 10, side: 'left' });
+  run(0.3);
+  U.goTo(world, s, xb + 40, world.groundTop[xb + 40] - 1);
+  let swum = false, out = -1;
+  run(40, (k) => { swum = swum || s.swim; if (out < 0 && swum && !s.swim && s.onGround && !(s.wet > 0.3)) out = k; });
+  // (it may wade in its shallows - to its thighs - as near as it can get)
+  check(r && !r.reached && !swam && wettest < 0.6 && !t.dead && t.x < xa + 20 && t.onGround && swum && out >= 0 && !s.dead,
+    `a lake 300 across with no way round: told to the far shore, no way is found (${r ? `reached ${r.reached}` : 'no route'}), and the trooper goes to the near shore and stops (${(t.x - xa).toFixed(0)} cells into its shallows, ${(wettest * 100).toFixed(0)}% under at the most, swam ${swam}); one thrown into the middle of it swims (${swum}) and walks out (${out >= 0 ? `in ${(out / 60).toFixed(1)} s` : 'never'})`);
+  kill(t, s);
 }
 
 // 12b. In hand (N102): a man the person has taken in hand, an enemy in plain sight, does nothing of

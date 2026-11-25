@@ -312,6 +312,40 @@ const fresh = () => { world.troops = []; world.grenades = []; };
   }
 }
 
+// 6d. Not over a mountain (N124, the user's): a man at the foot of the world's highest mountain,
+// told to its far side, finds no way over its crest - its open ground higher than 55% of the
+// mountain over the land's level - and never sets foot on it in 25 s; under it, its tunnels would be
+// a way (WGM's). A man set down on the crest walks off it when told.
+{
+  const L = world.layout, m = L && L.mountains && [...L.mountains].sort((a, b) => b.height - a.height)[0];
+  if (!m || !Number.isFinite(L.baseY)) check(false, 'a mountain in the world to cross');
+  else {
+    fresh();
+    const top = L.baseY - 0.55 * m.height;
+    // (on it: past its edge by more than a stride - the edge it may stand at, as near as it can get)
+    const crestAt = (x, y) => world.groundTop[Math.round(x)] < top - 4 && Math.abs(y + 1 - world.groundTop[Math.round(x)]) <= 3 && Math.abs(x - m.x) <= m.half && !(PW.getFlags(world, Math.round(x), Math.round(y)) & PW.FLAG.TUNNEL);
+    // (the feet of its flanks: as far out as its ground is under the band, 60 cells more)
+    let xl = Math.round(m.x), xr = Math.round(m.x);
+    while (xl > m.x - m.half && world.groundTop[xl] < top + 80) xl -= 1;
+    while (xr < m.x + m.half && world.groundTop[xr] < top + 80) xr += 1;
+    xl -= 60; xr += 60;
+    const crestCols = Array.from({ length: xr - xl }, (_, d) => world.groundTop[xl + d] < top).filter(Boolean).length;
+    const t = PW.troops.create(world, { x: xl + 0.5, y: world.groundTop[xl] - 1, side: 'left', facing: 1 });
+    run(0.3);
+    const r = PW.troops.goTo(world, t, xr, world.groundTop[xr] - 1);
+    let onIt = 0, high = Infinity;
+    run(25, () => { if (crestAt(t.x, t.y)) onIt += 1; high = Math.min(high, world.groundTop[Math.round(t.x)]); });
+    // (and one set down on the crest itself, told down to the foot: it walks off it)
+    const px = Math.round(m.x), s = PW.troops.create(world, { x: px + 0.5, y: world.groundTop[px] - 1, side: 'left', facing: 1 });
+    run(0.3);
+    const r2 = PW.troops.goTo(world, s, xr, world.groundTop[xr] - 1);
+    run(20);
+    check(crestCols > 20 && onIt === 0 && !(r && r.reached && !r.legs.some((l) => l.y > world.groundTop[Math.round(l.x)] + 20)) && r2 && r2.legs.length > 0 && s.x > px + 150,
+      `a man at the foot of the highest mountain (${m.height} over the land; its crest band ${crestCols} columns across) told to its far side finds no way over (${r ? (r.reached ? 'a way - under it' : 'none: as near as it can get') : 'no route'}) and never sets foot on its crest in 25 s (${onIt} ticks on it; the highest ground under it ${L.baseY - high} over the land, the band from ${Math.round(L.baseY - top)}); one set down on the crest walks down off it (${(s.x - px).toFixed(0)} cells)`);
+    fresh();
+  }
+}
+
 // 7. What they cost: twenty troopers walking, a tick; and drawing them.
 {
   const S = site(600);

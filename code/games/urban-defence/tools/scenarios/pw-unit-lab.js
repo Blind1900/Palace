@@ -53,15 +53,17 @@ const M = L.marks;
 }
 
 // 3. A flooded tunnel is no way: a trooper told to go to the room beyond the sump is not led into
-// the water; it stops short, and does not drown.
+// the water; it goes as near as it can get on dry feet - the sump's edge, or the level over the
+// room - never into the room past the water, and does not drown.
 {
   const t = U.create(world, { x: 2620.5, y: M.shaftDown.y + 160, side: 'left', style: 'asian' });
   for (let k = 0; k < 60; k += 1) L.stepWorld(1);
   const r = U.goTo(world, t, M.beyondSump.x, M.beyondSump.y);
   let wettest = 0;
   for (let k = 0; k < 60 * 30 && (t.route || k < 60); k += 1) { L.stepWorld(1); wettest = Math.max(wettest, t.wet || 0); }
-  check(r && !r.reached && !t.dead && t.x > M.beyondSump.x + 100 && wettest < 0.6,
-    `a room beyond a flooded sump is no way: told to go there, the trooper is not led through the water (${r ? (r.reached ? 'a way found' : 'no way found') : 'no route'}); it stops at its edge, at ${t.x.toFixed(0)}, never more than ${(wettest * 100).toFixed(0)}% in the water, alive`);
+  const past = t.x < M.beyondSump.x + 50 && Math.abs(t.y - M.beyondSump.y) < 30;
+  check(r && !r.reached && !t.dead && !past && wettest < 0.6,
+    `a room beyond a flooded sump is no way: told to go there, the trooper is not led through the water (${r ? (r.reached ? 'a way found' : 'no way found') : 'no route'}); it stops as near as it gets dry, at ${t.x.toFixed(0)},${t.y} (${past ? 'past the water' : t.y < M.beyondSump.y - 30 ? 'the level over the room' : 'at the edge'}), never more than ${(wettest * 100).toFixed(0)}% in the water, alive`);
   t.hp = 0; t.dead = true; t.deadFor = 99;
 }
 

@@ -423,7 +423,11 @@ for (let s = 0; s < 75 && stability.busy(); s += 1) pwApp.stepWorld(60);
 // sway, the higher the more, its wood not at all; in calm air nothing moves, in a wind the leaves
 // lean the way it blows.
 {
-  const tree = (world.flora || []).find((r) => r.kind === 'tree' && !r.fallen && !r.felled && r.size > 90);
+  // (a big tree with leaves, out in the wind: of the first dozen, the one whose crown's top sways most
+  // - one in a sheltered hollow, or a dead tree, barely stirs)
+  const crownSway = (r) => { let a = 0; for (let y = r.y; y < r.y + r.height * 0.3; y += 2) for (let x = r.x; x < r.x + r.width; x += 2) { const f = PW.getFlags(world, x, y); if ((f & PW.FLAG.FLORA) && !(f & PW.FLAG.WOOD)) a += PW.flora.leafSway(world, x, y) >> 8; } return a; };
+  const tree = (world.flora || []).filter((r) => r.kind === 'tree' && !r.fallen && !r.felled && r.size > 90 && r.type !== 'deadTree').slice(0, 12)
+    .map((r) => [r, crownSway(r)]).sort((a, b) => b[1] - a[1]).map(([r]) => r)[0];
   if (tree) {
     let woodSways = 0, high = 0, nHigh = 0, low = 0, nLow = 0;
     for (let y = tree.y; y < tree.y + tree.height; y += 1) for (let x = tree.x; x < tree.x + tree.width; x += 1) {

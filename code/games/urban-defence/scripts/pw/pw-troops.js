@@ -331,6 +331,7 @@
   const SAFE_DROP = 40;         // cells it drops off a ledge unhurt (see FALL_SAFE)
   const FREE_CAP = 40;
   const SWIM_COST = 4;          // a cell's going in water deeper than its thighs, against a walked one's 1
+  const CREST = 0.55;           // of a mountain's height over the land's level: its open ground higher is no way (N124)
   const PLAN = { n: 0, free: null, foot: null, cost: null, prev: null, how: null };
   const HOW = { WALK: 1, CROUCH: 2, UP: 3, DOWN: 4 };
   function plan(world, from, to) {
@@ -358,24 +359,42 @@
     const at = (x, y) => (y - y0) * bw + (x - x0);
     const inBox = (x, y) => x - HALF >= x0 && x + HALF - 1 <= x1 && y - HEIGHT >= y0 && y + 1 <= y1;
     const room = (x, y) => { let m = FREE_CAP; for (let xx = x - HALF, i = at(x - HALF, y); xx < x + HALF; xx += 1, i += 1) if (free[i] < m) m = free[i]; return m; };
-    // In water it wades, and deeper it swims, its head kept over the surface (see move) - but never
-    // where the water is over its head: a tunnel flooded to its roof is no way (the user's design),
-    // where a lake out in the open is crossed swimming, slowly, when there is no dry way round.
+    // In water it wades no deeper than its thighs (N124, the user's: troopers do not swim across a
+    // lake - a flooded tunnel is no way either, the user's design): where there is no dry way, the
+    // nearest dry place is where it goes. Only a man in the water already - fallen in, washed in -
+    // swims, his head kept over the surface (see move), to get out of it.
     // (its head out of the water standing there; and where it floats - its neck at the surface,
     // its head over it - water bears it)
     const WADE = 10;
     const headOut = (x, y) => !(foot[at(x, y - HEIGHT + 3)] & 4);
     const floatAt = (x, y) => (foot[at(x, y - HEIGHT + 4)] & 4) !== 0 && headOut(x, y);
-    const bearsAt = (x, y) => {
-      for (let xx = x - HALF, i = at(x - HALF, y + 1); xx < x + HALF; xx += 1, i += 1) if (foot[i] & 1) return true;
-      return ((foot[at(x, y + 1)] & 2) !== 0 && (foot[at(x, y)] & 2) === 0) || floatAt(x, y);
-    };
     // (deeper in the water than its thighs: wading slowly, or swimming)
     const wet = (x, y) => (foot[at(x, y - WADE)] & 4) !== 0;
-    // (how tall it can stand there, 0 not at all; wet, only standing, its head out of the water)
+    const inWater = inBox(sx, sy) && wet(sx, sy);
+    const bearsAt = (x, y) => {
+      for (let xx = x - HALF, i = at(x - HALF, y + 1); xx < x + HALF; xx += 1, i += 1) if (foot[i] & 1) return true;
+      return ((foot[at(x, y + 1)] & 2) !== 0 && (foot[at(x, y)] & 2) === 0) || (inWater && floatAt(x, y));
+    };
+    // Nor over a mountain (N124, the user's): the open ground of a high mountain's crest - higher over
+    // the land's level than CREST of the mountain's height - is no way; under it its tunnels are, and
+    // its buildings, and its lower flanks. (A man up there already - set down, blown up - walks off it.)
+    const crest = new Uint8Array(bw), L = world.layout;
+    if (L && L.mountains && Number.isFinite(L.baseY)) {
+      for (const m of L.mountains) {
+        const top = L.baseY - CREST * m.height;
+        for (let x = Math.max(x0, Math.floor(m.x - m.half)); x <= Math.min(x1, Math.ceil(m.x + m.half)); x += 1) if (world.groundTop[x] < top) crest[x - x0] = 1;
+      }
+    }
+    // (on it: anywhere over the ground there, or a little into it - standing on a slope, a man's feet
+    // are on the ground beside his column; not in a tunnel)
+    const onCrest = (x, y) => crest[x - x0] === 1 && y < world.groundTop[x] + 8 && !(PW.getFlags(world, x, y) & PW.FLAG.TUNNEL);
+    const upThere = inBox(sx, sy) && onCrest(sx, sy);
+    // (how tall it can stand there, 0 not at all; wet - in the water already - only standing, its
+    // head out of the water)
     const standH = (x, y) => {
       const r = room(x, y), h = r >= HEIGHT ? HEIGHT : r >= CROUCH ? CROUCH : 0;
-      return h && (!wet(x, y) || (h === HEIGHT && headOut(x, y))) ? h : 0;
+      if (!h || (!upThere && onCrest(x, y))) return 0;
+      return !wet(x, y) || (inWater && h === HEIGHT && headOut(x, y)) ? h : 0;
     };
     // (where it ends up let go at (x, y), h tall: on what bears it, or a drop no deeper than it takes unhurt)
     const landAt = (x, y, h) => {
