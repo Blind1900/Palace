@@ -27,6 +27,7 @@
   const MAX_LEN = 2600;        // portal to portal at the most
   const MAX_FILL = 200;        // rows of embankment under the road over a valley at the most
   const COVER = 12;            // rock over the crown below which the road runs in an open cut
+  const MOUNTAIN_COVER = 80;   // N144: rock over the crown somewhere along the way, or it is a hill
   const STEP = 16;             // the bore advances a box at a time
   const BORE_RATE = 24;        // cells a second a growing city's bore advances
   const PIPE_UNDER = 18;       // rows under the road the bundle is laid again (clear of the road's bed)
@@ -77,6 +78,12 @@
     const ya = world.groundTop[a], yb = world.groundTop[b];
     if (Math.abs(yb - ya) > (b - a) * GRADE) return { why: 'too steep between the feet' };
     const floorAt = (x) => Math.round(ya + (yb - ya) * (x - a) / (b - a));
+    // N144 (the user's screenshot): a road is bored through a mountain, not a hill - a range whose
+    // rock stands no more than the bore's own height over the line is crossed over the top (a hill
+    // bored through was all cut and void, a base sitting over the hole)
+    let deepest = -Infinity;
+    for (let x = a; x <= b; x += 4) deepest = Math.max(deepest, floorAt(x) - CLEAR - world.groundTop[x]);
+    if (deepest < MOUNTAIN_COVER && !PW.NO_HILL_PASS) return { why: 'a hill, not a mountain: the road goes over it' };
     for (let x = a; x <= b; x += 2) {
       const f = floorAt(x), g = world.groundTop[x];
       if (g - f > MAX_FILL) return { why: 'a chasm under the line' };

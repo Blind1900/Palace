@@ -110,6 +110,7 @@
     const wetAt = (x) => (PW.get(world, x, world.groundTop[x]) & 63) === M.WATER;
     // Water bodies and mountain flanks, judged once on the natural ground: the barriers growth
     // stops at (N44). Steepness is judged over 16 columns, like ploughable land (about 1 in 1.8).
+    const HILL_RISE = 176;   // N144: a road tunnel's bore (96) and 80 rows of rock over it
     function computeBarriers() {
       const out = [], W = world.width;
       for (let x = 8; x < W - 8; x += 1) {
@@ -145,7 +146,26 @@
         for (const [a, b] of pieces) if (b - a >= 24) land.push({ kind: 'mountain', x0: a, x1: b });
       }
       land.sort((a, b) => a.x0 - b.x0);
-      return land;
+      // N144 (the user's screenshot): a steep flank only a hill's height is no mountain - the town
+      // grows on over it, grading it, rather than stopping at its foot to bore a road through it
+      // (a hill bored was all cut and void, a base sitting over the hole). A mountain's flank rises
+      // more than a road tunnel's bore and its rock cover.
+      // (judged by its whole massif - the flanks within RANGE_GAP of each other are one mountain, a
+      // shoulder or a shelf of a great mountain is no hill: its top over its lower foot)
+      if (PW.NO_HILL_PASS) return land;
+      const pieces = land.filter((b) => b.kind === 'mountain'), keep = new Set();
+      for (const b of pieces) {
+        let x0 = b.x0, x1 = b.x1, grew = true;
+        while (grew) {
+          grew = false;
+          for (const q of pieces) if (q.x1 >= x0 - 260 && q.x0 <= x1 + 260 && (q.x0 < x0 || q.x1 > x1)) { x0 = Math.min(x0, q.x0); x1 = Math.max(x1, q.x1); grew = true; }
+        }
+        let top = Infinity;
+        for (let x = x0; x <= x1; x += 2) top = Math.min(top, surf(x));
+        const foot = Math.max(surf(Math.max(0, x0 - 20)), surf(Math.min(world.width - 1, x1 + 20)));
+        if (foot - top >= HILL_RISE) keep.add(b);
+      }
+      return land.filter((b) => b.kind !== 'mountain' || keep.has(b));
     }
     const barriers = computeBarriers();
     // N104: the whole massif a mountain barrier belongs to - its flanks, the shelves and saddles
