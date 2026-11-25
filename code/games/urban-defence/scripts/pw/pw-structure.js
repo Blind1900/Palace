@@ -21,6 +21,7 @@
   const PW = window.PW;
   const { M, ID_MASK, CHUNK_SHIFT, CHUNK_MASK } = PW;
   const { phase, structural, breaksTo, hardness } = PW.mat;
+  const CLEAR_SOON = 600;       // ticks between looks over a building told of, at most (see clearOut)
   const groundMat = PW.mat.ground;
 
   const FAIL_RATIO = 1.8;     // a row gives way when each support carries 1.8 times its built load
@@ -240,6 +241,9 @@
     const CALM_MAX = 3;
     function notify(id, soon = false) {
       const b = building(id);
+      // (struck, pushed on, a neighbour come down against it: what that put inside it is looked for
+      // soon - see clearOut; once in CLEAR_SOON ticks at most - water pressing on one tells it every tick)
+      if (b && !(tick - (b.clearSoonAt ?? -1e9) < CLEAR_SOON)) { b.clearSoon = true; b.clearSoonAt = tick; b.clearStuck = undefined; }
       if (!b || (due.has(id) && !soon)) return;
       if (soon) b.floodAt = tick;
       // (only a whole building calms: one damaged is looked at at the usual pace - what hangs loose
@@ -309,6 +313,11 @@
       }
       stats.ms = performance.now() - t0;
       stats.maxMs = Math.max(stats.maxMs, stats.ms);
+      // (and what has come to lie inside the finished buildings carried out of them: see clearOut)
+      const t1 = performance.now();
+      clearOut();
+      stats.clearMs = performance.now() - t1;
+      stats.clearMaxMs = Math.max(stats.clearMaxMs || 0, stats.clearMs);
     }
     // Mark the building's frame that is anchored - joined, 8-connected, to ground or to structure
     // it does not own - in `state`; [frame cells, anchored cells]. (A tower is a hundred thousand
@@ -735,8 +744,255 @@
       }
     }
 
+    // ---- Clearing out (the user's, 2026-11-24: debris is pushed out of the inside of a fully built
+    // building - a system, not a fix) ---------------------------------------------------------------
+    // What has come to lie inside a building that stands whole and finished - no site, nothing of it
+    // being built or mended (see PW.isGrowing) - rubble, debris, loose earth and stone, sand, ash - is
+    // carried out of it: along its rooms and down its stairs to the nearest way out - a door,
+    // a gate hall's mouth - and set down outside it, where it settles as any loose ground does. None
+    // of it is lost; water drains as it does. A site keeps what lies in it until it is built (see
+    // pw-repair).
+    // Here each building's way out is worked out - a distance over its rooms from the cells by its
+    // openings (its own open cells beside or over open air not its own), the ways one carrying it
+    // walks: along the floors, across the stairs' steps, up a step or a stair's tread, down through
+    // a grate as water goes - a share a tick, with what lies in it found as the rooms are looked over;
+    // the carrying is the sim's (pw-sim's carried: a grain at rest goes on a cell by that way). Looked
+    // over again every CLEAR_AGAIN ticks - every CLEAR_WAKE while it is being cleared, what is carried
+    // having moved - and soon when the building is told of a blow.
+    const CLEAR_LOOK = 3000;      // cells of the buildings' boxes looked at a tick, all together
+    const CLEAR_AGAIN = 300;      // ticks before a building is looked over again
+    const CLEAR_WAKE = 90;        // ticks from one look over a building being cleared to the next
+    const CLEAR_WAKES = 1500;     // cells of what was found woken a tick, at most
+    const CLEAR_GIVE = 8;         // looks over it with none of it gone out before it is left be (till CLEAR_AGAIN)
+    const CLEAR_GRATE = 16;       // cells of grate - a flight's steps - it is carried across, at most (pw-sim's GRATE_DEPTH)
+    const CLEAR_CLIMB = 5;        // cells: the face it is lifted up at most - a stair's tread is 4
+    const CLEAR_STEP = 8;         // cells: the step outside a way out it is set out over, at most (pw-sim's CARRY_STEP)
+    const LOOSE = new Uint8Array(64);
+    // (not earth that stands - a base let into a slope keeps the ground it is cut into)
+    for (const m of [M.DEBRIS, M.RUBBLE, M.LOOSE_SOIL, M.LOOSE_STONE, M.SAND, M.ASH]) if (m !== undefined) LOOSE[m] = 1;
+    // (found, what had packed down is broken up to be carried: rubble as debris)
+    function found(c, i) {
+      if ((mat[i] & ID_MASK) === M.RUBBLE) PW.set(world, i % W, (i / W) | 0, (mat[i] & ~ID_MASK) | M.DEBRIS, { quiet: true, keepPaint: true });
+      c.found.push(i);
+    }
+    const OPEN = PW.mat.open;
+    // (room in a building's rooms: open air, or standing water - what is carried is waded through it)
+    const ROOM = new Uint8Array(64);
+    for (let k = 0; k < 64; k += 1) ROOM[k] = OPEN[k] || phase[k] === PW.PHASE.LIQUID ? 1 : 0;
+    const finished = (b) => !!(b && b.body && b.canvas && (b.health === undefined || b.health >= 1) && !b.ruined && !b.site && !b.siteWanted
+      && !(PW.isGrowing && PW.isGrowing(world, b)));
+    let clearAt = 0;
+    // (the owner of cell (x, y), read straight from its chunk: the clearing looks at many)
+    const OWNERS = world.owner, CX = world.chunksX;
+    // (a look over building b begun again - in its last look's arrays, the same size; or, that look
+    // still carried by while this one is made, in the one before it)
+    function startClear(b, old = b.clear) {
+      const x0 = Math.max(1, b.body.left - 1), x1 = Math.min(W - 2, b.body.right + 1);
+      const y0 = Math.max(1, b.body.top - 1), y1 = Math.min(H - 2, b.ground);
+      const w = x1 - x0 + 1, h = y1 - y0 + 1;
+      const busy = !!old && !!world.clearing && world.clearing.get(b.id) === old;
+      let from = busy ? old.spare : old;
+      if (!from || from.dist.length !== w * h) from = null;
+      if (busy) old.spare = null;
+      return {
+        x0, y0, x1, y1, w, h, qn: 0, head: 0, k: 0, phase: 'seed', found: [], at: tick, canvas: b.canvas, spare: busy ? old : null, roofed: new Uint8Array(w),
+        dist: from ? from.dist : new Int32Array(w * h), grates: from ? from.grates : new Uint8Array(w * h),
+        heap: from ? from.heap : new Uint8Array(w * h), queue: from ? from.queue : new Int32Array(w * h),
+      };
+    }
+    // (a grate it is carried over: stairs - their steps and the openings over their flights, M.PLATFORM
+    // - and a roof's drain hatch, as water runs through them: see pw-sim's grate)
+    const HATCH = PW.FLAG.HATCH || 0, FLAGS = world.flags;
+    const grateAt = (x, y, id) => {
+      if (id === M.PLATFORM) return true;
+      if (!HATCH || !structural[id]) return false;
+      const f = FLAGS[(y >> CHUNK_SHIFT) * CX + (x >> CHUNK_SHIFT)];
+      return !!f && (f[(y & CHUNK_MASK) << CHUNK_SHIFT | (x & CHUNK_MASK)] & HATCH) !== 0;
+    };
+    const ownerAt = (x, y) => { const o = OWNERS[(y >> CHUNK_SHIFT) * CX + (x >> CHUNK_SHIFT)]; return o ? o[(y & CHUNK_MASK) << CHUNK_SHIFT | (x & CHUNK_MASK)] : 0; };
+    // (material id at (x, y) of building b's own design there)
+    const designed = (b, x, y, id) => { const c = b.canvas, cx = x - b.ox, cy = y - b.oy; return cx >= 0 && cy >= 0 && cx < c.width && cy <= c.ground && (c.mat[cy * c.width + cx] & ID_MASK) === id; };
+    // (cell (x, y) outside building b that what is carried out of it is set out to: room - air, or
+    // water - not its own, and not in another building's body: see pw-sim's carried, which sets
+    // nothing down there)
+    function away(b, x, y) {
+      if (!ROOM[mat[y * W + x] & ID_MASK]) return false;
+      const o = ownerAt(x, y);
+      if (o === b.id) return false;
+      const ob = o > 0 && o < 50000 ? building(o) : null;
+      return !(ob && ob.body && x >= ob.body.left - 1 && x <= ob.body.right + 1);
+    }
+    // (cell i of the world in building b: its own and loose, not of its own design)
+    function debrisAt(b, i) {
+      const id = mat[i] & ID_MASK, x = i % W, y = (i / W) | 0;
+      return LOOSE[id] === 1 && ownerAt(x, y) === b.id && !designed(b, x, y, id);
+    }
+    function clearOut() {
+      const all = world.buildings || [];
+      if (!all.length) return;
+      let look = CLEAR_LOOK;
+      const clearing = world.clearing || (world.clearing = new Map());
+      // (first those being cleared, looked over again - what is in them moved since - and those told
+      // of lately - struck, pushed, a neighbour come down on them; half the looking at most, the round
+      // below the rest)
+      let soon = CLEAR_LOOK / 2;
+      for (let n = 0; n < all.length && soon > 0; n += 1) {
+        const b = all[n];
+        if (b && b.clear && b.clear.phase !== 'carry' && clearing.has(b.id)) {
+          if (!finished(b)) { b.clear = null; continue; }
+          const u = lookOver(b, b.clear, soon); soon -= u; look -= u;
+          continue;
+        }
+        if (!b || !b.clearSoon) continue;
+        if (!finished(b)) { b.clearSoon = false; continue; }
+        if (!b.clear || b.clear.phase === 'carry' || b.clear.canvas !== b.canvas) b.clear = startClear(b);
+        const u = lookOver(b, b.clear, soon); soon -= u; look -= u;
+        if (b.clear.phase === 'carry') b.clearSoon = false;
+      }
+      // (then looking over: one building at a time, round them all - how long a round takes kept)
+      for (let n = 0; n < all.length && look > 0; n += 1) {
+        if (clearAt % all.length === 0) { stats.clearRound = tick - (stats.clearRoundAt ?? tick); stats.clearRoundAt = tick; }
+        const b = all[clearAt % all.length];
+        if (!finished(b)) { if (b) b.clear = null; clearAt += 1; continue; }
+        let c = b.clear;
+        if (!c || c.canvas !== b.canvas || (c.phase === 'carry' && tick - c.at > CLEAR_AGAIN && !(world.clearing && world.clearing.has(b.id)))) c = b.clear = startClear(b);
+        if (c.phase === 'carry') { clearAt += 1; look -= 8; continue; }
+        look -= lookOver(b, c, look);
+        if (c.phase !== 'carry') break;
+        clearAt += 1;
+      }
+      // (the carrying is the sim's - see pw-sim's carried: here each building being cleared is looked
+      // over again CLEAR_WAKE ticks after its last look - carried on by that one till the new one is
+      // made - and given up a while, CLEAR_GIVE looks with none of it gone out: see looked)
+      // (what a look found woken CLEAR_WAKES cells a tick, all together, as the sim is to carry it)
+      let wakes = CLEAR_WAKES;
+      for (const [id, c] of clearing) {
+        const b = building(id);
+        if (!b || !finished(b) || (b.clear !== c && !(b.clear && b.clear.phase !== 'carry'))) { clearing.delete(id); continue; }
+        for (const f = c.found; wakes > 0 && c.wakeK < f.length; wakes -= 1, c.wakeK += 1) PW.wakeCell(world, f[c.wakeK] % W, (f[c.wakeK] / W) | 0);
+        if (b.clear === c && tick - (c.woke ?? -1e9) >= CLEAR_WAKE) b.clear = startClear(b, c);
+      }
+    }
+    // Look over building b's box, `budget` cells at most: its rooms and what lies in them (seed), then
+    // the way out from its openings (the distance, breadth first). The cells looked at.
+    function lookOver(b, c, budget) {
+      const { x0, y0, w, h, dist, grates, heap } = c, n = w * h;
+      let used = 0;
+      if (c.phase === 'seed') {
+        const start = c.k, end = Math.min(n, c.k + budget);
+        for (; c.k < end; c.k += 1) {
+          const kx = c.k % w, x = x0 + kx, y = y0 + ((c.k / w) | 0), i = y * W + x;
+          grates[c.k] = 0; heap[c.k] = 0;
+          if (ownerAt(x, y) !== b.id) { dist[c.k] = -1; continue; }
+          const id = mat[i] & ID_MASK, loose = LOOSE[id] === 1 && !designed(b, x, y, id);
+          if (!ROOM[id] && !loose) {
+            // (a grate - stairs, a hatch - is on the way down from storey to storey, though nothing stays on it)
+            if (grateAt(x, y, id)) { dist[c.k] = 0x3fffffff; grates[c.k] = 1; } else dist[c.k] = -1;
+            c.roofed[kx] = 1;
+            continue;
+          }
+          // (under the open sky - on its roof, between its ornaments: not inside it - what lies there
+          // is left be, and no way out goes there)
+          if (!c.roofed[kx]) { dist[c.k] = -1; continue; }
+          dist[c.k] = 0x3fffffff;
+          // (what lies there is in the way: given its way on from the room beside it, not a way itself)
+          if (loose) { found(c, i); heap[c.k] = 1; }
+          // (by an opening: open air - or water - beside it or under it not its own; or beside a step no
+          // higher than CLEAR_STEP - what was set out before, packed down at the door - with open air
+          // over it, belonging to no building, and room over it to lift it there: what is set out there
+          // goes, over the step - see pw-sim's carried)
+          // (open air there in no other building's body: a door into the gap by its neighbour is no way out)
+          let opening = away(b, x - 1, y) || away(b, x + 1, y) || away(b, x, y + 1);
+          for (let s = -1; s <= 1 && !opening; s += 2) {
+            if (ownerAt(x + s, y) === b.id) continue;
+            for (let up = 1; up <= CLEAR_STEP && y - up > 0; up += 1) {
+              if (!ROOM[mat[i - up * W] & ID_MASK]) break;
+              if (ROOM[mat[i - up * W + s] & ID_MASK]) { opening = away(b, x + s, y - up); break; }
+            }
+          }
+          if (opening) { dist[c.k] = 0; if (!loose) c.queue[c.qn++] = c.k; }
+        }
+        used = end - start;
+        if (c.k < n) return used;
+        // (a gate hall's piers - see PW.tanks.gatesOf - its own people pass, as its own side's troops
+        // do: crossed as a flight's steps are)
+        for (const g of b.gates || []) {
+          if (g.x < x0 || g.x >= x0 + w) continue;
+          for (let y = Math.max(y0, g.y0); y <= Math.min(y0 + h - 1, g.y1); y += 1) {
+            const k = (y - y0) * w + g.x - x0;
+            if (dist[k] === -1 && ownerAt(g.x, y) === b.id) { dist[k] = 0x3fffffff; grates[k] = 1; }
+          }
+        }
+        c.phase = 'way'; c.head = 0;
+        return used;
+      }
+      if (c.phase === 'way') {
+        const q = c.queue;
+        // (the ways a carried cell goes, as one carrying it walks, worked back from the openings - see
+        // pw-sim's carried, which goes them: open cells only, a grate never a place to stop on the way.
+        // Cell j to k: down, falling - through a grate under it to the open cell under that; along onto
+        // k from where it lies on something, across the stairs' grates between them too; up a face
+        // CLIMB cells at most - a step, a stair's tread - onto k, with room over it to lift it. Over the
+        // rooms as they are: what lies in them is in the way - borne on, climbed, never gone through -
+        // and gets its way on from the room it can go to: a heap is carried off from its face, and what
+        // lies buried in it is given its way as it is uncovered, at a later look.)
+        const room = (j) => dist[j] >= 0 && grates[j] === 0 && heap[j] === 0;
+        const can = (j) => dist[j] >= 0 && grates[j] === 0;
+        const face = (j) => dist[j] < 0 || grates[j] === 1 || heap[j] === 1;
+        const bears = (j) => j + w < n && face(j + w);
+        let d = 0;
+        const reach = (j) => { if (dist[j] > d && grates[j] === 0) { dist[j] = d; if (!heap[j]) q[c.qn++] = j; } };
+        while (c.head < c.qn && used < budget) {
+          const k = q[c.head++], kx = k % w;
+          d = dist[k] + 1;
+          used += 3;
+          // (down onto k: from over it, or from over the grate over it)
+          if (k >= w) {
+            let j = k - w;
+            for (let g = 0; g < CLEAR_GRATE && j >= w && grates[j] === 1; g += 1) j -= w;
+            if (can(j)) reach(j);
+          }
+          for (let s = -1; s <= 1; s += 2) {
+            // (along onto k - over a run of grates between, a flight's steps crossed under it)
+            let j = k - s, jx = kx - s;
+            for (let g = 0; g < CLEAR_GRATE && jx > 0 && jx < w - 1 && grates[j] === 1; g += 1) { j -= s; jx -= s; }
+            if (jx >= 0 && jx < w && can(j) && bears(j)) reach(j);
+            // (up onto k, standing on its face, from beside the face's foot: the cells over the one
+            // it comes from open up to k's height)
+            if (kx - s < 0 || kx - s >= w) continue;
+            for (let h = 1; h <= CLEAR_CLIMB; h += 1) {
+              const f = k + h * w, j2 = f - s;
+              if (f >= n || !face(f) || !room(j2 - w)) break;
+              if (can(j2) && bears(j2)) reach(j2);
+              if (!room(j2)) break;
+            }
+          }
+        }
+        if (c.head < c.qn) return used;
+        c.qn = 0; c.head = 0; c.phase = 'carry'; c.at = tick; looked(b, c);
+      }
+      return used;
+    }
+    // (a look over b done: what lies in it woken, the sim to carry it out by the way worked out - or,
+    // none, the building left be; and left be too - stuck - after CLEAR_GIVE looks with no less in it
+    // than ever: its ways out heaped up outside, what is set out sliding back in. Stuck, it is let be
+    // till there is less in it, or it is struck again - see notify. Kept on the building, look to look)
+    function looked(b, c) {
+      const clearing = world.clearing || (world.clearing = new Map());
+      const n = c.found.length;
+      if (!n) { clearing.delete(b.id); b.clearStuck = b.clearLeast = undefined; b.clearStill = 0; return; }
+      if (b.clearStuck !== undefined && n >= b.clearStuck) { clearing.delete(b.id); return; }
+      b.clearStuck = undefined;
+      if (n < (b.clearLeast ?? Infinity)) { b.clearLeast = n; b.clearStill = 0; } else b.clearStill = (b.clearStill || 0) + 1;
+      if (b.clearStill > CLEAR_GIVE) { clearing.delete(b.id); b.clearStuck = b.clearLeast; b.clearLeast = undefined; b.clearStill = 0; return; }
+      clearing.set(b.id, c);
+      c.wakeK = 0;
+      c.woke = tick;
+      stats.clearFound = (stats.clearFound || 0) + n;
+    }
+
     // (the world's: water pressing on a building tells it - see pw-sim's pushOn)
-    world.structure = { notify, urgent, step, analyse, stats, blueprintOf };
+    world.structure = { notify, urgent, step, analyse, stats, blueprintOf, clearOut };
     return world.structure;
   }
 

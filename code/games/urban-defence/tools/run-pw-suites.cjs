@@ -15,7 +15,7 @@ const jobs = Number(args.jobs || 2), seed = String(args.seed || 7), limit = Numb
 // the test - so they come out the same on a loaded machine; see PW.DETERMINISTIC)
 const SUITES = [
   { name: 'pw-grounding', params: 'det=1' }, { name: 'pw-settlements' }, { name: 'pw-tunnels' }, { name: 'pw-mining', params: 'det=1' },
-  { name: 'pw-pipes' }, { name: 'pw-made-ground' }, { name: 'pw-physics', params: 'det=1' }, { name: 'pw-ore' }, { name: 'pw-fields' }, { name: 'pw-styles' }, { name: 'pw-sandbox' }, { name: 'pw-views' }, { name: 'pw-repair' },
+  { name: 'pw-pipes' }, { name: 'pw-made-ground' }, { name: 'pw-physics', params: 'det=1', limit: 360 }, { name: 'pw-ore' }, { name: 'pw-fields' }, { name: 'pw-styles' }, { name: 'pw-sandbox' }, { name: 'pw-views' }, { name: 'pw-repair' },
   { name: 'pw-slopes', params: 'gallery=slopes' }, { name: 'pw-mirror', params: 'gallery=mirror' }, { name: 'pw-pipe-cavity', params: 'det=1' }, { name: 'pw-tank', params: 'det=1' }, { name: 'pw-bore', params: 'det=1' }, { name: 'pw-core-life', params: 'det=1' }, { name: 'pw-shots', params: 'det=1' }, { name: 'pw-troops', params: 'det=1' }, { name: 'pw-jets', params: 'det=1' }, { name: 'pw-defence', params: 'det=1' }, { name: 'pw-mechs', params: 'det=1' },
   // pw-core-attached (N80) joins once the underbody-ownership slice closes its six catalogued cuts
   { name: 'pw-pipe-flow', params: 'det=1' },       // N81: bends swept, no level change blocks the flow

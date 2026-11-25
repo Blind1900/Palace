@@ -518,6 +518,8 @@ for (let s = 0; s < 75 && stability.busy(); s += 1) pwApp.stepWorld(60);
   // out, or draw off, is not the water let go)
   const pipeStep = pwApp.pipes && pwApp.pipes.step;
   if (pipeStep) pwApp.pipes.step = () => {};
+  // (and the towns' growth: a bridge laid over a lake meanwhile - see pw-capital-growth - is not it either)
+  if (pwApp.setDevelopSpeed) pwApp.setDevelopSpeed(0);
   if (T) {
     const box = { x0: T.body.left - 300, x1: T.body.right + 300 };
     // (the world's water, steam and drops in flight: a box round the tower is crossed by the town's
@@ -545,9 +547,19 @@ for (let s = 0; s < 75 && stability.busy(); s += 1) pwApp.stepWorld(60);
     // (the roof, down to the underside of its hatch: what lies on it - in its gutters, between its
     // ornaments - is still where it was let go)
     const roofBase = hy >= 0 ? hyBottom : py1 - 1;
+    // (the floor its stairs come down to - in a tower over a raised gate hall, N121's, the slab over
+    // the hall, which drains into it by its ladder's hatch: water spread over it has come all the way
+    // down the stairwell)
+    let foot = T.ground;
+    for (let y = S.sy1 - 6; y < T.ground; y += 1) {
+      let closed = 0;
+      for (let x = T.body.left + 2; x <= T.body.right - 2; x += 1) if (!openAt(x, y) && id(x, y) !== M.WATER) closed += 1;
+      if (closed >= (T.body.right - T.body.left - 3) * 0.5) { foot = y; break; }
+    }
+    const betweenEnd = Math.min(ceiling, foot - 3);
     // (what is left where it was let go, and on the storeys between; the rest has gone down to the
     // ground storey - and on from there, out of its door - as none is lost: see the next check)
-    const top0 = wetIn(py1 - 20, roofBase), between0 = wetIn(roofBase + 1, ceiling);
+    const top0 = wetIn(py1 - 20, roofBase), between0 = wetIn(roofBase + 1, betweenEnd);
     let placed = 0;
     for (let y = py1 - 14; y < py1; y += 1) for (let x = px0; x <= px1; x += 1) if (id(x, y) === M.AIR) { PW.set(world, x, y, M.WATER); placed += 1; }
     const water0 = water();
@@ -555,15 +567,16 @@ for (let s = 0; s < 75 && stability.busy(); s += 1) pwApp.stepWorld(60);
     // (the new world's towers stand on tall gate halls - N121 - their stairs near 300 cells: given 16 s)
     pwApp.stepWorld(60 * 16);
     for (let s = 0; s < 10 && P.airWater(); s += 1) pwApp.stepWorld(60);
-    const top = wetIn(py1 - 20, roofBase) - top0, between = wetIn(roofBase + 1, ceiling) - between0, down = placed - top - between;
+    const top = wetIn(py1 - 20, roofBase) - top0, between = wetIn(roofBase + 1, betweenEnd) - between0, down = placed - top - between;
     await view('stairwell-water', (S.sx0 + S.sx1) / 2, S.sy0 + 40, 5);
     // (a roof's gutters, and the pockets between its ornaments, keep a little)
     // (a puddle may stand on a storey's floor away from its opening: the storey over a raised gate
     // hall - N121's - drains into the hall by its ladder's hatch, not a flight of stairs)
-    check(placed >= 100 && down >= placed * 0.6 && between <= placed * 0.3, `water let go ${hy >= 0 ? `on a tower's roof over its drain hatch (${hx1 - hx0 + 1} wide)` : 'over a tower\'s stairs'} goes down the stairwell to its ground floor (${placed} cells let go, stairs ${S.sy1 - S.sy0} tall: ${down} went down to the ground storey, ${between} left on the storeys between, ${top} on the roof where it was let go)`);
+    check(placed >= 100 && down >= placed * 0.6 && between <= placed * 0.3, `water let go ${hy >= 0 ? `on a tower's roof over its drain hatch (${hx1 - hx0 + 1} wide)` : 'over a tower\'s stairs'} goes down the stairwell to its ground floor (${placed} cells let go, stairs ${S.sy1 - S.sy0} tall: ${down} went down to the foot of its stairs${betweenEnd < ceiling ? ' - the slab over its gate hall' : ''}, ${between} left on the storeys between, ${top} on the roof where it was let go)`);
     check(water() === water0, `the water going down the stairwell is all kept (${water0} -> ${water()} in the world, the town's supply lines held still)`);
   } else check(false, 'a standing tower with stairs to pour water down');
   if (pipeStep) pwApp.pipes.step = pipeStep;
+  if (pwApp.setDevelopSpeed) pwApp.setDevelopSpeed(1);
 }
 
 // 8. Loose ground shivers from a distant shock (N9): its wave runs on through the ground far past
@@ -640,6 +653,67 @@ for (let s = 0; s < 75 && stability.busy(); s += 1) pwApp.stepWorld(60);
     await view('n98-vent-out', x, top, 6);
     if (!had) { PW.setFlag(world, x, top, VENT, false); world.vents.delete(key); }
     check(laid >= 20 && vented >= 10 && over > 0, `smoke under a tower's roof ${under - top} cells thick, under a vent in it, goes out through it (${laid} cells of it laid, ${vented} let out by the vent, ${over} over the roof at the most${vented ? '' : ` - tower ${b.id} at ${x}, its column ${col0}, ${world.vents.size} vents`})`);
+  }
+}
+
+// 10. Cleared out (the user's, 2026-11-24: debris is pushed out of the inside of a fully built
+// building): loose stone and sand poured on a storey's floor up a standing tower are carried out of
+// it, as one carrying them walks - along the floors, down its stairs, through the hatch over its gate
+// hall, past the hall's piers, out by its door - and set down outside it, off the doorway; none of it
+// is lost, and what slides back in at its door is carried out again.
+{
+  // (finished: whole, no site, nothing of it being built - see pw-structure's clearOut)
+  const towers = world.buildings.filter((b) => b.type === 'population' && (b.health === undefined || b.health >= 1) && !b.ruined && !b.site && !b.siteWanted
+    && !(PW.isGrowing && PW.isGrowing(world, b)) && b.ground - b.body.top > 150)
+    .sort((a, b) => (b.ground - b.body.top) - (a.ground - a.body.top));
+  // (a storey's floor in it, 110 to 200 cells up - a flight of stairs or two and, over a gate hall, its ladder's hatch
+  // under it: a run of its own open cells 24 wide, its floor under it)
+  let T = null, fx = -1, fy = -1;
+  for (const b of towers) {
+    for (let y = Math.max(b.body.top + 20, b.ground - 200); y < b.ground - 110 && fx < 0; y += 1) {
+      let run = 0;
+      for (let x = b.body.left + 2; x < b.body.right - 2; x += 1) {
+        const ok = PW.getOwner(world, x, y) === b.id && PW.mat.open[id(x, y)] && PW.getOwner(world, x, y + 1) === b.id && !PW.mat.open[id(x, y + 1)] && id(x, y + 1) !== M.PLATFORM;
+        run = ok ? run + 1 : 0;
+        if (run >= 24) { fx = x - 23; fy = y; break; }
+      }
+    }
+    if (fx >= 0) { T = b; break; }
+  }
+  if (!T) check(false, 'a standing tower with a storey floor to pour debris on');
+  else {
+    // (what is poured: loose stone and sand - told from the debris lying round the town, which may slide in at its doors)
+    const loose = (k) => k === M.LOOSE_STONE || k === M.SAND;
+    const x0 = T.body.left - 300, x1 = T.body.right + 300, y0 = T.body.top - 60, y1 = T.ground + 60;
+    // (loose cells round it - and gravel: loose stone come to rest on the ground packs into it, see
+    // pw-sim's compact; in it: its own, within its body - not its forecourt's)
+    const count = () => { let n = 0; for (let y = y0; y <= y1; y += 1) for (let x = x0; x <= x1; x += 1) { const k = id(x, y); if (loose(k) || k === M.GRAVEL) n += 1; } return n; };
+    const inside = () => { let n = 0; for (let y = T.body.top; y <= T.ground; y += 1) for (let x = T.body.left; x <= T.body.right; x += 1) if (loose(id(x, y)) && PW.getOwner(world, x, y) === T.id) n += 1; return n; };
+    const all0 = count(), in0 = inside();
+    // (a heap on the floor: loose stone under, sand over it - 24 across, 6 high - as a blow inside it would
+    // leave it: the building told of it, and looked over at once)
+    let poured = 0;
+    for (let y = fy; y > fy - 6; y -= 1) for (let x = fx; x < fx + 24; x += 1) if (PW.mat.open[id(x, y)]) { PW.set(world, x, y, y > fy - 3 ? M.LOOSE_STONE : M.SAND); poured += 1; }
+    pwApp.structure.notify(T.id);
+    const S = pwApp.structure && pwApp.structure.stats, sim = pwApp.sim.stats, out0 = sim.carriedOut || 0;
+    // (carried out - a minute and a half at most: what is in a tower with one way out of it goes by that one; and, 3 s on, what has slid back in at its door - a doorway lower
+    // than the ground before it is a hollow what is set out slides into - carried out again at its
+    // next look, 12 s at most)
+    let clearMax = 0, gone = -1;
+    for (let t = 0; t < 60 * 90 && gone < 0; t += 1) {
+      pwApp.stepWorld(1);
+      clearMax = Math.max(clearMax, (S && S.clearMs) || 0);
+      if (t % 30 === 0 && inside() - in0 <= 0) gone = t;
+    }
+    pwApp.stepWorld(60 * 3);
+    const back = Math.max(0, inside() - in0);
+    for (let t = 0; t < 60 * 12 && inside() - in0 > 0; t += 30) pwApp.stepWorld(30);
+    const left = inside() - in0, kept = count() - all0;
+    await view('cleared-out', (T.body.left + T.body.right) / 2, T.ground - 60, 4);
+    // (how the tower's clearing stands, should it not have gone)
+    const C = T.clear, why = left > 0 ? ` - its clearing ${C ? `${C.phase}, ${C.found.length} found, ${C.dist.filter((d) => d === 0).length} cells by its openings` : 'never begun'}; ${PW.isGrowing && PW.isGrowing(world, T) ? 'growing' : 'not growing'}, health ${T.health ?? 1}${T.site ? ', a site' : ''}${T.clearStuck !== undefined ? `, let be stuck with ${T.clearStuck} in it` : ''}` : '';
+    check(poured >= 120 && gone >= 0 && left <= 0 && kept >= poured * 0.97 && clearMax < 1,
+      `loose stone and sand poured on a storey's floor up a tower (${poured} cells, ${T.ground - fy} cells up) are carried out of it (${gone >= 0 ? `all out in ${(gone / 60).toFixed(1)} s` : 'not all out in 90 s'}${back ? `, ${back} slid back in at its door 3 s on${left > 0 ? ` and ${left} still in it 12 s later` : ' and carried out again'}` : ''}${why}; ${(sim.carriedOut || 0) - out0} cells set out of buildings meanwhile) and lie outside it, none lost (${kept} of them round it), the clearing ${clearMax.toFixed(2)} ms a tick at most, its round of the buildings ${S && S.clearRound ? (S.clearRound / 60).toFixed(1) + ' s' : '-'}`);
   }
 }
 

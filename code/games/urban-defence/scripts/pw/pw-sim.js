@@ -587,6 +587,104 @@
       move(i, x, y, i + d, x + d, y, 'drift');
       return true;
     }
+    // Loose stuff lying inside a building standing whole and finished is carried out of it (the
+    // user's, 2026-11-24 - see pw-structure's clearing, which works out each such building's way out
+    // and keeps world.clearing: the building -> its way): a grain at rest is taken a cell on that way
+    // now and then (CARRY_RATE of its steps), as one carrying it walks - along the floor, across the
+    // stairs' steps, up a step or a tread, down through a grate as water goes - and at the way out, out
+    // beside it, where it falls. Its way shut by others ahead of it, it waits; the clearing wakes
+    // what is left now and then, and lets be a building none of whose stuff goes out.
+    const CARRY_RATE = 0.5;
+    const CARRY_GRATE = 16, CARRY_CLIMB = 5;     // (pw-structure's CLEAR_GRATE and CLEAR_CLIMB)
+    const CARRY_AWAY = 6, CARRY_OUT = 48;   // cells out from a way out it is set down, at least and at most
+    const CARRY_STEP = 8;         // cells up a step it is carried out over, at most (a man climbs a step so high)
+    const CARRY_SLOPE = 4;        // the heap set out rises a cell over the sill for every 4 cells further off, at most
+    const SPOTS = new Int32Array(CARRY_OUT + 1);   // (the places on the way out it might be set down, by cells off)
+    let carryOn = false;
+    // (room for what is carried: open air, or standing water - waded through, the water taking its
+    // place - never the water shut in a supply line's bore)
+    const roomAt = (j) => (OPEN[mat[j] & ID_MASK] === 1 || phase[mat[j] & ID_MASK] === PHASE.LIQUID) && !shut(j);
+    function carried(i, x, y) {
+      const o = PW.getOwner(world, x, y);
+      if (!(o > 0 && o < 50000)) return false;
+      const c = world.clearing.get(o);
+      if (!c || c.phase !== 'carry' || x < c.x0 || y < c.y0 || x >= c.x0 + c.w || y >= c.y0 + c.h) return false;
+      // (cell j's place in the way, -1 off it)
+      const kOf = (j) => { const jx = j % W, jy = (j / W) | 0; return jx < c.x0 || jy < c.y0 || jx >= c.x0 + c.w || jy >= c.y0 + c.h ? -1 : (jy - c.y0) * c.w + jx - c.x0; };
+      const d = c.dist[kOf(i)];
+      // (0x3fffffff: buried in a heap at the look - see below)
+      if (!(d >= 0)) return false;
+      if ((PW.hash3(x, y, world.tick + 5) & 1023) / 1023 >= CARRY_RATE) { PW.wakeCell(world, x, y); return false; }
+      const to = (j) => { move(i, x, y, j, j % W, (j / W) | 0, 'carried'); return true; };
+      if (d === 0) {
+        // (at the way out: dropped into the open under it, or carried out beside it - over steps and
+        // what was set out before, up to CARRY_STEP cells at a time - and thrown down off the first
+        // edge CARRY_AWAY cells off or more, or, none, set down CARRY_OUT cells off; over the sill no
+        // higher than a cell in CARRY_SLOPE past CARRY_AWAY - flatter than a heap stands, so what is
+        // set out never slides back in. Never into a building - its own, or the one over the way, to
+        // carry it back. Where it is set down, stirred, to slide. No room out there, the way out is shut.)
+        if (roomAt(i + W) && PW.getOwner(world, x, y + 1) !== o) { stats.carriedOut = (stats.carriedOut || 0) + 1; return to(i + W); }
+        // (the sill: the way out's floor under it - what lies in the way out on others is set out by it)
+        let sill = y;
+        while (sill < H - 2 && PW.getOwner(world, x, sill + 1) === o && (roomAt(i + (sill + 1 - y) * W) || phase[mat[i + (sill + 1 - y) * W] & ID_MASK] === PHASE.POWDER)) sill += 1;
+        for (const s of [-1, 1]) {
+          let r = y, at = -1, end = CARRY_OUT;
+          for (let t = 1; t <= CARRY_OUT; t += 1) {
+            const cx = x + s * t;
+            if (cx < 1 || cx >= W - 1) { end = t - 1; break; }
+            for (let h = 0; h < CARRY_STEP && r > 1 && !roomAt(r * W + cx); h += 1) r -= 1;
+            // (come to a building - this one, the one over the way - the heap kept CARRY_AWAY off it too)
+            const ow = PW.getOwner(world, cx, r), ob = ow > 0 && ow < 50000 && world.buildings ? world.buildings[ow - 1] : null;
+            if (ob && ob.body && cx >= ob.body.left - 1 && cx <= ob.body.right + 1) { end = t - 1 - CARRY_AWAY; break; }
+            if (!roomAt(r * W + cx)) { end = t - 1; break; }
+            SPOTS[t] = -1;
+            if (t < CARRY_AWAY) continue;
+            // (an edge - thrown down off it, it lands below, away from the way out - or the slope kept;
+            // in the open, never into water there: it would take its place in the way out)
+            const spot = r * W + cx, edge = roomAt(spot + W);
+            if ((edge || (sill - r) * CARRY_SLOPE <= t - CARRY_AWAY) && airAt(spot)) SPOTS[t] = spot;
+            if (edge) { end = t; break; }
+          }
+          for (let t = end; t >= CARRY_AWAY && at < 0; t -= 1) at = SPOTS[t];
+          if (at < 0) continue;
+          stats.carriedOut = (stats.carriedOut || 0) + 1;
+          const ax = at % W, ay = (at / W) | 0;
+          PW.stir(world, ax - 2, ay - 2, ax + 2, ay + 2);
+          return to(at);
+        }
+        // (no room out there: it waits - the clearing wakes it again with its next look)
+        return false;
+      }
+      // (on by the way, to the place it can go to nearest the way out - nearer than it is: what lay
+      // buried in a heap at the look, its way not yet known, follows into the place left by what went
+      // on ahead of it)
+      const grated = (j) => { const k = kOf(j); return k >= 0 && c.grates[k] === 1; };
+      let best = -1, bd = d;
+      // (water it is carried into, the cell beside it, takes its place; never across a grate or up a
+      // step - water lifted through a roof's hatch, or a flight's steps, by what goes down them)
+      const consider = (j, far) => { const k = kOf(j); if (k >= 0 && c.dist[k] < bd && (far ? airAt(j) : roomAt(j))) { bd = c.dist[k]; best = j; } };
+      // (down: falling, or through a grate under it)
+      let j = i + W;
+      for (let g = 0; g < CARRY_GRATE && grated(j); g += 1) j += W;
+      consider(j, j !== i + W);
+      // (lying on something: along - across a flight's steps too - or up a face onto it)
+      if (!roomAt(i + W)) {
+        const s0 = ((x + y + world.tick) & 1) ? 1 : -1;
+        for (let s = s0, q = 0; q < 2; q += 1, s = -s) {
+          j = i + s;
+          for (let g = 0; g < CARRY_GRATE && grated(j); g += 1) j += s;
+          consider(j, j !== i + s);
+          for (let h = 1; h <= CARRY_CLIMB; h += 1) {
+            const f = i + s - (h - 1) * W;
+            if (roomAt(f) || !roomAt(i - h * W)) break;
+            consider(f - W, h > 1);
+          }
+        }
+      }
+      if (best >= 0) return to(best);
+      // (its way on taken: it waits - woken as what is ahead of it moves on, or by the clearing's next look)
+      return false;
+    }
     function stepPowder(i, x, y, id) {
       if (y + 1 >= H) return false;
       const below = mat[i + W];
@@ -628,6 +726,8 @@
       }
       // At rest it holds, even standing straight up, until it is stirred (see PW.stir): shaken,
       // landed on, moved about - or in water, or caught by a gust strong enough for its weight.
+      // (inside a building being cleared, carried out: see carried)
+      if (carryOn && carried(i, x, y)) return true;
       if (!PW.stirred(world, x, y) && !isLiquid(mat[i - W]) && !gusted(x, y, id)) return false;
       const dir = ((x * 7 + y + world.tick) & 1) ? 1 : -1;
       for (let k = 0; k < 2; k += 1) {
@@ -966,6 +1066,7 @@
       world.wind = 14 * windNoise(t / 45) + 6 * gustNoise(t / 4);
       airBusy = !!(world.air && world.air.busy());
       ventsOn = !!(PW.FLAG.VENT && world.vents && world.vents.size);
+      carryOn = !!(world.clearing && world.clearing.size);
       if (ventsOn && world.vents.size !== ventN) { ventN = world.vents.size; ventCols.clear(); for (const k of world.vents.keys()) ventCols.add(k % W); }
       eddyKey = -1; paceKey = -1;
       const list = world.activeList;
