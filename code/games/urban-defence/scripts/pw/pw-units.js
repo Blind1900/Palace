@@ -119,7 +119,7 @@
       u.sneak = !!o.quiet;
       if (o.type === 'move') return !!PW.troops.goTo(world, u, o.x, o.y);
       if (o.type === 'hold') { u.route = null; u.walk = 0; }
-      if (o.type === 'attack' && !o.target && Number.isFinite(o.x)) PW.troops.goTo(world, u, o.x, o.y);
+      if (o.type === 'attack' && !o.target && Number.isFinite(o.x)) headFor(world, u, o.x, o.y, true);
       return true;
     }
     if (u.kind === 'tank' && (o.type === 'hold' || o.type === 'auto')) PW.tanks.drive(u, 0);
@@ -178,6 +178,21 @@
   // it is on its own again. (True while the order has it.)
   const CORE_RANGE = { trooper: 300, mech: 350, tank: 700 };
   const CORE_CLOSE = 160;       // cells: an enemy this near in its sights is fought first
+  // A trooper's way to a place a long way off - a core, a foe across the world - is looked for a stage
+  // at a time: the way to a place STAGE cells on towards it, on the ground's top there, looked for as
+  // the last is walked (the search's box spans the whole way: across the world, it was millions of
+  // cells a look). Each trooper looks on a tick of its own, once in 60, and, no way found, WAIT ticks
+  // on (now: told to, looked for at once).
+  const STAGE = 600, WAIT = 240;
+  let phases = 0;
+  function headFor(world, t, x, y, now = false) {
+    const tick = world.tick || 0;
+    if (t.planPhase === undefined) t.planPhase = (phases++ * 13) % 60;
+    if (!now && ((tick + t.planPhase) % 60 !== 0 || t.planWait > tick)) return;
+    const ahead = Math.abs(x - t.x) > STAGE;
+    const sx = ahead ? Math.max(1, Math.min(world.width - 2, Math.round(t.x + Math.sign(x - t.x) * STAGE))) : x;
+    if (!PW.troops.goTo(world, t, sx, ahead ? world.groundTop[sx] : y)) t.planWait = tick + WAIT;
+  }
   function coreGone(world, core) {
     const b = core.building && typeof core.building === 'object' ? core.building : (world.buildings || [])[(core.building | 0) - 1];
     const x = Math.round(core.x), y = Math.round(core.y);
@@ -206,7 +221,7 @@
     const far = Math.abs(dx) > R || Math.hypot(dx, p.y - e.y) > R * 1.4;
     if (u.kind === 'trooper') {
       const U = PW.troops;
-      if (far) { if (!u.route && (world.tick % 60) === 0) U.goTo(world, u, p.x, p.y); return true; }
+      if (far) { if (!u.route) headFor(world, u, p.x, p.y); return true; }
       u.walk = 0; u.route = null;
       u.aim = { x: p.x, y: p.y };
       if (u.slot !== 'rifle') u.slot = 'rifle';
@@ -240,7 +255,7 @@
     if (t.sneak) { if (!t.crouch && !t.swim) t.crouch = U.clear(world, t.x, t.y, U.CROUCH); return; }
     // (a guard keeps to its post: thrown off it, it goes back)
     if (t.unit === 'guard' && t.post && !t.route && !f && Math.abs(t.x - t.post.x) > 30 && (world.tick % 120) === 0) U.goTo(world, t, t.post.x, t.post.y);
-    if (o.type === 'attack' && o.target && !o.target.dead && !t.foeInSight && !t.route && (world.tick % 60) === 0) U.goTo(world, t, o.target.x, o.target.y);
+    if (o.type === 'attack' && o.target && !o.target.dead && !t.foeInSight && !t.route) headFor(world, t, o.target.x, o.target.y);
     if (t.toCover && !t.route) t.toCover = false;
     if (!f || f.dead) { t.foe = null; return; }
     if (t.foeInSight) {
