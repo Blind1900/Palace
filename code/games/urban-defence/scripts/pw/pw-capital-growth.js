@@ -252,6 +252,59 @@
       const r = lot && lot.owner ? world.buildings[lot.owner - 1] : null;
       return !!(r && r.underConstruction);
     };
+    // N132 (the user's): no building stands raised over the ground beside it - a lot set on falling
+    // ground (a slope, the dip a road tunnel's approach or the supply line's trench left by a portal)
+    // gets made ground banked up against it on each side, from its floor's level falling away at the
+    // land's own grade until it meets the ground: it sits on the land, its floor met level, no flat
+    // plinth stood up over a drop (the user's N127 rule too). The bank stops short of a neighbour's
+    // works (their apron watch would read it as earthmoving), a road, water and the supply line.
+    const APRON = 160, APRON_GRADE = 0.45;
+    function apronFill(city, lot, ground) {
+      const p = lot.placed;
+      let filled = false;
+      // (every other building's whole extent - its works and its body, a site's blueprint not yet
+      // raised too: made ground over it would stand where its crews are to build)
+      const others = [];
+      for (const b of world.buildings || []) {
+        if (!b || !b.body || b.id === lot.owner || b.dismantled) continue;
+        const w = b.works || [b.body.left, b.body.right];
+        others.push([Math.min(w[0], b.body.left), Math.max(w[1], b.body.right)]);
+      }
+      const own = world.buildings[lot.owner - 1];
+      const ownL = Math.min(p.worksL, p.x0, own && own.body ? own.body.left : p.x0), ownR = Math.max(p.worksR, p.x1, own && own.body ? own.body.right : p.x1);
+      // (up to a neighbour's works, banked between the two; the neighbours' apron watch is told the
+      // new lie of the ground below, so it reads no earthmoving and nothing re-seats)
+      const blocked = (x) => others.some((q) => x >= q[0] - 2 && x <= q[1] + 2);
+      for (const dir of [-1, 1]) {
+        const edge = dir < 0 ? ownL - 1 : ownR + 1;
+        for (let k = 0; k < APRON; k += 1) {
+          const x = edge + dir * k;
+          if (x < 4 || x > world.width - 5 || blocked(x)) break;
+          const g = world.groundTop[x];
+          const target = Math.round(ground + k * APRON_GRADE);
+          if (g <= target) break;   // (the ground has come up to meet it)
+          // (never over a road - a street, a road tunnel's approach or its open cut)
+          const surface = PW.get(world, x, g) & 63;
+          if (surface === M.ASPHALT || surface === M.ROADBED || (world.roadTunnels || []).some((t) => x >= t.a - 30 && x <= t.b + 30)) break;
+          let stop = false;
+          for (let y = target; y < g; y += 1) {
+            const id = PW.get(world, x, y) & 63, o = PW.getOwner(world, x, y);
+            if (id === M.WATER || id === M.ASPHALT || id === M.ROADBED || o) { stop = true; break; }
+          }
+          if (stop) break;
+          for (let y = target; y < g; y += 1) {
+            const d = y - target;
+            PW.set(world, x, y, (d < 2 ? M.GRASS : d < 10 ? M.TOPSOIL : M.SOIL) | ((PW.hash2(x >> 3, y >> 3) & 3) << 6), Q);
+          }
+          PW.refreshGroundTop(world, x);
+          if (world.surface0) world.surface0[x] = world.groundTop[x];
+          filled = true;
+        }
+      }
+      if (filled) for (const c of cities) for (const l of [c.main, ...c.rings.left, ...c.rings.right]) {
+        if (l && l !== lot && l.placed && l.groundSig !== undefined) l.groundSig = apronSig(l.placed);
+      }
+    }
     function placeLot(city, lot, centerX) {
       const canvas = lot.canvas || (lot.canvas = canvasFor(city, lot));
       const w = bodyWidth(canvas);
@@ -281,6 +334,11 @@
         // (side is layout here; faction is the real allegiance - the tanks' gate rule keys
         // off b.faction ?? b.side, PS's half)
         { id: lot.owner, side: 'left', faction: city.faction || null, type: lot.type, style: city.style, level: lot.level, kind: city.kind });
+      // N132: banked up to on either side where the ground falls away from its floor
+      if (!PW.NO_APRON_FILL && Number.isFinite(world.buildings[lot.owner - 1].ground)) {
+        apronFill(city, lot, world.buildings[lot.owner - 1].ground);
+        lot.groundSig = apronSig(lot.placed);
+      }
       // The newcomer threads its vault cores onto its faction's bundle (the worldgen rule,
       // step E): the line grows out to it or the stretch is taken up and re-laid through
       // its connectors - which also heals any cut the foundation work just made. A re-seat

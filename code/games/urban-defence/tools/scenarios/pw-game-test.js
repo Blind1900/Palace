@@ -159,7 +159,10 @@ const milFor = (side, from) => {
 };
 world.stock.right.hm = 4000; world.stock.right.sm = 600;
 const lm = milFor('left', later ? later.edge.right : start.edge.right), rm = milFor('right', ai.edge.left);
+// (its main grows at the match's pace - N122's two minutes for a military seed, four times as fast
+// here: given up to a minute to stand)
 secs(20);
+for (let s = 0; s < 40 && lm && !G.bases(m, 'left').length; s += 1) secs(1);
 const facings = (side) => world.buildings.filter((q) => q && q.type === 'military' && (q.faction ?? q.side) === side && q.canvas)
   .map((q) => q.canvas.meta.facing);
 const lf = facings('left'), rf = facings('right');
@@ -168,6 +171,7 @@ check(lf.length > 0 && lf.every((f) => f === 1), `the left side's military build
 check(rf.length > 0 && rf.every((f) => f === -1), `the right side's military buildings face left (${rf.join(' ') || 'none'})`);
 if (lm) {
   const b0 = G.bases(m, 'left')[0];
+  if (!b0) info(`no standing left base: ${world.buildings.filter((q) => q && q.type === 'military' && (q.faction ?? q.side) === 'left').map((q) => `#${q.id} health ${(q.health ?? 1).toFixed(2)}${q.underConstruction ? ' site' : ''}${q.coresOpen ? ' cores open' : ''}${q.dismantled ? ' gone' : ''}${q.canvas && q.canvas.meta && q.canvas.meta.post ? ' post' : ''}`).join(', ') || 'none'}; city ${lm.id} level ${lm.level}, notes ${(lm.notes || []).slice(-3).map((q) => q.text || q).join(' | ')}`);
   const d = b0 ? G.deploy(m, 'left', 'trooper', b0) : { ok: false, note: 'no base' };
   check(d.ok && d.unit.facing === 1, `a unit of the left side faces right (${d.ok ? d.unit.facing : d.note})`);
   // N4 (the user's design doc): a hurt man by his side's base is patched up; one far from any of his

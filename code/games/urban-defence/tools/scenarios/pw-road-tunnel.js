@@ -142,6 +142,21 @@ for (const p of t.portals) {
   check((ring > 60 || byTown) && face > 200 && clear >= 95, `the ${p.end} mouth has its arch ring out over the road (${ring} cells${byTown ? `, a town's works at it${t.joined ? `, joined to building ${t.joined}` : ''}` : ''}), its face and wing walls behind (${face}), and the road's full height under the ring (${clear} rows)`);
   await view(`n121-portal-${p.end}`, p.x + out * 30, p.top + 20, 4);
 }
+// 6. N132 (the user's): the buildings by a portal sit on the ground - beside each one within 400
+// cells of a mouth the land meets its floor (within 4 rows, 8 cells out), never a plinth stood up
+// over a drop.
+const near = [];
+for (const p of t.portals) for (const b of world.buildings) {
+  if (!b || !b.body || b.dismantled || !Number.isFinite(b.ground) || Math.abs((b.body.left + b.body.right) / 2 - p.x) > 400) continue;
+  const g = (x) => world.groundTop[Math.max(0, Math.min(world.width - 1, Math.round(x)))];
+  // (just past its works - its own footings and benches are its foundation, not the land)
+  const [w0, w1] = b.works || [b.body.left, b.body.right];
+  near.push({ b, dl: g(Math.min(b.body.left, w0) - 3) - b.ground, dr: g(Math.max(b.body.right, w1) + 3) - b.ground });
+}
+const raised = near.filter((n) => n.dl > 4 || n.dr > 4);
+if (!near.length) info('no building stands within 400 cells of a mouth on this seed');
+else check(!raised.length, `the buildings by its mouths sit on the ground (${near.map((n) => `b${n.b.id}: ${n.dl}/${n.dr}`).join(', ') || 'none near'} rows of drop beside the floor, left/right)`);
+for (const n of near.slice(0, 2)) await view(`n132-by-the-portal-b${n.b.id}`, (n.b.body.left + n.b.body.right) / 2, n.b.ground - 60, 4);
 const halls = world.buildings.filter((b) => b && b.canvas && b.canvas.meta && b.canvas.meta.undercroft);
 check(halls.length > 0 && halls.every((b) => b.canvas.meta.undercroft.height === PW.buildingKit.S.HALL),
   `every gate hall stands as tall as the road tunnel (${[...new Set(halls.map((b) => b.canvas.meta.undercroft.height))].join(', ')} rows; the tunnel ${PW.roadTunnels.CLEAR})`);

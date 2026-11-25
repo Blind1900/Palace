@@ -31,7 +31,8 @@
   const BORE_RATE = 24;        // cells a second a growing city's bore advances
   const PIPE_UNDER = 18;       // rows under the road the bundle is laid again (clear of the road's bed)
   const PORTAL_THICK = 10;     // the headwall's thickness
-  const BARRICADE_W = 64;      // a barricade across the road: jersey blocks and steel hedgehogs
+  const BARRICADE_W = 70;      // a barricade across the road: jersey blocks and steel hedgehogs (five pieces, 14 apart -
+                               // its span covers the last of them: at 64 the end block stood outside it, read as rock)
   const KEEP_EVERY = 5;        // s between looks at the barricades
   const QUIET = 20;            // s with no enemy near before a broken barricade is laid again
   const CONCRETE = [150, 148, 140], CONCRETE_DARK = [112, 110, 104], CONCRETE_LIT = [178, 176, 168];
@@ -196,6 +197,11 @@
     }
     if (PW.settlementTools && PW.settlementTools.paveStreet) PW.settlementTools.paveStreet(world, x0, x1, (x) => t.floorAt(x), () => t.style);
     for (let x = x0; x <= x1; x += 1) PW.refreshGroundTop(world, x, Math.max(0, t.floorAt(x) - CLEAR - 40));
+    // N132 (the user's): the ground the works leave is the land's surface from now on - the growth
+    // seats its lots on world.surface0, and read as the hill that was there before the cut and the
+    // banking, the lots by a portal stood raised on plinths over the road's level (a building's own
+    // columns aside: they keep the ground they were laid on)
+    if (world.surface0) for (let x = x0; x <= x1; x += 1) if (!builtAt(world, x)) world.surface0[x] = world.groundTop[x];
   }
   // The bore goes on `cells` from where it stands, a box at a time; through, the far portal and the
   // barricades go in.
