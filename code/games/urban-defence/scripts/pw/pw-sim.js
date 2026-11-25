@@ -239,10 +239,22 @@
     const breakable = (id) => structural[id] && !TERRAIN[id] && id !== M.PIPE && id !== M.CORE && phase[id] === PHASE.SOLID;
     // (the world's: the head of water at a water cell, itself counted - for pw-structure's swept)
     world.waterHead = (x, y) => headAt(x, y) + 1;
-    // (water at (x - d, y) pushing on the structure cell j at (x, y), with a head of `head` cells)
-    function pushOn(j, x, y, d, head) {
+    // A bridge's legs and braces (FLAG.BRIDGE) stand in the water as piers do: the world is a slice,
+    // and the water is all round a pier in depth - it holds back no head, and a lake sloshing about
+    // it, or standing deeper on one side a moment, does not press it over. Only a front running at it
+    // pushes on it, by its drag: PIER_DRAG of the surge's head.
+    const PIER = PW.FLAG.BRIDGE || 0;
+    const PIER_DRAG = 0.5;
+    // (water at (x - d, y) pushing on the structure cell j at (x, y), with a head of `head` cells -
+    // front: a front running at it, not water standing or stirring beside it)
+    function pushOn(j, x, y, d, head, front = false) {
       const id = mat[j] & ID_MASK;
       if (!breakable(id)) return false;
+      const pier = PIER && (PW.getFlags(world, x, y) & PIER) !== 0;
+      if (pier) {
+        if (!front) return false;
+        head *= PIER_DRAG;
+      }
       const owner = PW.getOwner(world, x, y);
       // (its building looks at what all the water against it does to it - see pw-structure's swept)
       if (head >= WATER_NOTICE && owner > 0 && owner < 50000 && world.structure) {
@@ -254,7 +266,7 @@
       // (the wall: as thick as the run of structure from here on, and the water on its far side)
       let t = 1;
       while (t < WALL_MAX && x + d * t > 0 && x + d * t < W - 1 && breakable(mat[j + d * t] & ID_MASK)) t += 1;
-      const far = j + d * t, back = isWater(mat[far]) ? headAt(x + d * t, y) + 1 : 0;
+      const far = j + d * t, back = !pier && isWater(mat[far]) ? headAt(x + d * t, y) + 1 : 0;
       const over = (head - back) / (WALL_HOLD * HARDNESS[id] * t * t * (0.8 + (PW.hash2(x, y) & 255) / 640));
       if (over < 1 || rnd(x, y) >= GIVES * Math.min(4, over) || PW.growing(world, x, y)) return false;
       const v = Math.sqrt(2 * WATER_G * Math.max(1, head)), paint = PW.getLayer(world, 'paint', x, y);
@@ -317,7 +329,7 @@
       }
       if (go === 0) {
         // (running into a structure: it pushes on it - see pushOn - and runs into the gap next)
-        if (x + d > 0 && x + d < W - 1 && !isWater(mat[i + d]) && pushOn(i + d, x + d, y, d, SURGE_HEAD)) return true;
+        if (x + d > 0 && x + d < W - 1 && !isWater(mat[i + d]) && pushOn(i + d, x + d, y, d, SURGE_HEAD, true)) return true;
         // Running into standing water, the push carries through it (like a surge): the cell
         // passes to the far end of the water along its row, if that end is open and within
         // reach, and the front advances there. A wall or a long run spends the momentum.
