@@ -200,6 +200,7 @@
   }
 
   // Surface height (row of the first ground cell) for every column.
+  const GRADE_MARGIN = 5;   // degrees under the tanks' climb the slopes are laid at (see surfaceProfile)
   function surfaceProfile(world, layout, seed) {
     const W = world.width;
     const surface = new Float32Array(W);
@@ -224,11 +225,19 @@
       const h = Math.max(k - Math.abs(a - b), 0) / k;
       return Math.max(a, b) + h * h * k / 4;
     };
+    // N133 (the user's, 2026-11-24): the map is a valley - its two ends stand higher than its centre,
+    // the land falling gently all the way in from either end - and the country rolls more: long
+    // swells and hills all through, more height to them, never a full mountain and never a slope a
+    // man or a hull balks at (the grade limit below holds every column to LAND_GRADE off the
+    // mountains). The sites' levels follow the valley down.
+    const VALLEY = 420;
+    const valley = layout.valley = (x) => { const u = 2 * x / (W - 1) - 1; return VALLEY * u * u; };
+    if (!layout.valleyLevels) { layout.valleyLevels = true; for (const site of layout.sites) site.level = Math.round(site.level - valley((site.x0 + site.x1) / 2)); }
     for (let x = 0; x < W; x += 1) {
       // (N133: the land's own rise and fall gradual - the short swells and the fine roughness
-      // that made steps a man or a hull balks at are a third of what they were)
-      let y = layout.baseY
-        - hills[0](x) * 170 - hills[1](x) * 95 - hills[2](x) * 12 - hills[3](x) * 3 - hills[4](x) * 1;
+      // that made steps a man or a hull balks at stay small; the long swells carry the height)
+      let y = layout.baseY - valley(x)
+        - hills[0](x) * 190 - hills[1](x) * 130 - hills[2](x) * 28 - hills[3](x) * 5 - hills[4](x) * 1;
       for (const m of layout.mountains) {
         let lift = 0;
         for (const peak of m.peaks) {
@@ -289,9 +298,14 @@
       surface[x] = y;
     }
     // N133 (the user's): every slope one a tank can climb - the ground never rises or falls more
-    // than GRADE a column (38 degrees, under the tanks' 43), the crests worn down to it
-    // - and off the mountains the land no steeper than LAND_GRADE (24 degrees: rolling country)
-    const GRADE = 0.8, LAND_GRADE = 0.45;
+    // than GRADE a column, the crests worn down to it - and off the mountains the land no steeper
+    // than LAND_GRADE (24 degrees: rolling country)
+    // (the checklist, 2026-11-24: the mountains' sides to the tanks' own climb limit - what a man can
+    // climb a tank can - PW.tanks.MAX_SLOPE. Laid at GRADE_MARGIN under it: the cells are whole rows,
+    // and the rounding of a graded line adds up to a row in any stretch - laid at the limit less one
+    // degree it measured 45 over eight columns, past what a tank climbs)
+    const TANK_SLOPE = (PW.tanks && PW.tanks.MAX_SLOPE) || 43;
+    const GRADE = Math.tan((TANK_SLOPE - GRADE_MARGIN) * Math.PI / 180), LAND_GRADE = 0.45;
     const gradeAt = (x) => (relief[x] > 0.02 ? GRADE : LAND_GRADE);
     for (let x = 1; x < W; x += 1) { const g = gradeAt(x); if (surface[x] < surface[x - 1] - g) surface[x] = surface[x - 1] - g; }
     for (let x = W - 2; x >= 0; x -= 1) { const g = gradeAt(x); if (surface[x] < surface[x + 1] - g) surface[x] = surface[x + 1] - g; }
@@ -536,7 +550,7 @@
   // N133: what the scree and the talus banked up is held to the land's grade as well - any crest
   // left steeper than a tank climbs is cut back to it (lakes' bowls and shores aside)
   function gradeCut(world, layout, surface, top) {
-    const { mat, width: W } = world, G = 0.8;
+    const { mat, width: W } = world, G = Math.tan((((PW.tanks && PW.tanks.MAX_SLOPE) || 43) - GRADE_MARGIN) * Math.PI / 180);
     const wet = (x) => layout.lakes.some((l) => Math.abs(x - l.x) < l.half * 1.3);
     const lim = Float32Array.from(surface);
     for (let x = 1; x < W; x += 1) if (!wet(x) && lim[x] < lim[x - 1] - G) lim[x] = lim[x - 1] - G;

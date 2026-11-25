@@ -288,8 +288,11 @@
       let edge = dir > 0 ? b.body.right : b.body.left;
       const town = cities.find((c) => edge > c.edge.left - 140 && edge < c.edge.right + 140);
       if (town) edge = dir > 0 ? Math.max(edge, town.edge.right + 140) : Math.min(edge, town.edge.left - 140);
-      const a = edge + dir * 40, z = edge + dir * 400;
-      if (place(world, Math.min(a, z), Math.max(a, z), { near: edge + dir * 90, side, style: styleOf(side, b.style), facing: dir, at: 'land' })) n += 1;
+      // (the rolling land - N133 - may have no flat enough for a plate close in: it looks on further out)
+      for (const [from, to] of [[40, 400], [400, 800]]) {
+        const a = edge + dir * from, z = edge + dir * to;
+        if (place(world, Math.min(a, z), Math.max(a, z), { near: edge + dir * (from + 50), side, style: styleOf(side, b.style), facing: dir, at: 'land' })) { n += 1; break; }
+      }
     }
     // (underground the floor is looked for from inside the room down: from its pad's head height, or
     // a couple of rows under the room's roof)

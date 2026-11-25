@@ -66,7 +66,9 @@ const storedBefore = left.stored, deliveredBefore = left.delivered;
 for (let s = 0; s < 20 && left.stored <= storedBefore; s += 1) pwApp.stepWorld(60);
 check(left.stored > storedBefore, `while the line is cut, the mine stores its ore (${storedBefore} -> ${left.stored} HM stored)`);
 await view('mn-cut', cutX, cutY, 5);
-for (let s = 0; s < 40 && [...hm.broken].some(Boolean); s += 1) pwApp.stepWorld(60);
+// (the ends grow back over the crater at the line's own pace: a deeper cut in rolling ground - N133 -
+// takes the better part of two minutes)
+for (let s = 0; s < 120 && [...hm.broken].some(Boolean); s += 1) pwApp.stepWorld(60);
 check(![...hm.broken].some(Boolean) && pipes.stats.repairHM > 0, `the crew re-lays the line around the crater (${pipes.stats.repaired} cells, ${pipes.stats.repairHM} HM)`);
 await view('mn-repaired', cutX, cutY, 5);
 const storedPeak = left.stored;
