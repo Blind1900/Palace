@@ -39,11 +39,16 @@ sky();
   life.clear(fx - 14, fy - 14, fx + 14, fy + 14);
 }
 
-// 2. At rest it keeps alive, sparked from the heart, most at the poles.
+// 2. While its building is being built or mended it keeps alive, sparked from the heart, most at
+// the poles; once the building stands done, the flicker goes (N143, the user's).
 const live = [];
 for (const b of world.buildings || []) for (const c of b.cores || []) if (!c.standing && !c.dead) live.push(c);
 for (const s of world.seedCores || []) if (!s.building && !s.dead) live.push(s);
 const core = live[0];
+const home = (world.buildings || []).find((b) => (b.cores || []).includes(core));
+const was = home && { growing: home.growing, grewAt: home.grewAt, site: home.site, siteWanted: home.siteWanted };
+// (its building being mended)
+if (home) home.growing = true;
 {
   let gens = 0, alive = 0, polar = 0, equator = 0, g0 = life.stats.generations || 0, prev = new Set();
   const cx = Math.round(core.x), cy = Math.round(core.y);
@@ -60,7 +65,16 @@ const core = live[0];
   }
   // (most at the poles: a fifth more there at least - 1.25 to 1.5 over the seeds' first cores)
   check(core && gens >= 85 && alive >= gens * 0.85 && polar > equator * 1.2 && polar + equator > gens * 2,
-    `at rest a core's Life keeps going in its own body, stepped by the cores as the game steps them - ${gens} generations in 12 s, alive in ${alive} of them, ${polar + equator} births - sparked from its heart, most at the poles (${polar} births polar, ${equator} round its equator)`);
+    `while its building is being mended a core's Life keeps going in its own body, stepped by the cores as the game steps them - ${gens} generations in 12 s, alive in ${alive} of them, ${polar + equator} births - sparked from its heart, most at the poles (${polar} births polar, ${equator} round its equator)`);
+  // (its building done: the flicker goes)
+  if (home) { home.growing = false; home.grewAt = -1e9; home.site = false; home.siteWanted = false; }
+  const pop0 = life.coreCells(core);
+  let gone = -1, back = 0;
+  for (let t = 0; t < 60 * 2 && gone < 0; t += 1) { cores.step(); life.step(); if (life.coreCells(core) === 0) gone = t; }
+  for (let t = 0; t < 60 * 3; t += 1) { cores.step(); life.step(); back = Math.max(back, life.coreCells(core)); }
+  check(!home || (pop0 > 0 && gone >= 0 && back === 0),
+    `once its building stands done the flicker goes (${pop0} live cells on its disc, none ${gone >= 0 ? `${(gone / 60).toFixed(2)} s` : 'never'} after; ${back} come back in 3 s)`);
+  if (home) Object.assign(home, was);
 }
 
 // 3. Rubble filling its disc smothers it there; 4. a dead core's Life dies.

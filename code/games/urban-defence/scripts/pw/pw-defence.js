@@ -35,7 +35,8 @@
     // see the turrets below) - bursts at the hostile units it sees; a box of rounds, reloaded
     turret: { length: 26, ammo: 120, kind: 'cannon', hp: 45, burst: 5, rof: 1 / 7, rest: 0.9, reload: 4, fixed: true },
   };
-  const RIPPLE = 0.15;          // s between a salvo's rockets
+  const RIPPLE = 0.008;         // s between a salvo's rockets (N142, the user's: fired all at once - the pod's
+                                // twelve away within a tenth of a second)
   const LAUNCH_GAP = 0.2;       // s between a battery's interceptors
   const ENGAGE = 5;             // s: a Dome fires at a threat this near coming down on its ground, no sooner
   const ENGAGE_LAST = 1;        // s: ... and no later - its interceptor would meet it too low

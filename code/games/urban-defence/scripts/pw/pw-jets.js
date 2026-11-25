@@ -41,7 +41,7 @@
   const EDGE = 500;             // cells from the world's end it turns about
   const ARMOUR = 60;
   const DAMAGE = { bullet: 3, cannon: 12, he: 60, ap: 60, missile: 100, rocket: 60, interceptor: 60, patriot: 100 };
-  const WARHEAD = { radius: 22, power: 1.4 };   // what it brings down on what it strikes
+  const WARHEAD = { radius: 32, power: 1.4 };   // what it brings down on what it strikes (N142: the medium blast)
   const WRECKED = { radius: 14, power: 1.1 };   // ... shot down, where it falls
   const G = () => PW.GRAVITY || 260;
   const deg = Math.PI / 180;

@@ -38,12 +38,13 @@
     he: { speed: 4000, drag: 0.04, blast: [9, 0.9], damage: 22, tracer: [255, 196, 120], len: 24, life: 6 },
     // a mech's (or a turret's) autocannon round: a small high-explosive one
     cannon: { speed: 3000, drag: 0.1, blast: [3.5, 0.45], damage: 4, tracer: [255, 210, 140], len: 14, life: 4, brush: true },
+    // (N142, the user's: missiles' and rockets' blasts medium - 32 cells, the medium blast)
     // a missile: thrown off its rail at `launch`, then flown on its motor (thrust, for burn seconds)
     // up to its speed, turning for its mark at up to `turn` rad/s; it leaves a trail of smoke
-    missile: { speed: 1500, launch: 340, thrust: 2600, burn: 4, turn: 3.2, drag: 0.05, blast: [16, 1.3], damage: 45, len: 7, life: 12, missile: true },
+    missile: { speed: 1500, launch: 340, thrust: 2600, burn: 4, turn: 3.2, drag: 0.05, blast: [32, 1.3], damage: 45, len: 7, life: 12, missile: true },
     // a launcher's artillery rocket (a salvo's - Grad, MLRS): off its tube at its speed, flying
     // straight on its motor a moment, then on a high arc, unguided, to burst where it comes down
-    rocket: { speed: 1100, launch: 1100, thrust: 0, burn: 0.8, turn: 0, drag: 0.004, blast: [12, 1.1], damage: 40, len: 6, life: 30, missile: true },
+    rocket: { speed: 1100, launch: 1100, thrust: 0, burn: 0.8, turn: 0, drag: 0.004, blast: [32, 1.1], damage: 40, len: 6, life: 30, missile: true },
     // interceptors (N90, the user's Iron Dome and Patriot): fast, turning hard for the threat they
     // were launched at - led, where it will be - and bursting beside it on their proximity fuse,
     // destroying it more often than not (kill: the share of their bursts that do). Each climbs off its

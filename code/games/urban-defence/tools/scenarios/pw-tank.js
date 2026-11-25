@@ -618,6 +618,67 @@ else {
   }
 }
 
+// 5g. A group comes up together and keeps together (N142, the user's: 6 troops and 2 tanks spawn at
+// once): each at its own place round the point, none overlapping, all on the floor; sent on, the
+// tanks wait for their men, the group never strung out past its tank's patience.
+{
+  if (!PW.troops) await new Promise((resolve) => { const s = document.createElement('script'); s.src = 'scripts/pw/pw-troops.js'; s.onload = s.onerror = resolve; document.head.appendChild(s); });
+  const S = site(900);
+  if (!S || !PW.units || !PW.units.spawnGroup) check(false, 'a stretch of the wilds for the group, and PW.units.spawnGroup');
+  else {
+    const { x0, g } = S;
+    world.tanks.length = 0; world.troops = [];
+    const kinds = ['trooper', 'trooper', 'trooper', 'tank', 'trooper', 'trooper', 'tank', 'trooper'];
+    const at = PW.units.spawnGroup(world, 'left', kinds, x0 + 250, g - 1);
+    const half = (k) => (k === 'tank' ? 56 : 3);
+    const apart = !!at && at.every((p, i) => at.every((q, j) => i === j || Math.abs(p.x - q.x) >= half(p.kind) + half(q.kind) + 4));
+    const onFloor = !!at && at.every((p) => Math.abs((p.kind === 'tank' ? p.y : p.y + 1) - g) <= 1);
+    let lagMax = 0, arrived = false;
+    if (at) {
+      const units = at.map((p) => (p.kind === 'tank' ? T.create(world, { style: 'modern', x: p.x, y: p.y, facing: 1, side: 'left' }) : PW.troops.create(world, { x: p.x + 0.5, y: p.y, side: 'left', facing: 1 })));
+      for (const u of units) { u.group = 'test-group'; PW.units.order(world, u, { type: 'move', x: x0 + 850, y: g - 1 }); }
+      const tanks = units.filter((u) => u.kind === 'tank'), men = units.filter((u) => u.kind === 'trooper');
+      run(tanks[0], 40, () => {
+        const back = Math.min(...men.map((m) => m.x));
+        lagMax = Math.max(lagMax, ...tanks.map((t) => t.x - back));
+      });
+      arrived = units.every((u) => u.x > x0 + 760);
+    }
+    check(at && at.length === kinds.length && apart && onFloor && lagMax <= 360 && arrived,
+      `a group of 6 troops and 2 tanks comes up at once round its point (${at ? `${at.length} places, ${apart ? 'none overlapping' : 'overlapping'}, ${onFloor ? 'all on the floor' : 'not all on the floor'}` : 'no room'}); sent on, it keeps together - the tanks at most ${lagMax.toFixed(0)} cells ahead of the hindmost man - and all of it arrives (${arrived})`);
+    world.tanks.length = 0; world.troops = [];
+  }
+}
+
+// 5h. An attack on a core (N145, WGM's computer player): told to attack a building's core, a tank
+// goes in range and shells it there, the building over it first; the core gone, the order is done
+// and it is on its own again.
+{
+  const b = (world.buildings || []).find((q) => q.body && (q.cores || []).some((c) => !c.dead && !c.lost && !c.standing) && (q.health === undefined || q.health >= 1));
+  if (!b) check(false, 'a building with a core to attack');
+  else {
+    const core = b.cores.find((c) => !c.dead && !c.lost && !c.standing);
+    world.tanks.length = 0;
+    // (a tank off to its side, 500 cells out, on the ground - the side away from the world's end)
+    const left = b.body.left - 500 > 300, tx = Math.round(left ? b.body.left - 500 : b.body.right + 500);
+    const t = T.create(world, { style: 'gothic', x: tx, y: world.groundTop[tx], facing: left ? 1 : -1, side: 'raider' });
+    const at0 = PW.units.stats.atCore || 0;
+    PW.units.order(world, t, { type: 'attack', core: { building: b, x: core.x, y: core.y } });
+    run(t, 12);
+    const fired = (PW.units.stats.atCore || 0) - at0;
+    const before = t.order && t.order.type;
+    // (the core gone - as when its building falls and it is blown apart)
+    const was = core.dead;
+    core.dead = true;
+    run(t, 1);
+    const done = t.order && t.order.type === 'auto' && t.orderDone && t.orderDone.done;
+    core.dead = was;
+    check(fired >= 2 && before === 'attack' && done,
+      `told to attack a building's core, a tank goes in range and shells it (${fired} rounds at it in 12 s, its order ${before}${fired < 2 ? ` - the tank from ${tx} to ${t.x.toFixed(0)},${t.y.toFixed(0)} '${t.blocked}', the core at ${core.x},${Math.round(core.y)}, the building ${b.body.left}-${b.body.right} ground ${b.ground} top ${b.body.top} open ${!!b.coresOpen}, gun ${(t.elevation / deg).toFixed(1)} hull ${(t.angle / deg).toFixed(1)} reload ${t.reload.toFixed(1)}` : ''}); the core gone, its order is done and it is on its own again (${done ? 'done' : `still ${t.order && t.order.type}`})`);
+    world.tanks.length = 0;
+  }
+}
+
 // 5e. Where a unit comes up (N131, the user's rule: troopers, mechs and tanks only at a military
 // building's core spawner - WGM's N130 hands its point on): a base's hall cut into the rock, its core
 // spawner's point in it. PW.units.spawnPoint, asked for a tank, a mech and a man there, gives the

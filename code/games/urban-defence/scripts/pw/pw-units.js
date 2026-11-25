@@ -6,6 +6,7 @@
 // - move: there - a trooper finds its way (PW.troops.goTo), a tank drives, a mech strides, leaping
 //   and boosting over what stops it, a jet flies over it; engaging what it meets on the way;
 // - attack: the target (a unit), or the place: it goes until it has it in its sights, and fires;
+//   a core ({ core: { building, x, y } } - N145): it goes in range and fires at it till it is gone;
 // - hold: it stays where it is, and fires at what comes into its sights;
 // - auto: the sentry - it fires at the nearest enemy it sees; a trooper under fire gets down behind
 //   what covers it, and throws a grenade at one it saw go round a corner.
@@ -108,6 +109,8 @@
   // ---- Orders --------------------------------------------------------------------------------------------
   function order(world, u, o) {
     if (!u || u.dead || !o) return false;
+    // (an attack on a core - N145: { type: 'attack', core: { building, x, y } } - is an attack on its place)
+    if (o.type === 'attack' && o.core) o = { ...o, x: o.core.x, y: o.core.y };
     u.order = { ...o, at: world.tick || 0 };
     if (u.kind === 'trooper') {
       PW.troops.stopDrill(u);
@@ -161,10 +164,76 @@
       else if (u.foe && (world.tick || 0) - (u.foeAt || 0) > REMEMBER) u.foe = null;
       u.foeInSight = !!seen;
     }
+    if (o.type === 'attack' && o.core && u.kind !== 'jet' && atCore(world, u, o)) return;
     if (u.kind === 'trooper') trooper(world, u, o);
     else if (u.kind === 'tank') tank(world, u, o);
     else if (u.kind === 'mech') mech(world, u, o);
     else if (u.kind === 'jet') jet(world, u, o);
+  }
+  // ---- An attack on a core (N145, WGM's computer player: its main aim the enemy's main core) -----------------
+  // The unit goes in range of the core's place and, stopped there, fires at it while it stands - into
+  // the building over it till that is broken open, then at the core itself. An enemy close by it fights
+  // first. The core gone - its record dead or lost, no core left round its place (as PW.game's
+  // livingCore: the win rule's) - the order is done ({ ...order, done: true } kept as u.orderDone) and
+  // it is on its own again. (True while the order has it.)
+  const CORE_RANGE = { trooper: 300, mech: 350, tank: 700 };
+  const CORE_CLOSE = 160;       // cells: an enemy this near in its sights is fought first
+  function coreGone(world, core) {
+    const b = core.building && typeof core.building === 'object' ? core.building : (world.buildings || [])[(core.building | 0) - 1];
+    const x = Math.round(core.x), y = Math.round(core.y);
+    const rec = b && (b.cores || []).find((c) => Math.abs(c.x - x) <= 8 && Math.abs(Math.round(c.y) - y) <= 16);
+    if (rec && (rec.dead || rec.lost)) return true;
+    for (let dy = -4; dy <= 4; dy += 1) for (let dx = -4; dx <= 4; dx += 1) if ((PW.get(world, x + dx, y + dy) & ID_MASK) === PW.M.CORE) return false;
+    return true;
+  }
+  function atCore(world, u, o) {
+    if (coreGone(world, o.core)) {
+      u.orderDone = { ...o, done: true, doneAt: world.tick || 0 };
+      u.order = { type: 'auto', at: world.tick || 0 };
+      if (u.kind === 'tank') PW.tanks.drive(u, 0);
+      if (u.kind === 'mech') PW.mechs.walk(u, 0);
+      stats.coresDown = (stats.coresDown || 0) + 1;
+      return true;
+    }
+    const f = u.foe;
+    if (u.foeInSight && f && !f.dead && Math.hypot(f.x - u.x, f.y - u.y) < CORE_CLOSE) return false;
+    // (what it fires at: the core - or, while the building over it stands and it is not yet laid
+    // open, the building over it, low on it)
+    const b = o.core.building && typeof o.core.building === 'object' ? o.core.building : (world.buildings || [])[(o.core.building | 0) - 1];
+    const shut = b && b.body && !b.coresOpen && !b.ruined;
+    const p = shut ? { x: o.core.x, y: b.ground - Math.min(60, (b.ground - b.body.top) / 3) } : { x: o.core.x, y: o.core.y };
+    const e = eyes(u), dx = p.x - e.x, R = CORE_RANGE[u.kind] || 300;
+    const far = Math.abs(dx) > R || Math.hypot(dx, p.y - e.y) > R * 1.4;
+    if (u.kind === 'trooper') {
+      const U = PW.troops;
+      if (far) { if (!u.route && (world.tick % 60) === 0) U.goTo(world, u, p.x, p.y); return true; }
+      u.walk = 0; u.route = null;
+      u.aim = { x: p.x, y: p.y };
+      if (u.slot !== 'rifle') u.slot = 'rifle';
+      if (U.fire(world, u)) stats.atCore = (stats.atCore || 0) + 1;
+      return true;
+    }
+    if (u.kind === 'tank') {
+      const T = PW.tanks;
+      if (far) { T.drive(u, Math.sign(dx) || 1); return true; }
+      T.drive(u, 0);
+      T.aimAt(u, p.x, p.y);
+      if (u.reload > 0) return true;
+      const m = T.muzzle(u), want = Math.atan2(p.y - m.y, p.x - m.x), have = Math.atan2(m.dy, m.dx);
+      let dd = Math.abs(want - have);
+      if (dd > Math.PI) dd = 2 * Math.PI - dd;
+      if (dd < 0.04 + 6 / Math.max(60, Math.hypot(p.x - m.x, p.y - m.y)) && T.fire(world, u)) stats.atCore = (stats.atCore || 0) + 1;
+      return true;
+    }
+    if (u.kind === 'mech') {
+      const X = PW.mechs;
+      if (far) { mech(world, u, { type: 'move', x: p.x }); if (u.order && u.order.type === 'hold') u.order = o; return true; }
+      X.walk(u, 0);
+      u.aim = { x: p.x, y: p.y };
+      if (u.burst === 0 && (world.tick % 45) === 0 && X.fire(world, u)) stats.atCore = (stats.atCore || 0) + 1;
+      return true;
+    }
+    return false;
   }
   function trooper(world, t, o) {
     const U = PW.troops, f = t.foe;
@@ -211,7 +280,9 @@
     const T = PW.tanks, f = t.foe;
     if (o.type === 'move' || (o.type === 'attack' && !t.foeInSight)) {
       const gx = o.type === 'attack' && o.target && !o.target.dead ? o.target.x : o.x;
-      if (Number.isFinite(gx)) T.drive(t, Math.abs(gx - t.x) < 20 ? 0 : Math.sign(gx - t.x));
+      const dir = Number.isFinite(gx) ? (Math.abs(gx - t.x) < 20 ? 0 : Math.sign(gx - t.x)) : 0;
+      // (its group's men well behind it: it waits for them - N142)
+      if (Number.isFinite(gx)) T.drive(t, waitsForGroup(world, t, dir) ? 0 : dir);
       if (o.type === 'move' && Math.abs(gx - t.x) < 20) t.order = { type: 'hold', at: world.tick || 0 };
     }
     if (!f || f.dead || !t.foeInSight) { if (!f || f.dead) t.foe = null; return; }
@@ -231,9 +302,11 @@
       const gx = o.type === 'attack' && o.target && !o.target.dead ? o.target.x : o.x;
       if (Number.isFinite(gx)) {
         const dir = Math.abs(gx - m.x) < 20 ? 0 : Math.sign(gx - m.x);
-        X.walk(m, dir);
+        // (its group's men well behind it: it waits for them - N142)
+        const waits = waitsForGroup(world, m, dir);
+        X.walk(m, waits ? 0 : dir);
         // (stopped by what it cannot step up: it leaps it; still stopped, its jets take it up)
-        if (dir && m.onGround && Math.abs(m.vx) < 2) { m.stuck = (m.stuck || 0) + 1; if (m.stuck > 20) { X.leap(m); m.stuck = 0; m.leaptAt = world.tick; } }
+        if (dir && !waits && m.onGround && Math.abs(m.vx) < 2) { m.stuck = (m.stuck || 0) + 1; if (m.stuck > 20) { X.leap(m); m.stuck = 0; m.leaptAt = world.tick; } }
         else m.stuck = 0;
         if (!m.onGround && m.leaptAt && world.tick - m.leaptAt > 40 && m.vy > -20 && m.fuel > 0.4 && !m.boosting) X.boost(m, true);
         if (o.type === 'move' && !dir) m.order = { type: 'hold', at: world.tick || 0 };
@@ -324,5 +397,51 @@
     return null;
   }
 
-  PW.units = { all, order, disable, disabled, sees, spot, step, eyes, body, stats, SIGHT, BORE_SEEN, spawnPoint, SPAWN };
+  // ---- A group come up together (N142, the user's: troops deployed in groups that spawn at once -
+  // 3 troops; 5 troops and a tank; 6 troops and 2 tanks; 1-2 mechs) ----------------------------------------
+  // Where each of a group comes up round (x, y), a core spawner's point: each at its own spawnPoint,
+  // the biggest first, none overlapping another - [{ kind, x, y }] in the order given, or null where
+  // one of them has no room. (The game makes them, and marks each with the group's key: u.group.)
+  const GROUP_GAP = 10;         // cells between two of a group, side by side
+  const halfOf = (kind) => (kind === 'tank' ? (SPAWN.tank.half || 58) : kind === 'mech' ? (PW.mechs ? PW.mechs.HALF : SPAWN.mech.half) : SPAWN.trooper.half);
+  function spawnGroup(world, side, kinds, x, y) {
+    const order = kinds.map((kind, k) => ({ kind, k })).sort((a, b) => halfOf(b.kind) - halfOf(a.kind));
+    const placed = [], out = new Array(kinds.length);
+    for (const { kind, k } of order) {
+      const h = halfOf(kind);
+      let got = null;
+      // (out from the point, both ways, a body's width at a time)
+      for (let n = 0; n < 24 && !got; n += 1) {
+        const off = (n & 1 ? -1 : 1) * Math.ceil(n / 2) * (2 * h + GROUP_GAP);
+        const p = spawnPoint(world, kind, x + off, y);
+        if (p && placed.every((q) => Math.abs(q.x - p.x) >= h + q.h + GROUP_GAP || Math.abs(q.y - p.y) > 40)) got = p;
+      }
+      if (!got) return null;
+      placed.push({ x: got.x, y: got.y, h });
+      out[k] = { kind, x: got.x, y: got.y };
+    }
+    return out;
+  }
+  // (a group on the move keeps together: its tank or mech waits while its men are more than
+  // GROUP_LAG behind it the way it goes, till they are within GROUP_CLOSE)
+  const GROUP_LAG = 300, GROUP_CLOSE = 150;
+  let groupsAt = -1, groups = new Map();
+  function groupOf(world, u) {
+    if (!u.group) return null;
+    if (groupsAt !== (world.tick || 0)) {
+      groupsAt = world.tick || 0; groups = new Map();
+      for (const list of [world.troops, world.tanks, world.mechs]) for (const v of list || []) if (v.group && !v.dead) { const g = groups.get(v.group); if (g) g.push(v); else groups.set(v.group, [v]); }
+    }
+    return groups.get(u.group) || null;
+  }
+  function waitsForGroup(world, u, dir) {
+    const g = groupOf(world, u);
+    if (!g || !dir) return false;
+    let lag = 0;
+    for (const v of g) if (v !== u && v.kind === 'trooper') lag = Math.max(lag, (u.x - v.x) * dir);
+    if (lag > GROUP_LAG) u.waiting = true; else if (lag < GROUP_CLOSE) u.waiting = false;
+    return !!u.waiting;
+  }
+
+  PW.units = { all, order, disable, disabled, sees, spot, step, eyes, body, stats, SIGHT, BORE_SEEN, spawnPoint, SPAWN, spawnGroup };
 })();

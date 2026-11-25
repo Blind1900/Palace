@@ -621,11 +621,25 @@
         live.set(i, WHITE);
       }
     }
+    // (N143, the user's: the flicker shows only while its building is being built or mended - a seed's
+    // core is building its town - and once the building stands done, it goes: its disc's cells die)
+    let homes = new Map(), homesN = -1, homesAt = -1e9;
+    function homeOf(core) {
+      const all = world.buildings || [];
+      if (all.length !== homesN || tick - homesAt > 120) {
+        homes = new Map();
+        for (const b of all) for (const c of (b && b.cores) || []) homes.set(c, b);
+        homesN = all.length; homesAt = tick;
+      }
+      return homes.get(core) || null;
+    }
+    const working = (b) => !b || !!b.site || !!b.siteWanted || !!b.underConstruction || (PW.isGrowing ? PW.isGrowing(world, b) : !!b.growing);
     function coreSparks() {
       const gen = stats.generations || 0;
       for (const e of coreOf.values()) {
         // (a core no longer stepped - sealed home in its vault, gone: its disc is let go)
         if (tick - e.seen > LIFE_EVERY * 2) { leave(e); coreOf.delete(e.core); continue; }
+        if (!working(homeOf(e.core))) { ringCells(e, (i) => { if (discOf.get(i) === e) live.delete(i); }); continue; }
         if (e.vigor <= 0) continue;
         const salt = (e.x * 7 + e.y * 13) | 0;
         if (e.shock > 0) {

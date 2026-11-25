@@ -168,7 +168,7 @@
     pan: null,
     water: () => M.WATER, sand: () => M.SAND, soil: () => M.LOOSE_SOIL,
     debris: () => M.DEBRIS | (world.random.int(0, 3) << 6), concrete: () => M.CONCRETE, erase: () => M.AIR,
-    blastS: { radius: 22, power: 0.9 }, blastM: { radius: 48, power: 1.1 }, blastL: { radius: 90, power: 1.35 },
+    blastS: { radius: 22, power: 0.9 }, blastM: { radius: 32, power: 1.1 }, blastL: { radius: 90, power: 1.35 },   // (N142, the user's: the medium blast 32)
     smoke: () => M.SMOKE | 3 << 6,
   };
   // Torch: heat the brush disc to flame temperature (ignites grass, plants and wood; boils water).
