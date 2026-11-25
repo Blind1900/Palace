@@ -593,5 +593,51 @@ for (let s = 0; s < 75 && stability.busy(); s += 1) pwApp.stepWorld(60);
     check(hops > 12 && near === near0 && farStill, `loose ground shivers from a distant shock, and settles back (${hops} grains hopped in sand 200-350 cells off, past the 66 the shake stirs; ${near0} -> ${near} sand cells there; the strip 550-700 cells off, past the wave's 480: ${farStill ? 'still' : 'stirred'})`);
   }
 }
+// (last: what is new to the world is looked at after what was there - the sections before it run
+// on the world as it was)
+// 9. N98, the user's: a building's vents let the gas inside it out. Smoke under a tower's roof,
+// under a vent in it (the flag on the roof's top cell, as the repair crews lay it - see pw-repair's
+// vents), goes up through the roof, however thick, and out into the open over it.
+{
+  const VENT = PW.FLAG.VENT || 0;
+  const b = world.buildings.filter((q) => q.type === 'population' && (q.health === undefined || q.health >= 1) && !q.ruined && q.ground - q.body.top > 120)
+    .sort((p, q) => (q.ground - q.body.top) - (p.ground - p.body.top))[0];
+  if (!b || !VENT) check(false, `a standing tower to vent (${VENT ? 'none' : 'no FLAG.VENT'})`);
+  else {
+    // (its roof near its middle where a vent goes - as the repair crews place them, see pw-repair's
+    // vents: its own top cell with open air over it - how thick, the room under it)
+    const roofAt = (x) => { let y = b.body.top - 2; while (y < b.ground && !(PW.getOwner(world, x, y) === b.id && !PW.mat.open[id(x, y)])) y += 1; return y; };
+    let x = Math.round((b.body.left + b.body.right) / 2), top = roofAt(x);
+    for (let d = 0; d < (b.body.right - b.body.left) / 3; d += 1) {
+      const c = Math.round((b.body.left + b.body.right) / 2) + (d & 1 ? -1 : 1) * (d >> 1), t = roofAt(c);
+      if (PW.mat.open[id(c, t - 1)] && PW.mat.open[id(c, t - 2)]) { x = c; top = t; break; }
+    }
+    let under = top;
+    while (under < b.ground && !PW.mat.open[id(x, under)]) under += 1;
+    const key = top * W + x, had = world.vents && world.vents.has(key);
+    PW.setFlag(world, x, top, VENT, true);
+    (world.vents || (world.vents = new Map())).set(key, b.id);
+    // (smoke - thick - filling the room's top under it, 9 across and 4 down)
+    let laid = 0;
+    for (let y = under; y < under + 4; y += 1) for (let xx = x - 4; xx <= x + 4; xx += 1) if (PW.mat.open[id(xx, y)] && id(xx, y) !== M.WATER) { PW.set(world, xx, y, M.SMOKE | 3 << 6); laid += 1; }
+    const vented0 = pwApp.sim.stats.vented || 0;
+    const colAt = () => { const o = []; for (let y = top - 2; y <= under + 4; y += 1) o.push(`${y - top}:${id(x, y)}${PW.getFlags(world, x, y) & VENT ? 'V' : ''}`); return o.join(' '); };
+    const col0 = colAt();
+    // (the most of it over the roof at once - out, it rises, drifts and thins away)
+    let over = 0;
+    for (let t = 0; t < 60 * 3; t += 1) {
+      pwApp.stepWorld(1);
+      if (t % 6) continue;
+      let n = 0;
+      for (let y = top - 60; y < top; y += 1) for (let xx = x - 30; xx <= x + 30; xx += 1) if (id(xx, y) === M.SMOKE) n += 1;
+      over = Math.max(over, n);
+    }
+    const vented = (pwApp.sim.stats.vented || 0) - vented0;
+    await view('n98-vent-out', x, top, 6);
+    if (!had) { PW.setFlag(world, x, top, VENT, false); world.vents.delete(key); }
+    check(laid >= 20 && vented >= 10 && over > 0, `smoke under a tower's roof ${under - top} cells thick, under a vent in it, goes out through it (${laid} cells of it laid, ${vented} let out by the vent, ${over} over the roof at the most${vented ? '' : ` - tower ${b.id} at ${x}, its column ${col0}, ${world.vents.size} vents`})`);
+  }
+}
+
 pwApp.setPaused(false);
 return { checks, shots: shots.length, holes, stability: stability.stats };

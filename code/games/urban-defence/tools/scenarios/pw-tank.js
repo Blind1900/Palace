@@ -576,6 +576,48 @@ else {
   }
 }
 
+// 5f. Over bumpy ground (N107, the user's two screenshots): a grassy bank at the foot of a hill - a
+// steep face 20 cells high, then a slope of 30 degrees up 60 more - it climbs; a pond in a dip - its
+// banks of 25 degrees, 30 cells deep, water 26 deep in it - it drives down into it, through it and
+// out up the far bank. Neither stops it.
+{
+  const A = site(900);
+  if (!A) check(false, 'a stretch of the wilds for the bank');
+  else {
+    const { x0, g } = A;
+    const bankAt = x0 + 300, face = 20, runFace = 7, rise = 60, run30 = Math.round(rise / Math.tan(30 * deg));
+    for (let d = 0; d <= runFace; d += 1) fill(bankAt + d, g - Math.round(face * d / runFace), bankAt + d, g - 1, M.SOIL);
+    for (let d = 0; d <= run30; d += 1) fill(bankAt + runFace + d, g - face - Math.round(d * Math.tan(30 * deg)), bankAt + runFace + d, g - 1, M.SOIL);
+    fill(bankAt + runFace + run30, g - face - rise, x0 + 900, g - 1, M.SOIL);
+    const top = g - face - rise, t = T.create(world, { style: 'modern', x: x0 + 150, y: g, facing: 1 });
+    T.drive(t, 1);
+    let k = 0, stop = '';
+    for (; k < 60 * 20 && t.x < bankAt + runFace + run30 + 120; k += 1) { T.step(world, DT); if (t.blocked && !stop) stop = t.blocked; }
+    const over = Math.abs(t.y - top) < 3 && !t.falling && t.x > bankAt + runFace + run30 + 100;
+    await view('tank-bank', bankAt + 60, g - 50, 6);
+    check(over && !stop, `up a bank like the user's: a face ${face} cells high (${Math.round(Math.atan(face / runFace) / deg)} degrees), then a slope of 30 up ${rise} more - it climbs it all (${over ? `on top in ${(k / 60).toFixed(1)} s` : `no - at ${(g - t.y).toFixed(0)} up`}${stop ? `, stopped by '${stop}'` : ''})`);
+    world.tanks.length = 0;
+  }
+  const P = site(1000);
+  if (!P) check(false, 'a stretch of the wilds for the pond');
+  else {
+    const { x0, g } = P;
+    // (the dip: banks of 25 degrees down 30, a floor 80 wide; water to 4 under its rim)
+    const at = x0 + 320, deep = 30, side = Math.round(deep / Math.tan(25 * deg)), floor = 80, x1 = at + 2 * side + floor;
+    const depthAt = (x) => (x < at || x > x1 ? 0 : x < at + side ? Math.round((x - at) * Math.tan(25 * deg)) : x > at + side + floor ? Math.round((x1 - x) * Math.tan(25 * deg)) : deep);
+    for (let x = at; x <= x1; x += 1) { const d = depthAt(x); fill(x, g, x, g + d - 1, M.AIR); fill(x, g + d, x, g + d + 4, M.SOIL); }
+    for (let x = at; x <= x1; x += 1) for (let y = g + 4; y < g + depthAt(x); y += 1) PW.set(world, x, y, M.WATER, { quiet: true });
+    const t = T.create(world, { style: 'asian', x: x0 + 150, y: g, facing: 1 });
+    T.drive(t, 1);
+    let k = 0, stop = '', wettest = 0;
+    for (; k < 60 * 30 && t.x < x1 + 160; k += 1) { T.step(world, DT); wettest = Math.max(wettest, t.wet || 0); if (t.blocked && !stop) stop = t.blocked; }
+    await view('tank-pond', at + side + floor / 2, g + 10, 5);
+    check(t.x >= x1 + 160 && !t.falling && Math.abs(t.y - g) < 3 && !stop && wettest > 0.2,
+      `through a pond in a dip like the user's: banks of 25 degrees, ${deep} cells deep, water ${deep - 4} deep in it - it drives down in, through (${(wettest * 100).toFixed(0)}% under at the most) and out up the far bank (${t.x >= x1 + 160 ? `out in ${(k / 60).toFixed(1)} s` : `no - at ${(t.x - at).toFixed(0)} along, ${(t.y - g).toFixed(0)} down`}${stop ? `, stopped by '${stop}'` : ''})`);
+    world.tanks.length = 0;
+  }
+}
+
 // 5e. Where a unit comes up (N131, the user's rule: troopers, mechs and tanks only at a military
 // building's core spawner - WGM's N130 hands its point on): a base's hall cut into the rock, its core
 // spawner's point in it. PW.units.spawnPoint, asked for a tank, a mech and a man there, gives the

@@ -35,17 +35,21 @@
   const PW = window.PW;
   const { M, ID_MASK } = PW;
 
-  const VMAX = 54;              // cells/s top speed (about 14 km/h: slow, but faster than a trooper)
+  const VMAX = 54.9;            // cells/s top speed (about 14 km/h: slow, but faster than a trooper; N107,
+                                // the user's: 1.7% over the 54 it had)
   const ACCEL = VMAX / 1.5;     // cells/s^2: from rest to top speed in 1.5 s
   const BRAKE = VMAX / 0.6;     // cells/s^2 to a stop
   const CLIMB = 0.75;           // of its top speed it loses climbing, by the sine of the slope
   const MAX_SLOPE = 43;         // degrees it climbs, at most - a mountainside, a flight of stairs (the user's)
-  const STEP = 15;              // cells it climbs straight up at most (an Abrams' vertical step, 1.07 m)
+  const STEP = 22;              // cells it climbs straight up at most (N107, the user's: over a bank like the
+                                // one in their screenshot - 1.6 m, past an Abrams' rated 1.07 m step, its
+                                // long tracks and the hull bridging it)
   const DROP = 16;              // cells it goes down straight at most (it stops at a higher edge)
   const LOOK = 96;              // cells ahead of its leading wheel it looks at the ground (room to brake, and
                                 // to tell a slope a degree over MAX_SLOPE: a cell in 60)
   const NOSE = 60;              // cells from its middle its nose and lower plate reach, and a little
-  const DEEP = 26;              // cells of water it fords at most
+  const DEEP = 36;              // cells of water it fords at most (N107, the user's: through a pond's dip
+                                // like the one in their screenshot, some 30 deep - its hull's height)
   // In water (N82; see wade): what of its hull is under the surface bears its weight off its tracks
   // and drags on it.
   const BUOY = 0.8;             // of its weight a hull wholly under water has borne off its tracks

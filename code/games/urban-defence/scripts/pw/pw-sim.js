@@ -768,17 +768,20 @@
     // on (PW.isGrowing) its fans draw the gas inside it - dust too, which would settle - up and over to
     // the nearest vent (DRAFT: the share of its steps it is drawn).
     const VENT_THROUGH = 10, DRAFT = 0.7;
-    let ventsOn = false;
-    // (the open cell over the vent just over i that a gas leaving by it comes out into, or -1)
+    let ventsOn = false, ventN = -1;
+    const ventCols = new Set();   // (the columns with a vent in them - world.vents' keys - kept as they change)
+    // (the open cell over the roof just over i, a vent in it, that a gas leaving by it comes out
+    // into, or -1: the vent - WGM's flag on the roof's top cell - and the roof's cells under it are
+    // its duct, however thick the roof)
     function ventOut(i) {
       const VENT = PW.FLAG.VENT;
-      if (!VENT || i < 2 * W) return -1;
+      if (!VENT || i < 2 * W || !ventCols.has(i % W) || isEmpty(mat[i - W])) return -1;
       const x = i % W, y = (i / W) | 0;
-      if (!(PW.getFlags(world, x, y - 1) & VENT)) return -1;
-      for (let k = 2; k <= VENT_THROUGH && y - k > 0; k += 1) {
+      let through = false;
+      for (let k = 1; k <= VENT_THROUGH && y - k > 0; k += 1) {
         const j = i - k * W;
-        if (isEmpty(mat[j])) return j;
-        if (!(PW.getFlags(world, x, y - k) & VENT)) return -1;
+        if (isEmpty(mat[j])) return through ? j : -1;
+        if (PW.getFlags(world, x, y - k) & VENT) through = true;
       }
       return -1;
     }
@@ -963,6 +966,7 @@
       world.wind = 14 * windNoise(t / 45) + 6 * gustNoise(t / 4);
       airBusy = !!(world.air && world.air.busy());
       ventsOn = !!(PW.FLAG.VENT && world.vents && world.vents.size);
+      if (ventsOn && world.vents.size !== ventN) { ventN = world.vents.size; ventCols.clear(); for (const k of world.vents.keys()) ventCols.add(k % W); }
       eddyKey = -1; paceKey = -1;
       const list = world.activeList;
       // Bottom chunk rows first so falling cells are not processed twice.
