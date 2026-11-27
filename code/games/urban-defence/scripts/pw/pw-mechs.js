@@ -561,6 +561,9 @@
   // pixel of the drawing nearest where it goes. Worked out in the drawing's own cells (it turns with
   // it), when it is drawn, not every tick.
   const LEGS = 9;                       // rows under its body point where its legs begin
+  const WINGS = -7;                     // rows over it where its wings begin
+  const JOINT = 8, RIB = 6, SEAM = 7;   // cells between its legs' joints, its wings' ribs, its plates' seams
+  const DUSTED = 14;                    // rows of its legs over its feet dusted
   const LENS = [176, 226, 222], MARKER = [232, 152, 46], DUST = [112, 99, 76];   // (lens: the tanks' sights lit; dust: the war photos' khaki)
   const LENS_AT = [-8, -1], MARKER_AT = [9, -6];   // (in the drawing, which faces left: the front of its head, the top of its back)
   const toneAt = (st, x, y) => {
@@ -579,25 +582,26 @@
     if (P.painted) return P;
     const st = STYLES[P.m.style] || STYLES.modern, { grid, list } = P, f = P.f;
     if (!P.col) P.col = new Uint32Array(RW * RW);
-    const col = P.col, span = Math.max(4, P.foot - LEGS);
+    const col = P.col;
     for (const k of list) {
       const dx = -f * (k % RW - R), dy = ((k / RW) | 0) - R;
       const up = grid[k - RW], down = grid[k + RW];
       // (lit where nothing is over it, shaded where nothing is under it, a strand of its wings between)
-      let s = !up && !down ? 1.08 : !up ? 1.16 : !down ? 0.8 : 1, c;
-      if (dy >= LEGS) {
-        // (the dust mostly about its feet: its legs keep its side's paint)
-        const t = Math.min(1, (dy - LEGS) / span);
-        c = mix(st.deep, DUST, 0.08 + 0.4 * t * t);
-      } else {
-        c = toneAt(st, dx, dy);
-        if (up && down) {
-          if ((dx + 512) % 7 === 0 && dy > -8) s *= 0.78;
-          else if (PW.hash2(dx + 512, dy + 512) % 31 === 0) s *= 1.3;
-        }
-      }
+      const lit = !up && !down ? 1.08 : !up ? 1.16 : !down ? 0.8 : 1;
+      let s = lit, c = toneAt(st, dx, dy);
+      // (N165, the user's: the detail carried all through it, its wings and legs in every pose - its
+      // thinnest strokes too: two-tone blocks all over it; across its legs, a shade darker, a joint
+      // between their armoured segments every few rows; along its wings, a shade lighter, their ribs
+      // running out from its body; across its body the plates' seams; bolt heads all over)
+      const legs = dy >= LEGS, wings = dy < WINGS;
+      if (legs) s *= 0.84; else if (wings) s *= 1.06;
+      if (legs ? (dy - LEGS) % JOINT === JOINT - 1 : wings ? (dx - dy + 512) % RIB === 0 : (dx + 512) % SEAM === 0) s *= 0.76;
+      else if (PW.hash2(dx + 512, dy + 512) % 23 === 0) s *= 1.28;
       if (Math.abs(dx - P.pod[0]) <= 5 && dy >= P.pod[1] && dy <= P.pod[1] + 1) c = st.dark;
-      col[k] = rgb(c, s);
+      c = [c[0] * s, c[1] * s, c[2] * s];
+      // (dust on the last of its legs, about its feet: a coat over its paint, lit as it is)
+      if (legs && dy > P.foot - DUSTED) c = mix(c, [DUST[0] * lit, DUST[1] * lit, DUST[2] * lit], 0.5 * (dy - P.foot + DUSTED) / DUSTED);
+      col[k] = rgb(c);
     }
     const lens = nearest(P, LENS_AT[0], LENS_AT[1]), marker = nearest(P, MARKER_AT[0], MARKER_AT[1]);
     if (lens >= 0) col[lens] = rgb(LENS);
@@ -915,7 +919,7 @@
 
   decode();
   PW.mechs = { create, step, draw, walk, leap, boost, fire, launch, reload, hurt, blast, touches, struck, target, tool, key, click, release, hold, held: () => held, pixel, pose, stats, clear,
-    STYLES: Object.keys(STYLES), palette: (style) => STYLES[style], LENS, MARKER, DUST, LEGS,
+    STYLES: Object.keys(STYLES), palette: (style) => STYLES[style], LENS, MARKER, DUST, LEGS, WINGS, DUSTED,
     frames: () => FR, clips: () => CLIP, bullet: () => BULLET, linkOf,
     HIP, HEIGHT, HALF, get WALK() { return WALK; }, STEP_UP, JUMP, FUEL, FALL_SAFE, GLIDE_FALL, TATTERS, FRAME_T, ARMOUR, SIGHT, DODGE_COOL, MAG, MISSILES };
 })();

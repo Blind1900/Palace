@@ -373,7 +373,7 @@ const drawnCells = (m) => { const P = m.P, out = new Set(); for (let y = P.box.y
 // palette - is the user's drawing cell for cell, only the colours its own: its plates in its side's paint,
 // its tanks' (sand, olive drab, gunmetal grey - the sides told apart by that alone), its legs darker and
 // dusted toward its feet, a stripe in the side's dark shade along its pod, one lit lens at its head and
-// one amber marker on its back.
+// one amber marker on its back; and (N165) the detail carried all through its wings and legs in every pose.
 {
   const S = site(500);
   if (!S) check(false, 'a stretch of the wilds for the paint');
@@ -383,6 +383,7 @@ const drawnCells = (m) => { const P = m.P, out = new Set(); for (let y = P.box.y
     const LENS = PW.abgr(...X.LENS) >>> 0, MARKER = PW.abgr(...X.MARKER) >>> 0;
     const m = X.create(world, { x: S.x0 + 250, side: 'left', facing: -1 });
     let poses = 0, exact = 0, lights = 0, striped = 0, worst = '';
+    const detail = { least: Infinity, at: '', parts: 0 };
     const looks = {};
     for (const style of X.STYLES) {
       const sum = { plate: [0, 0, 0, 0], legHi: [0, 0, 0, 0], legLo: [0, 0, 0, 0], stripe: [0, 0, 0, 0] };
@@ -394,21 +395,33 @@ const drawnCells = (m) => { const P = m.P, out = new Set(); for (let y = P.box.y
           const P = X.pose(m);
           const want = new Set(); for (let j = 0; j < F.n; j += 1) want.add(`${F.xs[j]},${F.ys[j]}`);
           let got = 0, both = 0, lens = 0, marker = 0, band = { s: [0, 0, 0, 0] };
+          // (N165: its detail, part by part - of the pairs of its cells side by side or one over the
+          // other in its wings, its body, its legs, the share told apart by their colour)
+          const part = (dy) => (dy < X.WINGS ? 0 : dy < X.LEGS ? 1 : 2), pairs = [0, 0, 0], apart = [0, 0, 0];
           for (let y = P.box.y0; y < P.box.y1; y += 1) for (let x = P.box.x0; x < P.box.x1; x += 1) {
             const c = X.pixel(m, x + 0.5, y + 0.5);
             if (!c) continue;
-            const dx = (x - P.hx) * -facing, dy = y - P.hy;
+            const dx = (x - P.hx) * -facing, dy = y - P.hy, p = part(dy);
+            for (const [nx, ny] of [[x + 1, y], [x, y + 1]]) { const n = X.pixel(m, nx + 0.5, ny + 0.5); if (n && part(ny - P.hy) === p) { pairs[p] += 1; if (n !== c) apart[p] += 1; } }
             got += 1; if (want.has(`${dx},${dy}`)) both += 1;
             if (c === LENS) { lens += 1; continue; }
             if (c === MARKER) { marker += 1; continue; }
             if (Math.abs(dx - P.pod[0]) <= 5 && dy >= P.pod[1] && dy <= P.pod[1] + 1) { add(sum.stripe, c); add(band.s, c); continue; }
             if (dy < X.LEGS) add(sum.plate, c);
-            else add(dy < X.LEGS + (P.foot - X.LEGS) / 2 ? sum.legHi : sum.legLo, c);
+            else add(dy > P.foot - X.DUSTED ? sum.legLo : sum.legHi, c);   // (about its feet, dusted; over them)
           }
           poses += 1;
           if (got === F.n && both === F.n) exact += 1; else if (!worst) worst = `${style} ${F.label} facing ${facing}: ${got} drawn, ${both} of ${F.n} the drawing's`;
           if (lens === 1 && marker === 1) lights += 1;
           if (band.s[3] >= 3) striped += 1;
+          // (its wings and legs as detailed as its body, wherever there is much of them)
+          const body = apart[1] / Math.max(1, pairs[1]);
+          for (const p of [0, 2]) {
+            if (pairs[p] < 60) continue;
+            const r = apart[p] / pairs[p] / Math.max(0.01, body);
+            if (r < detail.least) detail.least = r, detail.at = `${style} ${F.label} ${p ? 'legs' : 'wings'} ${(apart[p] / pairs[p] * 100).toFixed(0)}% against its body's ${(body * 100).toFixed(0)}%`;
+            detail.parts += 1;
+          }
         }
       });
       const mean = (s) => [s[0] / s[3], s[1] / s[3], s[2] / s[3]];
@@ -424,6 +437,9 @@ const drawnCells = (m) => { const P = m.P, out = new Set(); for (let y = P.box.y
     const legs = X.STYLES.every((s) => lum(L[s].legHi) < lum(L[s].plate) * 0.95 && far(L[s].legLo, X.DUST) < far(L[s].legHi, X.DUST) && lum(L[s].stripe) < lum(L[s].plate) * 0.85);
     check(legs && lights === poses && striped === poses,
       `its legs darker than its plates and dusted toward its feet, a dark stripe along its pod in every pose (${striped} of ${poses}), one lit lens and one amber marker in every pose (${lights} of ${poses}): ${X.STYLES.map((s) => `${s} plates ${lum(L[s].plate).toFixed(0)}, legs ${lum(L[s].legHi).toFixed(0)} then ${far(L[s].legLo, X.DUST).toFixed(0)} from dust (${far(L[s].legHi, X.DUST).toFixed(0)} above), stripe ${lum(L[s].stripe).toFixed(0)}`).join('; ')}`);
+    // (N159's legs, one dusted shade, were 78% of its body's at the least - their lit and shaded edges)
+    check(detail.parts > frames.length * 2 && detail.least >= 0.9,
+      `its detail carried through its wings and legs in every pose, as much as on its body (N165): ${detail.parts} wings and legs looked at, the least detailed ${(detail.least * 100).toFixed(0)}% of its body's (${detail.at})`);
     // (the three sides' mechs side by side, for the eye)
     fresh();
     X.STYLES.forEach((style, k) => X.create(world, { x: S.x0 + 100 + k * 140, side: k ? 'right' : 'left', facing: k ? -1 : 1, style }));
