@@ -126,7 +126,9 @@
     const centreSite = sites[2], wing = Math.round((wilds[1].x1 - wilds[1].x0) * 0.3);
     const c0 = centreSite.x0 - wing, c1 = centreSite.x1 + wing, cx = Math.round((centreSite.x0 + centreSite.x1) / 2);
     const crest = (k) => (PW.hash2(seed * 31 + 0xce17e, k) & 1023) / 1023;
-    const centreMountain = crest(1) < 0.6;
+    // (the user's answer, 2026-11-25: the centre is always the great mountain, with lakes round it -
+    // never a lake in its place; the lakes at its feet are N136's, below)
+    const centreMountain = PW.CENTRE_LAKE ? crest(1) < 0.6 : true;
     const hills = [];
     // (the high ones kept, when the centre is a lake: the tallest range on each side of it)
     const keep = new Set();
@@ -178,6 +180,42 @@
     // A pond beside each base for its farms, on the outer side.
     lakes.push({ x: sites[0].x0 - margin * 0.5 + 40, half: 180, depth: 110, pond: true });
     lakes.push({ x: sites[sites.length - 1].x1 + margin * 0.5 - 40, half: 180, depth: 110, pond: true });
+    // N136 (the user's, 2026-11-24): two or three more lakes by the map's size, in the open country
+    // between the bases and the neutral towns (and on a large map one more in the middle reach): each
+    // 300-700 across, clear of the mountains and the hills' crests (drawn from hashes - the layout's
+    // random sequence is unchanged). Crossed by the bridges the towns build as they level (pw-capital-growth).
+    {
+      // (the user's answer, 2026-11-25: two of them lie round the great mountain, one at each of its
+      // feet; a large map's third out in the open country of the first reach)
+      const extra = W >= 44000 ? 3 : 2;
+      const span = centre.half + 200;
+      // (where its foot is crowded by a hill, a smaller lake, then one a little further out - seed 11's
+      // feet each had a hill on them, and neither lake was laid)
+      const reaches = [{ x0: centre.x - span - 1500, x1: centre.x - span, out: -1 }, { x0: centre.x + span, x1: centre.x + span + 1500, out: 1 }];
+      if (extra > 2) reaches.push(wilds[0]);
+      const clear = (x, half) => mountains.every((m) => Math.abs(x - m.x) > m.half + half + 160)
+        && hills.every((hl) => Math.abs(x - hl.x) > hl.half * 0.6 + half)
+        && lakes.every((l) => Math.abs(x - l.x) > l.half + half + 400)
+        && sites.every((s) => x + half + 200 < s.x0 || x - half - 200 > s.x1);
+      reaches.forEach((r0, k) => {
+        const want = Math.round(150 + crest(40 + k) * 200), depth = Math.round(90 + crest(50 + k) * 70);
+        const tries = [];
+        for (const more of r0.out ? [0, 900] : [0]) for (let half = want; half >= 120; half = half > 120 && half - 40 < 120 ? 120 : half - 40) {
+          tries.push({ r: r0.out < 0 ? { x0: r0.x0 - more, x1: r0.x1 } : { x0: r0.x0, x1: r0.x1 + more }, half });
+          if (half === 120) break;
+        }
+        for (const { r, half } of tries) {
+          let laid = false;
+          for (let t = 0; t < 24 && !laid; t += 1) {
+            const x = Math.round(r.x0 + (r.x1 - r.x0) * (0.5 + (t % 2 ? -1 : 1) * Math.ceil(t / 2) * 0.04));
+            if (x - half < r.x0 + 100 || x + half > r.x1 - 100 || !clear(x, half)) continue;
+            lakes.push({ x, half, depth: Math.round(depth * Math.min(1, 0.4 + half / want * 0.6)), added: true });
+            laid = true;
+          }
+          if (laid) break;
+        }
+      });
+    }
     // Pockets of flat land in the wild, good ground for a city, a farm or both: the valley floors
     // above, and on a broad mountain now and then a bench, a flat shelf partway up one flank.
     // (drawn from hashes, so the layout's random sequence is unchanged)
@@ -551,7 +589,9 @@
   // left steeper than a tank climbs is cut back to it (lakes' bowls and shores aside)
   function gradeCut(world, layout, surface, top) {
     const { mat, width: W } = world, G = Math.tan((((PW.tanks && PW.tanks.MAX_SLOPE) || 43) - GRADE_MARGIN) * Math.PI / 180);
-    const wet = (x) => layout.lakes.some((l) => Math.abs(x - l.x) < l.half * 1.3);
+    // (an added lake's banks are land, graded like the rest - left alone, seed 11's had a seven-row
+    // step a tank could not climb out of the shallows by)
+    const wet = (x) => layout.lakes.some((l) => Math.abs(x - l.x) < l.half * (l.added ? 0.95 : 1.3));
     const lim = Float32Array.from(surface);
     for (let x = 1; x < W; x += 1) if (!wet(x) && lim[x] < lim[x - 1] - G) lim[x] = lim[x - 1] - G;
     for (let x = W - 2; x >= 0; x -= 1) if (!wet(x) && lim[x] < lim[x + 1] - G) lim[x] = lim[x + 1] - G;
@@ -1098,7 +1138,21 @@
     const avoid = (x, y) => {
       const depth = y - top[Math.round(x)];
       return layout.sites.some((site) => x > site.x0 - 200 && x < site.x1 + 200 && depth < (site.kind === 'base' ? 760 : 560))
-        || layout.lakes.some((lake) => Math.abs(x - lake.x) < lake.half + 100 && depth < 520);
+        || layout.lakes.some((lake) => !lake.added && Math.abs(x - lake.x) < lake.half + 100 && depth < 520);
+    };
+    // (N136's added lakes are kept out of the caves after them, not by turning the caves aside:
+    // judged in the walk, they spent the world's random draws differently and every cave, vein and
+    // tree on the map moved - and with them each suite's spots)
+    const sealAdded = () => {
+      for (const lake of layout.lakes) {
+        if (!lake.added) continue;
+        for (let x = Math.max(1, Math.round(lake.x - lake.half - 100)); x <= Math.min(W - 2, Math.round(lake.x + lake.half + 100)); x += 1) {
+          for (let y = top[x] + 1; y < top[x] + 520 && y < world.height - 2; y += 1) {
+            const i = y * W + x;
+            if ((mat[i] & 63) === M.AIR || (mat[i] & 63) === M.WATER) mat[i] = M.STONE | ((PW.hash2(x, y) & 3) << 6);
+          }
+        }
+      }
     };
     for (let i = 0, n = Math.round(16 * W / 16384); i < n; i += 1) {
       let x = random.range(400, W - 400);
@@ -1129,6 +1183,7 @@
       cave.chambers = carveChambers(world, cave, top, random);
       caves.push(cave);
     }
+    sealAdded();
     return caves;
   }
   // Breakdown chambers along a cave: a domed hall whose floor sits a little below the passage
@@ -1231,6 +1286,70 @@
     }
   }
 
+  // N136 (the user's, 2026-11-24): underground lakes - water-filled caverns 200-600 rows under the
+  // land, three to six by the map's size, spread so every stretch of land a farm can grow on has one
+  // within a well's reach (one under each side's starting third among them). They work as the lakes
+  // on the surface do: real still water, asleep until something breaks in, and a farm's well meters
+  // what it draws without moving a cell (the lake pump's rule). Laid as PS asked: a flat water
+  // surface with an air gap under the roof, the floor and walls solid rock (no loose grains to wake),
+  // plain water, kept clear of the caves and the ore. (Hashes only: the world's random sequence is
+  // unchanged.)
+  function carveAquifers(world, layout, top, seed) {
+    const { mat, width: W, height: H } = world;
+    const h = (k) => (PW.hash2(seed * 131 + 0xa9f, k) & 1023) / 1023;
+    // (one under each settlement site, a third of the way from its middle towards the map's middle -
+    // under the side's supply line, which a well is sunk from, and clear of the shaft the core sinks
+    // straight down at the site's middle (N129): laid at the middle they stood in the shaft's way,
+    // laid past the site the line did not reach them - then the rest evenly over the open land
+    // between, the farthest from any so far first)
+    const wants = (layout.sites || []).map((s) => {
+      const mid = (s.x0 + s.x1) / 2, inward = mid < W / 2 ? 1 : -1;
+      return Math.round(mid + inward * (s.x1 - s.x0) * 0.3);
+    });
+    for (let more = (W < 30000 ? 3 : W < 44000 ? 4 : 6) - wants.length; more > 0; more -= 1) {
+      let best = null, bestD = -1;
+      for (let x = Math.round(W * 0.1); x <= W * 0.9; x += 200) {
+        const d = Math.min(...wants.map((w) => Math.abs(w - x)));
+        if (d > bestD) { bestD = d; best = x; }
+      }
+      if (best === null) break;
+      wants.push(best);
+    }
+    const n = wants.length;
+    const out = [];
+    for (let i = 0; i < n; i += 1) {
+      const want = wants[i];
+      for (let t = 0; t < 9; t += 1) {
+        const cx = Math.round(want + (t % 2 ? -1 : 1) * Math.ceil(t / 2) * 260 + (h(i * 7) - 0.5) * 300);
+        const half = Math.round(150 + h(i * 7 + 1) * 150), tall = Math.round(40 + h(i * 7 + 2) * 80);
+        if (cx - half - 10 < 40 || cx + half + 10 > W - 40) continue;
+        const surfaceY = top[cx];
+        const roof = Math.round(surfaceY + 200 + h(i * 7 + 3) * (400 - tall));
+        const bottom = roof + tall;
+        if (bottom > H - 80) continue;
+        // (clear of the caves, the ore, and a lake's bowl over it)
+        let ok = true;
+        for (let y = roof - 12; y <= bottom + 12 && ok; y += 3) for (let x = cx - half - 12; x <= cx + half + 12 && ok; x += 3) {
+          const id = mat[y * W + x] & 63;
+          if (id === M.AIR || id === M.WATER || id === M.ORE) ok = false;
+        }
+        if (!ok || (layout.nodes || []).some((nd) => nd.box && nd.box.x1 > cx - half - 30 && nd.box.x0 < cx + half + 30 && nd.box.y1 > roof - 30 && nd.box.y0 < bottom + 30)) continue;
+        const midY = (roof + bottom) / 2, ry = tall / 2;
+        const gap = Math.max(4, Math.round(tall * 0.2)), level = roof + gap;
+        // the rock round it first (a shell of stone), then the hollow, then the water to a flat surface
+        for (let y = roof - 4; y <= bottom + 4; y += 1) for (let x = cx - half - 4; x <= cx + half + 4; x += 1) {
+          const q = ((x - cx) / (half + 4)) ** 2 + ((y - midY) / (ry + 4)) ** 2;
+          if (q > 1) continue;
+          const inside = ((x - cx) / half) ** 2 + ((y - midY) / ry) ** 2 <= 1;
+          mat[y * W + x] = inside ? (y >= level ? M.WATER : M.AIR) : (M.STONE | (PW.hash2(x, y) & 3) << 6);
+        }
+        out.push({ x: cx, x0: cx - half, x1: cx + half, roof, bottom, level, top: roof });
+        break;
+      }
+    }
+    return out;
+  }
+
   function generateTerrain(world, seed) {
     const random = PW.createRandom(seed);
     // Stage timings, for the performance pass (step L).
@@ -1253,6 +1372,7 @@
     mark('caves');
     layout.nodes = placeOreNodes(world, layout, top, random);
     mark('ore');
+    layout.aquifers = carveAquifers(world, layout, top, seed);
     fillLakes(world, layout, surface);
     layout.surface = surface;
     // Depth shading is measured from a broadly smoothed ground line, so mountains keep the bright

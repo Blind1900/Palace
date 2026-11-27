@@ -1604,9 +1604,14 @@
         snapToCores(fresh, x0, line.cores);
         extendTo(line, x0, x1, (c) => fresh[c - x0]);
       }
-      line.risers.push(layRiser(line, { x, y: op.riser.y, flow: 'out', kind: 'mining', resource: 'hm', op: op.id }));
+      line.risers.push(layRiser(line, { x, y: op.riser.y, flow: 'out', kind: op.kind || 'mining', resource: op.resource || 'hm', op: op.id, building: op.building || 0 }));
       for (const side of grow) capEnd(line, side);
       return true;
+    }
+    // N136: a farm's well - the same pipe stood on end, down from the side's line to an underground
+    // lake's roof, a pump riser: water comes up it at the lake pump's rate (metered: no cell moves).
+    function attachWell(side, x, y, building) {
+      return attach({ side, riser: { x, y }, id: `well-${building}`, kind: 'pump', resource: 'water', building });
     }
 
     // ---- Cargo ------------------------------------------------------------------------------------------
@@ -1682,6 +1687,9 @@
     function farmYield(id) {
       const b = (world.buildings || [])[id - 1];
       if (!b) return 1;
+      // N136 (the user's): a farm without a water supply grows nothing - its well still drilling, or
+      // cut (pw-capital-growth's wells)
+      if (b.dry) return 0;
       const fields = [b.field, b.lotField].filter(Boolean);
       const sown = fields.reduce((s, f) => s + (f.columns || 0), 0);
       if (!sown) return 0.5;
@@ -2023,7 +2031,7 @@
       }
     }
 
-    const api = { build, step, draw, attach, carry, connectCore, releaseBuilding, releaseSeedCore, notifyDamage, heal, openEnds, unite, lines, stats, flowing, lineFor, contour, relayAlong, BORE, BED, LANES, TAPS };
+    const api = { build, step, draw, attach, attachWell, carry, connectCore, releaseBuilding, releaseSeedCore, notifyDamage, heal, openEnds, unite, lines, stats, flowing, lineFor, lineNear, contour, relayAlong, BORE, BED, LANES, TAPS };
     return api;
   }
 

@@ -102,7 +102,9 @@ for (const side of ['left', 'right']) {
   const stock = (world.stock || {})[side] || {};
   check(stock.water > 0 && stock.sm > 0 && stock.hm > 0, `${side}: water, SM and ore arrive through the bundle (${JSON.stringify(stock)})`);
 }
-const sample = pipes.lines.flatMap((l) => l.packets.slice(0, 10).map((p) => ({ p, x: p.x, y: p.y })));
+// (twenty a line: N136's farms stand dry till their wells are down, and a town whose farm is the
+// only source may still be filling - ten a line from four lines needed every line already full)
+const sample = pipes.lines.flatMap((l) => l.packets.slice(0, 20).map((p) => ({ p, x: p.x, y: p.y })));
 pwApp.stepWorld(30);
 const moved = sample.filter((s) => s.p.x !== s.x || s.p.y !== s.y || s.p.done).length;
 check(sample.length > 30 && moved > sample.length * 0.7, `particles move along the lanes (${moved}/${sample.length} moved in half a second, ${pipes.stats.packets} in the lines)`);

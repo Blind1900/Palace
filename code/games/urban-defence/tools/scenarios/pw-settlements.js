@@ -30,7 +30,9 @@ check(settlements.length === 4, `4 settlements (got ${settlements.length})`);
   // if it is a lake); every slope one a tank can climb (43 degrees), the land's own profile
   // measured over 8 columns at a time, lakes' bowls aside
   const lakes = L.lakes.filter((l) => !l.river);
-  check(L.mountains.length >= 1 && L.mountains.length <= 2 && lakes.length <= 3 && !L.lakes.some((l) => l.river),
+  // (N136, the user's: the end ponds, two lakes round the great mountain at the centre, a large map's
+  // one more - five at most, six on a large map; the centre always the mountain)
+  check(L.mountains.length >= 1 && L.mountains.length <= 2 && lakes.length <= (world.width >= 44000 ? 6 : 5) && L.centre.kind === 'mountain' && !L.lakes.some((l) => l.river),
     `${L.mountains.length} high mountain(s), ${lakes.length} lakes, no rivers (${L.hills.length} ranges worn to hills)`);
   const S = L.surface, wetAt = (x) => L.lakes.some((l) => Math.abs(x - l.x) < l.half * 1.3);
   let steep = 0, worst = 0, at = 0;

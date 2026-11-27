@@ -418,6 +418,14 @@
     }
     return false;
   }
+  // N136: an underground lake's shell in the box (with a few cells' keep-off) - drives and shafts stop
+  // short of it; only a farm's well is cased down onto its roof (a breach would flood the workings).
+  function crossesAquifer(world, x0, y0, x1, y1, keep = 8) {
+    for (const a of (world.layout && world.layout.aquifers) || []) {
+      if (x1 >= a.x0 - keep && x0 <= a.x1 + keep && y1 >= a.roof - keep && y0 <= a.bottom + keep) return true;
+    }
+    return false;
+  }
   function prospectStep(world, op, p) {
     const net = PW.tunnels.state(world).networks[op.net - 1];
     if (!net) return 'stop';
@@ -434,6 +442,7 @@
       // (the next step's reach, before anything is dug: a road tunnel in it stops the drift there)
       const dir0 = Math.sign(p.node.x - p.x) || p.dir;
       if (crossesRoad(world, Math.min(p.x, p.x + dir0 * (STEP_W + 4)), p.y - DRIFT_H - 4, Math.max(p.x, p.x + dir0 * (STEP_W + 4)), p.y + 4)) return 'stop';
+      if (crossesAquifer(world, Math.min(p.x, p.x + dir0 * (STEP_W + 4)), p.y - DRIFT_H - 4, Math.max(p.x, p.x + dir0 * (STEP_W + 4)), p.y + 4)) return 'stop';
     }
     const dir = Math.sign(p.node.x - p.x) || p.dir;
     p.dir = dir;
@@ -723,6 +732,6 @@
     ctx.fill();
   }
 
-  PW.mining = { REACH, ROOM_H, SNIFF, veinNear, outline, open, openFromWorkings, afterDig, step, draw, drawHighlight, list, prospectFor, driveStep, expedition, trips, storeOf, crossesRoad, HM_KEEP, HM_LOW };
+  PW.mining = { REACH, ROOM_H, SNIFF, veinNear, outline, open, openFromWorkings, afterDig, step, draw, drawHighlight, list, prospectFor, driveStep, expedition, trips, storeOf, crossesRoad, crossesAquifer, HM_KEEP, HM_LOW };
   void ops;
 })();

@@ -492,18 +492,151 @@
 
     // A bridge across a water barrier. A farm's lesser bridge is a plank deck on slim timber
     // piers (N46, weaker than the main ones); a capital's main bridge is a steel deck on pillars.
+    // N136 (the user's, 2026-11-24): a bridge is the world's, not its town's. The towns raise them as
+    // they level (the neutral towns too, levelled through a match); two mini cores stand on the banks
+    // at its ends and build it - its deck laid out from both ends, a few columns a step, till they meet.
+    // A town that falls leaves its bridge standing; a bridge broken (blown, snapped) is laid again by
+    // its mini cores while a town stands beside it - any town or seed next to it, of any side, with no
+    // level asked when a bridge is already there. With both mini cores gone, a town beside it sets
+    // new ones down.
+    const BRIDGE_COLS = 6, BRIDGE_NEAR = 500, MINI_W = 7, MINI_H = 10;
+    const PILE_MAX = 160;   // rows a pier's leg is driven on through a loose bed to firm ground
+    const bridgeWorks = () => world.bridgeWorks || (world.bridgeWorks = []);
+    const bridgeAt = (b) => bridgeWorks().find((br) => Math.abs(br.x0 - (b.x0 - 2)) < 8 && Math.abs(br.x1 - (b.x1 + 2)) < 8) || null;
     function bridge(city, b, strong) {
-      const deckTop = Math.min(surf(b.x0 - 2), surf(b.x1 + 2)) - 2;
-      const rows = strong ? 4 : 2, pierEvery = strong ? 18 : 12;
+      const have = bridgeAt(b);
+      if (have) { if (!city.bridges.includes(have)) city.bridges.push(have); return have; }
+      // (over the water, never in it: read off the ground as it stands at both banks and the water's
+      // own surface at the middle - surf()'s smoothed line dips into a lake's bowl, and laid by it a
+      // deck went down 25 rows under the surface, the lake flowing through its gaps and its legs)
+      const gt = (x) => world.groundTop[Math.max(0, Math.min(world.width - 1, x))];
+      // (the deck's underside two rows clear of the water)
+      const deckTop = Math.min(gt(b.x0 - 2), gt(b.x1 + 2), gt((b.x0 + b.x1) >> 1) - (strong ? 4 : 2) - 10) - 2;
+      const br = { x0: b.x0 - 2, x1: b.x1 + 2, y: deckTop, rows: strong ? 4 : 2, strong, piers: [], legGap: strong ? 5 : 4, sag: 0,
+        laid: new Uint8Array(b.x1 - b.x0 + 5), built: false, cores: [] };
+      bridgeWorks().push(br);
+      city.bridges.push(br);
+      plantMiniCores(br);
+      note(city, strong ? 'a main bridge begins: its mini cores raise it from both banks' : 'a lesser bridge begins from both banks');
+      return br;
+    }
+    // The two mini cores on the banks: a steel cradle with the core's glow, on the ground at each end.
+    function plantMiniCores(br) {
+      br.cores = [];
+      for (const [x, dir] of [[br.x0 - 12, -1], [br.x1 + 12, 1]]) {
+        const g = world.groundTop[Math.max(0, Math.min(world.width - 1, x))];
+        const cells = [];
+        for (let h = 1; h <= MINI_H; h += 1) for (let dx = -3; dx <= 3; dx += 1) {
+          const cx = x + dx, cy = g - h;
+          if ((PW.get(world, cx, cy) & 63) !== M.AIR) continue;
+          const glow = Math.abs(dx) <= 1 && h >= 4 && h <= 7, edge = Math.abs(dx) === 3 || h === MINI_H;
+          PW.set(world, cx, cy, M.STEEL, Q);
+          PW.setLayer(world, 'paint', cx, cy, PW.abgr ? PW.abgr(...(glow ? [96, 214, 236] : edge ? [110, 114, 120] : [64, 68, 74]), 255) : 0);
+          cells.push(cy * world.width + cx);
+        }
+        br.cores.push({ x, y: g - 1, cells, dir });
+      }
+      clearSimAround(br.x0 - 20, br.y - 20, br.x1 + 20, br.y + 20);
+    }
+    const coreAlive = (k) => k.cells.length > 0 && k.cells.filter((i) => (world.mat[i] & 63) === M.STEEL).length >= k.cells.length * 0.5;
+    // The deck over column x: still there?
+    const deckHeld = (br, x) => {
+      const y = br.y + (br.off ? br.off[x - br.x0] : 0);
+      const id = PW.get(world, x, y) & 63;
+      // (a flag alone is no deck: a blast leaves the cell air with its flag still set)
+      if ((PW.getFlags(world, x, y) & FLAG.BRIDGE) && id !== M.AIR && id !== M.WATER) return true;
+      return id !== M.AIR && id !== M.WATER && PW.mat.phase[id] >= PW.PHASE.POWDER;   // (the bank itself at its ends)
+    };
+    // Build and mend: each step the mini cores lay a few more columns from each end of what is missing.
+    function stepBridgeWorks() {
+      for (const br of bridgeWorks()) {
+        const near = cities.some((c) => !c.fallen && Math.min(Math.abs(c.edge.left - br.x1), Math.abs(c.edge.right - br.x0),
+          Math.abs(c.x - br.x0), Math.abs(c.x - br.x1)) < BRIDGE_NEAR + (c.edge.right - c.edge.left) / 2);
+        if (br.built) {
+          // (a standing bridge: broken somewhere along it?)
+          let gap = false;
+          for (let x = br.x0; x <= br.x1 && !gap; x += 3) if (!deckHeld(br, x)) gap = true;
+          if (!gap) continue;
+          br.built = false; br.broken = true; br.dead = false; br.sag = 0;
+          for (let x = br.x0; x <= br.x1; x += 1) br.laid[x - br.x0] = deckHeld(br, x) ? 1 : 0;
+          br.off = null;
+        }
+        if (!near) continue;   // (no town beside it: it waits, broken or half built)
+        const alive = br.cores.filter(coreAlive);
+        if (!alive.length) { plantMiniCores(br); continue; }
+        // from each living core's end inward, the first missing columns
+        for (const k of alive) {
+          let n = 0;
+          const from = k.dir < 0 ? br.x0 : br.x1, step = k.dir < 0 ? 1 : -1;
+          for (let x = from; x >= br.x0 && x <= br.x1 && n < BRIDGE_COLS; x += step) {
+            if (br.laid[x - br.x0]) continue;
+            layBridgeColumn(br, x);
+            br.laid[x - br.x0] = 1;
+            n += 1;
+          }
+        }
+        if (br.laid.every(Boolean)) {
+          br.built = true; br.broken = false;
+          for (let x = br.x0 - 1; x <= br.x1 + 1; x += 1) PW.refreshGroundTop(world, x);
+          clearSimAround(br.x0 - 4, br.y - 4, br.x1 + 4, br.y + 60);
+        }
+      }
+    }
+    function layBridgeColumn(br, x) {
+      const b = { x0: br.x0 + 2, x1: br.x1 - 2 }, strong = br.strong, deckTop = br.y, rows = br.rows, legGap = br.legGap, piers = br.piers;
+      // (piers a third as often as they were: each leg displaces the lake it stands in - water kept,
+      // never deleted (N153) - and over a wide, deep lake 18 apart they raised it 14 rows over the
+      // deck; at these spans the deck still holds with one pier lost (SAG_SPAN))
+      const pierEvery = strong ? 54 : 34;
       const plank = [[126, 96, 58], [110, 84, 50], [96, 72, 44]];
       const steel = [[96, 100, 106], [84, 88, 94], [70, 74, 80]];
-      const piers = [], legGap = strong ? 5 : 4;
-      for (let x = b.x0 - 2; x <= b.x1 + 2; x += 1) {
+      // (a deck or leg cell laid where the lake stands displaces its water - never deleted: PS found
+      // the old write losing 5,375 cells in a tick on seed 7's end lake. The water is poured back on
+      // the lake's surface in the open water beside the pier once the column is laid - a drop sent up
+      // from inside a leg came down into the leg cells above it and turned the leg back to water.)
+      let spill = 0;
+      // (and a cell that was water is written loud, not quiet: the water's own book-keeping must
+      // hear that it is gone - written quiet, the lake flowed straight back into the legs within
+      // a second, top down, and the bridge sagged and snapped as soon as it stood)
+      const wetSet = (sx, sy, byte) => {
+        if ((PW.get(world, sx, sy) & 63) === M.WATER) { spill += 1; PW.set(world, sx, sy, byte); return; }
+        PW.set(world, sx, sy, byte, Q);
+      };
+      const pour = () => {
+        // (the open water out to either side of the pier, nearest first - a leg's column of a deep
+        // lake is more than a few columns' gap under the deck holds)
+        const offs = [];
+        for (let d = 3; d <= 48; d += 1) offs.push(-d, legGap + d);
+        for (const off of offs) {
+          const cx = x + off;
+          if (cx < 2 || cx >= world.width - 2) continue;
+          // (the open air just over the water there, under the deck)
+          let y = deckTop + rows;
+          while (spill > 0 && y < world.height - 30) {
+            const id = PW.get(world, cx, y) & 63;
+            if (id === M.WATER) break;
+            if (id !== M.AIR) { y = -1; break; }
+            y += 1;
+          }
+          if (y < 0) continue;
+          for (let k = y - 1; spill > 0 && k >= deckTop + rows && (PW.get(world, cx, k) & 63) === M.AIR; k -= 1) { PW.set(world, cx, k, M.WATER, Q); spill -= 1; }
+          if (!spill) return;
+        }
+        // (no room under the deck to take it: laid on the deck, to run off it into the lake - cells,
+        // not drops: a drop has a life and may be gone before it lands)
+        for (const off of offs) {
+          const cx = x + off;
+          if (cx < 2 || cx >= world.width - 2) continue;
+          for (let k = deckTop - 1; spill > 0 && k > deckTop - 40 && (PW.get(world, cx, k) & 63) === M.AIR; k -= 1) { PW.set(world, cx, k, M.WATER, Q); spill -= 1; }
+          if (!spill) return;
+        }
+      };
+      {
         for (let r = 0; r < rows; r += 1) {
           const y = deckTop + r;
           const id = PW.get(world, x, y) & 63;
           if (id !== M.AIR && id !== M.WATER) continue;
-          PW.set(world, x, y, (strong ? M.BRIDGE : M.WOOD) | ((PW.hash2(x, y) & 3) << 6), Q);
+          wetSet(x, y, (strong ? M.BRIDGE : M.WOOD) | ((PW.hash2(x, y) & 3) << 6));
           const joint = (x % 6) === 0;
           const c = strong ? (r === 0 ? (joint ? [226, 190, 60] : steel[0]) : steel[1 + (r & 1)])
             : (joint ? [70, 52, 34] : plank[PW.hash2(x, r) % 3]);
@@ -515,32 +648,44 @@
         // round the legs and through the windows between the braces.
         if (((x - b.x0) % pierEvery) === 2 && x > b.x0 + 1 && x < b.x1 - 2 - legGap) {
           let bottom = deckTop + rows;
-          for (const px of [x, x + legGap]) {
+          // (each leg two cells thick: the water a leg displaces comes back in on the lake and runs
+          // at the legs as a front - a leg one thick is knocked out by it, two thick holds (PS's pier
+          // rule, a3c9891))
+          for (const px of [x, x + 1, x + legGap - 1, x + legGap]) {
+            // (and on through the lake's loose bed - sand, silt, rubble - as a driven pile, down to
+            // ground that bears it: a leg standing on sand is no footing (legHolds), and a long
+            // bridge over a sandy bed sagged and snapped the moment it was finished)
+            let pile = 0;
             for (let y = deckTop + rows; y < world.height - 30; y += 1) {
               const id = PW.get(world, px, y) & 63;
-              if (id !== M.AIR && id !== M.WATER) break;
-              PW.set(world, px, y, (strong ? M.PILLAR : M.WOOD) | ((PW.hash2(px, y) & 3) << 6), Q);
+              const loose = id === M.SAND || id === M.LOOSE_SOIL || id === M.LOOSE_STONE || id === M.DEBRIS || id === M.RUBBLE || id === M.ASH;
+              if (id !== M.AIR && id !== M.WATER && !(loose && pile < PILE_MAX)) break;
+              if (loose) pile += 1;
+              wetSet(px, y, (strong ? M.PILLAR : M.WOOD) | ((PW.hash2(px, y) & 3) << 6));
               PW.setLayer(world, 'paint', px, y, PW.abgr ? PW.abgr(...(strong ? [84, 88, 94, 255] : [92, 70, 44, 255])) : 0);
               PW.setFlag(world, px, y, FLAG.BRIDGE);
               bottom = Math.max(bottom, y);
             }
           }
           for (let y = deckTop + rows + 2; y < bottom - 1; y += 4) {
-            for (let bx = x + 1; bx < x + legGap; bx += 1) {
+            for (let bx = x + 2; bx < x + legGap - 1; bx += 1) {
               const id = PW.get(world, bx, y) & 63;
               if (id !== M.AIR && id !== M.WATER) break;
-              PW.set(world, bx, y, (strong ? M.PILLAR : M.WOOD) | ((PW.hash2(bx, y) & 3) << 6), Q);
+              wetSet(bx, y, (strong ? M.PILLAR : M.WOOD) | ((PW.hash2(bx, y) & 3) << 6));
               PW.setLayer(world, 'paint', bx, y, PW.abgr ? PW.abgr(...(strong ? [70, 74, 80, 255] : [78, 60, 38, 255])) : 0);
               PW.setFlag(world, bx, y, FLAG.BRIDGE);
             }
           }
-          piers.push(x);
+          if (!piers.includes(x)) piers.push(x);
+          // (a pier is a braced truss, each leg capped by the deck and tied by the braces: PS's
+          // slender-column rule read a fresh leg 100 rows tall and one wide as a spire and toppled
+          // it as it was laid - the deck then sagged over the gap and snapped. Nothing topples for
+          // the laying itself; a blast or a cut later still brings a leg down.)
+          if (world.stability && world.stability.disturb) world.stability.disturb(x - 1, deckTop, x + legGap + 1, bottom + 2, { noTopple: true });
         }
       }
-      for (let x = b.x0 - 3; x <= b.x1 + 3; x += 1) PW.refreshGroundTop(world, x);
-      clearSimAround(b.x0 - 4, deckTop - 4, b.x1 + 4, deckTop + 60);
-      city.bridges.push({ x0: b.x0 - 2, x1: b.x1 + 2, y: deckTop, rows, strong, piers, legGap, sag: 0 });
-      note(city, strong ? 'main bridge raised' : 'lesser bridge laid');
+      if (spill) pour();
+      PW.refreshGroundTop(world, x);
     }
 
     // N3: a mountain in the road is CROSSED, not noted. One constant-grade drive runs
@@ -1112,10 +1257,14 @@
         if (barrierIn(cursor, far)) { city.blocked[side] = 'mountain'; return false; }
         city.blocked[side] = null;
       } else if (b) {
-        if (city.level < UNLOCK) { city.blocked[side] = b.kind; return false; }
+        // (N136: a bridge already over this water - standing, broken, or half built - asks no level of
+        // a town beside it: it crosses when it stands, and its mini cores mend it meanwhile)
+        const there = b.kind === 'water' ? bridgeAt(b) : null;
+        if (city.level < UNLOCK && !there) { city.blocked[side] = b.kind; return false; }
         if (b.kind === 'water') {
-          if (b.x1 - b.x0 > CAPITAL_BRIDGE_MAX) { city.blocked[side] = 'water-wide'; return false; }
-          if (!city.bridges.some((g) => g.x0 === b.x0)) bridge(city, b, true);
+          if (b.x1 - b.x0 > CAPITAL_BRIDGE_MAX && !there) { city.blocked[side] = 'water-wide'; return false; }
+          const br = bridge(city, b, true);
+          if (!br.built) { city.blocked[side] = 'bridging'; return false; }
         } else {
           // N3: the road bores a tunnel through the mountain (wider massifs stay walls)
           if (b.x1 - b.x0 > TUNNEL_MAX) { city.blocked[side] = 'mountain-wide'; return false; }
@@ -2246,10 +2395,91 @@
       return false;
     }
     const pierHolds = (br, px) => legHolds(br, px) || legHolds(br, px + br.legGap);
+    // ---- N136 (the user's, 2026-11-24): a farm needs water ---------------------------------------
+    // A farm grows nothing without a water supply. One near a lake on the surface draws from it (the
+    // lake pump's way). Any other drills a well down to the nearest underground lake within reach - a
+    // cased bore sunk a stretch at a time from its side's supply line - and when it reaches the lake's
+    // roof a pump riser takes the water up into the line, metered like the lake pump. Till then, or
+    // while the line between is cut, the farm stands dry: its fields yield nothing (pw-pipes'
+    // farmYield). One with no water within reach stays dry.
+    // (WELL_REACH: an underground lake lies under every settlement site, and a farm grows out along
+    // its town's rings - up to its spread cap - so the reach is the cap's, not the old 1400 that left
+    // seed 7's base and town farms all dry)
+    // (DRILL_STEP: a well is down in about ten seconds - at 14 rows a step its farm stood dry most of
+    // a match's first two minutes, and its town's fields gave nothing)
+    const WELL_REACH = 2400, LAKE_REACH = 700, DRILL_STEP = 40, DRILL_EVERY = 0.6;
+    function stepWells() {
+      const wells = world.wells || (world.wells = new Map());
+      const P = world.pipes, aquifers = (world.layout && world.layout.aquifers) || [], lakes = (world.layout && world.layout.lakes) || [];
+      const now = PW.tunnels ? PW.tunnels.state(world).time : (world.tick || 0) / 60;
+      for (const b of world.buildings || []) {
+        if (!b || b.type !== 'farm' || !b.body || b.dismantled || b.ruined) continue;
+        let w = wells.get(b.id);
+        const bx = Math.round((b.body.left + b.body.right) / 2), side = b.faction ?? b.side ?? 'neutral';
+        if (!w) {
+          const lake = lakes.find((l) => Math.abs(l.x - bx) - l.half < LAKE_REACH);
+          // (the well is sunk from where the side's line already runs, over the lake: a riser beyond
+          // the line's end grew the line out to it, joining bundles and laying new bends the lanes
+          // could not pass - so an underground lake is in reach only where the line lies over it)
+          const line = P && P.lineNear ? P.lineNear(side, bx) : P && P.lineFor ? P.lineFor(side) : null;
+          if (!line && !lake) continue;   // (no line yet: looked at again when there is one)
+          const lx0 = line ? line.x0 + 24 : 0, lx1 = line ? line.x1 - 24 : 0;
+          let best = null, bestD = WELL_REACH;
+          for (const a of aquifers) {
+            const inset = Math.round((a.x1 - a.x0) * 0.25), ax0 = Math.max(a.x0 + inset, lx0), ax1 = Math.min(a.x1 - inset, lx1);
+            if (ax1 < ax0) continue;
+            const d = Math.max(0, Math.abs(a.x - bx) - (a.x1 - a.x0) / 2);
+            if (d <= bestD) { bestD = d; best = a; best.wx0 = ax0; best.wx1 = ax1; }
+          }
+          // (N147: the cavern's roof is rough - the well sunk over its deep middle, to the roof
+          // over that column)
+          const wx = best ? Math.max(best.wx0, Math.min(best.wx1, bx)) : 0;
+          const to = best ? (best.roofs ? best.roofs[wx - best.x0] : best.roof) - 3 : 0;
+          w = lake ? { by: 'lake', done: true } : best ? { by: 'well', x: wx, to, y: null, at: now, done: false } : { by: 'none' };
+          wells.set(b.id, w);
+          if (w.by === 'well') noteFarm(b, 'dry: its well is drilling');
+          if (w.by === 'none') noteFarm(b, 'dry: no water within reach');
+        }
+        if (w.by === 'lake') { b.dry = false; continue; }
+        if (w.by === 'none') { b.dry = true; continue; }
+        // (the line the well hangs from - the nearest of its side's: the neutral towns each have one)
+        const line = P && P.lineNear ? P.lineNear(side, w.x) : P && P.lineFor ? P.lineFor(side) : null;
+        if (!w.done) {
+          b.dry = true;
+          if (!line || w.x < 2 || now < w.at) continue;
+          w.at = now + DRILL_EVERY;
+          if (w.y === null) w.y = line.ys[Math.max(0, Math.min(line.ys.length - 1, w.x - line.x0))] + (P.BORE || 7) + 2;
+          // (the drill's casing, three wide, sunk a stretch: the riser is laid over it when it is down)
+          const y1 = Math.min(w.to, w.y + DRILL_STEP);
+          for (let y = w.y; y < y1; y += 1) for (let dx = -1; dx <= 1; dx += 1) {
+            const id = PW.get(world, w.x + dx, y) & 63;
+            if (id === M.WATER || PW.getOwner(world, w.x + dx, y)) continue;
+            PW.set(world, w.x + dx, y, M.PIPE, Q);
+            PW.setLayer(world, 'paint', w.x + dx, y, PW.abgr ? PW.abgr(...(dx ? [70, 74, 80] : [40, 44, 48]), 255) : 0);
+          }
+          w.y = y1;
+          if (w.y >= w.to) {
+            w.done = P.attachWell ? P.attachWell(side, w.x, w.to, b.id) : false;
+            if (w.done) noteFarm(b, 'its well is down: water comes up to the fields');
+            else w.at = now + 10;
+          }
+          continue;
+        }
+        // (a cut in the line between the well and the cores dries the farm again till it is mended)
+        b.dry = !!(line && P.flowing && !P.flowing(line, w.x));
+      }
+    }
+    function noteFarm(b, text) {
+      const c = cities.find((q) => q.main && q.main.owner === b.id) || cities.find((q) => [...q.rings.left, ...q.rings.right].some((l) => l.owner === b.id));
+      if (c) note(c, text);
+    }
     function stepBridges(city) {
       for (const br of city.bridges) {
-        if (br.dead) continue;
-        const holds = [br.x0, ...(br.piers || []).filter((px) => pierHolds(br, px)).map((px) => px + (br.legGap >> 1)), br.x1];
+        if (br.dead || br.built === false) continue;   // (N136: a bridge still building or mending does not sag)
+        // (in order along the deck: N136's mini cores lay it from both banks at once, so its piers are
+        // listed end, end, next, next - read unsorted, the first "span" ran bank to bank and every
+        // bridge sagged and snapped as it was finished)
+        const holds = [br.x0, ...(br.piers || []).filter((px) => pierHolds(br, px)).map((px) => px + (br.legGap >> 1)), br.x1].sort((a, b) => a - b);
         let worst = null;
         for (let i = 0; i + 1 < holds.length; i += 1) {
           const run = holds[i + 1] - holds[i];
@@ -2513,8 +2743,10 @@
         // ---- straight down ----
         const y1 = Math.min(s.bottom, s.y + SHAFT_STEP);
         // (a shaft stops short of a mountain's road tunnel: its foot is where it stands then)
-        if (PW.mining.crossesRoad && PW.mining.crossesRoad(world, s.x - 34, s.y, s.x + 34, y1 + 34)) {
-          if (s.y - s.top < 40) { s.done = true; s.why = 'a road tunnel under it'; return false; }
+        // (and short of an underground lake under it - N136: a shaft is never sunk into the water)
+        if ((PW.mining.crossesRoad && PW.mining.crossesRoad(world, s.x - 34, s.y, s.x + 34, y1 + 34))
+          || (PW.mining.crossesAquifer && PW.mining.crossesAquifer(world, s.x - 34, s.y, s.x + 34, y1 + 34))) {
+          if (s.y - s.top < 40) { s.done = true; s.why = 'a road tunnel or a lake under it'; return false; }
           s.bottom = s.y;
         } else {
           // (the neck: narrow through the made ground the core stands in, the shaft's full width below)
@@ -2587,6 +2819,18 @@
         const ahead = Math.max(0, Math.min(world.width - 1, e.x + e.dir * 6));
         if (world.groundTop[ahead] >= e.row - 2) { e.done = true; e.mouth = e.x; portal(e, net); }
         return;
+      }
+      // (the way out kept clear: what falls into the adit - a tree felled over its mouth, rock off the
+      // flank - is mucked out by its crews, so the men's way down never closes behind a heap; on
+      // seed 11 a tree came down into the mouth and left the adit 20 rows high for a 25-row man)
+      if (e.mouth !== undefined && T.time >= (e.muckAt || 0)) {
+        e.muckAt = T.time + 2;
+        const a = Math.min(s.x + e.dir * 12, e.mouth + e.dir * 8), b = Math.max(s.x + e.dir * 12, e.mouth + e.dir * 8);
+        for (let x = a; x <= b; x += 1) for (let y = e.row - ADIT_H + 1; y <= e.row; y += 1) {
+          const id = PW.get(world, x, y) & 63;
+          if (id === M.DEBRIS || id === M.RUBBLE || id === M.LOOSE_SOIL || id === M.LOOSE_STONE || id === M.ASH || id === M.SAND
+            || ((PW.getFlags(world, x, y) & FLAG.WOOD) && PW.mat.phase[id] === PW.PHASE.SOLID)) PW.set(world, x, y, M.AIR, Q);
+        }
       }
       if (!e.room) {
         const a = s.x + e.dir * 12, b = s.x + e.dir * (12 + ROOM_W);
@@ -2695,15 +2939,19 @@
       if (L.under > 0) {
         // (down where there is depth for it, else up over it - never within the cover of the land)
         if (!L.way) L.way = L.y + 70 < world.height - 150 ? 2 : -2;
-        const nx = L.x + L.dir * 3, ny = L.y + L.way;
+        const nx = L.vert ? L.x : L.x + L.dir * 3, ny = L.y + L.way;
+        // (the vertical way round an underground lake is a shaft a man's width, on the near side)
+        const bx0 = L.vert ? (L.dir > 0 ? L.x - 12 : L.x) : Math.min(L.x, nx), bx1 = L.vert ? (L.dir > 0 ? L.x : L.x + 12) : Math.max(L.x, nx);
         const tooHigh = ny - ADIT_H < (world.surface0 || world.groundTop)[Math.max(0, Math.min(world.width - 1, nx))] + 160;
-        if (ny > world.height - 150 || tooHigh || !PW.tunnels.digBox(world, net, Math.min(L.x, nx), ny - ADIT_H + 1, Math.max(L.x, nx), ny, { kind: 'incline', keepOre: true, exact: true, through: true }).ok) {
+        const wet = PW.mining.crossesAquifer && PW.mining.crossesAquifer(world, bx0, ny - ADIT_H - 4, bx1, ny + 4);
+        if (ny > world.height - 150 || tooHigh || wet || !PW.tunnels.digBox(world, net, bx0, ny - ADIT_H + 1, bx1, ny, { kind: L.vert ? 'shaft' : 'incline', keepOre: true, exact: true, through: true }).ok) {
           if (!L.flipped) { L.flipped = true; L.way = -L.way; return; }
           L.end = 'stopped'; L.why = `no way past at ${L.x},${L.y}`; return;
         }
         for (let d = 0; d <= 3; d += 1) PW.setFlag(world, L.x + L.dir * d, ny, FLAG.LADDER);
         L.x = nx; L.y = ny; L.node.y = ny - 8; L.path.push(L.x, L.y);
         L.under -= 1;
+        if (!L.under) L.vert = false;
         return;
       }
       L.steps = 0;   // (a long drive: the prospectors' step limit is not its)
@@ -2720,7 +2968,23 @@
         L.blockedBy = [...seen].slice(0, 4).join(', ') || 'unknown';
         L.unders = (L.unders || 0) + 1;
         L.way = 0; L.flipped = false;
-        if (L.unders > 6) { L.end = 'stopped'; L.why = `stopped ${L.unders - 1} times, last at ${L.x},${L.y}`; } else L.under = 30;   // (60 rows down or up, 90 along)
+        // (N136: an underground lake ahead is gone round, under it or over it, by as much as it
+        // takes - its whole height and the keep, not the usual 60 rows - choosing the side the
+        // land and the world's floor leave room on)
+        const aq = ((world.layout && world.layout.aquifers) || []).find((a) => ax >= a.x0 - 20 && L.x <= a.x1 + 20 || ax <= a.x1 + 20 && L.x >= a.x0 - 20);
+        if (aq && L.y >= aq.roof - 40 && L.y - ADIT_H <= aq.bottom + 40) {
+          const downRows = aq.bottom + 16 + ADIT_H - L.y, upRows = L.y - (aq.roof - 16);
+          const roomUp = aq.roof - 16 - ADIT_H > (world.surface0 || world.groundTop)[Math.max(0, Math.min(world.width - 1, aq.x))] + 160;
+          const roomDown = aq.bottom + 16 + ADIT_H < world.height - 150;
+          if (roomDown || roomUp) {
+            L.way = roomDown && (downRows <= upRows || !roomUp) ? 2 : -2;
+            L.under = Math.ceil((L.way > 0 ? downRows : upRows) / 2) + 4;
+            L.vert = true;   // (straight down or up beside it: stepping on along would run into it)
+            seen.add('an underground lake');
+            L.blockedBy = [...seen].slice(0, 4).join(', ');
+          }
+        }
+        if (L.unders > 6) { L.end = 'stopped'; L.why = `stopped ${L.unders - 1} times, last at ${L.x},${L.y}`; } else if (!L.under) L.under = 30;   // (60 rows down or up, 90 along)
       } else if (r === 'done') L.opened = null;   // (a mine opened on its way: it drives on)
     }
     // A branch leaves the shaft at the row nearest its ore's depth, through the shaft's side wall.
@@ -2740,6 +3004,8 @@
       economy(dt);   // N4: census, consumption, workers
       stepTick += 1;
       if (stepTick % 30 === 0) for (const city of cities) stepBridges(city);   // N56
+      if (stepTick % 30 === 15) stepBridgeWorks();   // N136: built and mended by their mini cores
+      if (stepTick % 60 === 17 && !PW.NO_FARM_WATER) stepWells();   // N136
       const storm = stormy();
       const heavyMax = storm ? 0 : (world.particles && world.particles.count > 1500 ? 1 : 3);
       let heavy = 0;
