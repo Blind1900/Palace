@@ -1,8 +1,13 @@
 'use strict';
 // Tanks (N10, N71, N72), after the user's TankMovement and TankAim GIFs, drawn at their real size
-// (a cell is about 7 cm: a main battle tank's hull about 116 cells long, and each its own army's
-// height - an M1 Abrams 2.44 m to its turret roof, 35 cells with its cupola; a Type 99 34; a low
-// T-64 32), in two parts, as the user asked:
+// (a cell is about 7 cm: a main battle tank's hull about 116 cells long, 2.44 m to its turret roof,
+// its sight and weapon station low on it - 36 cells - under a gate hall's 36 clear). Every army's tank is the one design (N158, the user's,
+// after their references - the Leopard 2A6, the M1A2, the Merkava IV): a long low hull under full
+// skirts on seven road wheels, a wedge turret with a long bustle, its rack and a ball-and-chain
+// curtain under it, smoke dischargers on its cheeks, a gunner's sight and a remote weapon station
+// on its roof, and a long gun with a thermal sleeve - the armies told apart by their colours alone,
+// each its own palette over the same disruptive pattern (DESIGN, STYLES). In two parts, as the user
+// asked:
 // - the hull and its running gear: each road wheel finds the ground under it on its own spring
 //   (SPRING_UP / SPRING_DOWN cells of travel), the hull lies along the line through them, and the
 //   track belt wraps the wheels as they lie - so the tracks always follow the ground under them.
@@ -76,20 +81,26 @@
   const deg = Math.PI / 180;
 
   // ---- The look --------------------------------------------------------------------------------------
-  // (N128, the user's war-zone look: the colours of the war photos - paint dull, dark and low in
-  // colour; the 22% less colour over all is pw-look's, at draw time)
+  // Every army's tank is the one design (N158 - DESIGN), each army its own palette (the user's: each
+  // side its own colour palette): its paint's base and the other two tones of its disruptive pattern -
+  // the same pattern on every army's tank - a dark for its fittings and shadows, and its running
+  // gear's. (N128's war-zone look: dull, dark and low in colour, as the war photos' armour; the 22%
+  // less colour over all is pw-look's, at draw time)
   const STYLES = {
-    // (deck: the hull's roof, in cells over the track's bottom run; the turret stands 11 on it)
-    modern: { base: [134, 126, 106], dark: [101, 93, 77], wheel: [68, 66, 62], wheels: 7, span: 46, skirt: [-50, 50, -18, -9], barrel: 76, deck: 24,
-      turret: [[-34, -3], [-32, -10], [18, -11], [26, -5], [24, 0], [-25, 0]] },
-    asian: { base: [71, 78, 60], dark: [49, 55, 42], wheel: [55, 58, 51], wheels: 6, span: 42, skirt: [-47, 47, -17, -12], barrel: 80, deck: 23,
-      camo: { spots: [[49, 56, 42], [91, 90, 74], [69, 62, 51], [90, 99, 74]], density: 0.42 },
-      turret: [[-28, -2], [-25, -10], [10, -11], [31, -3], [25, 0], [-23, 0]], star: true },
-    gothic: { base: [48, 54, 43], dark: [33, 37, 30], wheel: [51, 54, 47], wheels: 6, span: 40, skirt: null, barrel: 74, deck: 21,
-      turret: null, era: true, cross: true },
+    modern: { base: [134, 126, 106], light: [148, 140, 118], deep: [112, 102, 84], dark: [96, 88, 73], wheel: [68, 66, 62] },   // (desert sand)
+    asian: { base: [76, 82, 56], light: [90, 95, 66], deep: [60, 64, 44], dark: [47, 51, 36], wheel: [55, 58, 51] },          // (olive drab)
+    gothic: { base: [72, 75, 78], light: [86, 89, 92], deep: [56, 58, 61], dark: [42, 44, 46], wheel: [54, 56, 58] },         // (gunmetal grey)
   };
+  // The design: the hull's roof (deck) in cells over the track's bottom run - the turret stands 11 on
+  // it; its seven road wheels, the outer ones `span` either side of its middle; its skirts over the
+  // tracks (u from, u to, v from, v to); the gun's length; and the turret's side (t along it, s down
+  // from its ring on the hull's roof) - a wedge forward of its roof, a long bustle behind it (its plan,
+  // its half-width across at each t: see PLAN).
+  const DESIGN = { deck: 24, wheels: 7, span: 46, skirt: [-50, 50, -18, -9], barrel: 80,
+    turret: [[-40, -4], [-39, -10], [4, -11], [30, -6], [29, -2], [24, 0], [-26, 0], [-27, -4]] };
   const rgb = (c, k = 1) => PW.abgr(Math.min(255, c[0] * k), Math.min(255, c[1] * k), Math.min(255, c[2] * k));
-  const TRACK = [44, 42, 38], LINK = [74, 72, 66], RUBBER = [34, 33, 31], HUB = [104, 100, 92], ERA = [59, 65, 52];
+  const TRACK = [44, 42, 38], LINK = [74, 72, 66], RUBBER = [34, 33, 31], HUB = [104, 100, 92];
+  const IRON = [40, 40, 42], LAMP = [170, 164, 136];   // (tow hooks, the weapon station's gun; the lamps)
   const inPoly = (poly, x, y) => {
     let inside = false;
     for (let i = 0, j = poly.length - 1; i < poly.length; j = i, i += 1) {
@@ -113,11 +124,12 @@
     return { x0, y0, x1, y1, w, h, px };
   }
   const at = (s, x, y) => (x < s.x0 || y < s.y0 || x > s.x1 || y > s.y1 ? 0 : s.px[(y - s.y0) * s.w + (x - s.x0)]);
-  // (camouflage: single-cell digital spots, as the troopers' - see pw-unit-art)
-  const camoAt = (st, x, y) => {
-    if (!st.camo) return st.base;
-    const h = PW.hash2(x * 3 + 1, y * 5 + 2);
-    return (h & 255) / 255 < st.camo.density ? st.camo.spots[(h >>> 8) % st.camo.spots.length] : st.base;
+  // (its disruptive pattern: blotches about 9 cells across and 6 high, their edges ragged - the same
+  // on every army's tank, in its own palette's three tones; low in contrast, so its shape reads first)
+  const toneAt = (st, x, y) => {
+    const bx = Math.floor((x + 512 + (PW.hash2(y >> 2, 7) & 3)) / 9), by = Math.floor((y + 512 + (PW.hash2(x >> 2, 11) & 3)) / 6);
+    const h = PW.hash2(bx * 13 + 5, by * 17 + 3) % 5;
+    return h === 3 ? st.light : h === 4 ? st.deep : st.base;
   };
   const ART = new Map();
   function artOf(style) {
@@ -126,46 +138,49 @@
     const st = STYLES[style] || STYLES.modern;
     // The hull (u along it, v down; v = 0 the bottom of the track's run under it), the same at both
     // ends: its upper body, a sloped plate and a lower plate at each end, the fenders over the
-    // tracks, and the side skirts where it has them.
-    const deck = st.deck;
+    // tracks, and its skirts.
+    const { deck, skirt } = DESIGN;
     const body = [[-58, -19], [-32, -deck], [32, -deck], [58, -19], [58, -18], [53, -16], [-53, -16], [-58, -18]];
-    const skirt = st.skirt;
     // (a cell's distance along from the middle, the same for a cell and its mirror: cells x and
     // -x - 1 are each other's)
     const along = (x) => Math.abs(x + 0.5) - 0.5;
     // (the body tested on its |u|: a cell and its mirror come out alike even where an edge runs
-    // through cell corners)
-    const hull = sprite(-60, -30, 60, -6, (u, v) => inPoly(body, Math.abs(u), v) || (skirt && u >= skirt[0] && u <= skirt[1] && v >= skirt[2] && v <= skirt[3] - ((Math.floor(Math.abs(u)) & 7) === 0 ? 1 : 0)), (u, v, light) => {
-      let c = camoAt(st, u, v), k = light;
+    // through cell corners; the skirts' lower edge scalloped over each wheel's hub)
+    const hull = sprite(-60, -30, 60, -6, (u, v) => inPoly(body, Math.abs(u), v) || (u >= skirt[0] && u <= skirt[1] && v >= skirt[2] && v <= skirt[3] - ((Math.floor(Math.abs(u)) & 7) === 0 ? 1 : 0)), (u, v, light) => {
+      let c = toneAt(st, u, v), k = light;
       const au = along(u);
-      if (v === -17 || v === -18) k *= 0.62;                       // (the fender's edge)
-      if (skirt && v > -17) k *= 0.9;
-      // (reactive armour on the sloped plates: blocks in rows along them)
-      if (st.era && au >= 34 && v <= -19) c = (au - 34) % 5 === 0 || (v + 30) % 3 === 0 ? st.dark : ERA;
+      if (v === -17 || v === -18) k *= 0.62;                                  // (the fender's edge)
+      if (v > -17) {
+        k *= 0.9;
+        if (au % 12 === 6) c = st.dark;                                        // (the skirts' panels, joined)
+        else if (v === skirt[3] - 2 && au % 4 === 1) c = st.dark;              // (and bolted along their foot)
+      }
+      if (v < -18 && (au === 20 || au === 40)) k *= 0.78;                      // (the upper hull's plates)
+      if (au >= 54 && au <= 55 && (v === -17 || v === -18)) { c = IRON; k = 1; }  // (its tow hooks)
+      if (au >= 49 && au <= 51 && v === -20) { c = LAMP; k = 1; }             // (its lamps)
       if (au === 57) k *= 0.8;
       return rgb(c, k);
     });
-    // The turret, facing right (t forward, s down across it; s = 0 its ring on the hull's roof),
-    // with its commander's cupola and a machine gun beside it, low on its roof, and the mantlet the
-    // gun pivots in.
-    const shape = st.turret || Array.from({ length: 19 }, (_, k) => { const a = Math.PI * k / 18; return [26 * Math.cos(a), -11.5 * Math.sin(a)]; });
-    // (its side's paint at cell (t, s), lit by `light`: its camouflage, the machine gun, its army's
-    // marking, a T-64's reactive armour - the turret's look from every side: see turnFrame)
+    // The turret, facing right (t forward, s down across it; s = 0 its ring on the hull's roof): its
+    // side (DESIGN.turret), the mantlet the gun pivots in, the gunner's sight and the remote weapon
+    // station on its roof, and the chains hung under its bustle - see solidOf.
+    const shape = DESIGN.turret;
+    // (its side's paint at cell (t, s), lit by `light`: its pattern; the smoke dischargers in a row on
+    // its cheek; the bustle's rack and what is stowed in it; its plates' seams - the turret's look from
+    // every side: see makeTurnFrame)
     const turretColour = (t, s, light) => {
-      let c = camoAt(st, t, s), k = light;
-      if (t >= 1 && t <= 8 && s === -12) { c = [40, 40, 42]; k = 1; }          // (the machine gun)
-      if (st.cross && t >= -16 && t <= -6 && s >= -8 && s <= -2 && (t === -11 || t === -12 || s === -5)) { c = [222, 222, 214]; k = 1; }
-      if (st.star && t >= -14 && t <= -10 && s >= -7 && s <= -3 && Math.abs(t + 12) + Math.abs(s + 5) <= 2) { c = [196, 44, 36]; k = 1; }
-      if (st.era && t >= 12 && s >= -10 && s <= -2) c = (t - 12) % 4 === 0 || (s + 10) % 3 === 0 ? st.dark : ERA;
+      let c = toneAt(st, t, s), k = light;
+      if (t >= 11 && t <= 18 && s >= -9 && s <= -8) { c = st.dark; if ((t - 11) % 3 !== 2) k *= 0.72; }
+      else if (t <= -30 && s >= -10 && s <= -5) c = (t + 40) % 4 === 0 || s === -10 || s === -5 ? st.dark : st.deep;
+      else if (t === -18 || t === 2) k *= 0.8;
       return rgb(c, k);
     };
-    const turret = sprite(-36, -17, 30, 0, (t, s) => inPoly(shape, t, s) || (t >= -9 && t <= 0 && s >= -12 && s <= -10) || (t >= 1 && t <= 8 && s >= -12.5 && s <= -11.5)
-      || (t >= 15 && t <= 24 && s >= -9 && s <= -3), turretColour);
+    const turret = sprite(-41, -15, 32, 0, (t, s) => inPoly(shape, t, s) || (t >= 24 && t <= 31 && s >= -9 && s <= -3), turretColour);
     // (road wheels evenly along the hull; a sprocket at one end and the idler at the other, the
     // same, raised; small return rollers under the belt's top run)
-    const wheels = Array.from({ length: st.wheels }, (_, k) => -st.span + (2 * st.span) * k / (st.wheels - 1));
-    a = { style, st, hull, turret, turretColour, shape: st.turret ? shape : null, wheels, R: WHEEL, sprocket: [-52, -9, 6], idler: [52, -9, 6], rollers: [-30, 0, 30].map((u) => [u, -13, 1.5]),
-      trunnion: [20, -6], barrel: st.barrel, ring: [0, -deck + 1], height: deck + 11, nose: NOSE - st.span,
+    const wheels = Array.from({ length: DESIGN.wheels }, (_, k) => -DESIGN.span + (2 * DESIGN.span) * k / (DESIGN.wheels - 1));
+    a = { style, st, hull, turret, turretColour, shape, wheels, R: WHEEL, sprocket: [-52, -9, 6], idler: [52, -9, 6], rollers: [-30, 0, 30].map((u) => [u, -13, 1.5]),
+      trunnion: [20, -6], barrel: DESIGN.barrel, ring: [0, -deck + 1], height: deck + 11, nose: NOSE - DESIGN.span,
       barrelC: rgb(st.base, 0.95), barrelD: rgb(st.dark, 0.85), barrelL: rgb(st.base, 1.18) };
     ART.set(style, a);
     return a;
@@ -787,20 +802,18 @@
   // faces us - its gun pointing out of the picture, the muzzle's dark bore ringed, the mantlet in the
   // middle of a turret near as wide as the hull, its front and a side in sight - while the hull and
   // tracks under it stay just as they were. The solid: its plan (its half-width along it - PLAN), its
-  // side's profile over that, chamfered or rounded across, and its mantlet, cupola and machine gun
-  // where they stand on it; seen at each step of a half turn (TURN_FRAMES of them, made once for each
-  // army's turret), painted as its side is (turretColour: its camouflage, its machine gun, its army's
-  // marking, a T-64's reactive armour), its faces lit as they face: its roof lightest, its side,
+  // side's profile over that, chamfered across, and its mantlet, its sight, its weapon station and the
+  // chains under its bustle where they stand on it; seen at each step of a half turn (TURN_FRAMES of
+  // them, made once for each army's turret), painted as its side is (turretColour: its pattern, its
+  // smoke dischargers, its bustle's rack), its faces lit as they face: its roof lightest, its side,
   // its front darker, its back darker still.
   const TURN_FRAMES = 24;
-  const PLAN = {
-    modern: (t) => (t <= 14 ? 24 : Math.max(0, 24 - (t - 14) * 0.45)),     // (the Abrams: slab sides, its front cut back)
-    asian: (t) => (t <= 0 ? 23 : Math.max(0, 23 - t * 0.36)),               // (the Type 99: an arrowhead wedge)
-    gothic: (t) => 21 * Math.sqrt(Math.max(0, 1 - (t / 26) ** 2)),          // (the T-64: a round dome)
-  };
+  // (its plan: the wedge's plates closing forward of its roof, the bustle a little narrower behind)
+  const PLAN = (t) => (t >= 8 ? Math.max(0, 24 - (t - 8) * 0.45) : t <= -27 ? 21 : 24);
   const BORE = PW.abgr(14, 14, 16);
   // (the turret as a solid, cell by cell - t along it, w across it (toward the eye at the start of a
-  // turn), s down - 0 nothing, 1 its body, 2 the mantlet, 3 the cupola, 4 the machine gun: made once
+  // turn), s down - 0 nothing, 1 its body, 2 the mantlet, 3 the gunner's sight and the weapon
+  // station's housing, 4 the weapon station's gun, 5 the chains under the bustle: made once
   // for each army's turret, a layer (s) at a time - `layers` at most this call: made ahead, a layer a
   // tick)
   const G3 = { t0: -40, w0: -27, s0: -18, nt: 81, nw: 55, ns: 19 };
@@ -818,7 +831,7 @@
       }
       b = art.solidBuild = { inside, top, grid: new Uint8Array(nt * nw * ns), k: 0 };
     }
-    const plan = PLAN[art.style] || PLAN.modern;
+    const plan = PLAN;
     for (let n = 0; n < layers && b.k < ns; n += 1, b.k += 1) {
       const k = b.k, s = s0 + k + 0.5;
       for (let j = 0; j < nw; j += 1) {
@@ -826,9 +839,11 @@
         for (let i = 0; i < nt; i += 1) {
           const t = t0 + i + 0.5;
           let v = 0;
-          if (t >= 15 && t <= 24 && Math.abs(w) <= 6 && s >= -9 && s <= -3) v = 2;
-          else if (t >= -9 && t <= 0 && w >= 4 && w <= 12 && s >= -12 && s <= -10) v = 3;
-          else if (t >= 1 && t <= 8 && w >= 6 && w <= 7.5 && s >= -12.5 && s <= -11.5) v = 4;
+          if (t >= 24 && t <= 31 && Math.abs(w) <= 5 && s >= -9 && s <= -3) v = 2;
+          else if ((t >= 2 && t <= 8 && w >= 8 && w <= 13 && s >= -12 && s <= -10) || (t >= -14 && t <= -6 && w >= -13 && w <= -7 && s >= -12 && s <= -9.5)) v = 3;
+          else if (t >= -6 && t <= 6 && w >= -11 && w <= -9 && s >= -12 && s <= -11.5) v = 4;
+          // (the ball-and-chain curtain hung round its bustle's foot: chains a cell apart)
+          else if (t >= -40 && t <= -27 && s > -4 && s <= -0.5 && (Math.abs(w) >= 19 || t <= -38) && Math.abs(w) <= 21 && (Math.floor(t) & 1) === 0 && (Math.floor(w) & 1) === 0) v = 5;
           else if (!art.shape) v = (t / 26) ** 2 + (w / 21) ** 2 + (s / 11.5) ** 2 <= 1 ? 1 : 0;
           // (chamfered along its roof's edges: its top rows narrower)
           else if (b.inside[k * nt + i]) v = Math.abs(w) <= plan(t) - Math.max(0, b.top[i] + 3 - s) * 1.3 ? 1 : 0;
@@ -844,7 +859,7 @@
   // (the turret turned by th from the way it faced - 0 its side view - seen from the side: a sprite
   // in the turret's own frame, t along the way it faced, s down)
   function makeTurnFrame(art, th) {
-    const { st } = art, c = Math.cos(th), sn = Math.sin(th), grid = solidOf(art), plan = PLAN[art.style] || PLAN.modern;
+    const { st } = art, c = Math.cos(th), sn = Math.sin(th), grid = solidOf(art), plan = PLAN;
     const solid = (t, w, s) => {
       const i = Math.floor(t) - G3.t0, j = Math.floor(w) - G3.w0, k = Math.floor(s) - G3.s0;
       return i < 0 || j < 0 || k < 0 || i >= G3.nt || j >= G3.nw || k >= G3.ns ? 0 : grid[(k * G3.nw + j) * G3.nt + i];
@@ -874,18 +889,16 @@
             face = ns > nt && ns > nw && s < -7 ? 'roof' : nw >= nt ? 'side' : t > 0 ? 'front' : 'back';
           }
           let col;
-          if (k === 2) col = rgb(camoAt(st, wi, y), 0.8);                    // (the mantlet)
-          else if (k === 3) col = art.turretColour(ti, y, 1.06);              // (the cupola)
-          else if (k === 4) col = rgb([40, 40, 42]);                          // (the machine gun)
-          else if (face === 'roof') col = rgb(camoAt(st, ti, wi), 1.16);      // (its roof)
+          if (k === 2) col = rgb(toneAt(st, wi, y), 0.8);                    // (the mantlet)
+          else if (k === 3) col = rgb(toneAt(st, ti, wi), s < -11 ? 1.1 : 0.9);    // (its sight, the weapon station)
+          else if (k === 4) col = rgb(IRON);                                  // (the weapon station's gun)
+          else if (k === 5) col = rgb(st.dark, (Math.floor(s) & 1) ? 0.62 : 0.85);   // (its chains, ball by ball)
+          else if (face === 'roof') col = rgb(toneAt(st, ti, wi), 1.16);      // (its roof)
           else {
             // (its side, painted and lit as it always was)
             if (face === 'side') col = art.turretColour(ti, y, 1 - (y + 17) / 18 * 0.18);
-            else if (face === 'front') {
-              // (its front - the reactive armour's blocks on a T-64's, in rows across it)
-              const fw = wi + 40, fs = y + 30;
-              col = st.era && t >= 8 ? rgb(fw % 5 === 0 || fs % 3 === 0 ? st.dark : ERA, 0.92) : rgb(camoAt(st, wi, y), 0.86);
-            } else col = rgb(camoAt(st, wi, y), 0.76);                         // (its back)
+            else if (face === 'front') col = rgb(toneAt(st, wi, y), 0.86);     // (its front)
+            else col = rgb(toneAt(st, wi, y), 0.76);                            // (its back)
           }
           px[(y - y0) * w + x - x0] = col; kind[(y - y0) * w + x - x0] = 1; depth[(y - y0) * w + x - x0] = D;
           break;
@@ -970,7 +983,11 @@
       // (and as it comes round towards us, its muzzle end the nearer, the bigger)
       const near = P.toward > 0 && glen > 1e-6 ? 1 + 0.55 * P.toward * Math.max(0, along / glen) : 1;
       const half = (f > L * 0.4 && f < L * 0.4 + 9 ? 2.5 : f > L - 3 ? 2 : 1.6) * near;
-      if (across >= -half && across <= half) return across < -half + 1 ? art.barrelL : across > half - 1 ? art.barrelD : art.barrelC;
+      if (across >= -half && across <= half) {
+        // (its thermal sleeve: the bands that clamp it, every 13 cells along it)
+        if (f > 8 && f < L - 4 && Math.floor(f) % 13 === 0) return art.barrelD;
+        return across < -half + 1 ? art.barrelL : across > half - 1 ? art.barrelD : art.barrelC;
+      }
     }
     if (glen < 6 && gx * gx + gy * gy <= 6.25) return gx * gx + gy * gy <= 1.5 ? art.barrelD : art.barrelC;
     return 0;
