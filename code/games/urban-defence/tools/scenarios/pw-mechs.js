@@ -369,5 +369,68 @@ const drawnCells = (m) => { const P = m.P, out = new Set(); for (let y = P.box.y
   } else check(false, 'a stretch of the wilds for the cost');
   fresh();
 }
+// 10. Its paint (N159): every drawing of it - each frame of its clips, facing either way, in each side's
+// palette - is the user's drawing cell for cell, only the colours its own: its plates in its side's paint,
+// its tanks' (sand, olive drab, gunmetal grey - the sides told apart by that alone), its legs darker and
+// dusted toward its feet, a stripe in the side's dark shade along its pod, one lit lens at its head and
+// one amber marker on its back.
+{
+  const S = site(500);
+  if (!S) check(false, 'a stretch of the wilds for the paint');
+  else {
+    fresh();
+    const frames = X.frames(), lum = (c) => c[0] * 0.3 + c[1] * 0.59 + c[2] * 0.11, far = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+    const LENS = PW.abgr(...X.LENS) >>> 0, MARKER = PW.abgr(...X.MARKER) >>> 0;
+    const m = X.create(world, { x: S.x0 + 250, side: 'left', facing: -1 });
+    let poses = 0, exact = 0, lights = 0, striped = 0, worst = '';
+    const looks = {};
+    for (const style of X.STYLES) {
+      const sum = { plate: [0, 0, 0, 0], legHi: [0, 0, 0, 0], legLo: [0, 0, 0, 0], stripe: [0, 0, 0, 0] };
+      const add = (s, c) => { s[0] += c & 255; s[1] += c >>> 8 & 255; s[2] += c >>> 16 & 255; s[3] += 1; };
+      m.style = style;
+      frames.forEach((F, i) => {
+        for (const facing of [-1, 1]) {
+          m.facing = facing; m.an = { a: i, b: i, t: 0, mode: 'idle' };
+          const P = X.pose(m);
+          const want = new Set(); for (let j = 0; j < F.n; j += 1) want.add(`${F.xs[j]},${F.ys[j]}`);
+          let got = 0, both = 0, lens = 0, marker = 0, band = { s: [0, 0, 0, 0] };
+          for (let y = P.box.y0; y < P.box.y1; y += 1) for (let x = P.box.x0; x < P.box.x1; x += 1) {
+            const c = X.pixel(m, x + 0.5, y + 0.5);
+            if (!c) continue;
+            const dx = (x - P.hx) * -facing, dy = y - P.hy;
+            got += 1; if (want.has(`${dx},${dy}`)) both += 1;
+            if (c === LENS) { lens += 1; continue; }
+            if (c === MARKER) { marker += 1; continue; }
+            if (Math.abs(dx - P.pod[0]) <= 5 && dy >= P.pod[1] && dy <= P.pod[1] + 1) { add(sum.stripe, c); add(band.s, c); continue; }
+            if (dy < X.LEGS) add(sum.plate, c);
+            else add(dy < X.LEGS + (P.foot - X.LEGS) / 2 ? sum.legHi : sum.legLo, c);
+          }
+          poses += 1;
+          if (got === F.n && both === F.n) exact += 1; else if (!worst) worst = `${style} ${F.label} facing ${facing}: ${got} drawn, ${both} of ${F.n} the drawing's`;
+          if (lens === 1 && marker === 1) lights += 1;
+          if (band.s[3] >= 3) striped += 1;
+        }
+      });
+      const mean = (s) => [s[0] / s[3], s[1] / s[3], s[2] / s[3]];
+      looks[style] = { plate: mean(sum.plate), legHi: mean(sum.legHi), legLo: mean(sum.legLo), stripe: mean(sum.stripe) };
+    }
+    const L = looks, show = (c) => `rgb(${c.map((v) => v.toFixed(0)).join(',')})`;
+    check(exact === poses && poses === frames.length * 2 * X.STYLES.length,
+      `every drawing of it is the user's, cell for cell, only its colours chosen: ${exact} of ${poses} poses (${frames.length} frames, facing either way, in ${X.STYLES.length} palettes)${worst ? ` - ${worst}` : ''}`);
+    const { modern: sand, asian: olive, gothic: grey } = Object.fromEntries(X.STYLES.map((s) => [s, L[s].plate]));
+    check(sand[0] > sand[1] && sand[1] > sand[2] && sand[0] > 110 && olive[1] > olive[0] && olive[1] > olive[2] && grey[2] >= grey[0] && grey[1] >= grey[0]
+      && far(sand, olive) > 40 && far(sand, grey) > 40 && far(olive, grey) > 15,
+      `each side's mechs in its own paint, its tanks': desert sand ${show(sand)}, olive drab ${show(olive)}, gunmetal grey ${show(grey)} - told apart by it (${far(sand, olive).toFixed(0)}, ${far(sand, grey).toFixed(0)}, ${far(olive, grey).toFixed(0)} apart)`);
+    const legs = X.STYLES.every((s) => lum(L[s].legHi) < lum(L[s].plate) * 0.95 && far(L[s].legLo, X.DUST) < far(L[s].legHi, X.DUST) && lum(L[s].stripe) < lum(L[s].plate) * 0.85);
+    check(legs && lights === poses && striped === poses,
+      `its legs darker than its plates and dusted toward its feet, a dark stripe along its pod in every pose (${striped} of ${poses}), one lit lens and one amber marker in every pose (${lights} of ${poses}): ${X.STYLES.map((s) => `${s} plates ${lum(L[s].plate).toFixed(0)}, legs ${lum(L[s].legHi).toFixed(0)} then ${far(L[s].legLo, X.DUST).toFixed(0)} from dust (${far(L[s].legHi, X.DUST).toFixed(0)} above), stripe ${lum(L[s].stripe).toFixed(0)}`).join('; ')}`);
+    // (the three sides' mechs side by side, for the eye)
+    fresh();
+    X.STYLES.forEach((style, k) => X.create(world, { x: S.x0 + 100 + k * 140, side: k ? 'right' : 'left', facing: k ? -1 : 1, style }));
+    run(0.5);
+    await view('mech-paint', S.x0 + 240, S.g - 40, 7);
+  }
+}
+
 pwApp.setPaused(false);
 return { checks, shots: shots.length };

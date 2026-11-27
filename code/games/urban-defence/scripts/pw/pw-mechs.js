@@ -214,12 +214,12 @@
 
   // ---- A mech --------------------------------------------------------------------------------------
   // spec: { x, y (its soles' row; the ground under it if left out), side, style, facing }
-  // (each style's colours: the drawings' strokes in its plate, lit from above - N128: dulled to the
-  // war photos' grey steel)
+  // (N159, the user's: each side's own palette - its tanks' (see PW.tanks' STYLES, N158): desert sand,
+  // olive drab, gunmetal grey; the drawings' strokes in it, lit from above)
   const STYLES = {
-    modern: { base: [64, 68, 73], dark: [37, 39, 43], light: [110, 115, 121] },
-    asian: { base: [58, 68, 57], dark: [34, 40, 34], light: [101, 113, 98] },
-    gothic: { base: [55, 57, 69], dark: [31, 33, 41], light: [97, 99, 117] },
+    modern: { base: [134, 126, 106], light: [148, 140, 118], deep: [112, 102, 84], dark: [96, 88, 73] },   // (desert sand)
+    asian: { base: [76, 82, 56], light: [90, 95, 66], deep: [60, 64, 44], dark: [47, 51, 36] },          // (olive drab)
+    gothic: { base: [72, 75, 78], light: [86, 89, 92], deep: [56, 58, 61], dark: [42, 44, 46] },         // (gunmetal grey)
   };
   function create(world, spec) {
     decode();
@@ -545,22 +545,79 @@
     for (const k of P.list) { const gx = k % RW, gy = (k / RW) | 0; if (gx < x0) x0 = gx; if (gx > x1) x1 = gx; if (gy < y0) y0 = gy; if (gy > y1) y1 = gy; }
     P.box = { x0: P.hx + x0 - R, x1: P.hx + x1 - R + 1, y0: P.hy + y0 - R, y1: P.hy + y1 - R + 1 };
     if (!STYLES[m.style]) m.style = 'modern';
-    const st = STYLES[m.style];
-    P.cols = [rgb(st.base), rgb(st.light), rgb(st.dark), rgb(st.base, 1.12)];
+    // (where its feet and its pod are in the drawing, for its paint - see paint)
+    P.foot = lerp(fa[0][1], fb[0][1], t); P.pod = A.pod;
+    P.painted = false;
     return P;
   }
   const rgb = (c, k = 1) => PW.abgr(Math.max(0, Math.min(255, c[0] * k)) | 0, Math.max(0, Math.min(255, c[1] * k)) | 0, Math.max(0, Math.min(255, c[2] * k)) | 0);
-  // (what of it is at world point (x, y): its colour as drawn - lit where nothing is over it, shaded
-  // where nothing is under it, a strand of its wings between - or 0)
-  function pixelP(P, x, y) {
-    const gx = Math.floor(x) - P.hx + R, gy = Math.floor(y) - P.hy + R;
-    if (gx < 1 || gy < 1 || gx >= RW - 1 || gy >= RW - 1) return 0;
-    const k = gy * RW + gx;
-    if (!P.grid[k]) return 0;
-    const up = P.grid[k - RW], down = P.grid[k + RW];
-    return !up && !down ? P.cols[3] : !up ? P.cols[1] : !down ? P.cols[2] : P.cols[0];
+  const mix = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+  // ---- Its paint (N159, the user's: detail and colour from the tank references - the drawing kept, pixel
+  // for pixel: only the colour of each of its pixels is chosen) -------------------------------------------
+  // Its plates in its side's paint, two-toned in blocks as its tanks are (see PW.tanks); seams across
+  // them every few cells and a bolt head catching the light here and there; its legs and joints a shade
+  // darker, dusted khaki toward its feet; a stripe in its side's dark shade along the pod under its wing;
+  // a lit sensor lens at the front of its head and an amber marker light on its back - each on the
+  // pixel of the drawing nearest where it goes. Worked out in the drawing's own cells (it turns with
+  // it), when it is drawn, not every tick.
+  const LEGS = 9;                       // rows under its body point where its legs begin
+  const LENS = [176, 226, 222], MARKER = [232, 152, 46], DUST = [112, 99, 76];   // (lens: the tanks' sights lit; dust: the war photos' khaki)
+  const LENS_AT = [-8, -1], MARKER_AT = [9, -6];   // (in the drawing, which faces left: the front of its head, the top of its back)
+  const toneAt = (st, x, y) => {
+    const bx = Math.floor((x + 512 + (PW.hash2(y >> 2, 7) & 3)) / 9), by = Math.floor((y + 512 + (PW.hash2(x >> 2, 11) & 3)) / 6);
+    const h = PW.hash2(bx * 13 + 5, by * 17 + 3) % 5;
+    return h === 3 ? st.light : h === 4 ? st.deep : st.base;
+  };
+  // (the cell of its drawing nearest drawing point (tx, ty), as laid: P.list's index into P.grid)
+  function nearest(P, tx, ty) {
+    const cx = R - P.f * tx, cy = R + ty;
+    let best = -1, bd = Infinity;
+    for (const k of P.list) { const d = (k % RW - cx) ** 2 + (((k / RW) | 0) - cy) ** 2; if (d < bd) { bd = d; best = k; } }
+    return best;
   }
-  const pixel = (m, x, y) => pixelP(m.P || poseOf(current, m), x, y);
+  function paint(P) {
+    if (P.painted) return P;
+    const st = STYLES[P.m.style] || STYLES.modern, { grid, list } = P, f = P.f;
+    if (!P.col) P.col = new Uint32Array(RW * RW);
+    const col = P.col, span = Math.max(4, P.foot - LEGS);
+    for (const k of list) {
+      const dx = -f * (k % RW - R), dy = ((k / RW) | 0) - R;
+      const up = grid[k - RW], down = grid[k + RW];
+      // (lit where nothing is over it, shaded where nothing is under it, a strand of its wings between)
+      let s = !up && !down ? 1.08 : !up ? 1.16 : !down ? 0.8 : 1, c;
+      if (dy >= LEGS) {
+        // (the dust mostly about its feet: its legs keep its side's paint)
+        const t = Math.min(1, (dy - LEGS) / span);
+        c = mix(st.deep, DUST, 0.08 + 0.4 * t * t);
+      } else {
+        c = toneAt(st, dx, dy);
+        if (up && down) {
+          if ((dx + 512) % 7 === 0 && dy > -8) s *= 0.78;
+          else if (PW.hash2(dx + 512, dy + 512) % 31 === 0) s *= 1.3;
+        }
+      }
+      if (Math.abs(dx - P.pod[0]) <= 5 && dy >= P.pod[1] && dy <= P.pod[1] + 1) c = st.dark;
+      col[k] = rgb(c, s);
+    }
+    const lens = nearest(P, LENS_AT[0], LENS_AT[1]), marker = nearest(P, MARKER_AT[0], MARKER_AT[1]);
+    if (lens >= 0) col[lens] = rgb(LENS);
+    if (marker >= 0 && marker !== lens) col[marker] = rgb(MARKER);
+    P.lens = lens; P.marker = marker;
+    P.painted = true;
+    return P;
+  }
+  // (whether its drawing covers world point (x, y): its cell in P.grid, or -1)
+  function cellAt(P, x, y) {
+    const gx = Math.floor(x) - P.hx + R, gy = Math.floor(y) - P.hy + R;
+    if (gx < 1 || gy < 1 || gx >= RW - 1 || gy >= RW - 1) return -1;
+    const k = gy * RW + gx;
+    return P.grid[k] ? k : -1;
+  }
+  // (what of it is at world point (x, y): its colour as painted - or 0)
+  function pixelP(P, x, y) { const k = cellAt(P, x, y); return k < 0 ? 0 : paint(P).col[k]; }
+  const pixel = (m, x, y) => pixelP(m.P || (m.P = poseOf(current, m)), x, y);
+  // (its pose now, painted - for the tests)
+  const pose = (m) => paint(m.P = poseOf(current, m));
   const boxOf = (P) => P.box;
 
   // ---- Fighting ------------------------------------------------------------------------------------------
@@ -641,7 +698,7 @@
   }
   // (its body at world point (x, y), for what falls on it - see pw-fragments' glance; struck by a
   // falling piece, a heavy or fast one dents it, a little of its way passed on)
-  function touches(m, x, y) { return m.dead || !m.P ? 0 : pixelP(m.P, x, y) ? 1 : 0; }
+  function touches(m, x, y) { return m.dead || !m.P ? 0 : cellAt(m.P, x, y) >= 0 ? 1 : 0; }
   const SHRUG = 30000, DENT = 3000;
   function struck(world, m, x, y, part, mass, vx, vy) {
     const blow = mass * Math.hypot(vx, vy);
@@ -696,7 +753,7 @@
         for (let q = 0; q <= n; q += 1) {
           const f = q / n;
           if (best && f >= best.f) break;
-          if (pixelP(m.P, x0 + sx * f, y0 + sy * f)) { best = { f, x: x0 + sx * f, y: y0 + sy * f, ref: m, part: 1 }; break; }
+          if (cellAt(m.P, x0 + sx * f, y0 + sy * f) >= 0) { best = { f, x: x0 + sx * f, y: y0 + sy * f, ref: m, part: 1 }; break; }
         }
       }
       return best;
@@ -726,7 +783,7 @@
     const vx0 = camera.x, vy0 = camera.y, vx1 = vx0 + view.width / z, vy1 = vy0 + view.height / z;
     for (const m of list) {
       if (m.dead) continue;
-      const P = m.P || (m.P = poseOf(world, m)), B = boxOf(P);
+      const P = paint(m.P || (m.P = poseOf(world, m))), B = boxOf(P), col = P.col;
       const x0 = Math.max(Math.floor(B.x0), Math.floor(vx0)), x1 = Math.min(Math.ceil(B.x1), Math.ceil(vx1));
       const y0 = Math.max(Math.floor(B.y0), Math.floor(vy0)), y1 = Math.min(Math.ceil(B.y1), Math.ceil(vy1));
       if (x1 <= x0 || y1 <= y0) continue;
@@ -740,7 +797,7 @@
       for (let jy = 0; jy < ih; jy += 1) {
         const wy = y0 + jy * skip + 0.5, row = jy * stride;
         px32.fill(0, row, row + iw);
-        for (let ix = 0; ix < iw; ix += 1) { const col = pixelP(P, x0 + ix * skip + 0.5, wy); if (col) px32[row + ix] = col; }
+        for (let ix = 0; ix < iw; ix += 1) { const k = cellAt(P, x0 + ix * skip + 0.5, wy); if (k >= 0) px32[row + ix] = col[k]; }
       }
       ctx2.putImageData(image, 0, 0, 0, 0, iw, ih);
       ctx.imageSmoothingEnabled = false;
@@ -857,7 +914,8 @@
   }
 
   decode();
-  PW.mechs = { create, step, draw, walk, leap, boost, fire, launch, reload, hurt, blast, touches, struck, target, tool, key, click, release, hold, held: () => held, pixel, stats, clear,
+  PW.mechs = { create, step, draw, walk, leap, boost, fire, launch, reload, hurt, blast, touches, struck, target, tool, key, click, release, hold, held: () => held, pixel, pose, stats, clear,
+    STYLES: Object.keys(STYLES), palette: (style) => STYLES[style], LENS, MARKER, DUST, LEGS,
     frames: () => FR, clips: () => CLIP, bullet: () => BULLET, linkOf,
     HIP, HEIGHT, HALF, get WALK() { return WALK; }, STEP_UP, JUMP, FUEL, FALL_SAFE, GLIDE_FALL, TATTERS, FRAME_T, ARMOUR, SIGHT, DODGE_COOL, MAG, MISSILES };
 })();
