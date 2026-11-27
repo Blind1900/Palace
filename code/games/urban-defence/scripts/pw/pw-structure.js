@@ -11,6 +11,9 @@
 //     support gives way, and so does one whose load now overhangs its remaining supports;
 //   - water standing or running against it pushes on it as a whole: a storey whose frame cannot
 //     take the push of all the water against the building above its floor shears through (swept);
+//   - a building on a raised deck - a stage on pillars, an undercroft's piers, pilotis - bears on
+//     the ground through them (N151): too few of its floor's columns bearing for its weight, its
+//     weight beyond them or its floor reaching a span past them, it gives way under its deck;
 //   - everything above the failing row becomes ONE rigid piece that hinges down towards the side
 //     that failed (crushing the stump as it goes) or, when it lost its supports evenly, drops into
 //     its own footprint floor by floor - or, swept, is shoved off the way the water pushes; a
@@ -29,6 +32,7 @@
   const MIN_LOAD = 80;        // rows carrying less than this are not checked (roof ornaments...)
   const CRUMBLE_ONLY = 40;    // parts smaller than this crumble instead of falling whole
   const SPAN = 60;            // cells (about 4 m) a floor spans unsupported before it sags in
+  const BASE_PRINTS = 4;      // raised bases printed a tick, at most (see baseCheck)
   const REPEAT = 15;          // ticks between analyses of a building still being damaged
   const SOLID = 1, BACK = 2, FIT = 4, FRAME = SOLID | BACK;
   // A construction site (see analyse) is judged only once it has lost more than GROW_LOSS cells
@@ -116,11 +120,12 @@
     // ---- What a building is made of, now -----------------------------------------------------------
     // The area it can occupy (its canvas, its works and the ground under it).
     function areaOf(b) {
-      if (b.area) return b.area;
+      // (where it stands now: re-founded on its heap - see PW.cores - it stands higher or lower)
+      if (b.area && b.area.oy === b.oy && b.area.ground === b.ground) return b.area;
       // (below its floor: its cores, and the stage, piers and walls of a base on a slope)
       const works = b.works || [b.body.left, b.body.right];
       b.area = { x0: Math.max(0, Math.min(b.ox, works[0]) - 4), x1: Math.min(W - 1, Math.max(b.ox + b.canvas.width, works[1]) + 4),
-        y0: Math.max(0, b.oy - 4), y1: Math.min(H - 1, b.ground + (b.base ? 190 : 40)) };
+        y0: Math.max(0, b.oy - 4), y1: Math.min(H - 1, b.ground + (b.base ? 190 : 40)), oy: b.oy, ground: b.ground };
       return b.area;
     }
     // (the grids an analysis works on, building-sized, kept and cleared for the next one: one
@@ -267,7 +272,7 @@
     // in the one tick - nor is anything else looked at in the tick it is lifted)
     const spawnQueue = [];
     const spawnLater = (spec) => { spawnQueue.push(spec); };
-    let sweepAt = 0, blueprintAt = 0;
+    let sweepAt = 0, blueprintAt = 0, printAt = 0;
     function step(budgetMs = 1.5) {
       tick += 1;
       const t0 = performance.now();
@@ -288,6 +293,14 @@
           sweepAt = (sweepAt + k + 1) % all.length;
           break;
         }
+      }
+      // (N151: each raised base printed as built, the first ticks it is looked after - see baseCheck)
+      for (let n = 0; printAt < all.length && n < BASE_PRINTS; printAt += 1) {
+        const b = all[printAt];
+        if (!b || b.basePrint !== undefined) continue;
+        if (!raised(b)) { if (b.body && b.canvas) b.basePrint = null; continue; }
+        b.basePrint = printOf(b);
+        n += 1;
       }
       for (const [id, at] of due) {
         if (at > tick) continue;
@@ -412,6 +425,83 @@
       }
       for (const i of seen) groundedOf.set(i, found);
       return found;
+    }
+    // ---- The base (N151, the user's: a stage's legs carry the building, and it falls when they are blown)
+    // A building on a raised deck - a stage on timber pillars, an undercroft's piers, pilotis - bears on
+    // the ground through them: each column of its floor carries its share down, through the structure
+    // under it - its legs, piers, plinth, footings, a retaining wall - to the ground (or a core, which
+    // holds itself up), or straight onto the ground where its floor lies on it. Not through a back wall:
+    // the vault painted behind an arcade does not hold its deck up. As built, so many of its columns
+    // bear, from here to there (its print, taken the first ticks it is looked after: see step); looked
+    // at, so many bear now. Just under its deck it gives way - its floor and all on it coming down as one,
+    // the stubs of its legs left to fall after - when
+    //   - too few bear for its weight, each carrying FAIL_RATIO times what it did as built: all of them
+    //     gone, or lost evenly, it drops into its footprint, grinding down through its legs; lost more
+    //     on one side, it comes down onto that side;
+    //   - the centre of its weight is past the last that bears: it tips over that way;
+    //   - its floor reaches further than a floor spans (SPAN) past the last that bears, as built it did
+    //     not: that end sags and it goes over that way; or it spans twice that between them: it drops.
+    const raised = (b) => !!(b && b.base && b.base.under && b.body && b.canvas) && !b.floating;
+    const deckOf = (b) => ((PW.foundations && PW.foundations.STYLE && PW.foundations.STYLE[b.style]) || {}).deck || 4;
+    // (which columns of b's floor bear it: `floorAt(x)` its floor is over column x, `own(x, y)` its
+    // standing structure is at (x, y), `firm(i)` what is at world cell i bears it - how many, their x
+    // summed, the first and last, the floor's ends, the widest run of its floor between two that bear
+    // nothing, and how deep they go)
+    function bearing(b, floorAt, own, firm) {
+      const A = areaOf(b), G = b.ground;
+      const r = { n: 0, sum: 0, lo: Infinity, hi: -Infinity, fl: Infinity, fr: -Infinity, gap: 0, gapAt: 0, deep: G };
+      let run = -Infinity;
+      for (let x = A.x0; x <= A.x1; x += 1) {
+        if (!floorAt(x)) { run = -Infinity; continue; }
+        if (x < r.fl) r.fl = x;
+        if (x > r.fr) r.fr = x;
+        let y = G;
+        while (y <= A.y1 && own(x, y)) y += 1;
+        if (y <= A.y1 && !firm(y * W + x)) { run += 1; continue; }
+        if (run > r.gap) { r.gap = run; r.gapAt = x - (run >> 1); }
+        run = 0;
+        r.n += 1; r.sum += x + 0.5;
+        if (x < r.lo) r.lo = x;
+        if (x > r.hi) r.hi = x;
+        if (y > r.deep) r.deep = y;
+      }
+      return r;
+    }
+    // (as built: everything of it stands)
+    function printOf(b) {
+      const G = b.ground;
+      const own = (x, y) => ownerAt(x, y) === b.id && frameOf[mat[y * W + x] & ID_MASK] === 1;
+      const P = bearing(b, (x) => own(x, G) || (ownerAt(x, G - 1) === b.id && (frameOf[mat[(G - 1) * W + x] & ID_MASK] === 1 || !!PW.getLayer(world, 'back', x, G - 1))),
+        own, (i) => { const id = mat[i] & ID_MASK; return id === M.CORE || holds[id] === 1; });
+      const mid = (b.body.left + b.body.right + 1) / 2;
+      P.centred = P.n > 0 && mid >= P.lo - TOPPLE_MARGIN && mid <= P.hi + 1 + TOPPLE_MARGIN;
+      P.G = G;
+      return P;
+    }
+    // (now, with its frame that stands marked in `state`: how it fails, or null - `load` its frame over
+    // its floor, `loadX` their x summed)
+    function baseCheck(b, S, state, bp, load, loadX) {
+      const P = b.basePrint;
+      if (!P || !P.n || load < MIN_LOAD) return null;
+      const { cls, at } = S, G = b.ground;
+      const own = (x, y) => { const k = at(x, y); return (cls[k] & SOLID) !== 0 && state[k] === 1; };
+      const now = bearing(b, (x) => state[at(x, G - 1)] === 1 || own(x, G), own, (i) => {
+        const id = mat[i] & ID_MASK;
+        return id === M.CORE || (holds[id] === 1 && PW.getOwner(world, i % W, (i / W) | 0) !== b.id && grounded(i));
+      });
+      const built = bp.total / P.n, centre = loadX / load;
+      const failed = (reason, dir, more) => ({ y: G + deckOf(b), dir, reason, load, support: now.n, built, builtSupport: P.n, under: true, base: P.deep, ...more });
+      if (!now.n || load / now.n > FAIL_RATIO * Math.max(1, built)) {
+        // (which side lost more: how far what still bears it has moved from where it bore as built)
+        const shift = now.n ? (now.sum / now.n - P.sum / P.n) / (P.hi - P.lo + 1) : 0;
+        const even = now.n < P.n * 0.08 || Math.abs(shift) < 0.1;
+        return failed(even ? 'pancake' : 'crushed', shift > 0 ? -1 : 1, { shift });
+      }
+      if (P.centred && (centre < now.lo - TOPPLE_MARGIN || centre > now.hi + 1 + TOPPLE_MARGIN)) return failed('overhang', centre < now.lo ? -1 : 1);
+      if (now.fr - now.hi > Math.max(SPAN, P.fr - P.hi + SPAN / 2)) return failed('crushed', 1, { reach: now.fr - now.hi });
+      if (now.lo - now.fl > Math.max(SPAN, P.lo - P.fl + SPAN / 2)) return failed('crushed', -1, { reach: now.lo - now.fl });
+      if (now.gap > Math.max(2 * SPAN, P.gap + SPAN)) return failed('pancake', 1, { gap: now.gap });
+      return null;
     }
     function analyse(b) {
       if (!b) return null;
@@ -565,10 +655,19 @@
         }
         load += rowN; loadX += rowX;
       }
+      // (N151: what bears its floor, on a raised deck - giving way under the deck brings down all over
+      // it, the lowest break of all. Struck before its print was taken, it is taken as it stands now;
+      // re-founded on its heap - see PW.cores - it is taken again there. A site going up is judged so
+      // only struck or much lost, as above: built up again over a deck long gone, the works hold it)
+      if (raised(b) && (!site || lost || struck)) {
+        if (b.basePrint === undefined || (b.basePrint && b.basePrint.G !== b.ground)) b.basePrint = printOf(b);
+        const under = baseCheck(b, S, state, bp, load, loadX);
+        if (under) fail = under;
+      }
       if (fail) {
         report.failed = fail;
         (b.failed || (b.failed = [])).push({ reason: fail.reason, y: fail.y, support: fail.support, built: fail.builtSupport, shift: fail.shift && +fail.shift.toFixed(3), row: fail.row,
-          push: fail.push && Math.round(fail.push), holds: fail.holds && Math.round(fail.holds), load: fail.load && Math.round(fail.load) });
+          push: fail.push && Math.round(fail.push), holds: fail.holds && Math.round(fail.holds), load: fail.load && Math.round(fail.load), under: fail.under, dir: fail.dir });
         collapse(b, fail, S, state);
       }
       report.orphans = clearFittings(b, S, state);
@@ -712,24 +811,51 @@
       const piece = [], band = [];
       const jags = new Int8Array(S.fx1 - S.fx0 + 1);
       for (let x = S.fx0; x <= S.fx1; x += 1) jags[x - S.fx0] = (PW.hash2(x >> 1, yf) % 5) - 2;    // the break is ragged
-      for (let y = S.fy0; y <= S.fy1; y += 1) {
-        for (let x = S.fx0, k = at(x, y); x <= S.fx1; x += 1, k += 1) {
-          if (!state[k]) continue;
+      if (fail.under) {
+        // (N151: given way under its deck, what comes down is the building and all joined to it over
+        // the break - not a retaining wall or a flight of steps standing apart on its own footing -
+        // and the band crumbles under it only)
+        const { gw, gh } = S, NEAR = [-gw - 1, -gw, -gw + 1, -1, 1, gw - 1, gw, gw + 1];
+        const queue = grid('queue', Int32Array, S.count + 1, false), seen = grid('under', Uint8Array, gw * gh);
+        const over = (k) => { const x = (k % gw) - 1 + S.x0, y = ((k / gw) | 0) - 1 + S.y0; return x >= S.fx0 && x <= S.fx1 && y < yf + jags[x - S.fx0] - 1; };
+        let top = 0, px0 = Infinity, px1 = -Infinity;
+        for (let y = Math.max(S.fy0, b.body.top); y < b.ground; y += 1) {
+          for (let x = Math.max(S.fx0, b.body.left), k = at(x, y); x <= Math.min(S.fx1, b.body.right); x += 1, k += 1) if (state[k] && !seen[k]) { seen[k] = 1; queue[top++] = k; }
+        }
+        while (top) {
+          const k = queue[--top], x = (k % gw) - 1 + S.x0, y = ((k / gw) | 0) - 1 + S.y0;
+          piece.push(y * W + x);
+          if (x < px0) px0 = x;
+          if (x > px1) px1 = x;
+          for (let d = 0; d < 8; d += 1) { const k2 = k + NEAR[d]; if (state[k2] && !seen[k2] && over(k2)) { seen[k2] = 1; queue[top++] = k2; } }
+        }
+        for (const i of piece) state[at(i % W, (i / W) | 0)] = 0;
+        for (let x = Math.max(S.fx0, px0); x <= Math.min(S.fx1, px1); x += 1) {
           const jag = jags[x - S.fx0];
-          if (y < yf + jag - 1) { piece.push(y * W + x); state[k] = 0; }
-          else if (y <= yf + jag + 2) { band.push(y * W + x); state[k] = 0; }
+          for (let y = yf + jag - 1, k = at(x, y); y <= yf + jag + 2; y += 1, k += gw) if (state[k]) { band.push(y * W + x); state[k] = 0; }
+        }
+      } else {
+        for (let y = S.fy0; y <= S.fy1; y += 1) {
+          for (let x = S.fx0, k = at(x, y); x <= S.fx1; x += 1, k += 1) {
+            if (!state[k]) continue;
+            const jag = jags[x - S.fx0];
+            if (y < yf + jag - 1) { piece.push(y * W + x); state[k] = 0; }
+            else if (y <= yf + jag + 2) { band.push(y * W + x); state[k] = 0; }
+          }
         }
       }
       if (piece.length < CRUMBLE_ONLY) { crumble(piece.concat(band)); fail.cells = piece.length + band.length; return; }
       crumble(band);
       for (const i of band) if ((PW.hash2(i, 3) & 7) === 0) fragments.puff(i % W, ((i / W) | 0) - 1, 2, 4, 2);
-      if (fail.reason === 'pancake') spawnLater({ cells: piece, owner: b.id, drop: true, floor: yf, base: b.ground, dir: fail.dir });
+      // (come down off its legs, it grinds its own stubs down to the ground they stood on)
+      const base = fail.base ?? b.ground;
+      if (fail.reason === 'pancake') spawnLater({ cells: piece, owner: b.id, drop: true, floor: yf, base, dir: fail.dir });
       else if (fail.reason === 'swept') {
         // (shoved off the way the water pushes: the push over what the row held, over its weight)
         const vx = fail.dir * Math.min(SWEEP_MAX, PW.GRAVITY * (fail.push - fail.holds) / (piece.length * FRAME_WEIGHT) * SWEEP_TIME);
-        spawnLater({ cells: piece, owner: b.id, floor: yf, base: b.ground, dir: fail.dir, vx });
+        spawnLater({ cells: piece, owner: b.id, floor: yf, base, dir: fail.dir, vx });
         stats.swept = (stats.swept || 0) + 1;
-      } else spawnLater({ cells: piece, owner: b.id, floor: yf, base: b.ground, dir: fail.dir });
+      } else spawnLater({ cells: piece, owner: b.id, floor: yf, base, dir: fail.dir });
       fail.cells = piece.length + band.length;
       b.collapses = (b.collapses || 0) + 1;
       b.struckAt = tick;   // (what it leaves over the break is struck loose: see analyse)
