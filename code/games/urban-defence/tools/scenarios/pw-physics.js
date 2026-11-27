@@ -14,6 +14,55 @@ const id = (x, y) => PW.get(world, x, y) & 63;
 // (the water in a box round a test - the world's own water is drawn off by its pumps as the tests run)
 const waterIn = (x0, y0, x1, y1) => { let n = 0; for (let y = Math.max(0, y0); y <= Math.min(world.height - 1, y1); y += 1) for (let x = Math.max(0, x0); x <= Math.min(W - 1, x1); x += 1) if (id(x, y) === M.WATER) n += 1; return n; };
 const openAt = (x, y) => PW.mat.open[id(x, y)] === 1;
+// (the towns' growth and the crews' work held still - a tower picked as standing whole, built up
+// or mended while it is looked at, is not the tower picked: 9, 10)
+// (the fires the tree tests' blasts start, put out once they have been looked at: let burn, they ran
+// on through the woods into the towns - ten to twenty thousand cells alight - and burnt down the towers
+// 9 and 10 look at, and boiled off the water 7 counts)
+// (every flame out, and the heat round them let go - the woods hot from the fire caught again from it)
+const putOut = () => {
+  const H = pwApp.heat;
+  if (!H || !H.burning) return;
+  for (const i of [...H.burning.keys()]) H.extinguish(i, i % W, (i / W) | 0);
+  const ambient = PW.heatAt(world, -1, -1);
+  for (const c of world.heatList || []) if (world.heat[c]) world.heat[c].fill(ambient);
+};
+// (a tower of the tests' own for 9 and 10, built whole and alone on a stretch of the wilds cleared
+// flat, its doors onto open ground: the towns' towers stand in what the tests before did to them -
+// burnt by the trees' fires, mended, built up, heaped at their doors - and the one picked was not
+// the one looked at. Built the first time it is wanted, away from the tank of 6)
+let lone;
+const loneTower = () => {
+  if (lone !== undefined) return lone;
+  lone = null;
+  let x0 = -1;
+  for (const z of layout.wilds || []) for (let x = z.x0 + 100; x0 < 0 && x + 800 < z.x1; x += 50) if (!(tankAt > 0 && x < tankAt + 900 && x + 800 > tankAt - 300)) x0 = x;
+  if (x0 < 0) return lone;
+  let g = Infinity;
+  for (let x = x0; x <= x0 + 800; x += 1) g = Math.min(g, world.groundTop[x]);
+  for (let x = x0; x <= x0 + 800; x += 1) {
+    for (let y = Math.max(1, g - 700); y < g; y += 1) { PW.set(world, x, y, M.AIR, { quiet: true }); PW.setLayer(world, 'deco', x, y, 0); PW.setLayer(world, 'back', x, y, 0); }
+    for (let y = g; y < g + 30; y += 1) PW.set(world, x, y, M.STONE, { quiet: true });
+  }
+  PW.rebuildGroundTop(world);
+  const canvas = PW.buildingTypes.population({ style: 'gothic', level: 1, variant: 'crown', seed: 7, facing: 1 });
+  const owner = world.buildings.length + 1;
+  const res = PW.foundations.place(world, canvas, x0 + 400 - Math.round((canvas.body.left + canvas.body.right) / 2), { style: 'gothic', owner });
+  if (!res) return lone;
+  lone = PW.buildingRecord(world, res.stamp, { id: owner, side: 'left', style: 'gothic', type: 'population', variant: 'crown', level: 1, facing: 1,
+    neutral: false, underConstruction: false, works: res.works, base: { G: res.plan.G, walls: res.walls, under: res.under, cores: res.cores }, plant: null });
+  world.buildings.push(lone);
+  PW.wakeArea(world, x0, g - 700, x0 + 800, g + 30);
+  pwApp.stepWorld(120);
+  return lone;
+};
+// (as 7 holds the supply lines: their steps stood down, and put back after)
+const holdTowns = () => {
+  const held = [world.repair, world.growth].filter((s) => s && s.step).map((s) => [s, s.step]);
+  for (const [s] of held) s.step = () => {};
+  if (pwApp.setDevelopSpeed) pwApp.setDevelopSpeed(0);
+  return () => { for (const [s, step] of held) s.step = step; if (pwApp.setDevelopSpeed) pwApp.setDevelopSpeed(1); };
+};
 
 // 1. The same blast takes out far less rock than soil, and a town's made ground stands it nearly as
 // well as rock. Test blocks of stone, soil and made ground are laid deep under the middle of the
@@ -355,6 +404,20 @@ for (let s = 0; s < 75 && stability.busy(); s += 1) pwApp.stepWorld(60);
   }
 }
 
+putOut();
+
+// (the tank's place for 6, found before the trees of 5 are felled - none of them by it: their wood
+// and leaves still coming down into it after, the last of its water lay dammed on its floor)
+const tankAt = (() => {
+  const firm = (x) => { const k = id(x, world.groundTop[x]); return PW.mat.terrain[k] && PW.mat.phase[k] === PW.PHASE.SOLID; };
+  for (const zone of layout.wilds) for (let x = zone.x0 + 100; x < zone.x1 - 600; x += 13) {
+    let flat = true;
+    for (let d = 0; d <= 420 && flat; d += 3) flat = firm(x + d) && Math.abs(world.groundTop[x + d] - world.groundTop[x]) <= 3;
+    if (flat) return x;
+  }
+  return -1;
+})();
+
 // 5. Trees felled by small blasts at their feet come down a branch at a time and lie on the ground -
 // on slopes too - never sinking into it (none of their wood two cells or more under its surface),
 // each falling piece one body of wood; their limbs bend where they strike the ground, and the
@@ -386,8 +449,12 @@ for (let s = 0; s < 75 && stability.busy(); s += 1) pwApp.stepWorld(60);
     }
     return n;
   };
+  // (trees with limbs to bend and snap - not birches, slim and all but bare of boughs: which kinds
+  // stand where changes with the world, and a stand of them bent and snapped next to nothing)
   const trees = [];
-  for (const r of (world.flora || []).filter((t) => t.kind === 'tree' && !t.fallen && t.size > 90 && t.type !== 'deadTree')) {
+  const standing = (world.flora || []).filter((t) => t.kind === 'tree' && !t.fallen && t.size > 90 && t.type !== 'deadTree' && t.type !== 'birch'
+    && !(tankAt > 0 && t.anchorX > tankAt - 400 && t.anchorX < tankAt + 820));
+  for (const r of standing) {
     if (trees.every((q) => Math.abs(q.anchorX - r.anchorX) > 400)) trees.push(r);
     if (trees.length >= 8) break;
   }
@@ -418,6 +485,7 @@ for (let s = 0; s < 75 && stability.busy(); s += 1) pwApp.stepWorld(60);
   check(worstParts === 1, `each falling piece of a tree is one body of wood (at most ${worstParts} separate parts of wood in one; ${more('parted')} parts gone their own ways)`);
   check(more('limbs') > 0 && more('limbBends') > 0 && more('brokeOff') > 0, `falling trees' limbs bend where they strike the ground, and the branches they snap off fall as pieces of their own (${more('limbs')} limbs bent ${more('limbBends')} times; ${more('brokeOff')} of ${more('snapped')} snapped branches fell on by themselves; ${more('stripped')} leaves torn off by the air)`);
 }
+putOut();
 
 // 5b. Plants sway in the wind (N9; drawn by the renderer's leaf pass): a standing tree's leaves
 // sway, the higher the more, its wood not at all; in calm air nothing moves, in a wind the leaves
@@ -454,14 +522,9 @@ for (let s = 0; s < 75 && stability.busy(); s += 1) pwApp.stepWorld(60);
 // out - the water pours out and falls as a sheet of drops in flight, not a dotted line of cells; the
 // tank empties; it lands in a walled basin below and spreads level across it; none of it is lost.
 {
-  const firm = (x) => { const k = id(x, world.groundTop[x]); return PW.mat.terrain[k] && PW.mat.phase[k] === PW.PHASE.SOLID; };
-  let x0 = -1;
-  for (const zone of layout.wilds) for (let x = zone.x0 + 100; x < zone.x1 - 600 && x0 < 0; x += 13) {
-    let flat = true;
-    for (let d = 0; d <= 420 && flat; d += 3) flat = firm(x + d) && Math.abs(world.groundTop[x + d] - world.groundTop[x]) <= 3;
-    if (flat) x0 = x;
-  }
-  if (x0 > 0) {
+  const x0 = tankAt;
+  if (x0 < 0) check(false, 'a flat stretch of the wilds 420 wide for the tank');
+  else {
     const tops = Array.from({ length: 421 }, (_, d) => world.groundTop[x0 + d]), g = Math.min(...tops);
     const fill = (a, b, c, d, m) => { for (let y = b; y <= d; y += 1) for (let x = a; x <= c; x += 1) { PW.set(world, x, y, m, { quiet: true }); if (m === M.AIR) PW.setLayer(world, 'deco', x, y, 0); } };
     fill(x0, g - 300, x0 + 420, g - 1, M.AIR);
@@ -518,8 +581,9 @@ for (let s = 0; s < 75 && stability.busy(); s += 1) pwApp.stepWorld(60);
   // out, or draw off, is not the water let go)
   const pipeStep = pwApp.pipes && pwApp.pipes.step;
   if (pipeStep) pwApp.pipes.step = () => {};
-  // (and the towns' growth: a bridge laid over a lake meanwhile - see pw-capital-growth - is not it either)
-  if (pwApp.setDevelopSpeed) pwApp.setDevelopSpeed(0);
+  // (and the towns' growth and works: a bridge laid over a lake meanwhile - see pw-capital-growth - or
+  // the water a farm draws for its fields is not it either)
+  const release = holdTowns();
   if (T) {
     const box = { x0: T.body.left - 300, x1: T.body.right + 300 };
     // (the world's water, steam and drops in flight: a box round the tower is crossed by the town's
@@ -576,7 +640,7 @@ for (let s = 0; s < 75 && stability.busy(); s += 1) pwApp.stepWorld(60);
     check(water() === water0, `the water going down the stairwell is all kept (${water0} -> ${water()} in the world, the town's supply lines held still)`);
   } else check(false, 'a standing tower with stairs to pour water down');
   if (pipeStep) pwApp.pipes.step = pipeStep;
-  if (pwApp.setDevelopSpeed) pwApp.setDevelopSpeed(1);
+  release();
 }
 
 // 8. Loose ground shivers from a distant shock (N9): its wave runs on through the ground far past
@@ -617,20 +681,25 @@ for (let s = 0; s < 75 && stability.busy(); s += 1) pwApp.stepWorld(60);
 // vents), goes up through the roof, however thick, and out into the open over it.
 {
   const VENT = PW.FLAG.VENT || 0;
-  const b = world.buildings.filter((q) => q.type === 'population' && (q.health === undefined || q.health >= 1) && !q.ruined && q.ground - q.body.top > 120)
-    .sort((p, q) => (q.ground - q.body.top) - (p.ground - p.body.top))[0];
-  if (!b || !VENT) check(false, `a standing tower to vent (${VENT ? 'none' : 'no FLAG.VENT'})`);
-  else {
-    // (its roof near its middle where a vent goes - as the repair crews place them, see pw-repair's
-    // vents: its own top cell with open air over it - how thick, the room under it)
-    const roofAt = (x) => { let y = b.body.top - 2; while (y < b.ground && !(PW.getOwner(world, x, y) === b.id && !PW.mat.open[id(x, y)])) y += 1; return y; };
-    let x = Math.round((b.body.left + b.body.right) / 2), top = roofAt(x);
-    for (let d = 0; d < (b.body.right - b.body.left) / 3; d += 1) {
-      const c = Math.round((b.body.left + b.body.right) / 2) + (d & 1 ? -1 : 1) * (d >> 1), t = roofAt(c);
-      if (PW.mat.open[id(c, t - 1)] && PW.mat.open[id(c, t - 2)]) { x = c; top = t; break; }
+  const release = holdTowns();
+  // (a roof near the tower's middle where a vent goes - as the repair crews place them, see pw-repair's
+  // vents: its own top cell with open air over it - thin, over a room: not over a shaft or a pier
+  // solid all the way down)
+  let b = null, x = -1, top = -1, under = -1;
+  for (const q of [loneTower()].filter((q) => q && q.ground - q.body.top > 120)) {
+    const roofAt = (c) => { let y = q.body.top - 2; while (y < q.ground && !(PW.getOwner(world, c, y) === q.id && !PW.mat.open[id(c, y)])) y += 1; return y; };
+    for (let d = 0; d < (q.body.right - q.body.left) * 2 - 8 && !b; d += 1) {
+      const c = Math.round((q.body.left + q.body.right) / 2) + (d & 1 ? -1 : 1) * (d >> 1), t = roofAt(c);
+      let u = t;
+      while (u < q.ground && !PW.mat.open[id(c, u)]) u += 1;
+      let room = 0;
+      for (let y = u; y < u + 4; y += 1) for (let xx = c - 4; xx <= c + 4; xx += 1) if (PW.mat.open[id(xx, y)] && id(xx, y) !== M.WATER) room += 1;
+      if (PW.mat.open[id(c, t - 1)] && PW.mat.open[id(c, t - 2)] && u - t <= 12 && room >= 30) { b = q; x = c; top = t; under = u; }
     }
-    let under = top;
-    while (under < b.ground && !PW.mat.open[id(x, under)]) under += 1;
+    if (b) break;
+  }
+  if (!b || !VENT) { release(); check(false, `a standing tower to vent (${VENT ? 'none with a thin roof over a room' : 'no FLAG.VENT'})`); }
+  else {
     const key = top * W + x, had = world.vents && world.vents.has(key);
     PW.setFlag(world, x, top, VENT, true);
     (world.vents || (world.vents = new Map())).set(key, b.id);
@@ -652,6 +721,7 @@ for (let s = 0; s < 75 && stability.busy(); s += 1) pwApp.stepWorld(60);
     const vented = (pwApp.sim.stats.vented || 0) - vented0;
     await view('n98-vent-out', x, top, 6);
     if (!had) { PW.setFlag(world, x, top, VENT, false); world.vents.delete(key); }
+    release();
     check(laid >= 20 && vented >= 10 && over > 0, `smoke under a tower's roof ${under - top} cells thick, under a vent in it, goes out through it (${laid} cells of it laid, ${vented} let out by the vent, ${over} over the roof at the most${vented ? '' : ` - tower ${b.id} at ${x}, its column ${col0}, ${world.vents.size} vents`})`);
   }
 }
@@ -663,10 +733,11 @@ for (let s = 0; s < 75 && stability.busy(); s += 1) pwApp.stepWorld(60);
 // piers, out by its door - and set down outside it, off the doorway; none of it is lost, and what
 // slides back in at its door is carried out again.
 {
-  // (finished: whole, no site, nothing of it being built - see pw-structure's clearOut)
-  const towers = world.buildings.filter((b) => b.type === 'population' && (b.health === undefined || b.health >= 1) && !b.ruined && !b.site && !b.siteWanted
-    && !(PW.isGrowing && PW.isGrowing(world, b)) && b.ground - b.body.top > 150)
-    .sort((a, b) => (b.ground - b.body.top) - (a.ground - a.body.top));
+  // (finished: whole, no site, nothing of it being built - see pw-structure's clearOut - and kept so
+  // while it is cleared: the crews mending it took what lay in it for their building)
+  const release = holdTowns();
+  const towers = [loneTower()].filter((b) => b && b.ground - b.body.top > 150 && (b.health === undefined || b.health >= 1) && !b.ruined && !b.site && !b.siteWanted
+    && !(PW.isGrowing && PW.isGrowing(world, b)));
   // (a storey's floor in it, 110 to 200 cells up - a flight of stairs or two and, over a gate hall, its ladder's hatch
   // under it: a run of its own open cells 24 wide, its floor under it)
   let T = null, fx = -1, fy = -1;
@@ -681,7 +752,7 @@ for (let s = 0; s < 75 && stability.busy(); s += 1) pwApp.stepWorld(60);
     }
     if (fx >= 0) { T = b; break; }
   }
-  if (!T) check(false, 'a standing tower with a storey floor to pour debris on');
+  if (!T) { release(); check(false, 'a standing tower with a storey floor to pour debris on'); }
   else {
     // (what is poured: loose stone and sand - told from the debris lying round the town, which may slide in at its doors)
     const loose = (k) => k === M.LOOSE_STONE || k === M.SAND;
@@ -697,7 +768,7 @@ for (let s = 0; s < 75 && stability.busy(); s += 1) pwApp.stepWorld(60);
     for (let y = fy; y > fy - 6; y -= 1) for (let x = fx; x < fx + 24; x += 1) if (PW.mat.open[id(x, y)]) { PW.set(world, x, y, y > fy - 3 ? M.LOOSE_STONE : M.SAND); poured += 1; }
     pwApp.structure.notify(T.id);
     const S = pwApp.structure && pwApp.structure.stats, sim = pwApp.sim.stats, out0 = sim.carriedOut || 0;
-    // (carried out - a minute and a half at most: what is in a tower with one way out of it goes by that one; and, 3 s on, what has slid back in at its door - a doorway lower
+    // (carried out - two minutes at most: what is in a tower with one way out of it goes by that one, its whole round down its stairs and out of its door; and, 3 s on, what has slid back in at its door - a doorway lower
     // than the ground before it is a hollow what is set out slides into - carried out again at its
     // next look, 12 s at most)
     // (and carried down its stairs over their treads - the user's, 2026-11-25: over them, not through
@@ -705,7 +776,7 @@ for (let s = 0; s < 75 && stability.busy(); s += 1) pwApp.stepWorld(60);
     const ROLE = PW.buildingKit.ROLE, roleAt = (x, y) => { const c = T.canvas, cx = x - T.ox, cy = y - T.oy; return cx >= 0 && cy >= 0 && cx < c.width && cy <= c.ground ? c.role[cy * c.width + cx] : -1; };
     let onTreads = 0;
     let clearMax = 0, gone = -1;
-    for (let t = 0; t < 60 * 90 && gone < 0; t += 1) {
+    for (let t = 0; t < 60 * 120 && gone < 0; t += 1) {
       pwApp.stepWorld(1);
       clearMax = Math.max(clearMax, (S && S.clearMs) || 0);
       if (t % 30 === 0 && inside() - in0 <= 0) gone = t;
@@ -719,11 +790,12 @@ for (let s = 0; s < 75 && stability.busy(); s += 1) pwApp.stepWorld(60);
     const back = Math.max(0, inside() - in0);
     for (let t = 0; t < 60 * 12 && inside() - in0 > 0; t += 30) pwApp.stepWorld(30);
     const left = inside() - in0, kept = count() - all0;
+    release();
     await view('cleared-out', (T.body.left + T.body.right) / 2, T.ground - 60, 4);
     // (how the tower's clearing stands, should it not have gone)
     const C = T.clear, why = left > 0 ? ` - its clearing ${C ? `${C.phase}, ${C.found.length} found, ${C.dist.filter((d) => d === 0).length} cells by its openings` : 'never begun'}; ${PW.isGrowing && PW.isGrowing(world, T) ? 'growing' : 'not growing'}, health ${T.health ?? 1}${T.site ? ', a site' : ''}${T.clearStuck !== undefined ? `, let be stuck with ${T.clearStuck} in it` : ''}` : '';
     check(poured >= 120 && gone >= 0 && left <= 0 && kept >= poured * 0.97 && clearMax < 1 && onTreads > 0,
-      `loose stone and sand poured on a storey's floor up a tower (${poured} cells, ${T.ground - fy} cells up) are carried out of it (${gone >= 0 ? `all out in ${(gone / 60).toFixed(1)} s` : 'not all out in 90 s'}${back ? `, ${back} slid back in at its door 3 s on${left > 0 ? ` and ${left} still in it 12 s later` : ' and carried out again'}` : ''}${why}; ${(sim.carriedOut || 0) - out0} cells set out of buildings meanwhile; carried down its stairs over their treads, up to ${onTreads} cells seen lying on them at once) and lie outside it, none lost (${kept} of them round it), the clearing ${clearMax.toFixed(2)} ms a tick at most, its round of the buildings ${S && S.clearRound ? (S.clearRound / 60).toFixed(1) + ' s' : '-'}`);
+      `loose stone and sand poured on a storey's floor up a tower (${poured} cells, ${T.ground - fy} cells up) are carried out of it (${gone >= 0 ? `all out in ${(gone / 60).toFixed(1)} s` : 'not all out in 120 s'}${back ? `, ${back} slid back in at its door 3 s on${left > 0 ? ` and ${left} still in it 12 s later` : ' and carried out again'}` : ''}${why}; ${(sim.carriedOut || 0) - out0} cells set out of buildings meanwhile; carried down its stairs over their treads, up to ${onTreads} cells seen lying on them at once) and lie outside it, none lost (${kept} of them round it), the clearing ${clearMax.toFixed(2)} ms a tick at most, its round of the buildings ${S && S.clearRound ? (S.clearRound / 60).toFixed(1) + ' s' : '-'}`);
   }
 }
 
