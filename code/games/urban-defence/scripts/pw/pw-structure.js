@@ -754,8 +754,8 @@
     // pw-repair).
     // Here each building's way out is worked out - a distance over its rooms from the cells by its
     // openings (its own open cells beside or over open air not its own), the ways one carrying it
-    // walks: along the floors, across the stairs' steps, up a step or a stair's tread, down through
-    // a grate as water goes - a share a tick, with what lies in it found as the rooms are looked over;
+    // walks: along the floors, down a flight of stairs over its treads (and up one), up a step, down
+    // through a stairwell's opening or a hatch as water goes - a share a tick, with what lies in it found as the rooms are looked over;
     // the carrying is the sim's (pw-sim's carried: a grain at rest goes on a cell by that way). Looked
     // over again every CLEAR_AGAIN ticks - every CLEAR_WAKE while it is being cleared, what is carried
     // having moved - and soon when the building is told of a blow.
@@ -767,6 +767,7 @@
     const CLEAR_GRATE = 16;       // cells of grate - a flight's steps - it is carried across, at most (pw-sim's GRATE_DEPTH)
     const CLEAR_CLIMB = 5;        // cells: the face it is lifted up at most - a stair's tread is 4
     const CLEAR_STEP = 8;         // cells: the step outside a way out it is set out over, at most (pw-sim's CARRY_STEP)
+    const CLEAR_FALL = 64;        // cells: how far it falls through a stairwell's opening onto the flight under it, at most
     const LOOSE = new Uint8Array(64);
     // (not earth that stands - a base let into a slope keeps the ground it is cut into)
     for (const m of [M.DEBRIS, M.RUBBLE, M.LOOSE_SOIL, M.LOOSE_STONE, M.SAND, M.ASH]) if (m !== undefined) LOOSE[m] = 1;
@@ -800,8 +801,9 @@
         heap: from ? from.heap : new Uint8Array(w * h), queue: from ? from.queue : new Int32Array(w * h),
       };
     }
-    // (a grate it is carried over: stairs - their steps and the openings over their flights, M.PLATFORM
-    // - and a roof's drain hatch, as water runs through them: see pw-sim's grate)
+    // (a grate it is carried down through: the openings over stairs' flights in the floors, M.PLATFORM -
+    // and a roof's drain hatch, a gate hall's ladder hatch - as water runs through them: see pw-sim's
+    // grate; not the steps of a flight - see treadAt)
     const HATCH = PW.FLAG.HATCH || 0, FLAGS = world.flags;
     const grateAt = (x, y, id) => {
       if (id === M.PLATFORM) return true;
@@ -812,6 +814,22 @@
     const ownerAt = (x, y) => { const o = OWNERS[(y >> CHUNK_SHIFT) * CX + (x >> CHUNK_SHIFT)]; return o ? o[(y & CHUNK_MASK) << CHUNK_SHIFT | (x & CHUNK_MASK)] : 0; };
     // (material id at (x, y) of building b's own design there)
     const designed = (b, x, y, id) => { const c = b.canvas, cx = x - b.ox, cy = y - b.oy; return cx >= 0 && cy >= 0 && cx < c.width && cy <= c.ground && (c.mat[cy * c.width + cx] & ID_MASK) === id; };
+    // (cell (x, y) one of the steps of building b's stairs, by its design)
+    const STAIR_ROLE = PW.buildingKit && PW.buildingKit.ROLE ? PW.buildingKit.ROLE.STAIR : -1;
+    const treadAt = (b, x, y) => { const c = b.canvas, cx = x - b.ox, cy = y - b.oy; return !!c.role && cx >= 0 && cy >= 0 && cx < c.width && cy <= c.ground && c.role[cy * c.width + cx] === STAIR_ROLE; };
+    // (column x under a ladder of building b's - a gate hall's, up through the hatch in its ceiling)
+    const ladderAt = (b, x) => (b.canvas.ladders || []).some((l) => x >= l.x0 + b.ox - 3 && x <= l.x1 + b.ox + 3);
+    // What is carried goes through the stairs and the floors' openings as one carrying it walks (the
+    // user's, 2026-11-25: over the stairs, not through them) - each cell of them in the look, a GRATE:
+    // - HATCH_WAY: a roof's drain hatch, a gate hall's ladder hatch: carried down through it, as water
+    //   runs, to land where it falls (a ladder is gone down, not walked);
+    // - OPENING: a stairwell's opening in a floor: carried down through it only onto a tread of the
+    //   flight under it - never down the well beside the flights;
+    // - TREAD: a step of a flight: it lies on it, goes down the flight over its treads, off each one's
+    //   edge onto the next, never through one; a flight's foot, standing on the floor, is passed along
+    //   the floor - as the troops pass it - not climbed over;
+    // - PIER_WAY: a gate hall's pier, passed along the floor as a flight's foot is.
+    const HATCH_WAY = 1, OPENING = 2, TREAD = 3, PIER_WAY = 4;
     // (cell (x, y) outside building b that what is carried out of it is set out to: room - air, or
     // water - not its own, and not in another building's body: see pw-sim's carried, which sets
     // nothing down there)
@@ -886,8 +904,9 @@
           if (ownerAt(x, y) !== b.id) { dist[c.k] = -1; continue; }
           const id = mat[i] & ID_MASK, loose = LOOSE[id] === 1 && !designed(b, x, y, id);
           if (!ROOM[id] && !loose) {
-            // (a grate - stairs, a hatch - is on the way down from storey to storey, though nothing stays on it)
-            if (grateAt(x, y, id)) { dist[c.k] = 0x3fffffff; grates[c.k] = 1; } else dist[c.k] = -1;
+            // (the stairs and the floors' openings - see GRATE: a hatch, an opening, a tread)
+            const kind = !grateAt(x, y, id) ? 0 : treadAt(b, x, y) ? TREAD : id === M.PLATFORM && !ladderAt(b, x) ? OPENING : HATCH_WAY;
+            if (kind) { dist[c.k] = 0x3fffffff; grates[c.k] = kind; } else dist[c.k] = -1;
             c.roofed[kx] = 1;
             continue;
           }
@@ -915,12 +934,12 @@
         used = end - start;
         if (c.k < n) return used;
         // (a gate hall's piers - see PW.tanks.gatesOf - its own people pass, as its own side's troops
-        // do: crossed as a flight's steps are)
+        // do: crossed as a flight's foot is)
         for (const g of b.gates || []) {
           if (g.x < x0 || g.x >= x0 + w) continue;
           for (let y = Math.max(y0, g.y0); y <= Math.min(y0 + h - 1, g.y1); y += 1) {
             const k = (y - y0) * w + g.x - x0;
-            if (dist[k] === -1 && ownerAt(g.x, y) === b.id) { dist[k] = 0x3fffffff; grates[k] = 1; }
+            if (dist[k] === -1 && ownerAt(g.x, y) === b.id) { dist[k] = 0x3fffffff; grates[k] = PIER_WAY; }
           }
         }
         c.phase = 'way'; c.head = 0;
@@ -930,33 +949,38 @@
         const q = c.queue;
         // (the ways a carried cell goes, as one carrying it walks, worked back from the openings - see
         // pw-sim's carried, which goes them: open cells only, a grate never a place to stop on the way.
-        // Cell j to k: down, falling - through a grate under it to the open cell under that; along onto
-        // k from where it lies on something, across the stairs' grates between them too; up a face
-        // CLIMB cells at most - a step, a stair's tread - onto k, with room over it to lift it. Over the
-        // rooms as they are: what lies in them is in the way - borne on, climbed, never gone through -
-        // and gets its way on from the room it can go to: a heap is carried off from its face, and what
-        // lies buried in it is given its way as it is uncovered, at a later look.)
+        // Cell j to k: down, falling - through a hatch under it, or a stairwell's opening onto the
+        // flight under that (see GRATE) - to the open cell under it; along onto k from where it lies on
+        // something, over a hatch or an opening between them, or past a flight's foot or a pier from
+        // the floor; up a face CLIMB cells at most - a step, a stair's tread - onto k, with room over it
+        // to lift it. Over the rooms as they are: what lies in them is in the way - borne on, climbed,
+        // never gone through - and gets its way on from the room it can go to: a heap is carried off
+        // from its face, and what lies buried in it is given its way as it is uncovered, at a later look.)
         const room = (j) => dist[j] >= 0 && grates[j] === 0 && heap[j] === 0;
         const can = (j) => dist[j] >= 0 && grates[j] === 0;
-        const face = (j) => dist[j] < 0 || grates[j] === 1 || heap[j] === 1;
+        const face = (j) => dist[j] < 0 || grates[j] !== 0 || heap[j] === 1;
         const bears = (j) => j + w < n && face(j + w);
+        // (falling from k, it comes down on a tread - of the flight under a stairwell's opening - or on
+        // what lies on one)
+        const ontoTread = (k) => { let m = k; for (let t = 0; t < CLEAR_FALL && m < n && (room(m) || heap[m]); t += 1) m += w; return m < n && grates[m] === TREAD; };
         let d = 0;
         const reach = (j) => { if (dist[j] > d && grates[j] === 0) { dist[j] = d; if (!heap[j]) q[c.qn++] = j; } };
         while (c.head < c.qn && used < budget) {
           const k = q[c.head++], kx = k % w;
           d = dist[k] + 1;
           used += 3;
-          // (down onto k: from over it, or from over the grate over it)
+          // (down onto k: from over it, or from over the hatch or the opening over it)
           if (k >= w) {
-            let j = k - w;
-            for (let g = 0; g < CLEAR_GRATE && j >= w && grates[j] === 1; g += 1) j -= w;
-            if (can(j)) reach(j);
+            let j = k - w, opening = false;
+            for (let g = 0; g < CLEAR_GRATE && j >= w && (grates[j] === HATCH_WAY || grates[j] === OPENING); g += 1) { opening = opening || grates[j] === OPENING; j -= w; }
+            if (can(j) && (!opening || ontoTread(k))) reach(j);
           }
           for (let s = -1; s <= 1; s += 2) {
-            // (along onto k - over a run of grates between, a flight's steps crossed under it)
-            let j = k - s, jx = kx - s;
-            for (let g = 0; g < CLEAR_GRATE && jx > 0 && jx < w - 1 && grates[j] === 1; g += 1) { j -= s; jx -= s; }
-            if (jx >= 0 && jx < w && can(j) && bears(j)) reach(j);
+            // (along onto k - over a hatch or an opening between, walked over; or past a flight's foot or
+            // a pier standing on the floor, from the floor: never along a tread into its flight)
+            let j = k - s, jx = kx - s, past = false;
+            for (let g = 0; g < CLEAR_GRATE && jx > 0 && jx < w - 1 && grates[j] !== 0; g += 1) { past = past || grates[j] >= TREAD; j -= s; jx -= s; }
+            if (jx >= 0 && jx < w && can(j) && bears(j) && !(past && j + w < n && grates[j + w] === TREAD)) reach(j);
             // (up onto k, standing on its face, from beside the face's foot: the cells over the one
             // it comes from open up to k's height)
             if (kx - s < 0 || kx - s >= w) continue;

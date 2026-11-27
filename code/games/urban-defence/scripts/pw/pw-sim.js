@@ -602,12 +602,12 @@
     // Loose stuff lying inside a building standing whole and finished is carried out of it (the
     // user's, 2026-11-24 - see pw-structure's clearing, which works out each such building's way out
     // and keeps world.clearing: the building -> its way): a grain at rest is taken a cell on that way
-    // now and then (CARRY_RATE of its steps), as one carrying it walks - along the floor, across the
-    // stairs' steps, up a step or a tread, down through a grate as water goes - and at the way out, out
-    // beside it, where it falls. Its way shut by others ahead of it, it waits; the clearing wakes
+    // now and then (CARRY_RATE of its steps), as one carrying it walks - along the floor, down a flight
+    // over its treads (a tread's edge stepped off, onto the next), up a step or a tread, down through a
+    // floor's opening or a hatch as water goes - and at the way out, out beside it, where it falls. Its way shut by others ahead of it, it waits; the clearing wakes
     // what is left now and then, and lets be a building none of whose stuff goes out.
     const CARRY_RATE = 0.5;
-    const CARRY_GRATE = 16, CARRY_CLIMB = 5;     // (pw-structure's CLEAR_GRATE and CLEAR_CLIMB)
+    const CARRY_GRATE = 16, CARRY_CLIMB = 5, CARRY_FALL = 64;   // (pw-structure's CLEAR_GRATE, CLEAR_CLIMB, CLEAR_FALL)
     const CARRY_AWAY = 6, CARRY_OUT = 48;   // cells out from a way out it is set down, at least and at most
     const CARRY_STEP = 8;         // cells up a step it is carried out over, at most (a man climbs a step so high)
     const CARRY_SLOPE = 4;        // the heap set out rises a cell over the sill for every 4 cells further off, at most
@@ -670,22 +670,31 @@
       // (on by the way, to the place it can go to nearest the way out - nearer than it is: what lay
       // buried in a heap at the look, its way not yet known, follows into the place left by what went
       // on ahead of it)
-      const grated = (j) => { const k = kOf(j); return k >= 0 && c.grates[k] === 1; };
+      // (the look's grates - see pw-structure's GRATE: 1 a hatch, 2 a stairwell's opening, 3 a tread, 4 a
+      // pier - by cell)
+      const grateOf = (j) => { const k = kOf(j); return k >= 0 ? c.grates[k] : 0; };
       let best = -1, bd = d;
       // (water it is carried into, the cell beside it, takes its place; never across a grate or up a
       // step - water lifted through a roof's hatch, or a flight's steps, by what goes down them)
       const consider = (j, far) => { const k = kOf(j); if (k >= 0 && c.dist[k] < bd && (far ? airAt(j) : roomAt(j))) { bd = c.dist[k]; best = j; } };
-      // (down: falling, or through a grate under it)
-      let j = i + W;
-      for (let g = 0; g < CARRY_GRATE && grated(j); g += 1) j += W;
-      consider(j, j !== i + W);
-      // (lying on something: along - across a flight's steps too - or up a face onto it)
+      // (down: falling, or through a hatch under it - or a stairwell's opening, onto the flight under
+      // it: never down the well beside the flights)
+      let j = i + W, opening = false;
+      for (let g = 0; g < CARRY_GRATE && (grateOf(j) === 1 || grateOf(j) === 2); g += 1) { opening = opening || grateOf(j) === 2; j += W; }
+      if (opening) {
+        let m = j;
+        for (let t = 0; t < CARRY_FALL && (roomAt(m) || phase[mat[m] & ID_MASK] === PHASE.POWDER) && grateOf(m) === 0; t += 1) m += W;
+        if (grateOf(m) === 3) consider(j, true);
+      } else consider(j, j !== i + W);
+      // (lying on something: along - over a floor's opening too, past a flight's foot or a pier from
+      // the floor, or off a tread's edge, onto the next - or up a face onto it: a step, a tread)
       if (!roomAt(i + W)) {
-        const s0 = ((x + y + world.tick) & 1) ? 1 : -1;
+        const s0 = ((x + y + world.tick) & 1) ? 1 : -1, onTread = grateOf(i + W) === 3;
         for (let s = s0, q = 0; q < 2; q += 1, s = -s) {
           j = i + s;
-          for (let g = 0; g < CARRY_GRATE && grated(j); g += 1) j += s;
-          consider(j, j !== i + s);
+          let past = false;
+          for (let g = 0; g < CARRY_GRATE && grateOf(j) !== 0; g += 1) { past = past || grateOf(j) >= 3; j += s; }
+          if (!(past && onTread)) consider(j, j !== i + s);
           for (let h = 1; h <= CARRY_CLIMB; h += 1) {
             const f = i + s - (h - 1) * W;
             if (roomAt(f) || !roomAt(i - h * W)) break;

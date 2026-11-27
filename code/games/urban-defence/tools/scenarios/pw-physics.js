@@ -658,9 +658,10 @@ for (let s = 0; s < 75 && stability.busy(); s += 1) pwApp.stepWorld(60);
 
 // 10. Cleared out (the user's, 2026-11-24: debris is pushed out of the inside of a fully built
 // building): loose stone and sand poured on a storey's floor up a standing tower are carried out of
-// it, as one carrying them walks - along the floors, down its stairs, through the hatch over its gate
-// hall, past the hall's piers, out by its door - and set down outside it, off the doorway; none of it
-// is lost, and what slides back in at its door is carried out again.
+// it, as one carrying them walks - along the floors, down its stairs over their treads (the user's,
+// 2026-11-25: over them, not through them), through the hatch over its gate hall, past the hall's
+// piers, out by its door - and set down outside it, off the doorway; none of it is lost, and what
+// slides back in at its door is carried out again.
 {
   // (finished: whole, no site, nothing of it being built - see pw-structure's clearOut)
   const towers = world.buildings.filter((b) => b.type === 'population' && (b.health === undefined || b.health >= 1) && !b.ruined && !b.site && !b.siteWanted
@@ -699,11 +700,20 @@ for (let s = 0; s < 75 && stability.busy(); s += 1) pwApp.stepWorld(60);
     // (carried out - a minute and a half at most: what is in a tower with one way out of it goes by that one; and, 3 s on, what has slid back in at its door - a doorway lower
     // than the ground before it is a hollow what is set out slides into - carried out again at its
     // next look, 12 s at most)
+    // (and carried down its stairs over their treads - the user's, 2026-11-25: over them, not through
+    // them - so seen lying on a tread on its way down, and never under a flight it has not gone round)
+    const ROLE = PW.buildingKit.ROLE, roleAt = (x, y) => { const c = T.canvas, cx = x - T.ox, cy = y - T.oy; return cx >= 0 && cy >= 0 && cx < c.width && cy <= c.ground ? c.role[cy * c.width + cx] : -1; };
+    let onTreads = 0;
     let clearMax = 0, gone = -1;
     for (let t = 0; t < 60 * 90 && gone < 0; t += 1) {
       pwApp.stepWorld(1);
       clearMax = Math.max(clearMax, (S && S.clearMs) || 0);
       if (t % 30 === 0 && inside() - in0 <= 0) gone = t;
+      if (t % 15 === 0) {
+        let n = 0;
+        for (let y = T.body.top; y < T.ground; y += 1) for (let x = T.body.left; x <= T.body.right; x += 1) if (loose(id(x, y)) && roleAt(x, y + 1) === ROLE.STAIR) n += 1;
+        onTreads = Math.max(onTreads, n);
+      }
     }
     pwApp.stepWorld(60 * 3);
     const back = Math.max(0, inside() - in0);
@@ -712,8 +722,8 @@ for (let s = 0; s < 75 && stability.busy(); s += 1) pwApp.stepWorld(60);
     await view('cleared-out', (T.body.left + T.body.right) / 2, T.ground - 60, 4);
     // (how the tower's clearing stands, should it not have gone)
     const C = T.clear, why = left > 0 ? ` - its clearing ${C ? `${C.phase}, ${C.found.length} found, ${C.dist.filter((d) => d === 0).length} cells by its openings` : 'never begun'}; ${PW.isGrowing && PW.isGrowing(world, T) ? 'growing' : 'not growing'}, health ${T.health ?? 1}${T.site ? ', a site' : ''}${T.clearStuck !== undefined ? `, let be stuck with ${T.clearStuck} in it` : ''}` : '';
-    check(poured >= 120 && gone >= 0 && left <= 0 && kept >= poured * 0.97 && clearMax < 1,
-      `loose stone and sand poured on a storey's floor up a tower (${poured} cells, ${T.ground - fy} cells up) are carried out of it (${gone >= 0 ? `all out in ${(gone / 60).toFixed(1)} s` : 'not all out in 90 s'}${back ? `, ${back} slid back in at its door 3 s on${left > 0 ? ` and ${left} still in it 12 s later` : ' and carried out again'}` : ''}${why}; ${(sim.carriedOut || 0) - out0} cells set out of buildings meanwhile) and lie outside it, none lost (${kept} of them round it), the clearing ${clearMax.toFixed(2)} ms a tick at most, its round of the buildings ${S && S.clearRound ? (S.clearRound / 60).toFixed(1) + ' s' : '-'}`);
+    check(poured >= 120 && gone >= 0 && left <= 0 && kept >= poured * 0.97 && clearMax < 1 && onTreads > 0,
+      `loose stone and sand poured on a storey's floor up a tower (${poured} cells, ${T.ground - fy} cells up) are carried out of it (${gone >= 0 ? `all out in ${(gone / 60).toFixed(1)} s` : 'not all out in 90 s'}${back ? `, ${back} slid back in at its door 3 s on${left > 0 ? ` and ${left} still in it 12 s later` : ' and carried out again'}` : ''}${why}; ${(sim.carriedOut || 0) - out0} cells set out of buildings meanwhile; carried down its stairs over their treads, up to ${onTreads} cells seen lying on them at once) and lie outside it, none lost (${kept} of them round it), the clearing ${clearMax.toFixed(2)} ms a tick at most, its round of the buildings ${S && S.clearRound ? (S.clearRound / 60).toFixed(1) + ' s' : '-'}`);
   }
 }
 
