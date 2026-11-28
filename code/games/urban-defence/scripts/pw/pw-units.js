@@ -419,15 +419,17 @@
   // one of them has no room. (The game makes them, and marks each with the group's key: u.group.)
   const GROUP_GAP = 10;         // cells between two of a group, side by side
   const halfOf = (kind) => (kind === 'tank' ? (SPAWN.tank.half || 58) : kind === 'mech' ? (PW.mechs ? PW.mechs.HALF : SPAWN.mech.half) : SPAWN.trooper.half);
-  function spawnGroup(world, side, kinds, x, y) {
+  function spawnGroup(world, side, kinds, x, y, dir = side === 'right' ? -1 : 1) {
     const order = kinds.map((kind, k) => ({ kind, k })).sort((a, b) => halfOf(b.kind) - halfOf(a.kind));
     const placed = [], out = new Array(kinds.length);
     for (const { kind, k } of order) {
       const h = halfOf(kind);
       let got = null;
-      // (out from the point, both ways, a body's width at a time)
-      for (let n = 0; n < 24 && !got; n += 1) {
-        const off = (n & 1 ? -1 : 1) * Math.ceil(n / 2) * (2 * h + GROUP_GAP);
+      // (out from the point the way the group goes, a body's width at a time - behind it only where
+      // there is no room ahead: a group of eight stood its last men behind its hangar's back wall,
+      // in a pocket with no way out, and its tanks waited for them for ever)
+      for (let n = 0; n < 48 && !got; n += 1) {
+        const off = (n < 24 ? n : 23 - n) * dir * (2 * h + GROUP_GAP);
         const p = spawnPoint(world, kind, x + off, y);
         if (p && placed.every((q) => Math.abs(q.x - p.x) >= h + q.h + GROUP_GAP || Math.abs(q.y - p.y) > 40)) got = p;
       }
@@ -438,8 +440,9 @@
     return out;
   }
   // (a group on the move keeps together: its tank or mech waits while its men are more than
-  // GROUP_LAG behind it the way it goes, till they are within GROUP_CLOSE)
-  const GROUP_LAG = 300, GROUP_CLOSE = 150;
+  // GROUP_LAG behind it the way it goes, till they are within GROUP_CLOSE - but not for a man who has
+  // not got on for GROUP_STUCK ticks: one who cannot come holds the whole group, and those behind it)
+  const GROUP_LAG = 300, GROUP_CLOSE = 150, GROUP_STUCK = 600;
   let groupsAt = -1, groups = new Map();
   function groupOf(world, u) {
     if (!u.group) return null;
@@ -453,7 +456,14 @@
     const g = groupOf(world, u);
     if (!g || !dir) return false;
     let lag = 0;
-    for (const v of g) if (v !== u && v.kind === 'trooper') lag = Math.max(lag, (u.x - v.x) * dir);
+    const now = world.tick || 0;
+    for (const v of g) {
+      if (v === u || v.kind !== 'trooper') continue;
+      // (where each man last got on from, and when)
+      if (!v.groupMoved || Math.abs(v.x - v.groupMoved.x) > 8) v.groupMoved = { x: v.x, at: now };
+      if (now - v.groupMoved.at > GROUP_STUCK) continue;
+      lag = Math.max(lag, (u.x - v.x) * dir);
+    }
     if (lag > GROUP_LAG) u.waiting = true; else if (lag < GROUP_CLOSE) u.waiting = false;
     return !!u.waiting;
   }

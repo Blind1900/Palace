@@ -45,6 +45,7 @@ const SUITES = [
   { name: 'pw-turret-mounts', params: 'mode=game&start=versus&side=left&det=1&towns=1' },
   // N111: the spawn pad in every hangar floor over the base's armoured core; units come up on it
   { name: 'pw-spawn-pad', params: 'mode=game&start=versus&side=left&det=1&towns=1' },
+  { name: 'pw-group-advance', params: 'mode=game&start=versus&side=left&det=1&towns=1' },
   // N116: levels bought by hand, units priced in HM and SM, HM to rush a tunnel's works
   { name: 'pw-game-upgrade', params: 'mode=game&start=versus&side=left&det=1&towns=1' },
   // N115: the gameplay test - each side places its starting capital, four times the build speed

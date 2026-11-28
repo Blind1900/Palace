@@ -453,6 +453,27 @@
     for (const r of (world.floraIndex && world.floraIndex.get(x >> 7)) || []) if (!r.felled && Math.abs((r.anchorX ?? r.x) - x) <= 3) return r;
     return null;
   }
+  // (N142: a tree it would knock over the way it drives - just ahead of its nose - with its own side's
+  // men standing where the tree would come down, out as far as it is tall: it holds short of it till
+  // they are clear, as a crew would. Knocked over on them, the tree's boughs came down on them at a man's
+  // run five times over, and a group lost half its men to its own tank going through a wood)
+  function treeHold(world, t, dir) {
+    if (!dir || !world.troops || !world.troops.length || !t.side) return false;
+    for (let k = 56; k <= 90; k += 2) {
+      const x = Math.round(t.x + dir * k), r = trunkAt(world, x, Math.round(t.y));
+      if (!r || !treeInWay(r) || r.rammed || r.felled) continue;
+      const rx = r.anchorX ?? r.x, tall = r.height || 200, row = r.row ?? (r.y + r.height);
+      // (its trunk there, standing in the open at the hull's height, as ram finds it - not the record
+      // of one cleared away, nor its paint left in the ground laid over it)
+      let trunk = false;
+      for (let yy = row - 10; yy >= row - 40 && !trunk; yy -= 1) {
+        trunk = (PW.getFlags(world, x, yy) & PW.FLAG.WOOD) !== 0 && !!PW.getLayer(world, 'deco', x, yy) && PW.mat.open[PW.get(world, x, yy) & ID_MASK] === 1;
+      }
+      if (!trunk) continue;
+      return world.troops.some((m) => !m.dead && m.side === t.side && (m.x - rx) * dir > -12 && (m.x - rx) * dir < tall + 30 && Math.abs(m.y - row) < 60);
+    }
+    return false;
+  }
   function ram(world, t) {
     const fr = world.fragments, dir = Math.sign(t.v);
     if (!fr || !fr.crush || !dir) return;
@@ -621,6 +642,7 @@
       const want = t.drive * VMAX * lame * (1 - CLIMB * Math.max(0, -t.drive * Math.sin(t.angle))) * (1 - WADE_SLOW * t.wet);
       t.blocked = want ? ahead(world, t, Math.sign(want)) : '';
       let goal = want;
+      if (want && treeHold(world, t, Math.sign(want))) goal = 0;
       if (t.blocked) {
         const room = Math.max(0, t.room), safe = Math.sqrt(2 * BRAKE * grip * room);
         if (Math.abs(goal) > safe) goal = room < 1 ? 0 : Math.sign(want) * safe;
