@@ -184,15 +184,20 @@ function measure(a) {
     for (let x = x0 + 900 - 2200; x <= x0 + 900; x += 10) top = Math.min(top, world.groundTop[Math.max(0, x)]);
     const j = J.create(world, { x: x0 + 900 - 2200, y: top - 500, facing: 1, style: 'modern', side: 'left' });
     let downAt = -1, k = 0, crashed0 = J.stats.crashed, near = Infinity, fired = 0;
-    const frags0 = world.fragments ? world.fragments.list.length : 0, seen = new Set();
+    // (what is thrown down of it: the pieces new to the world about it from when it is brought down -
+    // not the count of all the world's pieces, which others settling elsewhere take from)
+    const before = new Set(world.fragments ? world.fragments.list : []), wreck = new Set(), seen = new Set();
+    const pieces = () => { if (world.fragments) for (const p of world.fragments.list) if (!before.has(p) && Math.hypot(p.px - j.x, p.py - j.y) < 600) wreck.add(p); };
     for (; k < 60 * 20 && !j.dead; k += 1) {
       pwApp.stepWorld(1);
       if (j.down && downAt < 0) downAt = k;
+      if (j.down) pieces();
       // (the battery's missiles: how near they came to it)
       for (const s of world.shots || []) if (s.kind === 'patriot' && !s.done) { if (!seen.has(s)) { seen.add(s); fired += 1; } near = Math.min(near, Math.hypot(s.x - j.x, s.y - j.y)); }
     }
+    for (let q = 0; q < 30; q += 1) { pwApp.stepWorld(1); pieces(); }
     await view('drone-down', j.x, g - 40, 4);
-    const frags = world.fragments ? world.fragments.list.length - frags0 : 0;
+    const frags = wreck.size;
     check(downAt >= 0 && j.dead && J.stats.crashed - crashed0 === 1 && frags > 0,
       `a Patriot brings one down (${downAt >= 0 ? `at ${(downAt / 60).toFixed(1)} s, by ${j.hurtBy}` : `not down - ${fired} missiles at it, the nearest ${near.toFixed(0)} cells off, it at ${j.x.toFixed(0)},${j.y.toFixed(0)} by ${(x0 + 900 - j.x).toFixed(0)} off it, struck ${J.stats.struck}`}); burning, it falls and blows up where it hits (${j.dead ? `${((k - Math.max(0, downAt)) / 60).toFixed(1)} s later` : 'still flying'}), what is left of it thrown down (${frags} pieces)`);
     fresh();

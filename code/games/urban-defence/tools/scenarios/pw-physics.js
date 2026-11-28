@@ -274,9 +274,12 @@ check(movingAfter && restFar, `what waits on a wreck to come to rest can ask (st
 for (let s = 0; s < 75 && stability.busy(); s += 1) pwApp.stepWorld(60);
 {
   // (natural ground only, and away from the towns: a town at work - building, mending, laying its
-  // supply lines - moves its own made ground and buildings about)
+  // supply lines - moves its own made ground and buildings about; and its ground defences out in
+  // front of it, the sandbag wall's seat levelled into the ground and the wire beyond, are its works)
+  const works = (world.settlements || []).flatMap((s) => (s.defences || []).map((d) => d && d.span)).filter(Boolean);
   const near = (x) => touched.some(([tx, r]) => Math.abs(x - tx) < r)
-    || (world.buildings || []).some((b) => x > b.body.left - 150 && x < b.body.right + 150);
+    || (world.buildings || []).some((b) => x > b.body.left - 150 && x < b.body.right + 150)
+    || works.some(([a, b]) => x > a - 60 && x < b + 60);
   const made = (k) => k >= M.CONCRETE && k <= M.COURSE;
   const cells = [], was = [];
   for (let x = 200; x < W - 200; x += 6) {
@@ -351,22 +354,31 @@ for (let s = 0; s < 75 && stability.busy(); s += 1) pwApp.stepWorld(60);
   const chipsAt = (x, y) => { const b = PW.get(world, x, y); return (b & 63) === M.DEBRIS && (b >> 6) === PW.DEBRIS_KIND.WOOD; };
   const woodAt = (x, y) => { const f = PW.getFlags(world, x, y); return PW.getLayer(world, 'deco', x, y) && (f & PW.FLAG.FLORA) && (f & (PW.FLAG.WOOD | PW.FLAG.CHARRED)); };
   const surf = (x, top) => { let y = top; while (y < top + 300 && PW.mat.phase[id(x, y)] < PW.PHASE.POWDER) y += 1; return y; };
-  // (the densest stand of standing trees left in the wilds)
-  const standing = (world.flora || []).filter((r) => r.kind === 'tree' && !r.fallen && layout.wilds.some((z) => r.anchorX > z.x0 + 300 && r.anchorX < z.x1 - 300));
+  // (a stand of its own, planted for it on a stretch of the wilds laid level - six big trees, conifers
+  // and broadleaves, close together: which stand the world grows where changes with it, and one of
+  // birches or saplings, all twigs, is all splinters; level across the blast's reach - on a hillside
+  // what is thrown down runs down it, and gathers at its foot)
   let stand = null;
-  // (the most tree in it - big trees, by their size - not the most saplings; on ground near level
-  // across the blast's reach - on a hillside what is thrown down runs down it, and gathers at its foot)
-  const level = (x) => { let lo = Infinity, hi = -Infinity; for (let d = -200; d <= 200; d += 10) { const g = world.groundTop[x + d]; lo = Math.min(lo, g); hi = Math.max(hi, g); } return hi - lo <= 40; };
-  for (const r of standing) {
-    if (!level(r.anchorX)) continue;
-    const near = standing.filter((o) => Math.abs(o.anchorX - r.anchorX) < 150), size = near.reduce((s, o) => s + (o.size || 0), 0);
-    if (!stand || size > stand.size) stand = { n: near.length, size, x: r.anchorX, g: world.groundTop[r.anchorX] };
+  {
+    let sx = -1;
+    for (const z of layout.wilds || []) for (let x = z.x0 + 100; sx < 0 && x + 700 < z.x1; x += 50) sx = x;
+    if (sx >= 0) {
+      level(sx, sx + 600, () => 0);
+      for (let k = (world.flora || []).length - 1; k >= 0; k -= 1) if (world.flora[k].anchorX >= sx - 10 && world.flora[k].anchorX <= sx + 610) world.flora.splice(k, 1);
+      const cx = sx + 300;
+      for (let k = 0; k < 6; k += 1) {
+        const x = cx - 110 + k * 44;
+        PW.flora.plant(world, ['conifer', 'broadleaf'][k & 1], x, { row: world.groundTop[x], size: 160 + (k % 3) * 25, seed: 5101 + k * 61 });
+      }
+      pwApp.stepWorld(30);
+      stand = { n: 6, x: cx, g: world.groundTop[cx] };
+    }
   }
   // (two flat stretches of open ground, away from the stand, for the burning heap and the litter)
   const flats = [];
   for (const z of layout.wilds) for (let x = z.x0 + 100; x + 80 < z.x1 - 100 && flats.length < 2; x += 40) {
-    if (stand && Math.abs(x - stand.x) < 500) continue;
-    if (flats.some((f) => Math.abs(f - x) < 300)) continue;
+    if (stand && Math.abs(x - stand.x) < 1000) continue;   // (out of reach of what the blast throws)
+    if (flats.some((f) => Math.abs(f - x) < 500)) continue;
     let ok = true;
     for (let d = 0; d <= 80 && ok; d += 4) ok = Math.abs(world.groundTop[x + d] - world.groundTop[x]) <= 1 && PW.mat.terrain[id(x + d, world.groundTop[x + d])];
     if (ok) flats.push(x);
@@ -383,6 +395,12 @@ for (let s = 0; s < 75 && stability.busy(); s += 1) pwApp.stepWorld(60);
     for (let x = L; x <= R; x += 1) for (let y = s0[x - L]; y < s0[x - L] + 30; y += 1) if (splinterAt(x, y)) buried += 1;
     pwApp.explode(stand.x, stand.g - 70, 90, 1.35);
     // (the heap of splinters set alight; the litter lying out)
+    // (each laid bare and level well round it - the heap set alight caught the trees by it, and their
+    // burnt wood came down in it)
+    for (const f of flats) {
+      level(f - 160, f + 240, () => 0);
+      for (let k = (world.flora || []).length - 1; k >= 0; k -= 1) if (world.flora[k].anchorX >= f - 170 && world.flora[k].anchorX <= f + 250) world.flora.splice(k, 1);
+    }
     const [hx, lx] = flats, hg = world.groundTop[hx + 40], lg = world.groundTop[lx + 40];
     let heap0 = 0, litter0 = 0;
     // (the heap on bare rock, nothing round it to burn but itself)
@@ -476,7 +494,7 @@ const tankAt = (() => {
     for (let k = (world.flora || []).length - 1; k >= 0; k -= 1) if (world.flora[k].anchorX >= cx - 10 && world.flora[k].anchorX <= cx + 2610) world.flora.splice(k, 1);
     for (let k = 0; k < 8; k += 1) {
       const x = cx + (k >> 1) * 650 + (k & 1 ? 400 : 150);
-      trees.push(PW.flora.plant(world, ['conifer', 'broadleaf'][(k + (k >> 1)) & 1], x, { row: world.groundTop[x], size: 150 + (k % 4) * 25, seed: 4201 + k * 97 }));
+      trees.push(PW.flora.plant(world, ['conifer', 'broadleaf'][(k + (k >> 1)) & 1], x, { row: world.groundTop[x], size: 180 + (k % 4) * 25, seed: 4201 + k * 97 }));
     }
     pwApp.stepWorld(30);
   }
@@ -647,7 +665,15 @@ putOut();
     // ground storey - and on from there, out of its door - as none is lost: see the next check)
     const top0 = wetIn(py1 - 20, roofBase), between0 = wetIn(roofBase + 1, betweenEnd);
     let placed = 0;
-    for (let y = py1 - 14; y < py1; y += 1) for (let x = px0; x <= px1; x += 1) if (id(x, y) === M.AIR) { PW.set(world, x, y, M.WATER); placed += 1; }
+    // (into the open space over its hatch, column by column, up to 14 deep - not onto an ornament
+    // standing on the roof, a lantern, a finial, a railing: what is poured on their ledges they keep,
+    // as any roof does)
+    for (let x = px0; x <= px1; x += 1) {
+      let floor = py1;
+      if (hy >= 0) { floor = -1; for (let y = py1; y <= roofBase; y += 1) if (PW.getFlags(world, x, y) & (PW.FLAG.HATCH || 0)) { floor = y; break; } }
+      if (floor < 0) continue;
+      for (let y = floor - 1; y >= floor - 14 && id(x, y) === M.AIR; y -= 1) { PW.set(world, x, y, M.WATER); placed += 1; }
+    }
     const water0 = water();
     PW.wakeArea(world, S.sx0 - 10, S.sy0 - 20, S.sx1 + 10, T.ground);
     // (the new world's towers stand on tall gate halls - N121 - their stairs near 300 cells: given 16 s)
