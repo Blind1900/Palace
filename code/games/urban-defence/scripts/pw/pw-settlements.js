@@ -373,19 +373,13 @@
       if (!young && h > 6) { put(x - 1, padY - h + 1, pick(MAIZE.tassel, 3)); put(x + 1, padY - h + 2, pick(MAIZE.tassel, 4)); }
     }
   }
-  // The lake pump, from below: a pump chamber dug in under the lake bed, reached by nothing but its
-  // pipes. The basin's water comes down into it through a strainer set into the bed and a
-  // bell-mouthed suction pipe with its gate valve, into a centrifugal pump on its bedplate and
-  // plinth (after the refs: a polished volute, the coupling guard, a finned motor and its fan cowl),
-  // whose discharge goes on down through the chamber floor to the water main under the basin.
-  // The pump only measures its lake: no water is taken out of it.
+  // (CHAMBER: the reach the old pump chamber took round its intake - kept as the strip a lake's
+  // intake reserves, so the wild growth still grows the world it always did; see pumpSite)
   const CHAMBER = Object.freeze({ half: 28, height: 30, wall: 4, cover: 10 });
-  const VOLUTE = [206, 210, 212], VOLUTE_MID = [170, 174, 176], VOLUTE_RIM = [118, 122, 126];
-  const MOTOR = [42, 150, 110], MOTOR_LIT = [70, 186, 140], MOTOR_DARK = [26, 104, 76], GUARD = [214, 160, 40];
-  const PUMP_STEEL = [122, 130, 136], PUMP_DARK = [66, 70, 76];
-  // Where a pump would sit on this lake: wholly under the lake floor, where the floor over it
-  // is gentle, nearest the given shore (under the deepest spot, if the floor is uneven
-  // everywhere). Split out of lakePump for N62: a lake that already has its one pump still
+  const PUMP_STEEL = [122, 130, 136];
+  // Where a farm's intake goes on this lake: wholly under the water, where the floor round it
+  // is gentle, nearest the given shore (over the deepest spot, if the floor is uneven
+  // everywhere). Split out of lakePump for N62: a lake that already has its one intake still
   // RESERVES the strip a second would have taken, so the wild growth sees the same world.
   function pumpSite(world, lake, towardX, taken = () => false) {
     const near = towardX < lake.x ? -1 : 1, shore = near < 0 ? lake.left : lake.right;
@@ -411,93 +405,33 @@
     if (!at) return null;
     return { cx: at.x, near, low: at.low, left: at.x - reach, right: at.x + reach };
   }
+  // N160 (the user's, 2026-11-27): no pump design - the pipe just connects to the body of water. The
+  // farm's water pipe comes up through the ground under the lake and opens in its bed: a short
+  // perforated end set flush in the floor, the pipe straight down from it to the depth the water
+  // main runs at. No chamber, no machine, no core of its own; the water is metered as before (no
+  // cell is taken out of the lake).
+  const INTAKE_DOWN = 16;   // rows of pipe from the bed down to where the main's riser takes it
   function lakePump(world, lake, towardX, style, owner, taken = () => false) {
     const site = pumpSite(world, lake, towardX, taken);
     if (!site) return null;
-    const near = site.near, cx = site.cx;
+    const cx = site.cx;
     const bedAt = (x) => PW.supportBelow(world, x, world.groundTop[x], true);
     const put = (x, y, id, color) => {
       PW.set(world, x, y, id, { quiet: true });
       PW.setLayer(world, 'paint', x, y, rgb(color));
       PW.setOwner(world, x, y, owner);
     };
-    const { half, height, wall, cover } = CHAMBER;
-    // Rows: the roof slab under `cover` rows of ground below the lowest bed point, the chamber, its
-    // floor slab.
-    const roof = site.low + cover, top = roof + wall, floor = top + height - 1;
-    const back = (x, y, c) => {
-      if ((PW.get(world, x, y) & 63) !== M.AIR) PW.set(world, x, y, M.AIR, { quiet: true });
-      PW.setLayer(world, 'back', x, y, rgb(c));
-      PW.setOwner(world, x, y, owner);
-    };
-    // The chamber: concrete walls round a dry room, lit by a lamp under its roof.
-    for (let y = roof; y <= floor + wall; y += 1) for (let x = cx - half - wall; x <= cx + half + wall; x += 1) {
-      const inside = Math.abs(x - cx) <= half && y >= top && y <= floor;
-      if (inside) {
-        const glow = Math.max(0, 1 - Math.hypot(x - cx, (y - top) * 1.6) / 46);
-        back(x, y, tone((x - cx + half) % 12 === 0 ? [50, 52, 56] : [62, 64, 68], 1 + glow * 0.6));
-      } else {
-        const face = Math.abs(x - cx) === half + 1 || y === top - 1 || y === floor + 1;
-        put(x, y, M.FOUNDATION, face ? [150, 148, 142] : (x + y) % 7 === 0 ? [100, 98, 94] : [122, 120, 114]);
-      }
-    }
-    for (let x = cx - 3; x <= cx + 3; x += 1) PW.setLayer(world, 'back', x, top, rgb(Math.abs(x - cx) < 2 ? [255, 236, 190] : [120, 120, 116]));
-    // The pump on its plinth and bedplate: volute on the axis, coupling guard and motor on the side
-    // away from the farm, fan cowl at the motor's end (its discharge goes the farm's way).
-    const steel = (x, y, c) => put(x, y, M.STEEL, c);
-    for (let y = floor - 2; y <= floor; y += 1) for (let u = -26; u <= 14; u += 1) put(cx + near * u, y, M.FOUNDATION, y === floor - 2 ? [166, 166, 160] : [150, 150, 144]);
-    for (let u = -26; u <= 10; u += 1) steel(cx + near * u, floor - 3, PUMP_DARK);
-    const vy = floor - 11, r = 7;
-    for (let dy = -r; dy <= r; dy += 1) for (let dx = -r; dx <= r; dx += 1) {
-      const d = Math.hypot(dx, dy);
-      if (d > r + 0.3) continue;
-      steel(cx + dx, vy + dy, d > r - 1 ? VOLUTE_RIM : d < 2 ? [96, 100, 104] : dx * near + dy < -3 ? VOLUTE : VOLUTE_MID);
-    }
-    for (let y = vy + r; y <= floor - 4; y += 1) for (let dx = -4; dx <= 4; dx += 1) steel(cx + dx, y, PUMP_DARK);   // its pedestal
-    const toward = (u0, u1, y0, y1, c) => { for (let y = y0; y <= y1; y += 1) for (let u = u0; u <= u1; u += 1) steel(cx + near * u, y, typeof c === 'function' ? c(u, y) : c); };
-    toward(-11, -8, vy - 3, vy + 3, (u, y) => (y === vy - 3 ? [236, 184, 60] : GUARD));
-    toward(-24, -12, vy - 6, vy + 6, (u, y) => (y === vy - 6 ? MOTOR_LIT : y === vy + 6 ? MOTOR_DARK : (y - vy) & 1 ? MOTOR : [34, 128, 94]));
-    toward(-20, -16, vy - 9, vy - 7, (u, y) => (y === vy - 9 ? MOTOR_LIT : MOTOR));
-    toward(-26, -25, vy - 5, vy + 5, (u, y) => ((y - vy) & 1 ? [60, 64, 66] : [150, 154, 156]));
-    for (let y = vy + 7; y <= floor - 4; y += 1) toward(-22, -14, y, y, PUMP_DARK);   // the motor's feet
-    // The suction: a strainer set into the lake floor, a bell mouth under it, the pipe down
-    // through the ground and the roof into the volute's eye, with its gate valve.
-    const pipe = (x, y, k) => put(x, y, M.PIPE, k === 0 ? [150, 156, 160] : k === 2 ? [70, 76, 82] : [118, 124, 130]);
     const bed = bedAt(cx);
-    for (let dx = -5; dx <= 5; dx += 1) put(cx + dx, bedAt(cx + dx), M.STEEL, (dx & 1) ? [40, 46, 52] : PUMP_STEEL);
-    for (let y = bed + 1; y < vy - r; y += 1) {
-      const bell = y - bed <= 3 ? 4 - (y - bed) : 0;
-      for (let dx = -1 - bell; dx <= 1 + bell; dx += 1) pipe(cx + dx, y, dx === -1 - bell ? 0 : dx === 1 + bell ? 2 : 1);
-    }
-    for (let y = top + 6; y <= top + 9; y += 1) for (let dx = -3; dx <= 3; dx += 1) steel(cx + dx, y, y === top + 6 || y === top + 9 ? PUMP_DARK : PUMP_STEEL);
-    for (let dx = -4; dx <= 4; dx += 1) steel(cx + dx, top + 4, [176, 40, 32]);
-    for (let y = top + 4; y <= top + 5; y += 1) steel(cx, y, [176, 40, 32]);
-    // The discharge: out of the volute on the farm's side, along and down through the plinth and
-    // the floor slab to the water main.
-    const outX = cx + near * 12;
-    for (let u = r; u <= 12; u += 1) for (let dy = -1; dy <= 1; dy += 1) pipe(cx + near * u, vy + dy, dy + 1);
-    for (let y = vy + 2; y <= floor + wall; y += 1) for (let dx = -1; dx <= 1; dx += 1) pipe(outX + dx, y, dx + 1);
-    // N50: the pump's own small core, sunk in an armoured pocket in the floor on the farm's
-    // side and cabled to the bedplate - a half-size heart that keeps the pump regenerating.
-    const KIT = PW.buildingKit;
-    const coreX = cx + near * 21, coreY = floor - 5, heartY = coreY - 2;
-    for (let dy = -7; dy <= 2; dy += 1) for (let dx = -6; dx <= 6; dx += 1) {
-      const rim = Math.abs(dx) === 6 || dy === -7 || dy === 2;
-      if (rim) put(coreX + dx, coreY + dy, M.FOUNDATION, ((dx + dy) & 1) ? [196, 164, 58] : [58, 58, 62]);
-      else back(coreX + dx, coreY + dy, (dx & 1) ? [30, 32, 40] : [24, 26, 32]);
-    }
-    for (let dy = -3; dy <= 3; dy += 1) for (let dx = -3; dx <= 3; dx += 1) {
-      const d = Math.hypot(dx, dy);
-      if (d > 3.4) continue;
-      put(coreX + dx, heartY + dy, M.CORE, d < 1.3 ? [255, 255, 255] : d < 2.4 ? (KIT ? KIT.CORE_COLOR : [168, 236, 255]) : (KIT ? KIT.CORE_SHADE : [96, 170, 214]));
-    }
-    for (const u of [15, 16, 17]) steel(cx + near * u, floor - 3, u === 16 ? [60, 64, 66] : PUMP_DARK);   // the cable to the pocket
-    let bedTop = bed;
-    for (let dx = -5; dx <= 5; dx += 1) bedTop = Math.min(bedTop, bedAt(cx + dx));
-    const left = cx - half - wall, right = cx + half + wall;
-    return { x: outX, y: floor + 1, left, right, lake, intakeX: cx, chamber: { x0: cx - half, x1: cx + half, top, floor },
-      span: [left, right], core: { x: coreX, y: heartY },
-      box: { x0: left - 1, x1: right + 1, y0: bedTop - 2, y1: floor + wall + 1 } };
+    let low = bed;
+    for (let dx = -3; dx <= 3; dx += 1) low = Math.max(low, bedAt(cx + dx));
+    // the open end flush in the bed: perforated, the water's way in
+    for (let dx = -2; dx <= 2; dx += 1) put(cx + dx, bedAt(cx + dx), M.PIPE, (dx & 1) ? [40, 46, 52] : PUMP_STEEL);
+    // the pipe straight down out of it, three wide, its casing lit on the left and shaded on the right
+    const bottom = low + INTAKE_DOWN;
+    for (let y = bed + 1; y <= bottom; y += 1) for (let dx = -1; dx <= 1; dx += 1) put(cx + dx, y, M.PIPE, dx < 0 ? [150, 156, 160] : dx > 0 ? [70, 76, 82] : [118, 124, 130]);
+    return { x: cx, y: bottom - 1, left: cx - 3, right: cx + 3, lake, intakeX: cx, intake: true,
+      span: [cx - 3, cx + 3],
+      box: { x0: cx - 4, x1: cx + 4, y0: bed - 2, y1: bottom + 2 } };
   }
   // N50: a world-drawn work (the lake pump) captured as a print - the cells repair rebuilds
   // it from, the way a canvas serves a stamped building. Owner-filtered over the given box;
@@ -1352,12 +1286,10 @@
           }
           if (b.pump) {
             footprints.push(b.pump.span);
-            // N50: the pump's own small core joins the farm's cores (orb: it minds itself in
-            // its pocket, no rise). The pump's print is captured by capturePumpPrints at the
-            // END of generation - the pipes and the made ground rework cells in this box
-            // after settlements, and a print taken now would fight them (the seed-3 stall:
-            // repair burned the town's HM "mending" the pump into its pre-pipes shape).
-            b.cores.push({ x: b.pump.core.x, y: b.pump.core.y, kind: 'pump', orb: true, small: true });
+            // (N160: the intake has no core of its own - it is a pipe. Its print is captured by
+            // capturePumpPrints at the END of generation - the pipes and the made ground rework
+            // cells in this box after settlements, and a print taken now would fight them)
+            if (b.pump.core) b.cores.push({ x: b.pump.core.x, y: b.pump.core.y, kind: 'pump', orb: true, small: true });
           }
         }
       }

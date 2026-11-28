@@ -80,23 +80,19 @@ check(!!crouchShot && PW.props.COVER[crouchShot.id] === 1, `a shot at crouch hei
 const targetCells = new Set(target.cells);
 check(!headShot || !targetCells.has(headShot.y * W + headShot.x), `a shot over the top of the ${target.kind} is not stopped by it (${headShot ? `${PW.mat.names[headShot.id]} beyond it` : 'clear'})`);
 
-// 4. Structure bases: the lake pumps under their basins, fields, defences.
+// 4. Structure bases: the farms' water pipes into their lakes, fields, defences.
+// (N160, the user's: no pump design - the pipe just connects to the body of water: its open end
+// flush in the lake's bed under the water, the pipe unbroken from it down to the main's riser, and
+// no chamber, machine or core of its own)
 for (const b of world.buildings.filter((item) => item.pump)) {
-  const { chamber, intakeX } = b.pump;
-  // The chamber lies wholly under the lake floor, and it is dry inside.
-  let dryLand = 0, wet = 0;
-  for (let x = chamber.x0; x <= chamber.x1; x += 1) {
-    if (id(x, world.groundTop[x]) !== M.WATER) dryLand += 1;
-    for (let y = chamber.top; y <= chamber.floor; y += 1) if (id(x, y) === M.WATER) wet += 1;
-  }
-  // The strainer is set into the lake floor under the water, and the suction pipe runs unbroken
-  // from it down into the chamber.
+  const { intakeX, y: low } = b.pump;
   const bed = PW.supportBelow(world, intakeX, world.groundTop[intakeX], true);
-  const strainer = id(intakeX, bed) === M.STEEL && id(intakeX, bed - 1) === M.WATER;
+  const open = id(intakeX, bed) === M.PIPE && id(intakeX, bed - 1) === M.WATER;
   let broken = 0;
-  for (let y = bed + 1; y < chamber.top; y += 1) if (id(intakeX, y) !== M.PIPE) broken += 1;
-  check(dryLand === 0 && wet === 0 && strainer && broken === 0,
-    `farm ${b.id}'s pump draws from below its basin: chamber under the lake floor (${dryLand} columns under dry land), dry inside (${wet} wet cells), strainer in the bed (${strainer}), suction pipe unbroken (${broken} gaps)`);
+  for (let y = bed + 1; y <= low; y += 1) if (id(intakeX, y) !== M.PIPE) broken += 1;
+  const machine = !!b.pump.chamber || (b.cores || []).some((k) => k.kind === 'pump');
+  check(open && broken === 0 && !machine,
+    `farm ${b.id}'s water pipe opens in its lake's bed (${open}), unbroken down to the main (${broken} gaps), no pump chamber or pump core (${machine ? 'one stands' : 'none'})`);
 }
 for (const b of world.buildings.filter((item) => item.field)) {
   let bad = 0;
@@ -122,7 +118,7 @@ for (const type of ['broadleaf', 'conifer', 'bush', 'reeds']) {
 const rock = props.filter((r) => r.setting === 'surface').sort((a, b) => (b.y1 - b.y0) - (a.y1 - a.y0))[0];
 if (rock) await view('gr-surface-boulder', (rock.x0 + rock.x1) / 2, (rock.y0 + rock.y1) / 2, 8);
 const pumped = world.buildings.find((b) => b.pump);
-if (pumped) await view('gr-pump', pumped.pump.intakeX, (pumped.pump.chamber.top + PW.supportBelow(world, pumped.pump.intakeX, world.groundTop[pumped.pump.intakeX], true)) / 2, 6);
+if (pumped) await view('gr-pump', pumped.pump.intakeX, (pumped.pump.y + PW.supportBelow(world, pumped.pump.intakeX, world.groundTop[pumped.pump.intakeX], true)) / 2, 6);
 const front = world.settlements.find((s) => !s.style || s.side !== 'neutral');
 if (front && front.defences[0]) await view('gr-defence', (front.defences[0].span[0] + front.defences[0].span[1]) / 2, front.defences[0].cover.y0, 6);
 const core = world.buildings.find((b) => b.type === 'core' && b.mine);
