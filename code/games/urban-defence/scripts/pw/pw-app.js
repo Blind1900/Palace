@@ -807,6 +807,7 @@
   // game's own modules get their handle on it all (pwApp).
   function start() {
     new ResizeObserver(() => renderer.resize(canvas.clientWidth, canvas.clientHeight)).observe(canvas);
+    if (renderer.resetOverview) renderer.resetOverview();   // (the loading screen baked tiles of a half-made world)
     window.pwApp = { world, layout, renderer, sim, particles, seed, timings, ready: true, gameMode,
       explode, dig, planDig, preview, pipes, setDevelopSpeed: (k) => { devSpeed = k; }, heat, life, structure, fragments, cores, stability, air,
       dropSeed: (which, x) => { dropSeed(which, { x }); return lastDig; },   // N2: the hand's seed path (vision-gated)

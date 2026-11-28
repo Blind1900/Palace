@@ -868,9 +868,18 @@
       }
       ctx.imageSmoothingEnabled = false;
       const range = visibleChunkRange();
+      // The render profile (2026-11-28): at 1/8 zoom the view spans ~5,700 chunks, and a drawImage
+      // for every one of them each frame held the idle view at ~42 fps with the sim at 0.2 ms. The
+      // overview is stored at that very scale with the deco baked in, so one blit of it IS the
+      // lod-3 frame; only the chunks it hasn't caught up with yet (overviewVersion lags the world
+      // by the refresh budget) are drawn the long way - both their layers, here in the base pass.
+      const sheet = lod === MAX_LOD && OVERVIEW_LOD === MAX_LOD && !PW.NO_SHEET;
+      if (sheet && layer === 'deco') return;
+      if (sheet) drawOverviewRegion();
       for (let cy = range.y0; cy <= range.y1; cy += 1) {
         for (let cx = range.x0; cx <= range.x1; cx += 1) {
           const c = cy * world.chunksX + cx;
+          if (sheet && overviewVersion[c] === world.chunkVersion[c]) continue;
           if (layer === 'deco' && !world.deco[c]) continue;
           let entry = chunkRaster(c, lod, layer, true);
           let usedLod = lod;
@@ -888,6 +897,11 @@
             continue;
           }
           ctx.drawImage(entry.canvas, 0, 0, CHUNK >> usedLod, CHUNK >> usedLod, rect.left, rect.top, rect.width, rect.height);
+          // (a stale chunk drawn over the sheet carries its deco with it: the deco pass returned)
+          if (sheet && world.deco[c]) {
+            const d = chunkRaster(c, lod, 'deco', true);
+            if (d && d.canvas) ctx.drawImage(d.canvas, 0, 0, CHUNK >> lod, CHUNK >> lod, rect.left, rect.top, rect.width, rect.height);
+          }
         }
       }
     }
@@ -983,6 +997,13 @@
       ctx.fillStyle = color;
       ctx.fillRect(left, top, extent, Math.max(1, Math.round((gy + size - camera.y) * camera.zoom) - top));
     }
+    // The overview tiles baked once more from scratch. The loading screen's frames bake tiles while
+    // the gen stages are still painting (vegetation, made ground, the daylight settling), and a tile
+    // whose chunk never changes again keeps that half-made look for ever - invisible at 1/16 scale
+    // and beyond, pixel-for-pixel wrong at 1/8 now that the sheet path blits it there. Until a tile
+    // is rebaked the sheet draw treats its chunk as stale and draws it the long way, so the pixels
+    // are right from the first frame and the blit takes over as the rebake converges.
+    function resetOverview() { overviewVersion.fill(0xffffffff); }
     function invalidateAll() {
       for (const c of world.chunkVersion.keys()) {
         world.chunkVersion[c] += 1;
@@ -1004,7 +1025,7 @@
       ctx, camera, view, ZOOM_STEPS,
       resize, setZoomIndex, focus, panByDevice, clampCamera, minZoomIndex,
       screenToWorld, screenToWorldDevice, worldToScreen, worldToDevice,
-      beginFrame, drawSky, drawBase, drawDeco, drawLeaves, drawCells, fillCell, refreshOverview, invalidateAll, colorAt,
+      beginFrame, drawSky, drawBase, drawDeco, drawLeaves, drawCells, fillCell, refreshOverview, resetOverview, invalidateAll, colorAt,
       leafEntry: (c) => { const e = cache.get((c * 8) * 2 + 1); return e ? e.leaves : null; },   // (N9 probes)
       swayDebug: () => ({ swaying, flipAt: swayFlipAt, frame }),   // (N9 probes)
       stats: () => ({ cached: cache.size, frame, zoom: camera.zoom, lod: lodForZoom() }),
