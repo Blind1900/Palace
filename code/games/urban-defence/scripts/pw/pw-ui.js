@@ -423,6 +423,12 @@
       // (N116: each costs HM and SM both - shown HM+SM. N126, the user's: the kinds are options -
       // one picked at a time - and a single DEPLOY button lights when the picked one can go)
       Object.keys(K).map((k) => `<button data-deploy="${k}" class="opt${deployKind === k ? ' on' : ''}" title="Pick ${K[k].label.toLowerCase()} to deploy (${K[k].hm} HM, ${K[k].sm || 0} SM)">${K[k].label} ${K[k].hm}+${K[k].sm || 0}</button>`).join('') +
+      // (N142, the user's: whole groups in one press, at one summed cost - 3 troops; 5 troops and a
+      // tank; 6 troops and 2 tanks - up together and off at once. Mechs go one at a time.)
+      Object.entries(PW.game.GROUPS || {}).map(([g, def]) => [g, def.label, def.kinds()]).map(([g, label, kinds]) => {
+        const hm = kinds.reduce((c, k2) => c + K[k2].hm, 0), sm = kinds.reduce((c, k2) => c + (K[k2].sm || 0), 0);
+        return `<button data-deploy="group:${g}" class="opt${deployKind === `group:${g}` ? ' on' : ''}" title="Pick the ${label.toLowerCase()} to deploy (${hm} HM, ${sm} SM)">${label} ${hm}+${sm}</button>`;
+      }).join('') +
       `<button data-deploy-go="1" class="go" title="Deploy the picked unit">DEPLOY</button>`;
     deployKey = '';
   }
@@ -430,29 +436,40 @@
   function refreshDeploys() {
     if (!match.human) return;
     const base = cmd.building && PW.game.ownerOf(cmd.building) === match.human && cmd.building.type === 'military' ? cmd.building : null;
-    const can = Object.keys(PW.game.UNIT_KINDS).map((k) => PW.game.canDeploy(match, match.human, k, base));
+    // (N142: a key may be a kind, or a whole group - "group:squad" and its kin)
+    const G = PW.game;
+    const canOf = (k) => (k.startsWith('group:') ? G.canDeployGroup(match, match.human, k.slice(6), base) : G.canDeploy(match, match.human, k, base));
+    const labelOf = (k) => (k.startsWith('group:') ? `the ${G.groupPlan(match, match.human, k.slice(6)).label.toLowerCase()}` : `a ${G.UNIT_KINDS[k].label.toLowerCase()}`);
+    const keys = [...Object.keys(G.UNIT_KINDS), ...Object.keys(G.GROUPS || {}).map((g) => `group:${g}`)];
+    const can = keys.map(canOf);
     const key = `${deployKind}|${can.map((c) => (c.ok ? '1' : c.note)).join('|')}`;
     if (key === deployKey) return;
     deployKey = key;
     // (an option that cannot go now is dimmed, but may still be picked; DEPLOY lights for the picked one)
-    bar.querySelectorAll('[data-deploy]').forEach((b, i) => {
+    bar.querySelectorAll('[data-deploy]').forEach((b) => {
+      const i = keys.indexOf(b.dataset.deploy);
+      if (i < 0) return;
       b.classList.toggle('dim', !can[i].ok);
       b.classList.toggle('on', b.dataset.deploy === deployKind);
-      b.title = can[i].ok ? `Pick ${PW.game.UNIT_KINDS[b.dataset.deploy].label.toLowerCase()} to deploy` : `${PW.game.UNIT_KINDS[b.dataset.deploy].label}: ${can[i].note}`;
+      b.title = can[i].ok ? `Pick ${labelOf(b.dataset.deploy)} to deploy` : can[i].note;
     });
-    const go = bar.querySelector('[data-deploy-go]'), pick = Object.keys(PW.game.UNIT_KINDS).indexOf(deployKind);
+    const go = bar.querySelector('[data-deploy-go]'), pick = keys.indexOf(deployKind);
     if (go) {
       const ok = pick >= 0 && can[pick].ok;
       go.disabled = !ok;
       go.classList.toggle('lit', ok);
-      go.title = ok ? `Deploy a ${PW.game.UNIT_KINDS[deployKind].label.toLowerCase()}` : pick >= 0 ? can[pick].note : 'Pick a unit first';
+      go.title = ok ? `Deploy ${labelOf(deployKind)}` : pick >= 0 ? can[pick].note : 'Pick a unit first';
     }
   }
   function deployPicked() {
     if (!match.human || !deployKind) return;
     const base = cmd.building && PW.game.ownerOf(cmd.building) === match.human && cmd.building.type === 'military' ? cmd.building : null;
-    const r = PW.game.deploy(match, match.human, deployKind, base);
-    if (PW.notify) PW.notify.flash(r.ok ? `${PW.game.UNIT_KINDS[deployKind].label} deployed` : r.note, r.ok ? 'good' : 'bad', 2);
+    // (N142: a picked group goes out whole, at its one summed cost)
+    const r = deployKind.startsWith('group:')
+      ? PW.game.deployGroup(match, match.human, deployKind.slice(6), base)
+      : PW.game.deploy(match, match.human, deployKind, base);
+    const label = deployKind.startsWith('group:') ? PW.game.groupPlan(match, match.human, deployKind.slice(6)).label : PW.game.UNIT_KINDS[deployKind].label;
+    if (PW.notify) PW.notify.flash(r.ok ? `${label} deployed` : r.note, r.ok ? 'good' : 'bad', 2);
     deployKey = '';
   }
   function setTool(id) {

@@ -719,6 +719,89 @@
     for (let lx = pad.x0 + 6; lx <= pad.x1 - 6; lx += 12) P.spawn(lx + 0.5, pad.y - 1, 0, -10, 0, PW.abgr(118, 214, 232), F.GLOW, 0.5);
   }
 
+  // ---- N142 (the user's): group deploys -------------------------------------------------------------
+  // A whole group in one press - the user's three: 3 troops; 5 troops and a tank; 6 troops and 2
+  // tanks - paid as one summed cost, up together round the core's exit (PS's spawnGroup: every
+  // place real, none overlapping) and off at once as one body. Every unit of a call shares one group
+  // key, and a tank keeps to its men on the way (PS's group walk). (The user's answer, 2026-11-27:
+  // mechs deploy one at a time - no mech group; the single MECH option stays.)
+  const GROUPS = {
+    squad: { label: 'SQUAD', kinds: () => Array(3).fill('trooper') },
+    patrol: { label: 'PATROL', kinds: () => ['tank', ...Array(5).fill('trooper')] },
+    assault: { label: 'ASSAULT', kinds: () => ['tank', 'tank', ...Array(6).fill('trooper')] },
+  };
+  function groupPlan(match, side, key) {
+    const g = GROUPS[key];
+    if (!g) return null;
+    const kinds = g.kinds(match, side);
+    const plan = { key, label: g.label, kinds, hm: 0, sm: 0, pop: 0, level: 1 };
+    for (const k of kinds) { const K = UNIT_KINDS[k]; plan.hm += K.hm; plan.sm += K.sm || 0; plan.pop += K.pop; plan.level = Math.max(plan.level, K.level); }
+    return plan;
+  }
+  function canDeployGroup(match, side, key, b = null) {
+    const plan = groupPlan(match, side, key);
+    if (!plan) return { ok: false, note: `no such group: ${key}` };
+    if (match.over) return { ok: false, note: 'the match is over' };
+    if (!plan.kinds.length) return { ok: false, note: `the mechs are all afield (${UNIT_KINDS.mech.most || 2} at most)` };
+    const kinds = [...new Set(plan.kinds)];
+    const from = (b ? [b] : bases(match, side)).filter((q) => q && q.type === 'military' && standing(q) && ownerOf(q) === side
+      && (q.level || 1) >= plan.level && kinds.every((k) => wayOut(match, q, k).ok));
+    if (!from.length) {
+      const any = (b ? [b] : bases(match, side)).filter((q) => q && q.type === 'military' && standing(q) && ownerOf(q) === side && (q.level || 1) >= plan.level);
+      return { ok: false, note: any.length ? kinds.map((k) => wayOut(match, any[0], k)).find((w) => !w.ok).why : `no base of level ${plan.level}` };
+    }
+    const p = purse(match, side);
+    if (p.hm < plan.hm) return { ok: false, note: `needs ${plan.hm} HM` };
+    if (p.sm < plan.sm) return { ok: false, note: `needs ${plan.sm} SM` };
+    if (fielded(match, side) + plan.pop > armyCap(match, side)) return { ok: false, note: 'the army is as big as the population' };
+    const mechWant = plan.kinds.filter((k) => k === 'mech').length;
+    if (mechWant && unitsOf(match, side).filter((u) => kindOf(u) === 'mech').length + mechWant > (UNIT_KINDS.mech.most || 2)) {
+      return { ok: false, note: `${UNIT_KINDS.mech.most || 2} mechs at most` };
+    }
+    return { ok: true, from, plan };
+  }
+  let groupSeq = 0;
+  function deployGroup(match, side, key, b = null) {
+    const world = match.world, can = canDeployGroup(match, side, key, b);
+    if (!can.ok) return can;
+    const plan = can.plan, st = match.sides[side], style = st.style, dir = st.dir;
+    const low = can.from.filter((q) => !perched(world, q));
+    const pool = low.length ? low : can.from;
+    const padded = pool.filter((q) => q.pad);
+    const base = (padded.length ? padded : pool).sort((p2, q) => ((q.body.left + q.body.right) - (p2.body.left + p2.body.right)) * dir)[0];
+    // (the group leaves by the strictest kind's way: a tank's if it has one, else a mech's, else the men's)
+    const lead = plan.kinds.includes('tank') ? 'tank' : plan.kinds.includes('mech') ? 'mech' : 'trooper';
+    const way = wayOut(match, base, lead);
+    const at = way.from ? { ...way.from } : exitOf(match, base, lead);
+    if (!at) return { ok: false, note: 'no living core to deploy from' };
+    const spots = PW.units && PW.units.spawnGroup ? PW.units.spawnGroup(world, side, plan.kinds, at.x, at.y) : null;
+    if (!spots) return { ok: false, note: 'no room at the core for the whole group' };
+    // (spawnGroup's y is the spawnPoint's own: a tank's floor row, the others' feet)
+    const group = `g${side === 'left' ? 'L' : 'R'}-${groupSeq += 1}-${Math.round(match.clock)}`;
+    const placed = !!(at.pad || at.core);
+    const via = placed && way.goal ? way.goal.x : undefined;
+    const units = [];
+    for (const s of spots) {
+      let u = null;
+      if (s.kind === 'trooper' && PW.troops) u = PW.troops.create(world, { x: s.x + 0.5, y: s.y, side, style, facing: dir });
+      else if (s.kind === 'tank' && PW.tanks) u = PW.tanks.create(world, { x: s.x, y: placed ? s.y : undefined, side, style, facing: dir });
+      else if (s.kind === 'mech' && PW.mechs) u = PW.mechs.create(world, { x: s.x, y: placed ? s.y : undefined, side, style, facing: dir });
+      if (!u) continue;
+      u.group = group;
+      world.stock[side].hm -= UNIT_KINDS[s.kind].hm;
+      world.stock[side].sm -= UNIT_KINDS[s.kind].sm || 0;
+      u.game = { side, kind: s.kind, base: base.id, order: { type: 'auto' }, goal: null, born: match.clock, via, viaFor: way.goal ? 150 : 45 };
+      // (off at once: through the gate where the way out runs by one, else straight to its own way)
+      if (via !== undefined) carry(world, u, { type: 'move', x: via });
+      if (at.pad) padLift(match, at.pad, s.x);
+      units.push(u);
+    }
+    if (!units.length) return { ok: false, note: `${plan.label.toLowerCase()}: no room to deploy` };
+    if (via === undefined) match.autoClock = Math.min(match.autoClock || 0, 0.1);
+    alert(match, side, `${plan.label} deployed`, '', at.x);
+    return { ok: true, units, group };
+  }
+
   // ---- Turrets (N103) -------------------------------------------------------------------------------
   // A turret is set down on any flat ground the side can see - on the land, or on a tunnel room's
   // floor: a base laid there (PW.mounts) and the turret seated on it. It costs HM, and a side keeps
@@ -1060,6 +1143,7 @@
 
   PW.game = { create, step, alert, takeOver, handBack, purse, frontOf, seed, ownerOf, other, SIDES,
     UNIT_KINDS, bases, unitsOf, kindOf, fielded, armyCap, canDeploy, deploy, order, standing, ruinsAt, buildingsOf, livingCore,
+    GROUPS, groupPlan, canDeployGroup, deployGroup,   // N142: whole groups in one press
     HACK_TIME, rules, cover, standAt, TURRET, canTurret, placeTurret, turretCap, adopt, current: () => current,
     UPGRADE, RUSH, upgradeCost, cityAt, canUpgrade, upgrade, tunnelAt, rushTunnel, placeStart, thirdOf, seedPreview,
     ARTILLERY, canArtillery, placeArtillery, artilleryCap,

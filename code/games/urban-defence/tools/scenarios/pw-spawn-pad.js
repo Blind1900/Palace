@@ -107,4 +107,35 @@ if (world.repair && world.repair.notify) world.repair.notify(home.id);
 for (let s = 0; s < 60 && cut.some(([x, y]) => open(x, y)); s += 1) step(1);
 const back = cut.filter(([x, y]) => !open(x, y) && PW.getOwner(world, x, y) === home.id).length;
 check(cut.length > 20 && back >= cut.length * 0.9, `the crews rebuild a broken pad (${back} of ${cut.length} cells)`);
+
+// 5. N142 (the user's): a whole group in one press - the squad up together at one summed cost,
+// every man of it sharing one group key, none standing in another, all off at once; the group bar
+// buttons shown. (Mechs go one at a time - the user's answer, 2026-11-27: no mech group.)
+{
+  world.stock.left.hm = Math.max(world.stock.left.hm, 2000); world.stock.left.sm = Math.max(world.stock.left.sm, 500);
+  const hm0 = world.stock.left.hm, sm0 = world.stock.left.sm;
+  const plan = G.groupPlan(m, 'left', 'squad');
+  const r = G.deployGroup(m, 'left', 'squad', home);
+  const squad = r.ok ? r.units : [];
+  const want = plan.kinds.length;
+  check(r.ok && want === 3 && squad.length === want && squad.every((u) => u.group && u.group === squad[0].group),
+    `the squad comes up as one group of three sharing a key (${r.ok ? `${squad.length}, ${squad[0] && squad[0].group}` : r.note})`);
+  check(r.ok && hm0 - world.stock.left.hm === plan.hm && sm0 - world.stock.left.sm === plan.sm,
+    `paid as one summed cost (${hm0 - world.stock.left.hm} HM, ${sm0 - world.stock.left.sm} SM for ${plan.hm}+${plan.sm})`);
+  let apart = true;
+  for (const u of squad) for (const v of squad) if (u !== v && Math.abs(u.x - v.x) < 3 && Math.abs(u.y - v.y) < 10) apart = false;
+  check(squad.length === want && apart, `none of them stands in another (${squad.map((u) => Math.round(u.x)).join(', ')})`);
+  // (the user's three groups: 3 troops; 5 troops and a tank; 6 troops and 2 tanks - and no mech group)
+  const count = (g, k) => G.groupPlan(m, 'left', g).kinds.filter((q) => q === k).length;
+  const groupBtns = [...document.querySelectorAll('[data-deploy^="group:"]')].map((el) => el.textContent);
+  check(groupBtns.length === 3 && count('squad', 'trooper') === 3 && count('patrol', 'trooper') === 5 && count('patrol', 'tank') === 1
+    && count('assault', 'trooper') === 6 && count('assault', 'tank') === 2 && !G.GROUPS.mechs,
+    `the user's three groups stand on the bar, no mech group (${groupBtns.join(', ')})`);
+  if (squad[0]) await view('n142-squad-up', squad[0].x, squad[0].y - 30, 4);
+  // (and off at once: within two seconds every man of it is moving, none left standing at the pad)
+  const x0 = squad.map((u) => u.x);
+  step(2);
+  const moved = squad.filter((u, i) => !u.dead && Math.abs(u.x - x0[i]) > 3).length;
+  check(squad.length === want && moved === squad.length, `the group sets off at once (${moved} of ${squad.length} moving after 2 s)`);
+}
 return { checks, shots };
