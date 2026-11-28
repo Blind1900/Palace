@@ -754,7 +754,10 @@
     BORE: 524288,
     // VENT: this roof cell is a building's vent (N98): the outlet the inside's gas - its repair
     // crews' dust and fumes - goes out by (pw-repair's b.vents / world.vents; the flow is pw-air's)
-    VENT: 1048576 });
+    VENT: 1048576,
+    // FENCE: this cell is part of a base's perimeter - its T-walls, fence or gate (N89/N155): its own
+    // side's units pass it, an enemy's troopers are stopped, tanks drive over it or shoot across.
+    FENCE: 2097152 });
   // Does a pipe fixed to the wall show at open cell (x, y)? Over the wall face (a finished
   // tunnel's too, clamped to it), or across a cave's rock; not behind a fitting, a ladder's rails
   // and rungs, a rail or a belt - but between a ladder's rungs, yes.

@@ -66,6 +66,14 @@ const pipeOver = (when) => {
   check(piped === 0, `the supply line runs under the road, not across its way, ${when} (${piped} columns with pipe over the road${pipedAt.length ? `: ${pipedAt.join(' ')}` : ''})`);
 };
 pipeOver('as bored');
+// N155 (the user's): the tunnel through is dressed with the spawn core rig - on its back wall, kept
+// by the lining crews, nothing in the way of the road
+if (!PW.OLD_BASES) {
+  let n = 0;
+  if (t.rig) for (let x = t.rig.x0; x <= t.rig.x1; x += 1) for (let y = t.floorAt(x) - 50; y < t.floorAt(x); y += 1) if (PW.getFlags(world, x, y) & PW.FLAG.FIXTURE) n += 1;
+  check(!!t.rig && n > 1200, `the spawn core rig parked in it, on the wall behind the road (${t.rig ? `${t.rig.x0}..${t.rig.x1}, ${n} cells` : 'none'})`);
+  if (t.rig) await view('n155-rig', (t.rig.x0 + t.rig.x1) / 2, t.floorAt(t.rig.x0) - 40, 6);
+}
 const bars = (world.barricades || []).filter((b) => b.tunnel === t.id);
 check(bars.length >= 2 && bars.every((b) => b.side === t.side && b.laid > 20), `barricades of the boring side in it (${bars.length}: ${bars.map((b) => `${b.x0}..${b.x1} ${b.side}`).join(', ')})`);
 await view('n104-portal-a', t.a + 60, t.floorAt(t.a + 60) - 60, 4);

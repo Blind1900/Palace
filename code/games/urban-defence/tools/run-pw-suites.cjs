@@ -69,6 +69,8 @@ const SUITES = [
   { name: 'pw-pipe-tees', limit: 420, params: 'det=1' },
   // N162: one pipe design - a branch one lane in its resource's colour, the main's lanes open where they are used
   { name: 'pw-pipe-highway', params: 'det=1' },
+  // N155 + N163: every main base a watch tower on a winged base; its perimeter, its tunnel, the garage, the rig
+  { name: 'pw-mil-base', limit: 420, params: 'det=1' },
   // N8: the game is the main page, opened from disk as a downloaded copy is; the old beta still loads
   { name: 'pw-main-page', page: 'index.html', file: true, alone: true, ready: "!!document.getElementById('gm-menu')" },
   // (the old beta makes its world from Math.random: seeded, the same world each run - unseeded it

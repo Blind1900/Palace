@@ -923,6 +923,18 @@
       const ch = LANES[(idx - 1) >> 1].channel;
       return (along & 1) ? tone(ch, 1.5) : tone(ch, 0.66);
     }
+    // Would a fitting's turns or shaft (kinds 1 and 2) stand in a tunnel's open air or in a
+    // building's works? (its own line's cells and a core bed's licenced span are its own to take)
+    function fitBad(line, cells) {
+      for (const [key, v] of cells) {
+        if (!(v & 3)) continue;
+        const x = key % W, y = (key - x) / W, id = mat[key] & ID_MASK;
+        if (PW.getOwner(world, x, y) === line.owner || spanAt(x, y)) continue;
+        if (PW.mat.open[id] && isTunnel(x, y)) return true;
+        if (!PW.mat.open[id] && buildingOwned(x, y) && !terrain[id]) return true;
+      }
+      return false;
+    }
     function layFitting(line, p, q, kc0, others) {
       const cells = fittingCells(line, p, q, kc0);
       const slim = inIntake(line, line.x0 + ((p + q) >> 1));
@@ -1015,6 +1027,34 @@
         if (rise > q - p + 2 && q - p + 1 < 9) {
           if (q < kl + 3 && p === k - 3) p = Math.max(1, q - 8);
           else if (p > k - 3 && q === kl + 3) q = Math.min(len - 2, p + 8);
+        }
+        // (N155: a fitting's turns and shaft are never hung in a tunnel's open air nor pressed into
+        // a building's works - seed 7's step stood against a mine's open shaft, seed 3's against a
+        // stage's steps, and the lanes came out of the turn shut: the fitting is widened away
+        // from them, the shaft set in the rock beyond, a ramp carrying the run to it)
+        // (and a shaft's turn must meet a level run: where the run beyond it is still climbing or
+        // falling, the turn's rings crossed the ramp's lanes - seed 3 - and the step is widened
+        // until it is laid as one straight ramp instead)
+        const sloped = (a, b) => {
+          const at = (kk) => line.ys[Math.max(0, Math.min(len - 1, kk))];
+          const s = Math.sign(at(b + 1) - at(a - 1));
+          // (only a run going on the step's own way: arriving already on the move, or leaving it)
+          return s !== 0 && (Math.sign(at(a - 1) - at(a - 3)) === s || Math.sign(at(b + 3) - at(b + 1)) === s);
+        };
+        const unfit = (a, b, kc) => { const cs = fittingCells(line, a, b, kc); return fitBad(line, cs) || (cs.kc >= 0 && sloped(a, b)); };
+        if (unfit(p, q, kc0)) {
+          const zoneHit = (a, b) => line.cores.some((c) => { const zs = c.x - (HOP - 1) - line.x0, ze = c.x + (HOP - 1) - line.x0; return !(ze < a - 1 || zs > b + 1); });
+          const brokenIn = (a, b) => { for (let kk = Math.max(0, a - 1); kk <= Math.min(len - 1, b + 1); kk += 1) if (line.broken[kk]) return true; return false; };
+          let found = null;
+          for (let shift = 4; shift <= 32 && !found; shift += 4) {
+            for (const [dl, dr] of [[0, shift], [shift, 0], [shift >> 1, shift >> 1]]) {
+              const p2 = p - dl, q2 = q + dr;
+              if (p2 < 1 || q2 > len - 2 || zoneHit(p2, q2) || brokenIn(p2, q2)) continue;
+              const kc2 = dr > dl ? q2 - 3 : dl > dr ? p2 + 3 : kc0;
+              if (!unfit(p2, q2, kc2)) { found = { p: p2, q: q2, kc: kc2 }; break; }
+            }
+          }
+          if (found) { p = found.p; q = found.q; kc0 = found.kc; }
         }
         const others = [...line.wells, ...line.joints];
         const cells = layFitting(line, p, q, kc0, others);

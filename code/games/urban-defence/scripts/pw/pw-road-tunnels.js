@@ -227,6 +227,7 @@
         t.done = true;
         portal(world, t, t.from === 'a' ? 'b' : 'a');
         if (t.barricaded) barricades(world, t);
+        if (!PW.OLD_BASES) spawnRig(world, t);
       }
     }
   }
@@ -438,6 +439,75 @@
   // ---- The mountain at hand, and time -------------------------------------------------------------
   // One road through a mountain, once: whoever bores it, anyone may use it (the user's) - asked again,
   // by any side, while the bore goes on or after, the asker is told of the one there is.
+  // ---- N155 (the user's): the spawn core rig on the go -----------------------------------------------
+  // A road tunnel through is dressed with a mobile spawn rig parked in it: a six-wheeled olive lorry
+  // with the core's reactor unit on its bed - the amber heart between its ringed stacks, clamped - a
+  // generator set, a folded light mast, cables to the wall. Decor only, on the back wall behind the
+  // road (FIXTURE: the lining crews keep it), at the bored stretch nearest the middle.
+  const RIG_W = 96;
+  function spawnRig(world, t) {
+    if (t.rig) return;
+    const mid = Math.round((t.a + t.b) / 2);
+    // (parked on the levellest bored stretch, the nearer the middle the better)
+    let x0 = null, best = Infinity;
+    for (let k = 0; k < (t.b - t.a) / 2 - RIG_W - 40; k += 8) for (const s of [1, -1]) {
+      const x = Math.round(mid + s * k - RIG_W / 2);
+      let ok = true;
+      for (let dx = 0; dx <= RIG_W && ok; dx += 8) if (t.floorAt(x + dx) - CLEAR - world.groundTop[x + dx] < COVER) ok = false;
+      if (!ok) continue;
+      const fall = Math.abs(t.floorAt(x) - t.floorAt(x + RIG_W)) + k / 400;
+      if (fall < best) { best = fall; x0 = x; }
+    }
+    if (x0 === null || best > 12) return;
+    // (its wheels on the road at its lower end: the higher end's road hides the wheels' feet)
+    const floor = Math.max(t.floorAt(x0), t.floorAt(x0 + RIG_W));
+    const dir = t.side === 'right' ? -1 : 1;   // (its cab towards the side's front)
+    const lx = (k) => (dir > 0 ? x0 + k : x0 + RIG_W - k);
+    const put = (k, up, c) => {
+      const x = lx(k), y = floor - 1 - up;
+      if (!PW.mat.open[idAt(world, x, y)]) return;
+      PW.setLayer(world, 'back', x, y, rgb(c));
+      PW.setFlag(world, x, y, PW.FLAG.FIXTURE, true);
+    };
+    const OLIVE = [86, 92, 66], OLIVE_DK = [64, 70, 50], OLIVE_LT = [108, 114, 84], TYRE = [34, 34, 36], HUB = [96, 98, 94];
+    const CORE = [255, 164, 20], CORE_DK = [150, 78, 8], RING = [74, 78, 84], RING_LT = [112, 118, 124];
+    // the wheels: three axles pairs (rear two under the bed, front one under the cab)
+    for (const wk of [12, 26, 78]) for (let dx = -5; dx <= 5; dx += 1) for (let up = 0; up <= 10; up += 1) {
+      const d = Math.hypot(dx, up - 5);
+      if (d <= 5.3) put(wk + dx, up, d <= 1.6 ? HUB : d <= 2.4 ? [60, 62, 60] : TYRE);
+    }
+    // the chassis and bed
+    for (let k = 4; k <= 90; k += 1) for (let up = 8; up <= 12; up += 1) put(k, up, up === 12 ? OLIVE_LT : up === 8 ? OLIVE_DK : OLIVE);
+    // the cab: a squared armoured front, a narrow windscreen, a roof hatch
+    for (let k = 68; k <= 92; k += 1) for (let up = 13; up <= 38; up += 1) {
+      const glass = up >= 28 && up <= 33 && k >= 78 && k <= 90;
+      const edge = k === 68 || k === 92 || up === 38;
+      put(k, up, glass ? [52, 68, 80] : edge ? OLIVE_DK : (k + up) % 11 === 0 ? OLIVE_DK : OLIVE);
+    }
+    for (let k = 74; k <= 80; k += 1) put(k, 39, OLIVE_DK);
+    put(91, 18, [236, 220, 170]); put(91, 19, [236, 220, 170]);   // headlamp
+    // the reactor unit on the bed: a dark housing, two ringed stacks, the amber heart clamped between
+    for (let k = 14; k <= 50; k += 1) for (let up = 13; up <= 40; up += 1) {
+      const sk = k - 14, edge = sk === 0 || sk === 36 || up === 40 || up === 13;
+      let c = edge ? [40, 42, 46] : [54, 58, 62];
+      const inStack = (sk >= 3 && sk <= 9) || (sk >= 27 && sk <= 33);
+      if (inStack && up >= 16 && up <= 37) c = (up - 16) % 4 === 0 ? RING_LT : RING;
+      const d = Math.hypot(sk - 18, up - 26);
+      if (d <= 6) c = d <= 3 ? [255, 220, 120] : CORE;
+      else if (d <= 8) c = CORE_DK;
+      else if (!inStack && !edge && d <= 14) c = [Math.min(255, c[0] + (14 - d) * 9), Math.min(255, c[1] + (14 - d) * 5), c[2]];
+      if (!edge && (up === 33 || up === 19) && Math.abs(sk - 18) >= 6 && Math.abs(sk - 18) <= 9) c = [96, 100, 106];   // the clamp arms
+      put(k, up, c);
+    }
+    // the generator set behind it, a folded light mast along the bed, cables down to the road
+    for (let k = 52; k <= 64; k += 1) for (let up = 13; up <= 26; up += 1) put(k, up, up === 26 || k === 52 || k === 64 ? OLIVE_DK : ((k + up) & 3) === 0 ? [70, 74, 58] : OLIVE);
+    for (let k = 4; k <= 60; k += 1) put(k, 43, k % 6 === 0 ? [140, 144, 140] : [104, 108, 104]);
+    put(3, 44, [240, 236, 210]); put(4, 44, [240, 236, 210]);
+    for (let up = 1; up < 13; up += 1) put(2 - (up >> 2), up, [30, 30, 32]);
+    for (let k = -10; k <= 2; k += 1) put(k, 0, [30, 30, 32]);
+    t.rig = { x0: Math.min(lx(0), lx(RIG_W)), x1: Math.max(lx(0), lx(RIG_W)) };
+  }
+
   function forMountain(world, m0, m1, opts = {}) {
     const have = (world.roadTunnels || []).find((t) => t.a < m1 && t.b > m0);
     if (have) return { ok: true, tunnel: have, note: have.done ? 'through' : 'boring' };

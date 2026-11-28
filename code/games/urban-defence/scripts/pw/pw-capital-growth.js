@@ -247,8 +247,10 @@
       let cv = T[lot.type](opts);
       // N55/N63: a militarised tower is rebuilt bulkier - armour skin, steel floors, gunmetal,
       // and the grey annex merged on its outward flank (the user's sketch).
-      if (lot.mil && lot.type === 'population' && PW.militarise) {
-        cv = PW.militarise(cv, city.style, lot.milBoth ? 0 : (lot.side === 'left' ? -1 : 1));
+      // N155 (the user's): now a garage beside it, the building itself left as it was.
+      if (lot.mil && lot.type === 'population' && (PW.militaryGarage || PW.militarise)) {
+        const make = !PW.OLD_BASES && PW.militaryGarage ? PW.militaryGarage : PW.militarise;
+        cv = make(cv, city.style, lot.milBoth ? 0 : (lot.side === 'left' ? -1 : 1));
       }
       return cv;
     }
@@ -2050,6 +2052,20 @@
       const ring = city.rings[side].length;
       const lot = { type: 'military', level: 1, ring, side, bornLevel: city.level,
         variant: POST_KINDS[(ring + (side === 'left' ? 0 : 1)) % POST_KINDS.length], seedN: seedN += 17, owner: 0 };
+      // N155 (the user's): a hangar, standing apart, only where the ground is open - one a base,
+      // from its second level, never on a mountain: the run out from its edge level and dry
+      if (!PW.OLD_BASES && city.level >= 2 && city.setting !== 'mountain'
+        && ![...city.rings.left, ...city.rings.right].some((l) => l.variant === 'hangar')) {
+        const a = city.edge[side] + dir * 14, b = a + dir * 250;
+        let lo = Infinity, hi = -Infinity, dry = true;
+        for (let x = Math.round(Math.min(a, b)); x <= Math.max(a, b) && dry; x += 4) {
+          if (x < 60 || x > world.width - 60) { dry = false; break; }
+          const g = world.groundTop[x];
+          if ((PW.get(world, x, g) & 63) === M.WATER) dry = false;
+          lo = Math.min(lo, g); hi = Math.max(hi, g);
+        }
+        if (dry && hi - lo <= 12) lot.variant = 'hangar';
+      }
       const canvas = canvasFor(city, lot);
       const w = bodyWidth(canvas);
       const cursor = city.edge[side] + dir * 14;
@@ -2094,7 +2110,12 @@
         const dir = side === 'left' ? -1 : 1;
         // (laid afresh each time: the base may have grown out, or its main been raised a new record)
         const old = city.fences[side];
-        if (old) for (const [x, y] of old.cells) if (PW.getOwner(world, x, y) === old.owner) { PW.set(world, x, y, M.AIR, { quiet: true }); PW.setOwner(world, x, y, 0); }
+        if (old) for (const [x, y] of old.cells) if (PW.getOwner(world, x, y) === old.owner) {
+          PW.set(world, x, y, M.AIR, { quiet: true }); PW.setOwner(world, x, y, 0);
+          if (FLAG.FENCE) PW.setFlag(world, x, y, FLAG.FENCE, false);
+        }
+        // (and its dressing - the cages, wire, boom and plate - where it still shows)
+        if (old && old.dress) for (const [layer, x, y, v] of old.dress) if (PW.getLayer(world, layer, x, y) === v) PW.setLayer(world, layer, x, y, 0);
         const wall = dir === foe;   // (the T-walls face the enemy)
         const thick = wall ? 3 : 1, cells = [];
         // (the first open stretch of ground out past the base's edge - its works, a runway's end, a
@@ -2112,27 +2133,80 @@
         const ok = x0 !== null;
         rec.gates = (rec.gates || []).filter((q) => q.fence !== side);
         if (!ok) { city.fences[side] = null; continue; }
+        // N155 + N163 (the user's): drawn from the photos - on the enemy's side a precast T-wall
+        // block (a ribbed face, the joint, its foot), a row of sand-filled HESCO cages behind it and
+        // concertina wire over; on the home side the gate: steel posts and a striped boom, the
+        // faction's emblem on a plate at the post, chain-link and wire either way. Every cell of
+        // it FLAG.FENCE (own units pass, an enemy's troopers are stopped, tanks drive over).
+        const open = (x, y) => PW.mat.open[PW.get(world, x, y) & 63];
+        const dress = [];
+        const dressAt = (layer, x, y, c) => {
+          if (!open(x, y) || PW.getOwner(world, x, y)) return;
+          const v = PW.abgr(c[0], c[1], c[2]);
+          PW.setLayer(world, layer, x, y, v); dress.push([layer, x, y, PW.getLayer(world, layer, x, y)]);
+        };
+        const backAt = (x, y, c) => dressAt('back', x, y, c), decoAt = (x, y, c) => dressAt('deco', x, y, c);
         for (let k = 0; k < thick; k += 1) {
           const x = x0 + dir * k, g = world.groundTop[x];
           for (let y = g - FENCE_H; y < g; y += 1) {
-            const c = wall ? ((y - g) % 5 === 0 ? [118, 116, 110] : [156, 154, 146]) : (y === g - FENCE_H ? [150, 156, 164] : [96, 102, 110]);
+            const up = g - 1 - y;
+            const c = wall ? (up < 2 ? [112, 110, 104] : k === 1 && up % 4 === 1 ? [128, 126, 118] : k === 0 ? [146, 142, 132] : [158, 154, 144])
+              : (up === FENCE_H - 1 ? [150, 156, 160] : up % 4 === 0 ? [84, 88, 90] : [104, 108, 108]);
             PW.set(world, x, y, wall ? M.CONCRETE : M.STEEL, { quiet: true });
             PW.setLayer(world, 'paint', x, y, PW.abgr(c[0], c[1], c[2]));
             PW.setLayer(world, 'deco', x, y, 0);   // (the grass it stands in goes - no plant on a wall)
             PW.setFlag(world, x, y, FLAG.FLORA | FLAG.WOOD, false);
+            if (FLAG.FENCE) PW.setFlag(world, x, y, FLAG.FENCE, true);
             PW.setOwner(world, x, y, rec.id);
             cells.push([x, y]);
           }
           rec.gates.push({ x, y0: g - FENCE_H, y1: g - 1, fence: side });
-          // barbed wire coiled along the top
-          if (!wall) for (let dx = -3; dx <= 3; dx += 1) { const y = g - FENCE_H - 1 - ((dx & 1) ? 1 : 0); if (PW.mat.open[PW.get(world, x + dx, y) & 63]) PW.setLayer(world, 'deco', x + dx, y, PW.abgr(170, 172, 176)); }
         }
-        // the chain-link mesh behind the posts, a little way along the ground each way
-        if (!wall) for (let dx = -6; dx <= 6; dx += 1) {
-          const x = x0 + dx, g = world.groundTop[x];
-          for (let y = g - FENCE_H + 1; y < g; y += 1) if (((x + y) & 3) === 0 && PW.mat.open[PW.get(world, x, y) & 63]) PW.setLayer(world, 'back', x, y, PW.abgr(88, 94, 100));
+        const g0 = world.groundTop[x0];
+        if (wall) {
+          // the HESCO cages behind the wall (back layer: sand in grey mesh, a cage 12 wide)
+          for (let dx = 1; dx <= 26; dx += 1) {
+            const x = x0 - dir * dx, g = world.groundTop[x];
+            if (Math.abs(g - g0) > 3) break;
+            for (let up = 0; up < FENCE_H - 2; up += 1) {
+              const mesh = dx % 12 === 0 || up % 4 === 0;
+              backAt(x, g - 1 - up, mesh ? [112, 114, 110] : (PW.hash2(x, up) & 3) === 0 ? [150, 136, 104] : [164, 150, 116]);
+            }
+          }
+          // concertina wire over the wall's top, coil on coil
+          for (let dx = -4; dx <= 6; dx += 1) {
+            const x = x0 + dir * (dx < 0 ? dx : dx - 3), t = ((dx % 4) + 4) % 4, y = g0 - FENCE_H - 1 - [0, 1, 2, 1][t];
+            decoAt(x, y, [156, 160, 164]); if (t === 2) decoAt(x, y + 2, [120, 124, 128]);
+          }
+        } else {
+          // the gate: posts either side, the boom across at shoulder height over the way in
+          for (const px of [x0 - dir * 14, x0 + dir * 2]) {
+            const g = world.groundTop[px];
+            for (let up = 0; up < 24; up += 1) for (let w = 0; w < 2; w += 1) backAt(px + w, g - 1 - up, up === 23 ? [70, 72, 72] : [92, 96, 96]);
+          }
+          for (let k = -14; k <= 2; k += 1) {
+            const x = x0 + dir * k, y = g0 - 18;
+            const band = ((k + 16) >> 2) & 1;
+            decoAt(x, y, band ? [196, 192, 182] : [150, 52, 44]); decoAt(x, y + 1, band ? [168, 164, 156] : [120, 42, 36]);
+          }
+          // the faction's emblem on a plate at the far post (N163: emblems on flags, gates, fences only)
+          if (PW.factionEmblem) {
+            const mark = PW.factionEmblem(city.style || 'modern', 5), px = x0 + dir * 9, py = g0 - 33;
+            for (let dy = -7; dy <= 7; dy += 1) for (let dx = -7; dx <= 7; dx += 1) {
+              const edge = Math.abs(dx) === 7 || Math.abs(dy) === 7;
+              decoAt(px + dx, py + dy, edge ? [64, 66, 64] : mark(dx, dy) ? [222, 218, 202] : [74, 84, 70]);
+            }
+            for (let up = 0; up < 26; up += 1) decoAt(px, g0 - 1 - up, [86, 88, 86]);
+          }
+          // chain-link either way of the gate, barbed wire along its top
+          for (let dx = -24; dx <= 20; dx += 1) {
+            const x = x0 + dx, g = world.groundTop[x];
+            if (Math.abs(g - g0) > 3) continue;
+            for (let y = g - FENCE_H + 1; y < g; y += 1) if (((x + y) & 3) === 0 || ((x - y) & 3) === 0) backAt(x, y, [84, 90, 94]);
+            decoAt(x, g - FENCE_H - ((x & 2) ? 1 : 0), [160, 164, 168]);
+          }
         }
-        city.fences[side] = { x: x0, cells, wall, owner: rec.id };
+        city.fences[side] = { x: x0, cells, wall, owner: rec.id, dress };
       }
     }
 
@@ -2709,13 +2783,22 @@
         // (the user's: a seed makes no tunnel at once - its city starts digging at TUNNEL_LEVEL; a
         // mountain base from the first; and a side's starting base - the core bunker its match opens
         // with - has its tunnel from the start of the game, growing down from under the bunker)
-        if (city.level < TUNNEL_LEVEL && !mountainBase(city) && !city.start) return false;
-        const rec = world.buildings[city.main.owner - 1];
+        const recNow = world.buildings[city.main.owner - 1];
+        // (N155: a watch-tower base - on a mountain its shaft still goes down from the spawn core's
+        // vault, where its adit to the mountain's foot and its link are planned from: seed 7's adit,
+        // started from the tower's foot, ran out over a cave and left its men no way down)
+        const watch = recNow && recNow.canvas && recNow.canvas.watch && !mountainBase(city) ? recNow.canvas.watch : null;
+        if (city.level < TUNNEL_LEVEL && !mountainBase(city) && !city.start && !watch) return false;
+        const rec = recNow;
         if (!rec || rec.underConstruction || !rec.cores || !rec.cores.length) return false;
         const core = rec.cores.find((k) => k.vault) || rec.cores[0];
-        const x = Math.round(core.vault ? (core.vault.x0 + core.vault.x1) / 2 : core.x);
+        // (N155, the user's: each base builds its own tunnel system from the foot of its tower - the
+        // shaft goes down from under the tower's stair, not the spawn core's vault)
+        // (its ladder going on down the tower's own: the shaft's ladder is laid 2 left of its middle)
+        const x = watch ? Math.round(rec.ox + (watch.ladderX ?? (watch.shaft[0] + watch.shaft[1]) / 2) + 2)
+          : Math.round(core.vault ? (core.vault.x0 + core.vault.x1) / 2 : core.x);
         // (the hatch: the first row under the core's own casing - its steel and plate are left whole)
-        let top = Math.round(core.vault ? core.vault.bottom : core.y + 6);
+        let top = watch ? rec.ground : Math.round(core.vault ? core.vault.bottom : core.y + 6);
         const casing = (id) => id !== M.AIR && id !== M.FOUNDATION;
         while (top < world.height - 200 && PW.getOwner(world, x, top) === city.main.owner && casing(PW.get(world, x, top) & 63)) top += 1;
         const g = world.groundTop[x], tried = new Set();

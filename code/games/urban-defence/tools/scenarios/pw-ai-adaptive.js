@@ -57,6 +57,9 @@ if (PW.mechs) {
   check((b.missiles || 0) > mi0 && mech.missiles < m0, `a mech of its own looses a missile at a tank (${m0} -> ${mech.missiles})`);
   tank.dead = true; mech.dead = true;
 }
+// (its town's own guns held, as a hack holds them: N155's watch-tower base stands its hall turret at
+// the town's front, and its rounds at the man finished the hurt tank behind him first - seed 3)
+for (const u of world.defence || []) if (!u.dead && u.side === 'right' && Math.abs(u.x - hx) < 900 && PW.units && PW.units.disable) PW.units.disable(u, 10);
 const hurt = PW.tanks.create(world, { style: 'modern', side: 'right', x: hx, facing: -dirR });
 hurt.game = { side: 'right', kind: 'tank', order: { type: 'auto' }, goal: null, born: m.clock };
 hurt.hp = (PW.tanks.ARMOUR || 100) * 0.26;   // (under the commander's 0.3 - and a hit or two from gone)
