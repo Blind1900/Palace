@@ -168,7 +168,7 @@
           if (p.riser === r || (p.dst && p.dst.riser === r && p.stage === 2)) { p.done = true; stats.spilled += 1; }
           else if (p.dst && p.dst.riser === r) p.dst = null;
         }
-        line.risers[i] = layRiser(line, { x: r.x, y: r.anchorY, flow: r.flow, kind: r.kind, resource: r.resource, building: r.building, op: r.op, main: r.main });
+        line.risers[i] = layRiser(line, { x: r.fedFrom ?? r.x, y: r.anchorY, flow: r.flow, kind: r.kind, resource: r.resource, building: r.building, op: r.op, main: r.main });
       }
     }
     // N81: the LAW, enforced on any stretch a lay, merge or re-thread touched - after it,
@@ -641,7 +641,33 @@
     // user's rule: vertical and horizontal are one design): the full bore stood on end, casing,
     // lanes, tendril wraps and collars, flanged where it meets the run below - the pump merges
     // into the line as one continuous flow.
+    // N161 (the user's, 2026-11-27): a pipe joining the main never joins it near a core, nor over one.
+    // A branch whose tee would fall within TEE_CLEAR of a core on the line runs along at its own
+    // depth to the nearest clear column first, and tees in there.
+    const TEE_CLEAR = 60;   // (30 still set the valve's handwheel by the vault: the eye read it as joining the core)
+    function teeClear(line, x) {
+      const near = (cx) => line.cores.some((c) => Math.abs(c.x - cx) < TEE_CLEAR);
+      if (!near(x)) return x;
+      for (let d = 1; d < 400; d += 1) for (const cx of [x - d, x + d]) {
+        if (cx < line.x0 + 8 || cx > line.x1 - 8) continue;
+        if (!near(cx)) return cx;
+      }
+      return x;
+    }
+    // (the run along: the same casing as the riser, laid on its side at the branch's own depth)
+    function layFeeder(line, x0, x1, y) {
+      const a = Math.min(x0, x1) - 3, b = Math.max(x0, x1) + 3;
+      for (let x = a; x <= b; x += 1) {
+        for (let r = 0; r < BORE; r += 1) layCell(line, x, y - 3 + r, pipeColor(r, x), r, true);
+        jacketCell(line, x, y - 4, pipeColor(-1, x));
+        jacketCell(line, x, y - 3 + BORE, pipeColor(BORE, x));
+      }
+    }
     function layRiser(line, anchor) {
+      if (anchor.kind !== 'core') {
+        const xt = teeClear(line, anchor.x);
+        if (xt !== anchor.x) { layFeeder(line, anchor.x, xt, anchor.y); anchor = { ...anchor, x: xt, fedFrom: anchor.x }; }
+      }
       const lineY = line.ys[Math.max(0, Math.min(line.ys.length - 1, anchor.x - line.x0))];
       const yA = Math.min(anchor.y, lineY), yB = Math.max(anchor.y, lineY + BORE - 1);
       // N83: the run's own band (jacket to jacket) passes straight through the tee - laid over
@@ -701,7 +727,7 @@
       }
       return { x: anchor.x, y0: yA, y1: yB, anchorY: anchor.y, flow: anchor.flow, kind: anchor.kind, resource: anchor.resource, main: anchor.main,
         tTop: lineY - 9, tBot: lineY + BORE + 9,   // (the T-piece and valve hardware live in this band)
-        building: anchor.building, op: anchor.op, occ: new Uint8Array(yB - yA + 1), timer: 0, pending: 0 };
+        building: anchor.building, op: anchor.op, fedFrom: anchor.fedFrom, occ: new Uint8Array(yB - yA + 1), timer: 0, pending: 0 };
     }
     // The run's underground ends are closed with a bolted blind flange, its outer face domed -
     // a cap the eye reads as BUILT shut, not as the pipe cut off mid-ground (N37).
@@ -1258,7 +1284,7 @@
       layColumn(line, line.x0 + k);
       layWells(line, Math.max(1, k - FIT), Math.min(line.ys.length - 1, k + FIT));
       if (rr) {
-        const fresh = layRiser(line, { x: rr.x, y: rr.anchorY, flow: rr.flow, kind: rr.kind, resource: rr.resource, building: rr.building, op: rr.op });
+        const fresh = layRiser(line, { x: rr.fedFrom ?? rr.x, y: rr.anchorY, flow: rr.flow, kind: rr.kind, resource: rr.resource, building: rr.building, op: rr.op });
         Object.assign(rr, { y0: fresh.y0, y1: fresh.y1, occ: fresh.occ, tTop: fresh.tTop, tBot: fresh.tBot });
       }
       // The growing end is the pipe stamping its own cross-section outward (N14F/N16F - the
@@ -1404,7 +1430,7 @@
       snapToCores(fresh, x0, line.cores);
       extendTo(line, x0, x1, (c) => fresh[c - x0]);
       for (const a of M.risers) {
-        line.risers.push(layRiser(line, { x: a.x, y: a.anchorY, flow: a.flow, kind: a.kind, resource: a.resource, building: a.building, op: a.op, main: a.main }));
+        line.risers.push(layRiser(line, { x: a.fedFrom ?? a.x, y: a.anchorY, flow: a.flow, kind: a.kind, resource: a.resource, building: a.building, op: a.op, main: a.main }));
       }
       layWells(line);
       capEnd(line, -1); capEnd(line, 1);
