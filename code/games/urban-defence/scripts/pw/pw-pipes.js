@@ -133,6 +133,7 @@
             else p.dst = null;
           }
         }
+        if (dead.length || line.cores.length !== before) refreshLanes(line);   // N162
       }
     }
     // N80: let go of ONE bare seed core, by position - a planted seed whose building never
@@ -147,6 +148,7 @@
         }
         line.cores = line.cores.filter((c) => !(c.building === 0 && Math.abs(c.x - x) <= 2));
         stats.cores -= before - line.cores.length;
+        if (line.cores.length !== before) refreshLanes(line);   // N162
       }
     }
     // N81/N25F: any pass that can move the run's level snapshots its risers first and lays
@@ -420,6 +422,60 @@
       return (along & 1) ? tone(ch, 1.5) : tone(ch, 0.66);
     }
     const collarAt = (along) => !tendrilAt(along) && ((along % 36) + 36) % 36 < 2;
+    // ---- N162 (the user's, 2026-11-27): one pipe design, each resource by its coloured lane ----------
+    // A branch carries one resource and is drawn as one lane in that resource's colour. The main is
+    // the highway: a resource's lane shows open only over the stretch its sources and the places that
+    // take it span (both ways along the line - cargo is shared out over every taker and re-routes to
+    // any), so the main reads two lanes or three where the branches have merged in, and narrows past
+    // the last of them. A closed lane is only painted as casing: inside it is the same open bore as
+    // ever (PS: the cavity physics, the lanes' checks and the walking lumps rely on it).
+    function laneSpans(line) {
+      const out = {};
+      for (const lane of LANES) {
+        const res = lane.resource, xs = [];
+        let src = 0, dst = 0;
+        for (const c of line.cores) { const f = c.taps[res]; if (!f) continue; xs.push(c.x); if (f === 'out') src += 1; else dst += 1; }
+        for (const r of line.risers) {
+          if (r.flow === 'in') { xs.push(r.x); dst += 1; } else if (r.resource === res) { xs.push(r.x); src += 1; }
+        }
+        out[res] = src && dst ? [Math.min(...xs) - SPAN, Math.max(...xs) + SPAN] : null;
+      }
+      return out;
+    }
+    const laneOpen = (spans, res, x) => !spans || (!!spans[res] && x >= spans[res][0] && x <= spans[res][1]);
+    // (a shut lane reads as a dark empty channel - near-black, the slim intake's ink: the lanes'
+    // checks read ink as passable bore, which it still is)
+    const closedLane = (along) => (along % 14 === 0 ? [28, 30, 33] : [20, 22, 27]);
+    // (laid afresh where a lane opened or closed: after a build, and whenever a source or a taker
+    // comes or goes)
+    function refreshLanes(line, all = false) {
+      const old = line.lanes || null;
+      line.lanes = laneSpans(line);
+      // (only the lane cells' colour changes - nothing is laid again: re-laying the columns walled a
+      // fitting's lanes off at seed 3's step at 34070, the elbow's own cells being the fitting's)
+      for (let x = line.x0; x <= line.x1; x += 1) {
+        const k = x - line.x0, y = line.ys[k];
+        if (throughAt(line, x) || inIntake(line, x)) continue;
+        if ((k > 0 && line.ys[k - 1] !== y) || (k < line.ys.length - 1 && line.ys[k + 1] !== y)) continue;   // (a fitting keeps its own lanes)
+        for (const lane of LANES) {
+          const on = laneOpen(line.lanes, lane.resource, x);
+          if (!all && on === laneOpen(old, lane.resource, x)) continue;
+          const cy = y + lane.row, id = mat[cy * W + x] & ID_MASK;
+          const c = rgb(on ? pipeColor(lane.row, x) : closedLane(x));
+          if (id === M.PIPE && PW.getOwner(world, x, cy) === line.owner) PW.setLayer(world, 'paint', x, cy, c);
+          else if (PW.getFlags(world, x, cy) & FLAG.HOLLOW) {
+            if (PW.getLayer(world, 'pipe', x, cy)) PW.setLayer(world, 'pipe', x, cy, c); else PW.setLayer(world, 'back', x, cy, c);
+          }
+        }
+      }
+    }
+    // (a branch's single lane: every row inside its casing in its resource's colour, ribbed)
+    function branchColor(res, row, along) {
+      if (row < 0 || row >= BORE || row === 0 || row === BORE - 1) return pipeColor(row, along);
+      const ch = LANES[LANE_OF[res]].channel;
+      if (row === 2 || row === 4) return tone(ch, 0.5);
+      return (along & 1) ? tone(ch, 1.5) : tone(ch, 0.66);
+    }
     // Lay one bundle cell: in the ground a PIPE cell; across open space underground it is fixed to
     // the wall face; through a core's span it breaches plate and foundation into the bed's socket.
     // `row` is the cell's row within the bore (its column, stood on end) - casing 0 and BORE-1,
@@ -634,7 +690,11 @@
         bedCell(x, y - b, sand(-b));
         bedCell(x, y + BORE - 1 + b, sand(b));
       }
-      for (let r = 0; r < BORE; r += 1) layCell(line, x, y + r, slim ? intakeColor(r, x) : pipeColor(r, x), r);
+      for (let r = 0; r < BORE; r += 1) {
+        const lane = r & 1 ? LANES[(r - 1) >> 1] : null;
+        const shut = lane && !laneOpen(line.lanes, lane.resource, x);
+        layCell(line, x, y + r, slim ? intakeColor(r, x) : shut ? closedLane(x) : pipeColor(r, x), r);
+      }
     }
     // A riser between the line and an anchor at (x, y): for the few taps that are not cores (the
     // lake pump, a mining hopper, the main core's pedestal). It is the SAME pipe, turned (the
@@ -655,10 +715,10 @@
       return x;
     }
     // (the run along: the same casing as the riser, laid on its side at the branch's own depth)
-    function layFeeder(line, x0, x1, y) {
+    function layFeeder(line, x0, x1, y, res) {
       const a = Math.min(x0, x1) - 3, b = Math.max(x0, x1) + 3;
       for (let x = a; x <= b; x += 1) {
-        for (let r = 0; r < BORE; r += 1) layCell(line, x, y - 3 + r, pipeColor(r, x), r, true);
+        for (let r = 0; r < BORE; r += 1) layCell(line, x, y - 3 + r, res ? branchColor(res, r, x) : pipeColor(r, x), r, true);
         jacketCell(line, x, y - 4, pipeColor(-1, x));
         jacketCell(line, x, y - 3 + BORE, pipeColor(BORE, x));
       }
@@ -666,7 +726,7 @@
     function layRiser(line, anchor) {
       if (anchor.kind !== 'core') {
         const xt = teeClear(line, anchor.x);
-        if (xt !== anchor.x) { layFeeder(line, anchor.x, xt, anchor.y); anchor = { ...anchor, x: xt, fedFrom: anchor.x }; }
+        if (xt !== anchor.x) { layFeeder(line, anchor.x, xt, anchor.y, anchor.flow === 'out' ? anchor.resource : null); anchor = { ...anchor, x: xt, fedFrom: anchor.x }; }
       }
       const lineY = line.ys[Math.max(0, Math.min(line.ys.length - 1, anchor.x - line.x0))];
       const yA = Math.min(anchor.y, lineY), yB = Math.max(anchor.y, lineY + BORE - 1);
@@ -677,9 +737,11 @@
         const yr = line.ys[Math.max(0, Math.min(line.ys.length - 1, x - line.x0))];
         return y >= yr - 1 && y <= yr + BORE;
       };
+      // (N162: a branch of one resource is drawn as that resource's one lane)
+      const one = anchor.flow === 'out' && anchor.resource && LANE_OF[anchor.resource] !== undefined ? anchor.resource : null;
       for (let r = 0; r < BORE; r += 1) {
         const x = anchor.x - 3 + r;
-        for (let y = yA; y <= yB; y += 1) if (!inBand(x, y)) layCell(line, x, y, pipeColor(r, y), r, true);
+        for (let y = yA; y <= yB; y += 1) if (!inBand(x, y)) layCell(line, x, y, one ? branchColor(one, r, y) : pipeColor(r, y), r, true);
       }
       // (N84: the jacket stands up the riser too - one design, turned)
       for (let y = yA; y <= yB; y += 1) {
@@ -1106,6 +1168,7 @@
         }
         capEnd(line, -1); capEnd(line, 1);
         enforceGrade(line, 0, line.ys.length - 1);   // N81: born lawful
+        refreshLanes(line);   // N162: only the lanes its sources and takers span show open
         stats.cells += x1 - x0 + 1;
         stats.cores += cores.length;
         lines.push(line);
@@ -1440,6 +1503,7 @@
       checkSpan(line, Math.max(0, M.x0 - line.x0 - 2), Math.min(line.ys.length - 1, M.x1 - line.x0 + 2));
       stats.cores += 0;   // (the cores only changed hands)
       stats.merged = (stats.merged || 0) + 1;
+      refreshLanes(line, true);   // (N162: the fused line's lanes laid afresh over its whole length)
     }
     // N75: the city engine says two same-side cities have MET - every line of the side
     // within reach of the pair fuses into one, the connecting stretch laid whole. (The
@@ -1469,7 +1533,13 @@
         stats.lines = lines.length;
       }
     }
+    // (N162: a core joining - or a line it grew into another - opens the lanes its taps reach to)
     function connectCore(x, y, side, taps, building) {
+      const core = connectCoreTo(x, y, side, taps, building);
+      if (core) for (const line of lines) if (line.side === side && line.cores.includes(core)) refreshLanes(line);
+      return core;
+    }
+    function connectCoreTo(x, y, side, taps, building) {
       let line = lineNear(side, x);
       // A core the map cannot hold cannot thread (a walked-off append once offered one at
       // negative x, and the line extended right off the world after it).
@@ -1632,6 +1702,7 @@
       }
       line.risers.push(layRiser(line, { x, y: op.riser.y, flow: 'out', kind: op.kind || 'mining', resource: op.resource || 'hm', op: op.id, building: op.building || 0 }));
       for (const side of grow) capEnd(line, side);
+      refreshLanes(line);   // N162: its resource's lane opens to where it is taken
       return true;
     }
     // N136: a farm's well - the same pipe stood on end, down from the side's line to an underground
