@@ -31,6 +31,26 @@ const putOut = () => {
 // flat, its doors onto open ground: the towns' towers stand in what the tests before did to them -
 // burnt by the trees' fires, mended, built up, heaped at their doors - and the one picked was not
 // the one looked at. Built the first time it is wanted, away from the tank of 6)
+// (a stretch of the wilds [x0, x1] laid as the tests want it: its surface `rise(x)` under its highest
+// ground, cleared over that, solid under it down to the ground as it lay - soil over stone - so no
+// hollow is left under it to swallow what falls there; the highest ground's row)
+const level = (x0, x1, rise) => {
+  let g = Infinity;
+  const tops = [];
+  for (let x = x0; x <= x1; x += 1) { tops.push(world.groundTop[x]); g = Math.min(g, world.groundTop[x]); }
+  for (let x = x0; x <= x1; x += 1) {
+    const s = g + rise(x);
+    for (let y = Math.max(1, g - 700); y < s; y += 1) { PW.set(world, x, y, M.AIR, { quiet: true }); PW.setLayer(world, 'deco', x, y, 0); PW.setLayer(world, 'back', x, y, 0); }
+    for (let y = s; y <= Math.max(tops[x - x0], s + 29); y += 1) {
+      if (y >= s + 30 && !PW.mat.open[id(x, y)]) continue;
+      PW.set(world, x, y, y < s + 4 ? M.SOIL : M.STONE, { quiet: true });
+      PW.setLayer(world, 'deco', x, y, 0); PW.setLayer(world, 'back', x, y, 0);
+    }
+  }
+  PW.rebuildGroundTop(world);
+  PW.wakeArea(world, x0, g - 700, x1, g + 200);
+  return g;
+};
 let lone;
 const loneTower = () => {
   if (lone !== undefined) return lone;
@@ -38,13 +58,9 @@ const loneTower = () => {
   let x0 = -1;
   for (const z of layout.wilds || []) for (let x = z.x0 + 100; x0 < 0 && x + 800 < z.x1; x += 50) if (!(tankAt > 0 && x < tankAt + 900 && x + 800 > tankAt - 300)) x0 = x;
   if (x0 < 0) return lone;
-  let g = Infinity;
-  for (let x = x0; x <= x0 + 800; x += 1) g = Math.min(g, world.groundTop[x]);
-  for (let x = x0; x <= x0 + 800; x += 1) {
-    for (let y = Math.max(1, g - 700); y < g; y += 1) { PW.set(world, x, y, M.AIR, { quiet: true }); PW.setLayer(world, 'deco', x, y, 0); PW.setLayer(world, 'back', x, y, 0); }
-    for (let y = g; y < g + 30; y += 1) PW.set(world, x, y, M.STONE, { quiet: true });
-  }
-  PW.rebuildGroundTop(world);
+  level(x0, x0 + 800, () => 0);
+  // (its own trees gone with the ground they stood on)
+  for (let k = (world.flora || []).length - 1; k >= 0; k -= 1) if (world.flora[k].anchorX >= x0 - 10 && world.flora[k].anchorX <= x0 + 810) world.flora.splice(k, 1);
   const canvas = PW.buildingTypes.population({ style: 'gothic', level: 1, variant: 'crown', seed: 7, facing: 1 });
   const owner = world.buildings.length + 1;
   const res = PW.foundations.place(world, canvas, x0 + 400 - Math.round((canvas.body.left + canvas.body.right) / 2), { style: 'gothic', owner });
@@ -52,7 +68,6 @@ const loneTower = () => {
   lone = PW.buildingRecord(world, res.stamp, { id: owner, side: 'left', style: 'gothic', type: 'population', variant: 'crown', level: 1, facing: 1,
     neutral: false, underConstruction: false, works: res.works, base: { G: res.plan.G, walls: res.walls, under: res.under, cores: res.cores }, plant: null });
   world.buildings.push(lone);
-  PW.wakeArea(world, x0, g - 700, x0 + 800, g + 30);
   pwApp.stepWorld(120);
   return lone;
 };
@@ -449,14 +464,21 @@ const tankAt = (() => {
     }
     return n;
   };
-  // (trees with limbs to bend and snap - not birches, slim and all but bare of boughs: which kinds
-  // stand where changes with the world, and a stand of them bent and snapped next to nothing)
+  // (trees of its own, planted for it on a course of the wilds - four lots, each level then falling 80
+  // cells over 200, a conifer and a broadleaf on each, one on the level and one on the slope: which
+  // trees the world grows where changes with it, and a stand of birches or saplings bends and snaps
+  // next to nothing; away from the tank of 6)
   const trees = [];
-  const standing = (world.flora || []).filter((t) => t.kind === 'tree' && !t.fallen && t.size > 90 && t.type !== 'deadTree' && t.type !== 'birch'
-    && !(tankAt > 0 && t.anchorX > tankAt - 400 && t.anchorX < tankAt + 820));
-  for (const r of standing) {
-    if (trees.every((q) => Math.abs(q.anchorX - r.anchorX) > 400)) trees.push(r);
-    if (trees.length >= 8) break;
+  let cx = -1;
+  for (const z of layout.wilds || []) for (let x = z.x0 + 100; cx < 0 && x + 2700 < z.x1; x += 50) if (!(tankAt > 0 && x < tankAt + 900 && x + 2700 > tankAt - 300)) cx = x;
+  if (cx >= 0) {
+    level(cx, cx + 2600, (x) => { const u = (x - cx) % 650; return u < 300 ? 0 : u < 500 ? Math.round(80 * (u - 300) / 200) : 80; });
+    for (let k = (world.flora || []).length - 1; k >= 0; k -= 1) if (world.flora[k].anchorX >= cx - 10 && world.flora[k].anchorX <= cx + 2610) world.flora.splice(k, 1);
+    for (let k = 0; k < 8; k += 1) {
+      const x = cx + (k >> 1) * 650 + (k & 1 ? 400 : 150);
+      trees.push(PW.flora.plant(world, ['conifer', 'broadleaf'][(k + (k >> 1)) & 1], x, { row: world.groundTop[x], size: 150 + (k % 4) * 25, seed: 4201 + k * 97 }));
+    }
+    pwApp.stepWorld(30);
   }
   const stats0 = { ...fragments.stats };
   for (const r of trees) pwApp.explode(r.anchorX + 6, r.row - 2, 9, 1.0);
