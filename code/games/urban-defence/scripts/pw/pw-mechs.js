@@ -164,8 +164,15 @@
     const m = world.mat[y * world.width + x], id = m & ID_MASK;
     if (!(phase[id] >= POWDER && !passable[id] && id !== M.PLATFORM)) return false;
     if (passing && (id === M.CONCRETE || id === M.STEEL) && world.barricades && world.barricades.length) { const b = PW.barricadeAt(world, x, y, m); if (b && b.side === passing) return false; }
+    // (N89, the user's: its own side's gate spans - a base's fences and T-walls, its watch tower's
+    // ground-floor walls, the piers under its decks - it passes, as its men do: see PW.tanks.gatesOf)
+    if (passing && PW.tanks && PW.tanks.gatesOf) {
+      const a = PW.tanks.gatesOf(world).get(x);
+      if (a) for (let k = 0; k < a.length; k += 5) if (a[k + 3] === PIER && a[k + 2] === passing && y >= a[k] && y <= a[k + 1]) return false;
+    }
     return true;
   };
+  const PIER = 0;               // (a gate span's kind: a pier's cells - PW.tanks' gatesOf)
   const isPlatform = (world, x, y) => x >= 0 && y >= 0 && x < world.width && y < world.height && (world.mat[y * world.width + x] & ID_MASK) === M.PLATFORM;
   const isWater = (world, x, y) => x >= 0 && y >= 0 && x < world.width && y < world.height && (world.mat[y * world.width + x] & ID_MASK) === M.WATER;
   // (its body at x, its soles on row y: clear of what bars it)

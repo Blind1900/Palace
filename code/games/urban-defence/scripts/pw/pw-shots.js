@@ -23,6 +23,7 @@
 (function () {
   const PW = window.PW;
   const { M, ID_MASK } = PW;
+  const FENCE = PW.FLAG.FENCE || 0;   // (N89: a base's fences and T-walls - WGM's flag)
   const { hardness, breaksTo, phase, open } = PW.mat;
 
   // The rounds (speed: cells/s at the muzzle; drag: of its speed lost a second to the air; punch:
@@ -293,6 +294,9 @@
         if (owner > 0 && owner < 50000 && PW.game.cover(s, owner, cx, cy) === true) { stats.covered = (stats.covered || 0) + 1; lx = cx; ly = cy; continue; }
       }
       if (id === M.GLASS) { shatter(world, s, cx, cy); lx = cx; ly = cy; continue; }
+      // (N89, the user's: a base's chain-link fence - its steel flagged FENCE - is mesh, rounds go
+      // through it; its concrete T-walls stop them)
+      if (id === M.STEEL && FENCE && (PW.getFlags(world, cx, cy) & FENCE)) { lx = cx; ly = cy; continue; }
       if (!PW.mat.stopsShots[id]) { lx = cx; ly = cy; continue; }
       stats.struck += 1;
       if (s.k.blast) { burst(world, s, lx + 0.5, ly + 0.5); return false; }

@@ -65,18 +65,22 @@
   // (N104: a barricade across a road tunnel bars another side's men - its own side's, the side of the
   // man moving or finding his way, go through it)
   let passing = null;
+  // (a solid cell the side passing goes through, as its own: a barricade of its across a road tunnel
+  // (N104); the PIER spans of its own side's buildings (N124, the user's: units pass poles - the piers
+  // and stilts under them; N89: a base's fences and T-walls, its watch tower's foot) as the vehicle
+  // lanes have them, `spans` the column's - see PW.tanks.gatesOf)
+  function ownWay(world, x, y, m, spans) {
+    const id = m & ID_MASK;
+    if ((id === M.CONCRETE || id === M.STEEL) && world.barricades && world.barricades.length) { const b = PW.barricadeAt(world, x, y, m); if (b && b.side === passing) return true; }
+    if (spans) for (let k = 0; k < spans.length; k += 5) if (spans[k + 3] === PIER && spans[k + 2] === passing && y >= spans[k] && y <= spans[k + 1]) return true;
+    return false;
+  }
+  const spansAt = (world, x) => (passing && PW.tanks && PW.tanks.gatesOf ? PW.tanks.gatesOf(world).get(x) : null);
   const blocks = (world, x, y) => {
     if (x < 0 || y < 0 || x >= world.width || y >= world.height) return true;
     const m = world.mat[y * world.width + x], id = m & ID_MASK;
     if (!(phase[id] >= POWDER && !passable[id] && id !== M.PLATFORM)) return false;
-    if (passing && (id === M.CONCRETE || id === M.STEEL) && world.barricades && world.barricades.length) { const b = PW.barricadeAt(world, x, y, m); if (b && b.side === passing) return false; }
-    // (N124, the user's: units pass poles - the piers and stilts under its own side's buildings, each
-    // building's PIER spans as the vehicle lanes have them: see PW.tanks.gatesOf)
-    if (passing && PW.tanks && PW.tanks.gatesOf) {
-      const a = PW.tanks.gatesOf(world).get(x);
-      if (a) for (let k = 0; k < a.length; k += 5) if (a[k + 3] === PIER && a[k + 2] === passing && y >= a[k] && y <= a[k + 1]) return false;
-    }
-    return true;
+    return !(passing && ownWay(world, x, y, m, spansAt(world, x)));
   };
   const PIER = 0;               // (a gate span's kind: a pier's cells - PW.tanks' gatesOf)
   // (... nor does he climb it: no step up onto another side's barricade - rows y0 to y1 under his
@@ -346,11 +350,16 @@
     // (each cell of the box: how many cells are open straight up from it - itself too; and what it
     // is underfoot - something that bears a foot (1), a ladder (2), water (4))
     const LADDER = PW.FLAG.LADDER;
+    // (what bars the side finding its way - not its own barricades, its own buildings' piers and fences,
+    // as walking it goes through them: see blocks)
+    const barricades = !!(world.barricades && world.barricades.length);
     for (let x = x0; x <= x1; x += 1) {
       let run = 0;
-      for (let y = y0 - FREE_CAP; y < y0; y += 1) { const id = mat[y * W + x] & ID_MASK; run = phase[id] >= POWDER && !passable[id] && id !== M.PLATFORM ? 0 : Math.min(FREE_CAP, run + 1); }
+      const spans = spansAt(world, x), own = passing && (spans || barricades);
+      const solidAt = (y) => { const m = mat[y * W + x], id = m & ID_MASK; return phase[id] >= POWDER && !passable[id] && id !== M.PLATFORM && !(own && ownWay(world, x, y, m, spans)); };
+      for (let y = y0 - FREE_CAP; y < y0; y += 1) run = solidAt(y) ? 0 : Math.min(FREE_CAP, run + 1);
       for (let y = y0, i = x - x0; y <= y1; y += 1, i += bw) {
-        const id = mat[y * W + x] & ID_MASK, solid = phase[id] >= POWDER && !passable[id] && id !== M.PLATFORM;
+        const id = mat[y * W + x] & ID_MASK, solid = solidAt(y);
         run = solid ? 0 : Math.min(FREE_CAP, run + 1);
         free[i] = run;
         foot[i] = (solid || id === M.PLATFORM ? 1 : 0) | (PW.getFlags(world, x, y) & LADDER ? 2 : 0) | (id === M.WATER ? 4 : 0);

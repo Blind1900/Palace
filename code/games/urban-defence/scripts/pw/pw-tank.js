@@ -39,6 +39,7 @@
 (function () {
   const PW = window.PW;
   const { M, ID_MASK } = PW;
+  const FENCE = PW.FLAG.FENCE || 0;   // (N89: a base's fences and T-walls - WGM's flag)
 
   const VMAX = 54.9;            // cells/s top speed (about 14 km/h: slow, but faster than a trooper; N107,
                                 // the user's: 1.7% over the 54 it had)
@@ -238,6 +239,9 @@
     if (o >= 50000) { const bar = PW.barricadeAt(world, x, y, m); return !bar ? PLAIN : t && t.side && bar.side === t.side ? GHOST : RAMS; }
     if (o <= 0) return PLAIN;
     const b = world.buildings && world.buildings[o - 1];
+    // (a base's fence or T-wall - N89, the user's: its own side's it drives through, another's it runs
+    // down, wherever round the base it stands)
+    if (FENCE && b && (PW.getFlags(world, x, y) & FENCE)) return t && t.side && (b.faction || b.side) === t.side ? GHOST : RAMS;
     if (!b || !(y < b.ground) || !b.body || x < b.body.left || x > b.body.right) return PLAIN;
     if (t && t.side && (b.faction || b.side) === t.side) return GHOST;
     return id !== M.CORE && hardness[id] <= RAM_HARD ? RAMS : PLAIN;
@@ -509,11 +513,13 @@
         } else if (!(f & PW.FLAG.FIXTURE)) { fr.sweep(x, y, 8); sweeps += 1; }
       }
       if (!isSupport(m) || meets(world, t, x, y, m) !== RAMS) continue;
-      const o = PW.getOwner(world, x, y);
+      const o = PW.getOwner(world, x, y), fence = FENCE && (PW.getFlags(world, x, y) & FENCE);
       fr.crush(x, y, o, x - dir * 60);
       t.v -= dir * hardness[m & ID_MASK] * RAM_COST;
       t.rammed = (t.rammed || 0) + 1;
-      if (o > 0 && o < 50000) { const r = hit.get(o); if (r) { r.y0 = Math.min(r.y0, y); r.y1 = Math.max(r.y1, y); } else hit.set(o, { y0: y, y1: y }); }
+      // (a base's fence run down is that - its push not borne by the base's buildings, as a wall of
+      // theirs it drove into would be)
+      if (o > 0 && o < 50000 && !fence) { const r = hit.get(o); if (r) { r.y0 = Math.min(r.y0, y); r.y1 = Math.max(r.y1, y); } else hit.set(o, { y0: y, y1: y }); }
     }
     if (Math.sign(t.v) !== dir) t.v = 0;
     // (driving into it, it pushes with all its tracks' grip, however slowly it grinds on; rolling
